@@ -50,6 +50,10 @@ if (errors.length) {
   process.exit(1);
 }
 
-const index = { registryVersion: 1, generatedAt: new Date().toISOString(), apps };
+// No timestamp field: index.json must be byte-stable so CI's "committed and
+// current" diff only fires on real content changes (a wall-clock generatedAt
+// made every run look stale). git history already records when it changed, and
+// the box ignores everything but registryVersion + apps.
+const index = { registryVersion: 1, apps };
 writeFileSync(join(root, "index.json"), JSON.stringify(index, null, 2) + "\n");
 console.log(`index.json: ${apps.length} app(s) — ${apps.map((a) => a.id).join(", ")}`);
