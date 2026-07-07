@@ -1,0 +1,24 @@
+# tvbox-apps CI — validates every manifest (trust rules + JSON Schema from
+# the main tvbox repo) and keeps index.json in sync. Merging to main is what
+# publishes the registry: boxes fetch index.json over GitHub raw.
+name: registry
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: trust rules + rebuild index
+        run: node scripts/build-index.mjs
+      - name: index.json is committed and current
+        run: git diff --exit-code index.json || { echo "index.json is stale — run scripts/build-index.mjs and commit"; exit 1; }
+      - name: JSON Schema (from the main tvbox repo)
+        run: |
+          curl -fsSL -o /tmp/schema.json https://raw.githubusercontent.com/Andy1210/tvbox/main/docs/app-manifest.schema.json
+          npx --yes ajv-cli@5 validate --spec=draft2020 -s /tmp/schema.json -d "apps/*.json"

@@ -1,0 +1,45 @@
+{
+  "id": "livetv",
+  "manifestVersion": 1,
+  "name": {
+    "hu": "Élő TV",
+    "en": "Live TV"
+  },
+  "version": "1.0.1",
+  "changelog": [
+    {
+      "version": "1.0.1",
+      "notes": "Fixed a black screen when opening the app."
+    },
+    {
+      "version": "1.0.0",
+      "notes": "Initial release — IPTV channels, EPG guide, and phone-based setup."
+    }
+  ],
+  "type": "webclient",
+  "status": "ready",
+  "accent": "#39c0d6",
+  "icon": "<svg viewBox='0 0 24 24' fill='none' stroke='#39c0d6' stroke-width='2'><rect x='2.5' y='5' width='19' height='13' rx='2'/><path d='M8 21h8M9 5l3-2 3 2' stroke-linecap='round'/></svg>",
+  "tagline": {
+    "hu": "IPTV csatornák",
+    "en": "IPTV channels"
+  },
+  "requires": {
+    "bin": [
+      "mpv"
+    ],
+    "apt": [
+      "mpv"
+    ]
+  },
+  "service": "livetv",
+  "runtime": {
+    "serve": "local",
+    "entry": "index.html",
+    "capabilities": [
+      "player",
+      "nav",
+      "config"
+    ]
+  }
+}

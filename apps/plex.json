@@ -1,0 +1,41 @@
+{
+  "id": "plex",
+  "manifestVersion": 1,
+  "name": "Plex",
+  "version": "1.0.0",
+  "type": "webclient",
+  "status": "ready",
+  "accent": "#e5a00d",
+  "icon": "<svg viewBox='0 0 512 512'><rect width='512' height='512' rx='15%' fill='#282a2d'/><path d='m256 70h-108l108 186-108 186h108l108-186z' fill='#e5a00d'/></svg>",
+  "tagline": {
+    "hu": "Filmek és sorozatok",
+    "en": "Movies & TV shows"
+  },
+  "requires": {
+    "bin": ["mpv"],
+    "apt": ["mpv"]
+  },
+  "install": {
+    "source": {
+      "type": "flatpak",
+      "ref": "tv.plex.PlexHTPC",
+      "arch": "x86_64"
+    },
+    "extract": "files/resources/web-client",
+    "patch": [
+      {
+        "op": "strip-script",
+        "match": "qwebchannel"
+      }
+    ]
+  },
+  "runtime": {
+    "serve": "static",
+    "entry": "index.html",
+    "mount": "root",
+    "bridge": "qwebchannel",
+    "transparentSelector": "#media-container",
+    "capabilities": ["storage", "player", "input", "system"],
+    "player": "mpv-overlay"
+  }
+}

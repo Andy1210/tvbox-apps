@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+/* Tailwind must scan BOTH this app's source and the shared @tvbox/app-sdk
+   components (Osk, PinPad, FocusButton, …) that live outside it, or their
+   utility classes get purged from the build. */
+@source "../../../app-sdk/src";
+@source ".";
+
+/* tvbox design tokens (10-foot UI) — copied from the launcher's Tailwind entry so
+   the shared tokens the moved views use (text-fg-dim, bg-bg-0, --color-focus, …)
+   resolve identically to the launcher. */
+@theme {
+  --color-bg-0: #05070a;
+  --color-bg-1: #0c1219;
+  --color-fg: #f4f6fa;
+  --color-fg-dim: #8a96a6;
+  --color-focus: #ffffff;
+  --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    background: radial-gradient(120% 100% at 50% -10%, var(--color-bg-1) 0%, var(--color-bg-0) 60%);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    overflow: hidden;
+    cursor: none; /* TV: hidden by default (D-pad); shown when a mouse actually moves */
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  /* main.tsx adds .cursor-on for ~2.5s after real mouse movement, so a connected
+     mouse is usable but an idle pointer never sits on screen */
+  html.cursor-on body,
+  html.cursor-on body * {
+    cursor: auto !important;
+  }
+  /* hide scrollbars on the app rails */
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  /* custom dark scrollbar (the default is ugly on a 10-foot UI) */
+  ::-webkit-scrollbar {
+    width: 0.9vh;
+    height: 0.9vh;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.28);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+  }
+  /* video mode: the shell toggles html.tvbox-video while mpv plays behind the
+     transparent window, so the app page must let it show through (Live TV plays
+     a channel via the shell's mpv, and surfs it in a PiP) */
+  html.tvbox-video,
+  html.tvbox-video body,
+  html.tvbox-video #root {
+    background: transparent !important;
+  }
+}

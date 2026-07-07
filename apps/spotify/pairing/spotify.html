@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="{{lang}}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>{{title}}</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        background: #0b0f14;
+        color: #f4f6fa;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        padding: 24px;
+        max-width: 520px;
+        margin: auto;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      p {
+        color: #aab4c2;
+        font-size: 14px;
+      }
+      label {
+        display: block;
+        margin: 14px 0 6px;
+        color: #aab4c2;
+        font-size: 14px;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 12px;
+        border-radius: 10px;
+        border: 1px solid #2a3442;
+        background: #121a24;
+        color: #fff;
+        font-size: 16px;
+      }
+      .fld {
+        display: flex;
+        gap: 8px;
+      }
+      .fld input {
+        flex: 1;
+        font-family: ui-monospace, monospace;
+        font-size: 13px;
+      }
+      .fld button {
+        flex: 0 0 auto;
+        padding: 0 16px;
+        border: 0;
+        border-radius: 10px;
+        background: #1f2a36;
+        color: #fff;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      #save {
+        width: 100%;
+        padding: 14px;
+        border: 0;
+        border-radius: 12px;
+        background: #1db954;
+        color: #06120b;
+        font-size: 17px;
+        font-weight: 700;
+        margin-top: 16px;
+      }
+      #msg {
+        margin-top: 14px;
+        text-align: center;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>{{title}}</h1>
+    <p>{{hint}}</p>
+    <label>{{redir}}</label>
+    <div class="fld"><input id="redir" readonly value="{{redirUri}}" /><button onclick="cp()">{{copy}}</button></div>
+    <label>{{code}}</label><input id="code" inputmode="numeric" maxlength="4" placeholder="••••" />
+    <label>{{cid}}</label><input id="cid" autocapitalize="off" autocorrect="off" spellcheck="false" />
+    <label>{{secret}}</label><input id="secret" autocapitalize="off" autocorrect="off" spellcheck="false" />
+    <button id="save" onclick="save()">{{save}}</button>
+    <div id="msg"></div>
+    <script>
+      document.getElementById("code").value = new URLSearchParams(location.search).get("c") || "";
+      function val(id) {
+        return document.getElementById(id).value.trim();
+      }
+      function cp() {
+        var i = document.getElementById("redir");
+        i.select();
+        i.setSelectionRange(0, 999);
+        var d = function () {
+          var m = document.getElementById("msg");
+          m.textContent = "{{copied}}";
+          m.style.color = "#3fb950";
+        };
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(i.value).then(d, function () {});
+        }
+        try {
+          document.execCommand("copy");
+          d();
+        } catch (e) {}
+      }
+      function save() {
+        fetch("/save" + location.search, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: val("code"), clientId: val("cid"), clientSecret: val("secret") }),
+        })
+          .then(function (r) {
+            return r.json();
+          })
+          .then(function (d) {
+            var m = document.getElementById("msg");
+            m.textContent = d.ok ? "{{done}}" : d.error === "code" ? "{{errCode}}" : "{{err}}";
+            m.style.color = d.ok ? "#3fb950" : "#f85149";
+          })
+          .catch(function () {
+            var m = document.getElementById("msg");
+            m.textContent = "{{err}}";
+            m.style.color = "#f85149";
+          });
+      }
+    </script>
+  </body>
+</html>

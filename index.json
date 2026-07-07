@@ -1,0 +1,284 @@
+{
+  "registryVersion": 1,
+  "apps": [
+    {
+      "id": "jellyfin",
+      "manifestVersion": 1,
+      "version": "1.0.0",
+      "name": "Jellyfin",
+      "type": "webclient",
+      "status": "ready",
+      "accent": "#00a4dc",
+      "icon": "<svg viewBox='0 0 24 24'><rect width='24' height='24' rx='4' fill='#101010'/><path d='M12 6.5c-1.2 0-4.9 6.7-4.3 7.8.6 1.1 8 1.1 8.6 0 .6-1.1-3.1-7.8-4.3-7.8zm0 2.9c.5 0 2 2.7 1.8 3.2-.3.5-3.3.5-3.6 0-.2-.5 1.3-3.2 1.8-3.2z' fill='#00a4dc'/><path d='M12 3.2C9.8 3.2 3.2 15 4.3 17c.4.7 2.1 1 4.1 1.1-.7-.3-1.2-.6-1.4-1-.9-1.6 3.3-9.6 5-9.6s5.9 8 5 9.6c-.2.4-.7.7-1.4 1 2-.1 3.7-.4 4.1-1.1 1.1-2-5.5-13.8-7.7-13.8z' fill='#00a4dc' opacity='.55'/></svg>",
+      "tagline": {
+        "en": "Movies & TV from your own server",
+        "hu": "Filmek és sorozatok a saját szerveredről"
+      },
+      "runtime": {
+        "serve": "remote",
+        "urlConfig": "jellyfin",
+        "capabilities": [
+          "nav"
+        ]
+      }
+    },
+    {
+      "id": "livetv",
+      "manifestVersion": 1,
+      "name": {
+        "hu": "Élő TV",
+        "en": "Live TV"
+      },
+      "version": "1.0.1",
+      "changelog": [
+        {
+          "version": "1.0.1",
+          "notes": "Fixed a black screen when opening the app."
+        },
+        {
+          "version": "1.0.0",
+          "notes": "Initial release — IPTV channels, EPG guide, and phone-based setup."
+        }
+      ],
+      "type": "webclient",
+      "status": "ready",
+      "accent": "#39c0d6",
+      "icon": "<svg viewBox='0 0 24 24' fill='none' stroke='#39c0d6' stroke-width='2'><rect x='2.5' y='5' width='19' height='13' rx='2'/><path d='M8 21h8M9 5l3-2 3 2' stroke-linecap='round'/></svg>",
+      "tagline": {
+        "hu": "IPTV csatornák",
+        "en": "IPTV channels"
+      },
+      "requires": {
+        "bin": [
+          "mpv"
+        ],
+        "apt": [
+          "mpv"
+        ]
+      },
+      "service": "livetv",
+      "runtime": {
+        "serve": "local",
+        "entry": "index.html",
+        "capabilities": [
+          "player",
+          "nav",
+          "config"
+        ]
+      }
+    },
+    {
+      "id": "plex",
+      "manifestVersion": 1,
+      "name": "Plex",
+      "version": "1.0.0",
+      "type": "webclient",
+      "status": "ready",
+      "accent": "#e5a00d",
+      "icon": "<svg viewBox='0 0 512 512'><rect width='512' height='512' rx='15%' fill='#282a2d'/><path d='m256 70h-108l108 186-108 186h108l108-186z' fill='#e5a00d'/></svg>",
+      "tagline": {
+        "hu": "Filmek és sorozatok",
+        "en": "Movies & TV shows"
+      },
+      "requires": {
+        "bin": [
+          "mpv"
+        ],
+        "apt": [
+          "mpv"
+        ]
+      },
+      "install": {
+        "source": {
+          "type": "flatpak",
+          "ref": "tv.plex.PlexHTPC",
+          "arch": "x86_64"
+        },
+        "extract": "files/resources/web-client",
+        "patch": [
+          {
+            "op": "strip-script",
+            "match": "qwebchannel"
+          }
+        ]
+      },
+      "runtime": {
+        "serve": "static",
+        "entry": "index.html",
+        "mount": "root",
+        "bridge": "qwebchannel",
+        "transparentSelector": "#media-container",
+        "capabilities": [
+          "storage",
+          "player",
+          "input",
+          "system"
+        ],
+        "player": "mpv-overlay"
+      }
+    },
+    {
+      "id": "spotify",
+      "manifestVersion": 1,
+      "name": "Spotify",
+      "version": "1.0.1",
+      "changelog": [
+        {
+          "version": "1.0.1",
+          "notes": "Fixed now-playing not appearing while casting."
+        },
+        {
+          "version": "1.0.0",
+          "notes": "Initial release — Spotify Connect, now-playing, and library browsing."
+        }
+      ],
+      "type": "webclient",
+      "status": "ready",
+      "accent": "#1DB954",
+      "icon": "<svg viewBox='0 0 496 512'><path fill='#1ed760' d='M248 8C111.1 8 0 119.1 0 256s111.1 248 248 248 248-111.1 248-248S384.9 8 248 8Z'/><path d='M406.6 231.1c-5.2 0-8.4-1.3-12.9-3.9-71.2-42.5-198.5-52.7-280.9-29.7-3.6 1-8.1 2.6-12.9 2.6-13.2 0-23.3-10.3-23.3-23.6 0-13.6 8.4-21.3 17.4-23.9 35.2-10.3 74.6-15.2 117.5-15.2 73 0 149.5 15.2 205.4 47.8 7.8 4.5 12.9 10.7 12.9 22.6 0 13.6-11 23.3-23.2 23.3zm-31 76.2c-5.2 0-8.7-2.3-12.3-4.2-62.5-37-155.7-51.9-238.6-29.4-4.8 1.3-7.4 2.6-11.9 2.6-10.7 0-19.4-8.7-19.4-19.4s5.2-17.8 15.5-20.7c27.8-7.8 56.2-13.6 97.8-13.6 64.9 0 127.6 16.1 177 45.5 8.1 4.8 11.3 11 11.3 19.7-.1 10.8-8.5 19.5-19.4 19.5zm-26.9 65.6c-4.2 0-6.8-1.3-10.7-3.6-62.4-37.6-135-39.2-206.7-24.5-3.9 1-9 2.6-11.9 2.6-9.7 0-15.8-7.7-15.8-15.8 0-10.3 6.1-15.2 13.6-16.8 81.9-18.1 165.6-16.5 237 26.2 6.1 3.9 9.7 7.4 9.7 16.5s-7.1 15.4-15.2 15.4z'/></svg>",
+      "tagline": {
+        "hu": "Zene",
+        "en": "Music"
+      },
+      "requires": {
+        "bin": [
+          "librespot"
+        ],
+        "download": [
+          {
+            "bin": "librespot",
+            "arch": {
+              "arm64": {
+                "url": "https://github.com/Andy1210/tvbox-apps/releases/download/librespot-v0.8.0/librespot-aarch64",
+                "sha256": "3adf05fd4d203072437da90fa9f977b99ff78bc98cc37173debc40c5f4a47c51"
+              }
+            }
+          }
+        ]
+      },
+      "service": "spotify",
+      "runtime": {
+        "serve": "local",
+        "entry": "index.html",
+        "capabilities": [
+          "nav"
+        ]
+      }
+    },
+    {
+      "id": "youtube",
+      "manifestVersion": 1,
+      "name": "YouTube",
+      "version": "1.0.0",
+      "type": "webclient",
+      "status": "ready",
+      "accent": "#ff0033",
+      "icon": "<svg viewBox='0 0 28.57 20'><path d='M27.9727 3.12324C27.6435 1.89323 26.6768 0.926623 25.4468 0.597366C23.2197 2.24288e-07 14.285 0 14.285 0C14.285 0 5.35042 2.24288e-07 3.12323 0.597366C1.89323 0.926623 0.926623 1.89323 0.597366 3.12324C2.24288e-07 5.35042 0 10 0 10C0 10 2.24288e-07 14.6496 0.597366 16.8768C0.926623 18.1068 1.89323 19.0734 3.12323 19.4026C5.35042 20 14.285 20 14.285 20C14.285 20 23.2197 20 25.4468 19.4026C26.6768 19.0734 27.6435 18.1068 27.9727 16.8768C28.5701 14.6496 28.5701 10 28.5701 10C28.5701 10 28.5677 5.35042 27.9727 3.12324Z' fill='#FF0000'/><path d='M11.4253 14.2854L18.8477 10.0004L11.4253 5.71533V14.2854Z' fill='#fff'/></svg>",
+      "tagline": {
+        "hu": "Videók",
+        "en": "Videos"
+      },
+      "runtime": {
+        "serve": "remote",
+        "url": "https://www.youtube.com/tv",
+        "userAgent": "Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.5) AppleWebKit/537.36 (KHTML, like Gecko) 94.0.4606.31/6.5 TV Safari/537.36",
+        "origins": [
+          "youtube.com",
+          "google.com",
+          "gstatic.com",
+          "googleapis.com",
+          "ggpht.com",
+          "googlevideo.com",
+          "ytimg.com",
+          "googleusercontent.com",
+          "youtube-nocookie.com"
+        ],
+        "capabilities": [
+          "nav"
+        ]
+      }
+    }
+  ],
+  "packages": {
+    "livetv": {
+      "files": [
+        {
+          "path": "lib/provider.js",
+          "sha256": "c0f7f3c09f16d9ffd89cfa27686bbad7adf61881350865d93345262ae8a1ef11"
+        },
+        {
+          "path": "manifest.json",
+          "sha256": "68c4c845c43d360ce050ff92a4db83a0f4c0a75f4539fd0e14edd7aaf0a7ccc8"
+        },
+        {
+          "path": "pairing/iptv.html",
+          "sha256": "25d7714597bfad16366f4968b0e0b9b44150ca0e457d9bc07d471abe8ed37b3c"
+        },
+        {
+          "path": "plugin.js",
+          "sha256": "7a3e7bf61a6df16e4c6fdff41983c13f58ea4d746e21d782a5e5b61622efb4a2"
+        },
+        {
+          "path": "web/assets/index-CImb7sYZ.js",
+          "sha256": "c04de35a699440c0605d9a2bfab44f4b23a749b1703d6060cd51b7ea2f829f26"
+        },
+        {
+          "path": "web/assets/index-DXmMOTwE.css",
+          "sha256": "d2a291a46dcc2ed97b24692bbb0c3fc1766839b154ef54a595a19ebbae3141b7"
+        },
+        {
+          "path": "web/index.html",
+          "sha256": "7458aeae9a5a52c51d4b3d3084f1ea4f3acc9659614e1ae05336a15d45d69504"
+        }
+      ]
+    },
+    "spotify": {
+      "files": [
+        {
+          "path": "lib/constants.js",
+          "sha256": "a73def303df45aff4edfceb420b7f3d510cbf4c2fdd690c239c0ac8172a05a8b"
+        },
+        {
+          "path": "lib/spotify_api.js",
+          "sha256": "ccb245190df4cd8f9a799193aed13634f566e1cd8954bfed06a94617e196ecba"
+        },
+        {
+          "path": "lib/spotify.js",
+          "sha256": "a281c0e1956d5bd7ca95941d8fdda560d4e761dc2aa9e99133f23d40c6d35692"
+        },
+        {
+          "path": "manifest.json",
+          "sha256": "548f270c29a29e24cbd9a91f1d6bcf03dc1271213286dafbd7ac95fa5ab01f1e"
+        },
+        {
+          "path": "pairing/keyboard.html",
+          "sha256": "53e10969acb3d91e2a0baec209e8ea075742b128dc1c5af9bb0dba0ccf9ba06a"
+        },
+        {
+          "path": "pairing/spotify.html",
+          "sha256": "54fbf4636063d047c5022f36152495c5a8aef2723c634b32c91c88747cd75007"
+        },
+        {
+          "path": "plugin.js",
+          "sha256": "19faf5f3dd6befa340c78d97917bf25ab970a1e205ac35ff42c06b6335cba9cb"
+        },
+        {
+          "path": "spotify_event_hook.sh",
+          "sha256": "8745ad296656da4cc23e26f605b7e1980eceeece9d6910dccaec5f022f821972"
+        },
+        {
+          "path": "web/assets/index-DcSHwvEu.css",
+          "sha256": "4dbad77a54a255be7142df84de2b1a7da2ff996dd83fcc48c3f9eedf0b11a934"
+        },
+        {
+          "path": "web/assets/index-DtTXtgI_.js",
+          "sha256": "5c0929088307cc245a0b3dac11c056e945783af0a10621e6def87e8eafeee15e"
+        },
+        {
+          "path": "web/index.html",
+          "sha256": "e485c5f6ee73e901e8e51992c3b6a50703eb2f004081125d35ddd01ba10f3bc9"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,4 @@
+# Build tooling for the app sources under apps-src/. The built app UIs
+# (apps/<id>/web/) ARE committed — they ship in the registry package the box
+# fetches — so only the local install/build scratch is ignored here.
+node_modules/

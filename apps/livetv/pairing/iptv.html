@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="{{lang}}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>{{title}}</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        background: #0b0f14;
+        color: #f4f6fa;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        padding: 24px;
+        max-width: 520px;
+        margin: auto;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      fieldset {
+        border: 0;
+        padding: 0;
+        margin: 0 0 8px;
+      }
+      label {
+        display: block;
+        margin: 14px 0 6px;
+        color: #aab4c2;
+        font-size: 14px;
+      }
+      input,
+      select {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 12px;
+        border-radius: 10px;
+        border: 1px solid #2a3442;
+        background: #121a24;
+        color: #fff;
+        font-size: 16px;
+      }
+      .tabs {
+        display: flex;
+        gap: 8px;
+        margin: 8px 0;
+      }
+      .tabs button {
+        flex: 1;
+        padding: 12px;
+        border-radius: 10px;
+        border: 1px solid #2a3442;
+        background: #121a24;
+        color: #fff;
+        font-size: 15px;
+      }
+      .tabs button.on {
+        background: #1f6feb;
+        border-color: #1f6feb;
+      }
+      .hide {
+        display: none;
+      }
+      #save {
+        width: 100%;
+        padding: 14px;
+        border: 0;
+        border-radius: 12px;
+        background: #1f6feb;
+        color: #fff;
+        font-size: 17px;
+        font-weight: 600;
+        margin-top: 8px;
+      }
+      #msg {
+        margin-top: 14px;
+        text-align: center;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>{{title}}</h1>
+    <label>{{code}}</label><input id="code" inputmode="numeric" maxlength="4" placeholder="••••" />
+    <div class="tabs">
+      <button id="tx" class="on" onclick="mode('xtream')">{{xtream}}</button>
+      <button id="tm" onclick="mode('m3u')">{{m3u}}</button>
+    </div>
+    <fieldset id="fx">
+      <label>{{host}}</label
+      ><input id="x_base" placeholder="http://example.com:8080" autocapitalize="off" autocorrect="off" />
+      <label>{{user}}</label><input id="x_user" autocapitalize="off" autocorrect="off" /> <label>{{pass}}</label
+      ><input id="x_pass" type="text" autocapitalize="off" autocorrect="off" />
+    </fieldset>
+    <fieldset id="fm" class="hide">
+      <label>{{m3uUrl}}</label><input id="m_url" autocapitalize="off" autocorrect="off" /> <label>{{epgUrl}}</label
+      ><input id="m_epg" autocapitalize="off" autocorrect="off" />
+    </fieldset>
+    <button id="save" onclick="save()">{{save}}</button>
+    <div id="msg"></div>
+    <script>
+      var M = "xtream";
+      document.getElementById("code").value = new URLSearchParams(location.search).get("c") || "";
+      function mode(m) {
+        M = m;
+        document.getElementById("tx").className = m === "xtream" ? "on" : "";
+        document.getElementById("tm").className = m === "m3u" ? "on" : "";
+        document.getElementById("fx").className = m === "xtream" ? "" : "hide";
+        document.getElementById("fm").className = m === "m3u" ? "" : "hide";
+      }
+      function val(id) {
+        return document.getElementById(id).value.trim();
+      }
+      function save() {
+        var b = { code: val("code") };
+        if (M === "xtream") {
+          b.mode = "xtream";
+          b.xtream = { base: val("x_base"), user: val("x_user"), pass: val("x_pass") };
+        } else {
+          b.mode = "m3u";
+          b.m3u = { url: val("m_url"), epgUrl: val("m_epg") };
+        }
+        fetch("/save" + location.search, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(b),
+        })
+          .then(function (r) {
+            return r.json();
+          })
+          .then(function (d) {
+            var m = document.getElementById("msg");
+            m.textContent = d.ok ? "{{done}}" : d.error === "code" ? "{{errCode}}" : "{{err}}";
+            m.style.color = d.ok ? "#3fb950" : "#f85149";
+          })
+          .catch(function () {
+            var m = document.getElementById("msg");
+            m.textContent = "{{err}}";
+            m.style.color = "#f85149";
+          });
+      }
+    </script>
+  </body>
+</html>

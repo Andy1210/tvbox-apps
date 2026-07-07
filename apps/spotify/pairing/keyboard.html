@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="{{lang}}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>{{title}}</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        background: #0b0f14;
+        color: #f4f6fa;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        padding: 24px;
+        max-width: 520px;
+        margin: auto;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      p {
+        color: #aab4c2;
+        font-size: 14px;
+      }
+      label {
+        display: block;
+        margin: 14px 0 6px;
+        color: #aab4c2;
+        font-size: 14px;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 14px;
+        border-radius: 10px;
+        border: 1px solid #2a3442;
+        background: #121a24;
+        color: #fff;
+        font-size: 17px;
+      }
+      .fld {
+        display: flex;
+        gap: 8px;
+      }
+      .fld input {
+        flex: 1;
+      }
+      .fld button {
+        flex: 0 0 auto;
+        padding: 0 18px;
+        border: 0;
+        border-radius: 10px;
+        background: #1db954;
+        color: #06120b;
+        font-size: 15px;
+        font-weight: 700;
+      }
+      details {
+        margin-top: 18px;
+        color: #aab4c2;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .row button {
+        flex: 1;
+        padding: 12px;
+        border: 0;
+        border-radius: 10px;
+        background: #1f2a36;
+        color: #fff;
+        font-size: 15px;
+        font-weight: 600;
+      }
+      #st {
+        margin-top: 12px;
+        text-align: center;
+        font-size: 14px;
+        color: #7d8a99;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>{{title}}</h1>
+    <p>{{hint}}</p>
+    <input id="code" type="hidden" />
+    <label>{{email}}</label>
+    <div class="fld">
+      <input id="email" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false" /><button
+        onclick="fill('email', 'email')"
+      >
+        {{send}}
+      </button>
+    </div>
+    <label>{{secret}}</label>
+    <div class="fld">
+      <input id="secret" autocapitalize="off" autocorrect="off" spellcheck="false" /><button
+        onclick="fill('secret', 'secret')"
+      >
+        {{send}}
+      </button>
+    </div>
+    <details>
+      <summary>{{manual}}</summary>
+      <input id="kb" placeholder="{{ph}}" autocapitalize="off" autocorrect="off" spellcheck="false" />
+      <div class="row">
+        <button onclick="sp('backspace')">{{back}}</button><button onclick="sp('tab')">{{tab}}</button
+        ><button onclick="sp('submit')">{{enter}}</button>
+      </div>
+    </details>
+    <div id="st"></div>
+    <script>
+      document.getElementById("code").value = new URLSearchParams(location.search).get("c") || "";
+      function code() {
+        return document.getElementById("code").value;
+      }
+      function st(m) {
+        document.getElementById("st").textContent = m || "";
+      }
+      function fill(id, field) {
+        var v = document.getElementById(id).value;
+        if (!v) return;
+        fetch("/fill" + location.search, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: code(), field: field, value: v }),
+        })
+          .then(function (r) {
+            st(r.ok ? "{{sent}}" : "✗");
+          })
+          .catch(function () {
+            st("✗");
+          });
+      }
+      function key(b) {
+        b.code = code();
+        return fetch("/key" + location.search, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(b),
+        })
+          .then(function (r) {
+            if (!r.ok) st("✗");
+          })
+          .catch(function () {});
+      }
+      var kb = document.getElementById("kb");
+      function ch(c) {
+        key({ char: c });
+        kb.value += c;
+      }
+      function sp(k) {
+        key({ special: k });
+        if (k === "tab") kb.value = "";
+        else if (k === "backspace") kb.value = kb.value.slice(0, -1);
+      }
+      kb.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          sp("submit");
+          return;
+        }
+        if (e.key === "Tab") {
+          e.preventDefault();
+          sp("tab");
+          return;
+        }
+        if (e.key === "Backspace") {
+          e.preventDefault();
+          sp("backspace");
+          return;
+        }
+        if (e.key.length === 1) {
+          e.preventDefault();
+          ch(e.key);
+          return;
+        }
+      });
+      document.getElementById("email").focus();
+    </script>
+  </body>
+</html>
