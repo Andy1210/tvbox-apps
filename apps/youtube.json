@@ -11,6 +11,10 @@
     "hu": "Videók",
     "en": "Videos"
   },
+  "description": {
+    "en": "The full YouTube living-room experience: browse, search and play, all driven by the TV remote. Sign in to see your subscriptions and history.",
+    "hu": "A teljes YouTube nappali-élmény: böngészés, keresés és lejátszás, mind a TV-távirányítóval. Jelentkezz be a feliratkozásaidhoz és az előzményeidhez."
+  },
   "runtime": {
     "serve": "remote",
     "url": "https://www.youtube.com/tv",

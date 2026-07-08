@@ -14,6 +14,10 @@
         "en": "Movies & TV from your own server",
         "hu": "Filmek és sorozatok a saját szerveredről"
       },
+      "description": {
+        "en": "The free, self-hosted media server. Point the box at your Jellyfin server and watch your movies, shows and music on the TV, driven by the remote.",
+        "hu": "Az ingyenes, saját üzemeltetésű médiaszerver. Add meg a Jellyfin-szervered címét, és nézd a filmjeidet, sorozataidat és zenéidet a TV-n, távirányítóval."
+      },
       "runtime": {
         "serve": "remote",
         "urlConfig": "jellyfin",
@@ -48,6 +52,10 @@
         "hu": "IPTV csatornák",
         "en": "IPTV channels"
       },
+      "description": {
+        "en": "Watch IPTV channels with a full programme guide (EPG), played natively by the box. Set it up with an Xtream Codes login or an M3U playlist plus an XMLTV guide, entered from the TV or by scanning a QR with your phone.",
+        "hu": "IPTV-csatornák nézése teljes műsorújsággal (EPG), a videót a box natívan játssza. Beállítás Xtream Codes belépéssel vagy M3U-lejátszási listával és XMLTV-műsorújsággal, a TV-ről vagy telefonos QR-beolvasással megadva."
+      },
       "requires": {
         "bin": [
           "mpv"
@@ -79,6 +87,10 @@
       "tagline": {
         "hu": "Filmek és sorozatok",
         "en": "Movies & TV shows"
+      },
+      "description": {
+        "en": "The official Plex 10-foot app. Stream the movies, TV shows and music from your Plex server to the big screen, with the box playing video natively. Sign in once with plex.tv/link, no typing on the TV.",
+        "hu": "A hivatalos Plex nappali-app. A Plex-szervereden lévő filmek, sorozatok és zene lejátszása a nagy képernyőn, a videót a box natívan játssza. Egyszeri belépés a plex.tv/link címen, nem kell gépelni a TV-n."
       },
       "requires": {
         "bin": [
@@ -140,6 +152,10 @@
         "hu": "Zene",
         "en": "Music"
       },
+      "description": {
+        "en": "Turn the box into a Spotify Connect speaker: open Spotify on your phone or computer and pick the box as the playback device. Optional account features (free API keys) add on-screen search, playlists and Liked Songs.",
+        "hu": "A box Spotify Connect hangszóróvá válik: nyisd meg a Spotify-t a telefonodon vagy gépeden, és válaszd ki a boxot lejátszási eszköznek. Opcionális fiók-funkciók (ingyenes API-kulcsok) képernyős keresést, lejátszási listákat és kedvelt számokat adnak."
+      },
       "requires": {
         "bin": [
           "librespot"
@@ -178,6 +194,10 @@
         "hu": "Videók",
         "en": "Videos"
       },
+      "description": {
+        "en": "The full YouTube living-room experience: browse, search and play, all driven by the TV remote. Sign in to see your subscriptions and history.",
+        "hu": "A teljes YouTube nappali-élmény: böngészés, keresés és lejátszás, mind a TV-távirányítóval. Jelentkezz be a feliratkozásaidhoz és az előzményeidhez."
+      },
       "runtime": {
         "serve": "remote",
         "url": "https://www.youtube.com/tv",
@@ -208,7 +228,7 @@
         },
         {
           "path": "manifest.json",
-          "sha256": "68c4c845c43d360ce050ff92a4db83a0f4c0a75f4539fd0e14edd7aaf0a7ccc8"
+          "sha256": "0eb6561386fb1dbff1c9abb54ad03326c5648c71c4abd3175ef4d542bc67219e"
         },
         {
           "path": "pairing/iptv.html",
@@ -248,7 +268,7 @@
         },
         {
           "path": "manifest.json",
-          "sha256": "548f270c29a29e24cbd9a91f1d6bcf03dc1271213286dafbd7ac95fa5ab01f1e"
+          "sha256": "9e4fb609682c973a62cb9d5906d5cae01ef53dcff8861ef02bb48cab79e9627b"
         },
         {
           "path": "pairing/keyboard.html",

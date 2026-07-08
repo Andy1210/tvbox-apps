@@ -24,6 +24,10 @@
     "hu": "IPTV csatornák",
     "en": "IPTV channels"
   },
+  "description": {
+    "en": "Watch IPTV channels with a full programme guide (EPG), played natively by the box. Set it up with an Xtream Codes login or an M3U playlist plus an XMLTV guide, entered from the TV or by scanning a QR with your phone.",
+    "hu": "IPTV-csatornák nézése teljes műsorújsággal (EPG), a videót a box natívan játssza. Beállítás Xtream Codes belépéssel vagy M3U-lejátszási listával és XMLTV-műsorújsággal, a TV-ről vagy telefonos QR-beolvasással megadva."
+  },
   "requires": {
     "bin": [
       "mpv"

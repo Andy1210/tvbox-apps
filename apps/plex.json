@@ -11,6 +11,10 @@
     "hu": "Filmek és sorozatok",
     "en": "Movies & TV shows"
   },
+  "description": {
+    "en": "The official Plex 10-foot app. Stream the movies, TV shows and music from your Plex server to the big screen, with the box playing video natively. Sign in once with plex.tv/link, no typing on the TV.",
+    "hu": "A hivatalos Plex nappali-app. A Plex-szervereden lévő filmek, sorozatok és zene lejátszása a nagy képernyőn, a videót a box natívan játssza. Egyszeri belépés a plex.tv/link címen, nem kell gépelni a TV-n."
+  },
   "requires": {
     "bin": ["mpv"],
     "apt": ["mpv"]

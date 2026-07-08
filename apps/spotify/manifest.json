@@ -21,6 +21,10 @@
     "hu": "Zene",
     "en": "Music"
   },
+  "description": {
+    "en": "Turn the box into a Spotify Connect speaker: open Spotify on your phone or computer and pick the box as the playback device. Optional account features (free API keys) add on-screen search, playlists and Liked Songs.",
+    "hu": "A box Spotify Connect hangszóróvá válik: nyisd meg a Spotify-t a telefonodon vagy gépeden, és válaszd ki a boxot lejátszási eszköznek. Opcionális fiók-funkciók (ingyenes API-kulcsok) képernyős keresést, lejátszási listákat és kedvelt számokat adnak."
+  },
   "requires": {
     "bin": [
       "librespot"
