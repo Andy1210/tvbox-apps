@@ -2,8 +2,12 @@
   "id": "spotify",
   "manifestVersion": 1,
   "name": "Spotify",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "changelog": [
+    {
+      "version": "1.0.3",
+      "notes": "When you cast, the box opens Spotify and the home screen shows what's playing."
+    },
     {
       "version": "1.0.2",
       "notes": "Security hardening of the pairing pages."

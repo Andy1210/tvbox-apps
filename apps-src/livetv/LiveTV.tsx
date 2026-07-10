@@ -4,6 +4,7 @@ import { useI18n, verifyPin, postNowPlaying, useConfigStore, FocusButton, PinPad
 import { fetchChannels, fetchEpg, groupChannels, type Channel, type ChannelGroup, type EpgEntry } from "./api";
 import { ChannelBrowser } from "./ChannelBrowser";
 import { PlayerOverlay } from "./PlayerOverlay";
+import { TrackMenu } from "./TrackMenu";
 import { LiveTvSettings } from "./LiveTvSettings";
 import { EpgGuide } from "./EpgGuide";
 
@@ -75,6 +76,10 @@ export function LiveTV({ onExit }: { onExit: () => void }) {
   const [buffering, setBuffering] = useState(false);
   const [epg, setEpg] = useState<EpgEntry[]>([]);
   const [banner, setBanner] = useState(false);
+  // audio/subtitle tracks of the playing stream (window.tvbox.tracks; [] on old
+  // shells or before mpv loads) + whether the picker panel is open
+  const [tracks, setTracks] = useState<TvboxTrack[]>([]);
+  const [trackMenu, setTrackMenu] = useState(false);
   const epgReq = useRef(0);
   // parental lock — locked categories come from the config store (auto-updates
   // when changed in settings). Select the STABLE `config` ref and derive the
@@ -107,15 +112,25 @@ export function LiveTV({ onExit }: { onExit: () => void }) {
     loadChannels();
   }, [loadChannels]);
 
+  // re-query the stream's track list (safe no-op on shells without the API)
+  const refreshTracks = useCallback(() => {
+    window.tvbox
+      ?.tracks?.()
+      ?.then(setTracks)
+      .catch(() => {});
+  }, []);
+
   // player events from the shell (subscribe once; functional updates avoid stale state)
   useEffect(() => {
     if (!window.tvbox?.onPlayer) return;
     return window.tvbox.onPlayer((ev) => {
       if (ev.type === "buffering") setBuffering(!!ev.on);
-      else if (ev.type === "playing") setBuffering(false);
-      else if (ev.type === "finished" || ev.type === "error") setPlaying(null); // stream dropped -> back to browse
+      else if (ev.type === "playing") {
+        setBuffering(false);
+        refreshTracks(); // mpv has the stream loaded -> track list is meaningful now
+      } else if (ev.type === "finished" || ev.type === "error") setPlaying(null); // stream dropped -> back to browse
     });
-  }, []);
+  }, [refreshTracks]);
 
   // publish now-playing (channel) to the shell -> MQTT/HA; idle on stop + unmount
   useEffect(() => {
@@ -131,6 +146,7 @@ export function LiveTV({ onExit }: { onExit: () => void }) {
     setPlaying({ list, idx });
     setBuffering(true);
     setBanner(true);
+    setTracks([]); // stale tracks belong to the previous channel; refreshed on "playing"
     setEpg([]);
     const req = ++epgReq.current;
     fetchEpg(ch.id).then((e) => {
@@ -167,6 +183,7 @@ export function LiveTV({ onExit }: { onExit: () => void }) {
   const stop = useCallback(() => {
     window.tvbox?.stop?.();
     setPlaying(null);
+    setTracks([]);
     setEpg([]);
   }, []);
 
@@ -176,6 +193,16 @@ export function LiveTV({ onExit }: { onExit: () => void }) {
     const id = setTimeout(() => setBanner(false), 5000);
     return () => clearTimeout(id);
   }, [playing, banner, epg]);
+
+  // the track picker only exists over a live stream (also covers finished/error)
+  useEffect(() => {
+    if (!playing) setTrackMenu(false);
+  }, [playing]);
+
+  // the picker is worth opening only when there is a real choice
+  const audioCount = tracks.filter((x) => x.type === "audio").length;
+  const subCount = tracks.filter((x) => x.type === "sub").length;
+  const trackMenuAvailable = audioCount >= 2 || subCount >= 1;
 
   // enter surf: just show the browser; it measures the PiP placeholder and calls
   // pipToRect, which positions mpv exactly there. exit: restore fullscreen.
@@ -191,10 +218,11 @@ export function LiveTV({ onExit }: { onExit: () => void }) {
 
   // remote keys: Back (exit playback->browse->home), Left (open the list while
   // watching -> PiP), and zapping while playing. While surfing, the browser owns
-  // navigation; only Back is handled here (restore fullscreen).
+  // navigation; only Back is handled here (restore fullscreen). While the track
+  // picker is open it owns the keys (its own useBackspace + spatial nav).
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
-      if (gate || settingsOpen || (guideChannels && !playing)) return; // those views handle their own keys
+      if (gate || settingsOpen || trackMenu || (guideChannels && !playing)) return; // those views handle their own keys
       if (surf) {
         // isBackKey, not a bare Backspace check: BT remotes report Back as
         // Escape/BrowserBack/GoBack (same set the sdk's useBackspace accepts)
@@ -221,12 +249,37 @@ export function LiveTV({ onExit }: { onExit: () => void }) {
         startPlay(playing.list, n);
       } else if (ev.key === "Enter") {
         ev.preventDefault();
-        setBanner(true);
+        // first press: info banner; second press while it shows: track picker
+        // (only when there is something to pick - otherwise Enter just re-arms
+        // the banner). refreshTracks keeps the availability/hint current for
+        // streams that expose tracks late.
+        if (banner && trackMenuAvailable) {
+          setBanner(false);
+          setTrackMenu(true);
+        } else {
+          setBanner(true);
+          refreshTracks();
+        }
       }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [playing, stop, startPlay, onExit, gate, settingsOpen, guideChannels, surf, enterSurf, exitSurf]);
+  }, [
+    playing,
+    stop,
+    startPlay,
+    onExit,
+    gate,
+    settingsOpen,
+    guideChannels,
+    surf,
+    enterSurf,
+    exitSurf,
+    trackMenu,
+    banner,
+    trackMenuAvailable,
+    refreshTracks,
+  ]);
 
   if (loading) {
     return (
@@ -303,7 +356,26 @@ export function LiveTV({ onExit }: { onExit: () => void }) {
 
   if (playing) {
     const ch = playing.list[playing.idx];
-    return <PlayerOverlay channel={ch} epg={epg} buffering={buffering} bannerVisible={banner} />;
+    return (
+      <>
+        <PlayerOverlay
+          channel={ch}
+          epg={epg}
+          buffering={buffering}
+          bannerVisible={banner}
+          trackHint={trackMenuAvailable}
+        />
+        {trackMenu && (
+          <TrackMenu
+            tracks={tracks}
+            onClose={() => {
+              setTrackMenu(false);
+              refreshTracks(); // pull mpv's view so a reopened picker shows the confirmed selection
+            }}
+          />
+        )}
+      </>
+    );
   }
 
 

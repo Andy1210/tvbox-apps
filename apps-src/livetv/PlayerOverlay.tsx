@@ -9,11 +9,13 @@ export function PlayerOverlay({
   epg,
   buffering,
   bannerVisible,
+  trackHint,
 }: {
   channel: Channel;
   epg: EpgEntry[];
   buffering: boolean;
   bannerVisible: boolean;
+  trackHint?: boolean; // the stream has switchable audio/subtitle tracks -> show the OK hint
 }) {
   const { t } = useI18n();
   const now = epg[0];
@@ -52,6 +54,7 @@ export function PlayerOverlay({
                 {hhmm(next.start)} {next.title}
               </div>
             )}
+            {trackHint && <div className="text-[1.6vh] text-fg-dim/80 mt-[1vh]">{t("livetv.tracksHint")}</div>}
           </div>
         </div>
       </div>

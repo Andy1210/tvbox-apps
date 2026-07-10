@@ -112,6 +112,40 @@ bundle has no external dependency. Copy `apps-src/livetv/` as a template:
 Talk to your own host routes with a plain same-origin `fetch("/tvbox/api/<id>/…")`
 — a `local` app is served from the same origin as the API.
 
+### Shared SDK helpers worth knowing
+
+- **`PinGate` + `verifyPin`** - the box has ONE central parental PIN (set in HOME
+  Settings, stored salted+hashed in the shell, verified server-side). Gate any
+  action with `<PinGate onSuccess={…} onCancel={…} />` instead of re-wiring
+  `PinPad` + `verifyPin` + error state yourself; its strings default to the
+  shared `parental.enterPin` / `parental.wrongPin` i18n keys (override with
+  `title` / `wrongText`).
+- **`isBackKey(e)`** - for raw `keydown` handlers outside the `useBackspace`
+  stack (e.g. a fullscreen playback view with no focusable UI). Remotes report
+  Back as `Backspace`, `Escape`, `BrowserBack` or `GoBack` depending on how the
+  box is driven; never check a single key.
+
+```tsx
+import { PinGate, verifyPin, isBackKey, useBackspace } from "@sdk";
+```
+
+### In-playback tracks (`player` capability)
+
+While the shared mpv player is playing, an app can list the stream's
+audio/subtitle tracks and switch them (an in-playback language picker):
+
+```ts
+const tracks = await window.tvbox.tracks?.(); // [] when nothing plays
+// [{ type: "audio" | "sub", id: number, lang: string, title: string, selected: boolean }, …]
+window.tvbox.setTrack?.("audio", 2); // switch to audio track id 2
+window.tvbox.setTrack?.("sub", "no"); // subtitles off ("auto" is also accepted)
+```
+
+Feature-detect with `?.` - shells older than the API don't expose the
+functions at all. Apply optimistically, then re-query `tracks()` after ~500ms
+to confirm what mpv actually selected. Live TV's `TrackMenu.tsx`
+(`apps-src/livetv/`) is the reference implementation.
+
 ## The host plugin
 
 If your app needs host-side Node (a daemon, an OAuth window, server routes),
@@ -124,7 +158,7 @@ module.exports = (host) => {
   host.pairing.register("myapp", { page: (ctx) => "<html>…", routes: { "POST /save": … } });
   host.onConfigChange((sections) => { if (sections.includes("myapp")) reload(); });
   // host also gives: config, BrowserWindow, spawnService/stopService/restartService,
-  // childEnv, audioSink, showLauncher, navTo, base, log
+  // childEnv, audioSink, showLauncher, navTo, widget, base, log
   return {}; // optional { start, stop }
 };
 ```
@@ -132,6 +166,25 @@ module.exports = (host) => {
 The plugin loads only when its deps resolve. Read config via `host.config`
 (injected — never `require` a core config module). Serve pairing pages from your
 own package dir (read the HTML with `fs`, don't rely on the core page dir).
+
+### HOME widget + foregrounding
+
+A service plugin (the only sanctioned background code) can put ONE card on the
+HOME screen and bring its own app forward:
+
+```js
+host.widget.set({ title: "Now playing", subtitle: "Artist / Track" }); // upsert the app's card
+host.widget.clear(); // remove it
+host.navTo("myapp"); // foreground an app by id ("home" = the launcher)
+```
+
+The widget slot is per-app (a plugin can only ever write its OWN card),
+sanitized host-side (title capped at 120 chars, subtitle at 160) and cleared on
+uninstall. The launcher renders it as a card on HOME; Enter on the card opens
+the app. `navTo` stops whatever else is playing when it switches apps. Spotify
+uses the pair for casts: a now-playing card while a cast is active, `navTo` to
+jump to its UI. `host.widget` is shell 1.5+ host API - feature-detect
+(`if (host.widget) …`) so the plugin still loads on older shells.
 
 ## Dependencies — and the platform baseline
 

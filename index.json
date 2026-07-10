@@ -33,8 +33,12 @@
         "hu": "Élő TV",
         "en": "Live TV"
       },
-      "version": "1.0.2",
+      "version": "1.0.3",
       "changelog": [
+        {
+          "version": "1.0.3",
+          "notes": "Switch audio track and subtitles while watching: press OK on the info banner, then OK again."
+        },
         {
           "version": "1.0.2",
           "notes": "EPG works with standard XMLTV guides; Back works on Bluetooth remotes during playback; security hardening of the data path."
@@ -137,8 +141,12 @@
       "id": "spotify",
       "manifestVersion": 1,
       "name": "Spotify",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "changelog": [
+        {
+          "version": "1.0.3",
+          "notes": "When you cast, the box opens Spotify and the home screen shows what's playing."
+        },
         {
           "version": "1.0.2",
           "notes": "Security hardening of the pairing pages."
@@ -236,7 +244,7 @@
         },
         {
           "path": "manifest.json",
-          "sha256": "75d519d7d437de3fe46248cdcab16ed10fd9f6864e3adaaa523fe43c6ecc6fb3"
+          "sha256": "5312f08bd50b085c2f7bf49af6be76a96144a234afcbfe662db987692a88c83f"
         },
         {
           "path": "pairing/iptv.html",
@@ -247,16 +255,16 @@
           "sha256": "af2c37f4e242dd51bddc73ce967c80901695ffcf73ea307c5df1027130cf4e10"
         },
         {
-          "path": "web/assets/index-CqoPSK0F.js",
-          "sha256": "da89f33566461ab34054f618fbaeb4ab6185f7bb31d639501bcb18271884c064"
+          "path": "web/assets/index-B2GLbmTi.css",
+          "sha256": "5bcd1c6bf7031588b019786ce0411fe68b9851d44fc80597fa0407e7dbab656f"
         },
         {
-          "path": "web/assets/index-DXmMOTwE.css",
-          "sha256": "d2a291a46dcc2ed97b24692bbb0c3fc1766839b154ef54a595a19ebbae3141b7"
+          "path": "web/assets/index-Ddcs2Udl.js",
+          "sha256": "0ec9a2b55aa76114688ce43231e7cd12d2d204cc9733d5edc20465ce5f77158a"
         },
         {
           "path": "web/index.html",
-          "sha256": "c5497d2bcfc89f801d001615bae1b62ddb955578566460718f26304a95af21d4"
+          "sha256": "408d360eea726bd3cf566c19e7707d178b073ce81c74cc66901bed015be7b6f0"
         }
       ]
     },
@@ -276,7 +284,7 @@
         },
         {
           "path": "manifest.json",
-          "sha256": "218523091bce2a657361f7f03c0f9fa1975deec1b8f00203f31e20b3a4eefe22"
+          "sha256": "cece1e3fc4a34e7832036ac7ed6afda90e408a65a227cc4d35e8ebba68653435"
         },
         {
           "path": "pairing/keyboard.html",
@@ -288,7 +296,7 @@
         },
         {
           "path": "plugin.js",
-          "sha256": "f19b50226ebe04fd457583a495788c75114e2b5aa26a582983cda2e7a1fb04b1"
+          "sha256": "0749133613c365333cacedce387bc8747da8f3886f28cfbe90d0fecea2405173"
         },
         {
           "path": "spotify_event_hook.sh",

@@ -5,8 +5,12 @@
     "hu": "Élő TV",
     "en": "Live TV"
   },
-  "version": "1.0.2",
+  "version": "1.0.3",
   "changelog": [
+    {
+      "version": "1.0.3",
+      "notes": "Switch audio track and subtitles while watching: press OK on the info banner, then OK again."
+    },
     {
       "version": "1.0.2",
       "notes": "EPG works with standard XMLTV guides; Back works on Bluetooth remotes during playback; security hardening of the data path."

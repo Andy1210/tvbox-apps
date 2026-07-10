@@ -699,6 +699,18 @@ module.exports = (host) => {
         if (host.navTo) host.navTo("spotify");
         else host.showLauncher("#spotify");
       });
+      // HOME widget: the playing track as a card while a cast is active (shell
+      // 1.5+ host API; older shells simply have no host.widget). Keyed so the
+      // per-position state pushes don't re-send an unchanged card.
+      let lastWidgetKey = "";
+      spotify.subscribe((s) => {
+        if (!host.widget) return;
+        const key = s.is_playing && (s.title || s.artist) ? (s.title || "Spotify") + "\n" + (s.artist || "") : "";
+        if (key === lastWidgetKey) return;
+        lastWidgetKey = key;
+        if (key) host.widget.set({ title: s.title || "Spotify", subtitle: s.artist || "" });
+        else host.widget.clear();
+      });
       // Enrich the now-playing background with the primary artist's photo (Web API,
       // when connected) — like the old client. Fetch once per new track.
       let lastArtistTrack = "";
@@ -716,6 +728,7 @@ module.exports = (host) => {
       startLibrespot();
     },
     stop() {
+      if (host.widget) host.widget.clear();
       stopLibrespot();
     },
   };

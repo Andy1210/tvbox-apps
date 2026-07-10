@@ -12,12 +12,25 @@ interface TvboxPlayerEvent {
   ms?: number;
 }
 
+// One audio/subtitle track of the playing stream, as reported by mpv's
+// track-list through the shell ("player" cap). `tracks()` resolves to [] when
+// nothing is playing, and is missing entirely on shells older than the API.
+interface TvboxTrack {
+  type: "audio" | "sub";
+  id: number;
+  lang: string;
+  title: string;
+  selected: boolean;
+}
+
 interface TvboxBridgeGlobal {
   launch(appId: string): void;
   home(): void;
   play?(url: string): void;
   stop?(): void;
   pip?(on: boolean, rect?: { x: number; y: number; w: number; h: number }): void;
+  tracks?(): Promise<TvboxTrack[]>;
+  setTrack?(type: "audio" | "sub", id: number | "no" | "auto"): void;
   onPlayer?(cb: (ev: TvboxPlayerEvent) => void): () => void;
   onNotify?(cb: (n: unknown) => void): () => void;
   onCommand?(cb: (cmd: { action: string; app?: string }) => void): () => void;
