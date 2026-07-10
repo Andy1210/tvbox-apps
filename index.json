@@ -224,7 +224,7 @@
       "files": [
         {
           "path": "lib/provider.js",
-          "sha256": "c0f7f3c09f16d9ffd89cfa27686bbad7adf61881350865d93345262ae8a1ef11"
+          "sha256": "d9b130cbd50f2fd8729974d739fe0653d8010f6139fda077d97c7d54f004e317"
         },
         {
           "path": "manifest.json",
@@ -236,7 +236,7 @@
         },
         {
           "path": "plugin.js",
-          "sha256": "7a3e7bf61a6df16e4c6fdff41983c13f58ea4d746e21d782a5e5b61622efb4a2"
+          "sha256": "af2c37f4e242dd51bddc73ce967c80901695ffcf73ea307c5df1027130cf4e10"
         },
         {
           "path": "web/assets/index-CImb7sYZ.js",
@@ -280,7 +280,7 @@
         },
         {
           "path": "plugin.js",
-          "sha256": "19faf5f3dd6befa340c78d97917bf25ab970a1e205ac35ff42c06b6335cba9cb"
+          "sha256": "f19b50226ebe04fd457583a495788c75114e2b5aa26a582983cda2e7a1fb04b1"
         },
         {
           "path": "spotify_event_hook.sh",

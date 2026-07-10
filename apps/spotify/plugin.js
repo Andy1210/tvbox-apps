@@ -36,10 +36,28 @@ try {
   /* not installed yet / read-only — best effort */
 }
 
+// HTML-escape an interpolated value so a {{var}} can never inject markup. All
+// current values are trusted constants (localized strings + static URIs), but a
+// future user-derived var would otherwise be stored/reflected XSS.
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 // {{token}} substitution — same contract as the shell's pairing renderPage, but
 // reading the page from THIS package (the core PAGES_DIR no longer carries them).
 function renderTemplate(html, vars) {
-  return html.replace(/\{\{(\w+)\}\}/g, (_, k) => (vars && vars[k] != null ? String(vars[k]) : ""));
+  return html.replace(/\{\{(\w+)\}\}/g, (_, k) => (vars && vars[k] != null ? escapeHtml(vars[k]) : ""));
+}
+
+// Pick 'hu' or 'en' from a request's Accept-Language, the same locale selection
+// the pairing pages use (ctx.locale); defaults to 'en' like the rest of this file.
+function localeFrom(req) {
+  const al = String((req && req.headers && req.headers["accept-language"]) || "").toLowerCase();
+  return /\bhu\b/.test(al) ? "hu" : "en";
 }
 
 // Phone-pairing page strings. Ported from shell/pairing/spotify.js and
@@ -58,6 +76,8 @@ const SPOTIFY_STR = {
     done: "Kész! A TV-n kösd össze a fiókod.",
     errCode: "Hibás kód",
     err: "Hiba a mentéskor",
+    authOk: "✓ Spotify összekötve — térj vissza a TV-hez.",
+    authFail: "A Spotify összekötés nem sikerült. Próbáld újra a TV-ről.",
   },
   en: {
     title: "tvbox — Connect Spotify",
@@ -72,6 +92,8 @@ const SPOTIFY_STR = {
     done: "Done! Connect your account on the TV.",
     errCode: "Wrong code",
     err: "Failed to save",
+    authOk: "✓ Spotify connected — return to the TV.",
+    authFail: "Spotify connection failed. Try again from the TV.",
   },
 };
 const KEYBOARD_STR = {
@@ -308,8 +330,9 @@ module.exports = (host) => {
     });
     return { ok: true };
   }
-  function authResultHtml(ok) {
-    const msg = ok ? "✓ Spotify connected — return to the TV." : "Spotify connection failed. Try again from the TV.";
+  function authResultHtml(ok, locale) {
+    const s = SPOTIFY_STR[locale] || SPOTIFY_STR.en;
+    const msg = ok ? s.authOk : s.authFail;
     return (
       `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">` +
       `<body style="margin:0;background:#0b0f14;color:#f4f6fa;font:20px system-ui,sans-serif;` +
@@ -324,9 +347,10 @@ module.exports = (host) => {
     const code = params.get("code"),
       st = params.get("state"),
       err = params.get("error");
+    const locale = localeFrom(req);
     const finish = (ok) => {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(authResultHtml(ok));
+      res.end(authResultHtml(ok, locale));
       setTimeout(closeAuthWin, 1800);
     };
     if (err || !code || !authState || st !== authState) {

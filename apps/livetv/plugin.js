@@ -14,10 +14,21 @@ const fs = require("fs");
 const path = require("path");
 const livetv = require("./lib/provider");
 
+// HTML-escape an interpolated value so a {{var}} can never inject markup. All
+// current values are trusted constants (localized strings + lang code), but a
+// future user-derived var would otherwise be stored/reflected XSS.
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 // {{token}} substitution — same contract as the shell's pairing renderPage, but
 // reading the page from THIS package (the core PAGES_DIR no longer carries it).
 function renderTemplate(html, vars) {
-  return html.replace(/\{\{(\w+)\}\}/g, (_, k) => (vars && vars[k] != null ? String(vars[k]) : ""));
+  return html.replace(/\{\{(\w+)\}\}/g, (_, k) => (vars && vars[k] != null ? escapeHtml(vars[k]) : ""));
 }
 
 const PAIRING_STR = {

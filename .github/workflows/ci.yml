@@ -22,4 +22,7 @@ jobs:
       - name: JSON Schema (from the main tvbox repo)
         run: |
           curl -fsSL -o /tmp/schema.json https://raw.githubusercontent.com/Andy1210/tvbox/main/docs/app-manifest.schema.json
-          npx --yes ajv-cli@5 validate --spec=draft2020 -s /tmp/schema.json -d "apps/*.json"
+          # Validate BOTH manifest-only apps (apps/<id>.json) and the package
+          # manifests (apps/<id>/manifest.json) — the package apps ship trusted
+          # host-side plugin.js, so they must get the SAME schema scrutiny.
+          npx --yes ajv-cli@5 validate --spec=draft2020 -s /tmp/schema.json -d "apps/*.json" -d "apps/*/manifest.json"

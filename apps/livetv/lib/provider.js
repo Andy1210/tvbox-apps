@@ -9,6 +9,8 @@ const path = require("path");
 const os = require("os");
 const http = require("http");
 const https = require("https");
+const dns = require("dns");
+const net = require("net");
 
 // Packaged Live TV provider (Kodi-model app code — ships in the app package, not
 // the core shell). `config` is the shell's config store, injected once by
@@ -87,53 +89,162 @@ function resolveSource() {
   return { origin: "iptv.conf", x, m3uUrl: conf.M3U_URL || null, epgUrl: conf.EPG_URL || (x ? xmltvUrl(x) : null) };
 }
 
-// Block loopback/private/link-local targets so a malicious IPTV provider can't
-// 302 our fetch at the box's own services or the LAN (SSRF). Checked on the
-// initial URL and every redirect (fetchText recurses).
-function isBlockedHost(host) {
-  if (!host) return true;
-  const h = host.toLowerCase();
-  if (h === "localhost" || h.endsWith(".localhost")) return true;
-  const m = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(h);
-  if (m) {
-    const a = Number(m[1]),
-      b = Number(m[2]);
-    if (a === 0 || a === 127 || a === 10) return true;
-    if (a === 169 && b === 254) return true; // link-local
-    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16/12
-    if (a === 192 && b === 168) return true; // 192.168/16
+// SSRF guard. A malicious IPTV provider controls the M3U / Xtream / EPG URLs
+// AND any redirect Location they return, and we fetch them with raw
+// http/https.get — NOT the shell's guarded appfetch broker — so this is the ONLY
+// defense. A name-only string check is bypassable: a DNS name that resolves to a
+// private/loopback IP, or an IPv4-mapped IPv6 literal like [::ffff:127.0.0.1],
+// slips straight through. So (mirroring shell/appfetch.js) we classify literals
+// rigorously AND resolve every host, refusing if ANY resolved address is
+// loopback / private / link-local / metadata / unspecified, and we re-guard on
+// each redirect hop. Dependency-free — Node built-ins only.
+
+// Normalize a hostname: lowercase, strip a trailing FQDN dot, strip IPv6
+// brackets and any zone id (%eth0).
+function normHost(h) {
+  let s = String(h || "").toLowerCase();
+  if (s.endsWith(".")) s = s.slice(0, -1);
+  if (s.startsWith("[") && s.endsWith("]")) s = s.slice(1, -1);
+  const pct = s.indexOf("%");
+  if (pct >= 0) s = s.slice(0, pct);
+  return s;
+}
+
+// Pull the embedded IPv4 out of an IPv4-mapped/-compatible/NAT64 IPv6 address
+// ("::ffff:x", "::x", "64:ff9b::x") in dotted OR hex-group form; else null.
+// These ranges aren't publicly routable as-is, so classifying the embedded v4
+// fails closed (e.g. ::ffff:127.0.0.1 -> loopback).
+function embeddedV4(s) {
+  const m = /^(?:::(?:ffff:)?|64:ff9b::)([0-9a-f.:]+)$/i.exec(s);
+  if (!m) return null;
+  const tail = m[1];
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(tail)) return tail; // ::ffff:127.0.0.1
+  const g = tail.split(":");
+  if (g.length === 2 && g.every((x) => /^[0-9a-f]{1,4}$/i.test(x))) {
+    const hi = parseInt(g[0], 16);
+    const lo = parseInt(g[1], 16);
+    return [(hi >> 8) & 255, hi & 255, (lo >> 8) & 255, lo & 255].join("."); // ::ffff:7f00:1
   }
-  if (h === "::1" || h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80")) return true; // IPv6 loopback/ULA/link-local
-  return false;
+  return null;
+}
+
+// Classify a literal IP into a trust category: loopback | linklocal | metadata |
+// unspecified | private | public. Non-IP input returns "" (it's a name).
+function classifyIp(ip) {
+  const s = normHost(ip);
+  if (net.isIPv4(s)) {
+    const o = s.split(".").map(Number);
+    if (o[0] === 0) return "unspecified"; // 0.0.0.0/8
+    if (o[0] === 127) return "loopback"; // 127.0.0.0/8
+    if (o[0] === 169 && o[1] === 254) return o[2] === 169 && o[3] === 254 ? "metadata" : "linklocal"; // 169.254/16
+    if (o[0] === 10) return "private";
+    if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return "private"; // 172.16/12
+    if (o[0] === 192 && o[1] === 168) return "private"; // 192.168/16
+    if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) return "private"; // 100.64/10 CGNAT
+    return "public";
+  }
+  if (net.isIPv6(s)) {
+    if (s === "::1" || /^(0{1,4}:){7}0{0,3}1$/.test(s)) return "loopback"; // incl. fully-expanded
+    if (s === "::" || /^(0{1,4}:){7}0{1,4}$/.test(s)) return "unspecified";
+    const v4 = embeddedV4(s); // ::ffff:… / ::… / 64:ff9b::… -> classify the embedded v4
+    if (v4) return classifyIp(v4);
+    if (/^fe[89ab]/.test(s)) return "linklocal"; // fe80::/10
+    if (/^f[cd]/.test(s)) return "private"; // fc00::/7 unique-local
+    if (/^fec/.test(s)) return "private"; // deprecated site-local
+    return "public";
+  }
+  return "";
+}
+
+// Categories a box must never fetch from. This provider only ever pulls PUBLIC
+// IPTV endpoints, so private (LAN) is refused too — same as the old literal
+// check, but now also for names that RESOLVE into these ranges.
+function isForbiddenCat(cat) {
+  return cat === "loopback" || cat === "linklocal" || cat === "metadata" || cat === "unspecified" || cat === "private";
+}
+
+// Promisified dns.lookup(all): a name -> every A/AAAA address ([] on failure).
+function lookupAll(host) {
+  return new Promise((resolve) => {
+    dns.lookup(host, { all: true }, (err, addrs) => resolve(err ? [] : addrs));
+  });
+}
+
+// A net/tls `lookup` that returns ONLY the vetted addresses, so the socket
+// connects exactly where we classified — no re-resolution / rebinding TOCTOU.
+function pinnedLookup(addresses) {
+  const list = addresses.map((a) => ({ address: a.address, family: a.family || (net.isIPv6(a.address) ? 6 : 4) }));
+  return function (hostname, options, callback) {
+    if (typeof options === "function") {
+      callback = options;
+      options = {};
+    }
+    if (options && options.all) return callback(null, list);
+    return callback(null, list[0].address, list[0].family);
+  };
+}
+
+// Resolve + vet a target host; returns the vetted addresses (to pin the socket
+// to) or throws. localhost aliases and forbidden literal IPs (incl. IPv4-mapped
+// IPv6) are rejected up front; a name is resolved and rejected if ANY address is
+// forbidden — the DNS-rebinding / name-to-private bypass the old check missed.
+async function vetHost(host) {
+  const h = normHost(host);
+  if (!h || h === "localhost" || h.endsWith(".localhost")) throw new Error("blocked host: " + host);
+  const literal = classifyIp(h);
+  if (literal) {
+    if (isForbiddenCat(literal)) throw new Error("blocked host: " + host);
+    return [{ address: h, family: net.isIPv6(h) ? 6 : 4 }]; // an IP literal: no DNS needed
+  }
+  const addrs = await lookupAll(h);
+  if (!addrs.length) throw new Error("dns lookup failed: " + host);
+  for (const a of addrs) {
+    const cat = classifyIp(a.address);
+    if (isForbiddenCat(cat)) throw new Error("blocked host " + host + " -> " + a.address + " (" + cat + ")");
+  }
+  return addrs;
 }
 
 function fetchText(url, timeoutMs, redirects) {
-  return new Promise((resolve, reject) => {
-    let host;
-    try {
-      host = new URL(url).hostname;
-    } catch (e) {
-      return reject(new Error("bad url"));
-    }
-    if (isBlockedHost(host)) return reject(new Error("blocked host: " + host));
-    const mod = url.startsWith("https:") ? https : http;
-    const req = mod.get(url, (res) => {
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && (redirects || 0) < 4) {
-        res.resume();
-        return resolve(fetchText(res.headers.location, timeoutMs, (redirects || 0) + 1));
-      }
-      if (res.statusCode !== 200) {
-        res.resume();
-        return reject(new Error("HTTP " + res.statusCode));
-      }
-      let data = "";
-      res.setEncoding("utf8");
-      res.on("data", (c) => (data += c));
-      res.on("end", () => resolve(data));
-    });
-    req.on("error", reject);
-    req.setTimeout(timeoutMs, () => req.destroy(new Error("timeout")));
-  });
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (e) {
+    return Promise.reject(new Error("bad url"));
+  }
+  // Only http(s) is ever fetched (M3U/Xtream/EPG); refuse file:, data:, etc.
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+    return Promise.reject(new Error("blocked scheme: " + parsed.protocol));
+  return vetHost(parsed.hostname).then(
+    (addresses) =>
+      new Promise((resolve, reject) => {
+        const mod = parsed.protocol === "https:" ? https : http;
+        const req = mod.get(url, { lookup: pinnedLookup(addresses) }, (res) => {
+          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && (redirects || 0) < 4) {
+            res.resume();
+            // Resolve Location against the current URL so RELATIVE redirects work,
+            // then recurse — vetHost re-guards the new host on every hop.
+            let next;
+            try {
+              next = new URL(res.headers.location, parsed).href;
+            } catch (e) {
+              return reject(new Error("bad redirect location"));
+            }
+            return resolve(fetchText(next, timeoutMs, (redirects || 0) + 1));
+          }
+          if (res.statusCode !== 200) {
+            res.resume();
+            return reject(new Error("HTTP " + res.statusCode));
+          }
+          let data = "";
+          res.setEncoding("utf8");
+          res.on("data", (c) => (data += c));
+          res.on("end", () => resolve(data));
+        });
+        req.on("error", reject);
+        req.setTimeout(timeoutMs, () => req.destroy(new Error("timeout")));
+      }),
+  );
 }
 
 function api(x, action, extra) {
@@ -169,6 +280,14 @@ async function channelsFromXtream(x) {
 }
 
 // M3U fallback ---------------------------------------------------------------
+// Streaming schemes mpv can actually play. A hostile playlist could set a
+// channel URL to file:// (or another local scheme) that window.tvbox.play would
+// hand straight to mpv, so channels with any other scheme are dropped at parse.
+const STREAM_SCHEMES = new Set(["http", "https", "rtsp", "rtsps", "rtmp", "rtmps", "udp", "rtp"]);
+function allowedStreamUrl(u) {
+  const m = /^([a-z][a-z0-9+.-]*):/i.exec(String(u || "").trim());
+  return !!m && STREAM_SCHEMES.has(m[1].toLowerCase()); // must be an absolute URL with an allowed scheme
+}
 function attr(line, key) {
   const m = new RegExp(key + '="([^"]*)"').exec(line);
   return m ? m[1] : "";
@@ -190,8 +309,12 @@ function channelsFromM3U(text) {
       };
     } else if (line && !line.startsWith("#") && cur) {
       cur.url = line;
-      cur.order = order++;
-      channels.push(cur);
+      if (allowedStreamUrl(cur.url)) {
+        cur.order = order++;
+        channels.push(cur);
+      } else {
+        console.warn("[livetv] dropped channel with disallowed URL scheme:", line.slice(0, 40));
+      }
       cur = null;
     }
   }
@@ -256,6 +379,19 @@ function decodeEntities(s) {
     .replace(/&apos;/g, "'");
 }
 
+// Standard XMLTV datetime -> epoch SECONDS. Format is "YYYYMMDDHHMMSS ±HHMM"
+// (the trailing timezone offset is optional; absent = UTC), e.g.
+// "20240101060000 +0100". Returns 0 if unparseable. The wall-clock is
+// interpreted in the stated offset: epoch = UTC(wall) - offset.
+function parseXmltvTime(s) {
+  const m = /^\s*(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:\s*([+-])(\d{2})(\d{2}))?/.exec(String(s || ""));
+  if (!m) return 0;
+  const wall = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) / 1000;
+  if (!m[7]) return Math.floor(wall); // no offset -> treat as UTC
+  const offset = (Number(m[8]) * 60 + Number(m[9])) * 60 * (m[7] === "-" ? -1 : 1);
+  return Math.floor(wall - offset);
+}
+
 // Full EPG, parsed once from the XMLTV guide (EPG_URL, or xmltv.php for an
 // Xtream login) into { channelId: [{title,start,stop}, ...] } sorted by start,
 // for a now-2h..now+24h window. ~12 MB fetch + single-pass parse, cached. Keyed
@@ -280,8 +416,13 @@ async function getEpg() {
     const attrs = m[1];
     const chm = /channel="([^"]*)"/.exec(attrs);
     if (!chm || !chm[1]) continue;
-    const start = Number((/start_timestamp="(\d+)"/.exec(attrs) || [])[1] || 0);
-    const stop = Number((/stop_timestamp="(\d+)"/.exec(attrs) || [])[1] || 0);
+    // Two guide shapes: Xtream's xmltv.php extension (start_timestamp/stop_timestamp
+    // as epoch seconds) and standard XMLTV (start="YYYYMMDDHHMMSS ±HHMM"). Prefer
+    // the Xtream epoch when present, else parse the standard datetime form.
+    let start = Number((/start_timestamp="(\d+)"/.exec(attrs) || [])[1] || 0);
+    let stop = Number((/stop_timestamp="(\d+)"/.exec(attrs) || [])[1] || 0);
+    if (!start) start = parseXmltvTime((/\bstart="([^"]+)"/.exec(attrs) || [])[1] || "");
+    if (!stop) stop = parseXmltvTime((/\bstop="([^"]+)"/.exec(attrs) || [])[1] || "");
     if (!start || !stop || stop < lo || start > hi) continue;
     const tm = /<title[^>]*>([\s\S]*?)<\/title>/.exec(m[2]);
     const title = tm ? decodeEntities(tm[1]).trim() : "";
