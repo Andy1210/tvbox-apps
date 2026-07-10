@@ -110,19 +110,29 @@ export async function disconnectAccount(): Promise<void> {
   await fetch("/tvbox/api/spotify/disconnect", { method: "POST" }).catch(() => {});
 }
 
-export async function fetchLiked(): Promise<Track[]> {
+export async function fetchLiked(): Promise<ListResult<Track>> {
   try {
-    return (await (await fetch("/tvbox/api/spotify/liked", { cache: "no-store" })).json()).tracks || [];
+    const j = await (await fetch("/tvbox/api/spotify/liked", { cache: "no-store" })).json();
+    return { items: j.tracks || [], error: String(j.error || "") };
   } catch {
-    return [];
+    return { items: [], error: "network" };
   }
 }
 
-export async function fetchPlaylists(): Promise<Playlist[]> {
+// Lists carry the API error out to the UI: a 403 from a Development-Mode
+// Spotify app whose User Management list is missing this account must read as
+// an instruction, not as an empty library.
+export interface ListResult<T> {
+  items: T[];
+  error: string;
+}
+
+export async function fetchPlaylists(): Promise<ListResult<Playlist>> {
   try {
-    return (await (await fetch("/tvbox/api/spotify/playlists", { cache: "no-store" })).json()).playlists || [];
+    const j = await (await fetch("/tvbox/api/spotify/playlists", { cache: "no-store" })).json();
+    return { items: j.playlists || [], error: String(j.error || "") };
   } catch {
-    return [];
+    return { items: [], error: "network" };
   }
 }
 
@@ -146,12 +156,20 @@ export async function search(q: string): Promise<{ tracks: Track[]; playlists: P
   }
 }
 
-export async function control(action: string): Promise<void> {
-  await fetch("/tvbox/api/spotify/control", {
-    method: "POST",
-    headers: JSON_HEADERS,
-    body: JSON.stringify({ action }),
-  }).catch(() => {});
+export async function control(action: string): Promise<string> {
+  // returns "" on success, else the API error - a 403 from a Development Mode
+  // app must surface as an instruction, not as dead buttons
+  try {
+    const r = await fetch("/tvbox/api/spotify/control", {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ action }),
+    });
+    const j = await r.json();
+    return j.ok === true ? "" : String(j.error || "control failed");
+  } catch {
+    return "network";
+  }
 }
 
 export async function play(body: { contextUri?: string; uris?: string[] }): Promise<{ ok: boolean; error: string }> {

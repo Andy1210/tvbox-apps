@@ -65,6 +65,9 @@
     "keysHint": "Scan with your phone and paste the Client ID and Secret from your Spotify app.",
     "connectTitle": "Connect Spotify account",
     "connectScan": "Scan with your phone — the login opens automatically. Then fill the Email / Code fields there.",
-    "connectSteps": "On your phone: enter your email → Send, then the code you get by email (or your password) → Send."
+    "connectSteps": "On your phone: enter your email → Send, then the code you get by email (or your password) → Send.",
+    "notRegistered": "Spotify rejected this account: it is not added to your developer app. On developer.spotify.com open your app, Settings, User Management, and add the account's email.",
+    "apiUnreachable": "Spotify is unreachable right now.",
+    "apiError": "Spotify error: {error}"
   }
 }

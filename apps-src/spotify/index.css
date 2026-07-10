@@ -14,6 +14,7 @@
   --color-bg-1: #0c1219;
   --color-fg: #f4f6fa;
   --color-fg-dim: #8a96a6;
+  --color-warn: #e0b64a; /* transport error hints */
   --color-focus: #ffffff;
   --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
 }

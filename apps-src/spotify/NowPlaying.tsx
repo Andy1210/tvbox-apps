@@ -135,7 +135,7 @@ export function NowPlaying({
       const a = MEDIA[e.key];
       if (a) {
         e.preventDefault();
-        control(a);
+        doControl(a);
       }
     };
     window.addEventListener("keydown", onKey, true);
@@ -143,6 +143,18 @@ export function NowPlaying({
   }, [connected]);
 
   const playing = !!state?.is_playing;
+  // transport errors (Development Mode 403 etc.) show as a transient hint
+  // instead of silently dead buttons
+  const [ctrlErr, setCtrlErr] = useState("");
+  useEffect(() => {
+    if (!ctrlErr) return;
+    const id = setTimeout(() => setCtrlErr(""), 8000);
+    return () => clearTimeout(id);
+  }, [ctrlErr]);
+  const doControl = (a: string) =>
+    void control(a).then((err) => {
+      if (err) setCtrlErr(/not registered|HTTP 403/i.test(err) ? t("spotify.notRegistered") : t("spotify.apiError", { error: err }));
+    });
   const pos = state ? Math.min(state.position_ms + (playing ? Date.now() - at : 0), state.duration_ms || Infinity) : 0;
   const pct = state && state.duration_ms ? Math.min(100, (pos / state.duration_ms) * 100) : 0;
   const hasTrack = !!state?.track_id;
@@ -150,7 +162,12 @@ export function NowPlaying({
 
   return (
     <FocusContext.Provider value={focusKey}>
-      <div ref={ref} className="relative h-full overflow-hidden">
+      {/* overflow-CLIP, not hidden: a hidden box is still programmatically
+          scrollable, and the lyrics scrollIntoView scrolls every scrollable
+          ancestor - the scale-105 backdrop overflows this box at the bottom, so
+          the view used to get nudged up, dragging the inset-0 dim layers along
+          and letting the backdrop peek out undimmed. clip forbids scrolling. */}
+      <div ref={ref} className="relative h-full overflow-clip">
         {(state?.artist_image_url || state?.cover_url) && (
           <div
             className="absolute inset-0 bg-cover bg-center scale-105 blur-[0.6vh] opacity-85"
@@ -220,21 +237,30 @@ export function NowPlaying({
             </div>
             {connected && (
               <div className="flex items-center gap-[1.2vw] mt-[0.2vh]">
-                <Ctrl fk="sp-prev" sm onEnter={() => control("prev")}>
+                <Ctrl fk="sp-prev" sm onEnter={() => doControl("prev")}>
                   <TIcon name="prev" />
                 </Ctrl>
-                <Ctrl fk="sp-playpause" sm onEnter={() => control("playpause")}>
+                <Ctrl fk="sp-playpause" sm onEnter={() => doControl("playpause")}>
                   <TIcon name={playing ? "pause" : "play"} />
                 </Ctrl>
-                <Ctrl fk="sp-next" sm onEnter={() => control("next")}>
+                <Ctrl fk="sp-next" sm onEnter={() => doControl("next")}>
                   <TIcon name="next" />
                 </Ctrl>
               </div>
             )}
+            {ctrlErr && <div className="text-[1.5vh] text-warn mt-[0.4vh] max-w-[40vw]">{ctrlErr}</div>}
           </div>
         )}
 
-        <div className="relative z-10 h-full flex flex-col items-center justify-center gap-[2.4vh] px-[6vw]">
+        <div
+          className={[
+            "relative z-10 h-full flex flex-col items-center justify-center gap-[2.4vh] px-[6vw]",
+            // while lyrics are open, start the content below the absolute playback
+            // strip (top-[11vh] + its height, taller when transport controls show)
+            // so the lyrics scroll area never underlaps it
+            hasTrack && showLyrics ? (connected ? "pt-[29vh]" : "pt-[22vh]") : "",
+          ].join(" ")}
+        >
           {hasTrack && showLyrics ? (
             <Lyrics state={state!} pos={pos} />
           ) : hasTrack ? (

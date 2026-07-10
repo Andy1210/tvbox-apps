@@ -65,6 +65,9 @@
     "keysHint": "Olvasd be a telefonoddal, és illeszd be a Client ID-t és a Client Secretet a Spotify-alkalmazásodból.",
     "connectTitle": "Spotify-fiók összekötése",
     "connectScan": "Olvasd be a telefonoddal — a bejelentkezés automatikusan megnyílik. Utána töltsd ki ott az e-mail-címet és a kódot.",
-    "connectSteps": "A telefonon: add meg az e-mail-címed → Küldés, majd az e-mailben kapott kódot (vagy a jelszót) → Küldés."
+    "connectSteps": "A telefonon: add meg az e-mail-címed → Küldés, majd az e-mailben kapott kódot (vagy a jelszót) → Küldés.",
+    "notRegistered": "A Spotify elutasította ezt a fiókot: nincs hozzáadva a developer alkalmazáshoz. A developer.spotify.com oldalon nyisd meg az appot, Settings, User Management, és add hozzá a fiók e-mail-címét.",
+    "apiUnreachable": "A Spotify most nem érhető el.",
+    "apiError": "Spotify hiba: {error}"
   }
 }

@@ -171,6 +171,49 @@ function fetchLrclib(query) {
   });
 }
 
+// /api/get is an EXACT-match lookup (album + duration participate), so a track
+// whose librespot album string differs from LRCLIB's record (single vs
+// soundtrack naming, deluxe editions) misses even for very popular songs.
+// Fallback: full-text /api/search by track+artist, then pick the closest
+// duration (prefer entries that carry synced lyrics).
+function searchLrclib(title, artist, durSec) {
+  const params = new URLSearchParams({ track_name: title, artist_name: artist });
+  return new Promise((resolve) => {
+    const req = https.get(
+      "https://lrclib.net/api/search?" + params.toString(),
+      { headers: { "User-Agent": "tvbox (https://github.com/Andy1210/tvbox)" } },
+      (res) => {
+        if (res.statusCode !== 200) {
+          res.resume();
+          return resolve(null);
+        }
+        let d = "";
+        res.setEncoding("utf8");
+        res.on("data", (c) => (d += c));
+        res.on("end", () => {
+          let list;
+          try {
+            list = JSON.parse(d);
+          } catch (e) {
+            return resolve(null);
+          }
+          if (!Array.isArray(list) || !list.length) return resolve(null);
+          const want = Number(durSec) || 0;
+          const score = (e) =>
+            (want && Math.abs((e.duration || 0) - want) <= 7 ? 0 : 100) + (e.syncedLyrics ? 0 : 10);
+          list.sort((a, b) => score(a) - score(b));
+          const best = list[0];
+          // a wildly different duration is a different song/version - reject
+          if (want && Math.abs((best.duration || 0) - want) > 20) return resolve(null);
+          resolve(best);
+        });
+      },
+    );
+    req.on("error", () => resolve(null));
+    req.setTimeout(8000, () => req.destroy());
+  });
+}
+
 module.exports = (host) => {
   spotify.setConfig(host.config); // read the Connect device name from the shell config store
   spotifyApi.setConfig(host.config); // read the Spotify Web API credentials from the shell config store
@@ -622,14 +665,20 @@ module.exports = (host) => {
       const params = new URLSearchParams({ track_name: title, artist_name: artist });
       if (album) params.set("album_name", album);
       if (dur) params.set("duration", dur);
-      fetchLrclib(params.toString()).then((d) => {
-        const out = d
-          ? { synced: parseLrc(d.syncedLyrics || ""), plain: d.plainLyrics || "", instrumental: !!d.instrumental }
-          : { synced: [], plain: "", instrumental: false };
-        if (lyricsCache.size > 100) lyricsCache.clear(); // bound the cache
-        lyricsCache.set(key, out);
-        host.json(res, out);
-      });
+      const bare = new URLSearchParams({ track_name: title, artist_name: artist });
+      if (dur) bare.set("duration", dur);
+      // exact (album+duration) -> exact without album -> full-text search
+      fetchLrclib(params.toString())
+        .then((d) => d || (album ? fetchLrclib(bare.toString()) : null))
+        .then((d) => d || searchLrclib(title, artist, dur))
+        .then((d) => {
+          const out = d
+            ? { synced: parseLrc(d.syncedLyrics || ""), plain: d.plainLyrics || "", instrumental: !!d.instrumental }
+            : { synced: [], plain: "", instrumental: false };
+          if (lyricsCache.size > 100) lyricsCache.clear(); // bound the cache
+          lyricsCache.set(key, out);
+          host.json(res, out);
+        });
     },
   };
 

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n, useBackspace, FocusButton, Osk } from "@sdk";
-import { fetchLiked, fetchPlaylists, fetchPlaylistItems, search, play, mmss, type Track, type Playlist } from "./api";
+import { fetchLiked, fetchPlaylists, fetchPlaylistItems, search, play, mmss, type Track, type Playlist, type ListResult,
+} from "./api";
 
 type Tab = "liked" | "playlists" | "search";
 
@@ -44,12 +45,20 @@ function Row({
 // Account browser (shown only when connected). Liked Songs and own-playlist
 // tracks are fully browsable; any playlist can be played whole; search finds
 // tracks/playlists. Selecting plays on the box and returns to now-playing.
+// Map a Web API error to actionable copy: the common trap is a Development
+// Mode Spotify app without this account in its User Management list (403).
+function apiErrorText(t: (k: string, p?: Record<string, string>) => string, error: string): string {
+  if (/not registered/i.test(error)) return t("spotify.notRegistered");
+  if (error === "network") return t("spotify.apiUnreachable");
+  return t("spotify.apiError", { error });
+}
+
 export function Browser({ onBack, onPlayed }: { onBack: () => void; onPlayed: () => void }) {
   const { t } = useI18n();
   const { ref, focusKey } = useFocusable({ focusKey: "sp-browser" });
   const [tab, setTab] = useState<Tab>("liked");
-  const [liked, setLiked] = useState<Track[] | null>(null);
-  const [playlists, setPlaylists] = useState<Playlist[] | null>(null);
+  const [liked, setLiked] = useState<ListResult<Track> | null>(null);
+  const [playlists, setPlaylists] = useState<ListResult<Playlist> | null>(null);
   const [openPl, setOpenPl] = useState<Playlist | null>(null);
   const [plTracks, setPlTracks] = useState<Track[] | null>(null);
   const [results, setResults] = useState<{ tracks: Track[]; playlists: Playlist[] } | null>(null);
@@ -160,10 +169,12 @@ export function Browser({ onBack, onPlayed }: { onBack: () => void; onPlayed: ()
           {tab === "liked" &&
             (liked === null ? (
               <Spinner />
-            ) : liked.length === 0 ? (
+            ) : liked.error ? (
+              <Empty t={apiErrorText(t, liked.error)} />
+            ) : liked.items.length === 0 ? (
               <Empty t={t("spotify.emptyList")} />
             ) : (
-              liked.map((tr, i) => (
+              liked.items.map((tr, i) => (
                 <Row
                   key={tr.uri + i}
                   fk={"br-l-" + i}
@@ -171,7 +182,7 @@ export function Browser({ onBack, onPlayed }: { onBack: () => void; onPlayed: ()
                   title={tr.name}
                   sub={tr.artists}
                   right={mmss(tr.duration_ms)}
-                  onEnter={() => playAndGo({ uris: liked.slice(i).map((x) => x.uri) })}
+                  onEnter={() => playAndGo({ uris: liked.items.slice(i).map((x) => x.uri) })}
                 />
               ))
             ))}
@@ -181,10 +192,12 @@ export function Browser({ onBack, onPlayed }: { onBack: () => void; onPlayed: ()
             !openPl &&
             (playlists === null ? (
               <Spinner />
-            ) : playlists.length === 0 ? (
+            ) : playlists.error ? (
+              <Empty t={apiErrorText(t, playlists.error)} />
+            ) : playlists.items.length === 0 ? (
               <Empty t={t("spotify.emptyList")} />
             ) : (
-              playlists.map((p, i) => (
+              playlists.items.map((p, i) => (
                 <Row
                   key={p.id}
                   fk={"br-p-" + i}

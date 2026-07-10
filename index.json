@@ -141,8 +141,12 @@
       "id": "spotify",
       "manifestVersion": 1,
       "name": "Spotify",
-      "version": "1.0.3",
+      "version": "1.0.4",
       "changelog": [
+        {
+          "version": "1.0.4",
+          "notes": "Lyrics found for many more songs; plain lyrics scroll with the D-pad; the dim layer and layout fixed; clear message when the Spotify app needs your account added on the developer dashboard."
+        },
         {
           "version": "1.0.3",
           "notes": "When you cast, the box opens Spotify and the home screen shows what's playing."
@@ -284,7 +288,7 @@
         },
         {
           "path": "manifest.json",
-          "sha256": "cece1e3fc4a34e7832036ac7ed6afda90e408a65a227cc4d35e8ebba68653435"
+          "sha256": "34535940642749e674c314097ed95260bcbcda9c3c64c4557ec076e06ad24af0"
         },
         {
           "path": "pairing/keyboard.html",
@@ -296,23 +300,23 @@
         },
         {
           "path": "plugin.js",
-          "sha256": "0749133613c365333cacedce387bc8747da8f3886f28cfbe90d0fecea2405173"
+          "sha256": "0c4764723e47b7166ce1d9df168e130f7e125405ba87d0545bd43945f27bec35"
         },
         {
           "path": "spotify_event_hook.sh",
           "sha256": "8745ad296656da4cc23e26f605b7e1980eceeece9d6910dccaec5f022f821972"
         },
         {
-          "path": "web/assets/index-DcSHwvEu.css",
-          "sha256": "4dbad77a54a255be7142df84de2b1a7da2ff996dd83fcc48c3f9eedf0b11a934"
+          "path": "web/assets/index-ByuAM_D2.js",
+          "sha256": "e32150f1c6fd66129927a602b630b707bc64bfdf977c4f905667091a5b72dae7"
         },
         {
-          "path": "web/assets/index-DtTXtgI_.js",
-          "sha256": "5c0929088307cc245a0b3dac11c056e945783af0a10621e6def87e8eafeee15e"
+          "path": "web/assets/index-DImFgNdD.css",
+          "sha256": "dd8878cc1fa33c30911c4dbc2175222639eede89435916e3bc38c8fe606a1aa8"
         },
         {
           "path": "web/index.html",
-          "sha256": "e485c5f6ee73e901e8e51992c3b6a50703eb2f004081125d35ddd01ba10f3bc9"
+          "sha256": "ea9a0bde560a9980e0d851d305c0f0c7ae0433653af9d3eea98279b1695cb56a"
         }
       ]
     }

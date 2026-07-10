@@ -2,8 +2,12 @@
   "id": "spotify",
   "manifestVersion": 1,
   "name": "Spotify",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "changelog": [
+    {
+      "version": "1.0.4",
+      "notes": "Lyrics found for many more songs; plain lyrics scroll with the D-pad; the dim layer and layout fixed; clear message when the Spotify app needs your account added on the developer dashboard."
+    },
     {
       "version": "1.0.3",
       "notes": "When you cast, the box opens Spotify and the home screen shows what's playing."
