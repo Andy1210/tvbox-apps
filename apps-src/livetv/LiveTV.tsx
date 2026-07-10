@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
-import { useI18n, verifyPin, postNowPlaying, useConfigStore, FocusButton, PinPad } from "@sdk";
+import { useI18n, verifyPin, postNowPlaying, useConfigStore, FocusButton, PinPad, isBackKey } from "@sdk";
 import { fetchChannels, fetchEpg, groupChannels, type Channel, type ChannelGroup, type EpgEntry } from "./api";
 import { ChannelBrowser } from "./ChannelBrowser";
 import { PlayerOverlay } from "./PlayerOverlay";
@@ -196,13 +196,15 @@ export function LiveTV({ onExit }: { onExit: () => void }) {
     const onKey = (ev: KeyboardEvent) => {
       if (gate || settingsOpen || (guideChannels && !playing)) return; // those views handle their own keys
       if (surf) {
-        if (ev.key === "Backspace") {
+        // isBackKey, not a bare Backspace check: BT remotes report Back as
+        // Escape/BrowserBack/GoBack (same set the sdk's useBackspace accepts)
+        if (isBackKey(ev)) {
           ev.preventDefault();
           exitSurf();
         }
         return;
       }
-      if (ev.key === "Backspace") {
+      if (isBackKey(ev)) {
         ev.preventDefault();
         if (playing) stop();
         else onExit();
@@ -253,7 +255,10 @@ export function LiveTV({ onExit }: { onExit: () => void }) {
       <ChannelBrowser
         groups={groups}
         onPlay={(ch) => {
-          setSurf(false);
+          // exitSurf (not a bare setSurf(false)): restore fullscreen mpv too -
+          // play() may divert to the PIN gate instead of starting a stream,
+          // which would otherwise leave mpv parked in the PiP rectangle
+          exitSurf();
           play(ch);
         }}
         lockedGroups={lockedGroups}
@@ -271,10 +276,10 @@ export function LiveTV({ onExit }: { onExit: () => void }) {
     );
   }
 
-  if (playing) {
-    const ch = playing.list[playing.idx];
-    return <PlayerOverlay channel={ch} epg={epg} buffering={buffering} bannerVisible={banner} />;
-  }
+  // The PIN gate renders BEFORE the player: surf-zapping onto a locked channel
+  // sets `gate` while the previous channel keeps playing - the PinPad must win
+  // that render (its own Back handler works; the raw key handler above is
+  // gated off), otherwise the screen goes key-dead behind the player overlay.
 
   if (gate) {
     return (
@@ -295,6 +300,12 @@ export function LiveTV({ onExit }: { onExit: () => void }) {
       />
     );
   }
+
+  if (playing) {
+    const ch = playing.list[playing.idx];
+    return <PlayerOverlay channel={ch} epg={epg} buffering={buffering} bannerVisible={banner} />;
+  }
+
 
   if (guideChannels) {
     return <EpgGuide channels={guideChannels} onPlay={play} onExit={() => setGuideChannels(null)} />;

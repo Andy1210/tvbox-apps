@@ -5,8 +5,12 @@
     "hu": "Élő TV",
     "en": "Live TV"
   },
-  "version": "1.0.1",
+  "version": "1.0.2",
   "changelog": [
+    {
+      "version": "1.0.2",
+      "notes": "EPG works with standard XMLTV guides; Back works on Bluetooth remotes during playback; security hardening of the data path."
+    },
     {
       "version": "1.0.1",
       "notes": "Fixed a black screen when opening the app."

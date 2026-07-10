@@ -33,8 +33,12 @@
         "hu": "Élő TV",
         "en": "Live TV"
       },
-      "version": "1.0.1",
+      "version": "1.0.2",
       "changelog": [
+        {
+          "version": "1.0.2",
+          "notes": "EPG works with standard XMLTV guides; Back works on Bluetooth remotes during playback; security hardening of the data path."
+        },
         {
           "version": "1.0.1",
           "notes": "Fixed a black screen when opening the app."
@@ -133,8 +137,12 @@
       "id": "spotify",
       "manifestVersion": 1,
       "name": "Spotify",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "changelog": [
+        {
+          "version": "1.0.2",
+          "notes": "Security hardening of the pairing pages."
+        },
         {
           "version": "1.0.1",
           "notes": "Fixed now-playing not appearing while casting."
@@ -228,7 +236,7 @@
         },
         {
           "path": "manifest.json",
-          "sha256": "0eb6561386fb1dbff1c9abb54ad03326c5648c71c4abd3175ef4d542bc67219e"
+          "sha256": "75d519d7d437de3fe46248cdcab16ed10fd9f6864e3adaaa523fe43c6ecc6fb3"
         },
         {
           "path": "pairing/iptv.html",
@@ -239,8 +247,8 @@
           "sha256": "af2c37f4e242dd51bddc73ce967c80901695ffcf73ea307c5df1027130cf4e10"
         },
         {
-          "path": "web/assets/index-CImb7sYZ.js",
-          "sha256": "c04de35a699440c0605d9a2bfab44f4b23a749b1703d6060cd51b7ea2f829f26"
+          "path": "web/assets/index-CqoPSK0F.js",
+          "sha256": "da89f33566461ab34054f618fbaeb4ab6185f7bb31d639501bcb18271884c064"
         },
         {
           "path": "web/assets/index-DXmMOTwE.css",
@@ -248,7 +256,7 @@
         },
         {
           "path": "web/index.html",
-          "sha256": "7458aeae9a5a52c51d4b3d3084f1ea4f3acc9659614e1ae05336a15d45d69504"
+          "sha256": "c5497d2bcfc89f801d001615bae1b62ddb955578566460718f26304a95af21d4"
         }
       ]
     },
@@ -268,7 +276,7 @@
         },
         {
           "path": "manifest.json",
-          "sha256": "9e4fb609682c973a62cb9d5906d5cae01ef53dcff8861ef02bb48cab79e9627b"
+          "sha256": "218523091bce2a657361f7f03c0f9fa1975deec1b8f00203f31e20b3a4eefe22"
         },
         {
           "path": "pairing/keyboard.html",

@@ -2,8 +2,12 @@
   "id": "spotify",
   "manifestVersion": 1,
   "name": "Spotify",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "changelog": [
+    {
+      "version": "1.0.2",
+      "notes": "Security hardening of the pairing pages."
+    },
     {
       "version": "1.0.1",
       "notes": "Fixed now-playing not appearing while casting."
