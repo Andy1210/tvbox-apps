@@ -25,6 +25,7 @@ const path = require("path");
 const os = require("os");
 const roms = require("./lib/roms");
 const share = require("./lib/share"); // optional SMB game library shared by several boxes
+const cores = require("./lib/cores"); // the box installs and updates libretro cores itself
 
 const FLATPAK_REF = "org.libretro.RetroArch";
 // RetroArch's flatpak keeps its config under the standard per-app data dir.
@@ -84,8 +85,6 @@ const SHARE_STR = {
     user: "Felhasználó",
     pass: "Jelszó",
     passKeep: "változatlan",
-    domainLabel: "Tartomány (opcionális)",
-    domainPlaceholder: "csak tartományi fióknál",
     folder: "Mappa neve a játékok között",
     advNote: "Ezen a néven jelenik meg a RetroArch fájlböngészőjében.",
     testBtn: "Kapcsolat tesztelése",
@@ -101,6 +100,8 @@ const SHARE_STR = {
     notMounted: "Nincs csatolva",
     notConfigured: "Még nincs beállítva.",
     errPrefix: "Hiba:",
+    errFailed: "Nem sikerült.",
+    errNetwork: "Nem érem el a boxot. Ugyanazon a wifin vagy?",
     badHost: "Hibás kiszolgálónév.",
     badShare: "Hibás megosztásnév.",
     badFolder: "A mappanév csak kisbetű, szám és kötőjel lehet.",
@@ -128,8 +129,6 @@ const SHARE_STR = {
     user: "Username",
     pass: "Password",
     passKeep: "unchanged",
-    domainLabel: "Domain (optional)",
-    domainPlaceholder: "only for a domain account",
     folder: "Folder name among the games",
     advNote: "This is the name it appears under in RetroArch's file browser.",
     testBtn: "Test connection",
@@ -145,6 +144,8 @@ const SHARE_STR = {
     notMounted: "Not mounted",
     notConfigured: "Not set up yet.",
     errPrefix: "Error:",
+    errFailed: "That did not work.",
+    errNetwork: "Cannot reach the box. Are you on the same wifi?",
     badHost: "That server name is not valid.",
     badShare: "That share name is not valid.",
     badFolder: "The folder name may use lower-case letters, digits and dashes.",
@@ -166,6 +167,73 @@ const SHARE_STR = {
   },
 };
 
+// Strings for the console (core) page. The box installs cores itself, so this is
+// where a console is added, updated or removed.
+const CORES_STR = {
+  hu: {
+    title: "tvbox - Konzolok",
+    hint: "Írd be, mit keresel, vagy nézd végig a listát. A box letölti a kiválasztott emulátort és ellenőrzi is, plusz jelzi, ha újabb build jelent meg. Nem minden emulátor fut jól ezen a hardveren.",
+    offline: "A core-lista most nem elérhető, ezért a frissítések nem látszanak. A telepítés is hálózatot igényel.",
+    installBtn: "Telepítés",
+    updateBtn: "Frissítés",
+    removeBtn: "Törlés",
+    installedTag: "telepítve",
+    updatableTag: "frissíthető",
+    updateAll: "Mind a {n} frissítése",
+    working: "Folyamatban:",
+    doneOne: "{name} kész.",
+    doneMany: "{n} core frissítve.",
+    removeConfirm: "Törlöd a(z) {name} emulátorát?",
+    newBuild: "build: {date}",
+    errPrefix: "Hiba:",
+    errFailed: "Nem sikerült.",
+    errNetwork: "Nem érem el a boxot. Ugyanazon a wifin vagy?",
+    errBadCore: "Ismeretlen core.",
+    errDownload: "A letöltés nem sikerült. Van hálózat a boxon?",
+    errArchive: "A letöltött csomag hibás.",
+    errCrc: "A letöltött fájl ellenőrzőösszege nem egyezik, ezért nem telepítettem.",
+    errWrite: "Nem sikerült a helyére írni.",
+    errRemove: "Nem sikerült törölni.",
+    errNoIndex: "A core-lista nem elérhető, ezért nem tudok telepíteni. Van hálózat a boxon?",
+    errNotPublished: "Ezt az emulátort a libretro már nem kínálja letöltésre.",
+    searchPlaceholder: "Keresés (pl. ps2, sony, snes)",
+    counting: "{shown} / {total} emulátor",
+    nothingFound: "Nincs találat.",
+    notPublishedTag: "már nem kínált",
+  },
+  en: {
+    title: "tvbox - Consoles",
+    hint: "Search, or scroll the list. The box downloads the emulator you pick and verifies it, and tells you when a newer build appears. Not every emulator runs well on this hardware.",
+    offline: "The core list is unreachable right now, so updates are not shown. Installing also needs the network.",
+    installBtn: "Install",
+    updateBtn: "Update",
+    removeBtn: "Remove",
+    installedTag: "installed",
+    updatableTag: "update",
+    updateAll: "Update all {n}",
+    working: "Working:",
+    doneOne: "{name} done.",
+    doneMany: "{n} cores updated.",
+    removeConfirm: "Remove the emulator for {name}?",
+    newBuild: "build: {date}",
+    errPrefix: "Error:",
+    errFailed: "That did not work.",
+    errNetwork: "Cannot reach the box. Are you on the same wifi?",
+    errBadCore: "Unknown core.",
+    errDownload: "The download failed. Does the box have network?",
+    errArchive: "The downloaded archive is broken.",
+    errCrc: "The downloaded file's checksum did not match, so it was not installed.",
+    errWrite: "Could not write it into place.",
+    errRemove: "Could not remove it.",
+    errNoIndex: "The core list is unreachable, so nothing can be installed. Does the box have network?",
+    errNotPublished: "libretro no longer offers this emulator for download.",
+    searchPlaceholder: "Search (e.g. ps2, sony, snes)",
+    counting: "{shown} of {total} emulators",
+    nothingFound: "Nothing matches.",
+    notPublishedTag: "no longer offered",
+  },
+};
+
 // Settings this plugin insists on. Everything else in retroarch.cfg is the
 // user's (or RetroArch's) business.
 function requiredSettings() {
@@ -174,6 +242,13 @@ function requiredSettings() {
     audio_driver: "pulse",
     rgui_browser_directory: roms.ROMS_DIR,
     video_fullscreen: "true",
+    // RetroArch's own Online Updater is hidden, because in this build it does not
+    // work and cannot be made to: opening the Core Downloader starts no network
+    // request at all (nothing appears in its log), and setting the buildbot URL,
+    // which this build does not compile in, changes nothing. A menu entry that can
+    // only ever answer "failed to retrieve core list" is worse than no entry, so
+    // consoles are added from the box instead (lib/cores.js).
+    menu_show_online_updater: "false",
   };
 }
 
@@ -291,11 +366,13 @@ module.exports = (host) => {
         library: roms.list(),
         share: share.status(share.readConfig()),
         rclone: rcloneInstalled(),
+        cores: cores.installed(), // what is on disk, without a network call
       }),
   };
 
   const romsPage = fs.readFileSync(path.join(__dirname, "pairing", "roms.html"), "utf8");
   const sharePage = fs.readFileSync(path.join(__dirname, "pairing", "share.html"), "utf8");
+  const coresPage = fs.readFileSync(path.join(__dirname, "pairing", "cores.html"), "utf8");
 
   // The share form's own routes. Saving remounts, so a corrected password takes
   // effect without the user going anywhere else.
@@ -340,6 +417,32 @@ module.exports = (host) => {
     },
   };
 
+  // The consoles page. Installing reaches the network, so every handler is async
+  // and reports a short error code the page turns into a sentence.
+  const coresRoutes = {
+    "GET /cores": (req, res, ctx) =>
+      cores
+        .fetchIndex(host.childEnv())
+        .then((index) => ctx.json(res, { offline: index === null, cores: cores.list(index) })),
+    "POST /core-install": (req, res, ctx) => {
+      const core = String((ctx.body || {}).core || "");
+      cores
+        .fetchIndex(host.childEnv())
+        .then((index) => cores.install(core, host.childEnv(), index))
+        .then((r) => {
+          if (r.ok) host.log("retroarch: core installed:", core);
+          ctx.json(res, r);
+        })
+        .catch((e) => {
+          // The page has a sentence for every code, so an unexpected throw reports
+          // the generic one and the detail goes to the shell log, not to the phone.
+          host.log("retroarch: core install failed:", core, String(e.message || e));
+          ctx.json(res, { ok: false, error: "failed" });
+        });
+    },
+    "POST /core-remove": (req, res, ctx) => ctx.json(res, cores.remove(String((ctx.body || {}).core || ""))),
+  };
+
   return {
     start() {
       host.registerRoutes("/tvbox/api/retroarch", routes);
@@ -360,6 +463,10 @@ module.exports = (host) => {
               ok: roms.remove(String((ctx.body || {}).system || ""), String((ctx.body || {}).name || "")),
             }),
         },
+      });
+      host.pairing.register("cores", {
+        page: (ctx) => renderTemplate(coresPage, { lang: ctx.locale, ...(CORES_STR[ctx.locale] || CORES_STR.en) }),
+        routes: coresRoutes,
       });
       host.pairing.register("share", {
         page: (ctx) => renderTemplate(sharePage, { lang: ctx.locale, ...(SHARE_STR[ctx.locale] || SHARE_STR.en) }),
