@@ -141,8 +141,16 @@
       "id": "retroarch",
       "manifestVersion": 1,
       "name": "RetroArch",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "changelog": [
+        {
+          "version": "1.1.0",
+          "notes": "Consoles are added from the box now: pick one and the emulator for it is downloaded and checked, with a note when a newer build appears. RetroArch's own Online Updater is hidden, because in this build it cannot fetch anything."
+        },
+        {
+          "version": "1.0.1",
+          "notes": "Consoles can be added again: RetroArch's core downloader had no address to fetch its list from, so it always answered \"failed to retrieve core list\"."
+        },
         {
           "version": "1.0.0",
           "notes": "Initial release: RetroArch on the TV, driven by the remote or a controller. Home always returns to the box."
@@ -162,6 +170,13 @@
       },
       "service": "retroarch",
       "pairing": [
+        {
+          "kind": "cores",
+          "label": {
+            "en": "Consoles",
+            "hu": "Konzolok"
+          }
+        },
         {
           "kind": "roms",
           "label": {
@@ -384,6 +399,10 @@
     "retroarch": {
       "files": [
         {
+          "path": "lib/cores.js",
+          "sha256": "4cd8e6fb14b3ba1f3279db56e66f1c9d673636e607f4203edeb10a24995fa7b7"
+        },
+        {
           "path": "lib/roms.js",
           "sha256": "11c9e0d6994f0627c1bc86716652ebfdfd57983cd493ba755a77046cc30efd2f"
         },
@@ -393,11 +412,15 @@
         },
         {
           "path": "manifest.json",
-          "sha256": "54294f06ce10ba22f1224ee7a678a3227aff90d7c1a52c6b7032aa5155f9c762"
+          "sha256": "49aee78837fe20be1b932c35f502faf319abaf17f2d85a948da938161d1a45ba"
         },
         {
           "path": "package.json",
           "sha256": "d07db5d9d8256b0dac17e377101f797ec0ada9be21bd19a7128a06683656c0e8"
+        },
+        {
+          "path": "pairing/cores.html",
+          "sha256": "714b6f8a999e4ad2c8b45e6be9c9ea1beb42a8660ace5ac7ea3e1f03a676584c"
         },
         {
           "path": "pairing/roms.html",
@@ -405,11 +428,11 @@
         },
         {
           "path": "pairing/share.html",
-          "sha256": "52c4ab52d2c17d8496163dd3a9618ec8906a2828b3214a38e8d0678d075083ea"
+          "sha256": "e30fcccb040de2d6d715fdf024e0a3ba5943897a3f21a16eb94c8dc07750ec26"
         },
         {
           "path": "plugin.js",
-          "sha256": "9ccb577fa3eea487ebcd21c7f2221bc8b3bdf174217690fbb51d2db458864bb2"
+          "sha256": "8809a4da311d87dddd0700525ce5eaa3dfaa489da116f9f33d6091f4b5cebfce"
         }
       ]
     },
