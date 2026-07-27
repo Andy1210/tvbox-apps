@@ -30,6 +30,9 @@
       "googleusercontent.com",
       "youtube-nocookie.com"
     ],
-    "capabilities": ["nav"]
+    "textInput": "off",
+    "capabilities": [
+      "nav"
+    ]
   }
 }

@@ -274,6 +274,7 @@
           "googleusercontent.com",
           "youtube-nocookie.com"
         ],
+        "textInput": "off",
         "capabilities": [
           "nav"
         ]
