@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="{{lang}}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>{{title}}</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: auto;
+        background: #0b0f14;
+        color: #f4f6fa;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        padding: 24px;
+        max-width: 520px;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      h2 {
+        font-size: 15px;
+        color: #aab4c2;
+        margin: 28px 0 10px;
+        font-weight: 600;
+      }
+      p {
+        color: #aab4c2;
+        font-size: 14px;
+      }
+      label {
+        display: block;
+        font-size: 14px;
+        color: #aab4c2;
+        margin: 18px 0 6px;
+      }
+      select {
+        width: 100%;
+        padding: 12px;
+        border-radius: 10px;
+        background: #131a22;
+        color: #f4f6fa;
+        border: 1px solid #263241;
+        font-size: 16px;
+      }
+      .btn {
+        display: block;
+        text-align: center;
+        padding: 16px;
+        border-radius: 12px;
+        background: #7c5cd6;
+        color: #fff;
+        font-size: 17px;
+        font-weight: 700;
+        margin-top: 16px;
+        border: 0;
+        width: 100%;
+      }
+      .btn[disabled] {
+        opacity: 0.5;
+      }
+      #st {
+        margin-top: 16px;
+        text-align: center;
+        font-size: 15px;
+        color: #7d8a99;
+        min-height: 22px;
+      }
+      .bar {
+        height: 6px;
+        border-radius: 3px;
+        background: #1c2531;
+        overflow: hidden;
+        margin-top: 10px;
+      }
+      .bar > i {
+        display: block;
+        height: 100%;
+        width: 0;
+        background: #7c5cd6;
+        transition: width 0.15s;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 0;
+        border-bottom: 1px solid #1b2430;
+        font-size: 15px;
+      }
+      .row .nm {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .row .sz {
+        color: #7d8a99;
+        font-size: 13px;
+      }
+      .row .part {
+        color: #d98a3a;
+        font-size: 13px;
+      }
+      .del {
+        background: none;
+        border: 0;
+        color: #e5534b;
+        font-size: 14px;
+        padding: 4px 8px;
+      }
+      .sys.head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .sys.head span {
+        flex: 1;
+      }
+      .sys {
+        color: #7c5cd6;
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin-top: 18px;
+      }
+      #empty {
+        color: #7d8a99;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>{{title}}</h1>
+    <p>{{hint}}</p>
+
+    <label for="sys">{{system}}</label>
+    <select id="sys"></select>
+
+    <input id="pick" type="file" multiple hidden />
+    <button class="btn" id="go">{{pick}}</button>
+    <div class="bar"><i id="pb"></i></div>
+    <div id="st"></div>
+
+    <h2>{{current}}</h2>
+    <div id="list"></div>
+    <div id="empty" hidden>{{empty}}</div>
+
+    <script>
+      const T = {
+        uploading: "{{uploading}}",
+        done: "{{done}}",
+        failed: "{{failed}}",
+        delConfirm: "{{delConfirm}}",
+        del: "{{del}}",
+        unfinished: "{{unfinished}}",
+        delAll: "{{delAll}}",
+        delAllConfirm: "{{delAllConfirm}}",
+        deleted: "{{deleted}}",
+      };
+      // Folder names are slugs on the box; the labels are only for this page.
+      const SYSTEMS = [
+        ["nes", "Nintendo (NES)"],
+        ["snes", "Super Nintendo"],
+        ["gb", "Game Boy"],
+        ["gbc", "Game Boy Color"],
+        ["gba", "Game Boy Advance"],
+        ["megadrive", "Mega Drive / Genesis"],
+        ["psx", "PlayStation"],
+        ["n64", "Nintendo 64"],
+        ["dreamcast", "Dreamcast"],
+        ["psp", "PSP"],
+        ["arcade", "Arcade"],
+        ["other", "{{other}}"],
+      ];
+      // Extension to system, for the unambiguous ones. Shared extensions (.zip,
+      // .bin, .iso) are deliberately absent: guessing those wrong files a game
+      // under the wrong console, which is more annoying than picking by hand.
+      const BY_EXT = {
+        nes: "nes",
+        sfc: "snes",
+        smc: "snes",
+        gb: "gb",
+        gbc: "gbc",
+        gba: "gba",
+        md: "megadrive",
+        gen: "megadrive",
+        smd: "megadrive",
+        cue: "psx",
+        chd: "psx",
+        pbp: "psx",
+        m3u: "psx",
+        z64: "n64",
+        n64: "n64",
+        v64: "n64",
+        gdi: "dreamcast",
+        cdi: "dreamcast",
+        cso: "psp",
+      };
+      const CHUNK = 4 * 1024 * 1024;
+      const sysSel = document.getElementById("sys");
+      const st = document.getElementById("st");
+      const pb = document.getElementById("pb");
+      const go = document.getElementById("go");
+      const pick = document.getElementById("pick");
+
+      for (const [value, label] of SYSTEMS) {
+        const o = document.createElement("option");
+        o.value = value;
+        o.textContent = label;
+        sysSel.appendChild(o);
+      }
+
+      const fmt = (n) =>
+        n >= 1e9 ? (n / 1e9).toFixed(1) + " GB" : n >= 1e6 ? Math.round(n / 1e6) + " MB" : Math.round(n / 1e3) + " kB";
+      // The pairing server gates every route on the session code: "c" in the query
+      // for reads, "code" in the body for writes.
+      const code = new URLSearchParams(location.search).get("c") || "";
+      const api = (p, body) =>
+        fetch(p, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...body, code }),
+        }).then((r) => r.json());
+
+      go.onclick = () => pick.click();
+
+      pick.onchange = async () => {
+        const files = [...pick.files];
+        pick.value = "";
+        if (!files.length) return;
+        // Suggest the console from the first file, but never override a choice the
+        // user already made away from the default.
+        const ext = (files[0].name.split(".").pop() || "").toLowerCase();
+        if (BY_EXT[ext] && sysSel.selectedIndex === 0) sysSel.value = BY_EXT[ext];
+        go.disabled = true;
+        const system = sysSel.value;
+        let failed = 0;
+        for (let i = 0; i < files.length; i++) {
+          const f = files[i];
+          st.textContent = T.uploading + " " + (i + 1) + "/" + files.length + ": " + f.name;
+          if (!(await upload(f, system))) failed++;
+        }
+        pb.style.width = "0";
+        st.textContent = failed ? T.failed + " (" + failed + ")" : T.done;
+        go.disabled = false;
+        load();
+      };
+
+      async function upload(file, system) {
+        for (let offset = 0; offset < file.size || offset === 0; offset += CHUNK) {
+          const slice = file.slice(offset, offset + CHUNK);
+          const data = await b64(slice);
+          const last = offset + CHUNK >= file.size;
+          let r;
+          try {
+            r = await api("/rom-chunk", { system, name: file.name, offset, data, last });
+          } catch (e) {
+            return false;
+          }
+          if (!r || !r.ok) return false;
+          pb.style.width = Math.round((Math.min(offset + CHUNK, file.size) / Math.max(file.size, 1)) * 100) + "%";
+          if (last) return true;
+        }
+        return true;
+      }
+
+      // FileReader rather than a manual byte loop: a 4MB chunk turned into a JS
+      // string one character at a time is slow enough to be noticeable on a phone.
+      function b64(blob) {
+        return new Promise((res, rej) => {
+          const fr = new FileReader();
+          fr.onload = () => res(String(fr.result).split(",")[1] || "");
+          fr.onerror = rej;
+          fr.readAsDataURL(blob);
+        });
+      }
+
+      async function load() {
+        let groups = [];
+        try {
+          groups = await fetch("/roms?c=" + encodeURIComponent(code)).then((r) => r.json());
+        } catch (e) {
+          /* box went away; the list just stays as it was */
+        }
+        const list = document.getElementById("list");
+        list.textContent = "";
+        document.getElementById("empty").hidden = groups.length > 0;
+        for (const g of groups) {
+          const label = (SYSTEMS.find((s) => s[0] === g.system) || [, g.system])[1];
+          const h = document.createElement("div");
+          h.className = "sys head";
+          const t = document.createElement("span");
+          t.textContent = label;
+          // Clearing a console one file at a time is not usable with hundreds of
+          // games, so the whole folder can go in one action.
+          const all = document.createElement("button");
+          all.className = "del";
+          all.textContent = T.delAll + " (" + g.files.length + ")";
+          all.onclick = async () => {
+            const msg = T.delAllConfirm.replace("{n}", g.files.length).replace("{sys}", label);
+            if (!confirm(msg)) return;
+            const r = await api("/rom-delete-system", { system: g.system });
+            if (r && r.ok) st.textContent = T.deleted.replace("{n}", r.removed);
+            load();
+          };
+          h.append(t, all);
+          list.appendChild(h);
+          for (const f of g.files) {
+            const row = document.createElement("div");
+            row.className = "row";
+            const nm = document.createElement("span");
+            nm.className = "nm";
+            nm.textContent = f.name;
+            const sz = document.createElement("span");
+            sz.className = f.partial ? "part" : "sz";
+            sz.textContent = f.partial ? T.unfinished : fmt(f.size);
+            const del = document.createElement("button");
+            del.className = "del";
+            del.textContent = T.del;
+            del.onclick = async () => {
+              if (!confirm(T.delConfirm)) return;
+              await api("/rom-delete", { system: g.system, name: f.name });
+              load();
+            };
+            row.append(nm, sz, del);
+            list.appendChild(row);
+          }
+        }
+      }
+      load();
+    </script>
+  </body>
+</html>
