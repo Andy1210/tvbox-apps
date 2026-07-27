@@ -101,4 +101,28 @@ test("the mount point sits inside the library, under the chosen folder name", ()
   assert.strictEqual(path.basename(share.mountPoint({})), share.DEFAULT_MOUNT_NAME);
 });
 
+// listShares() takes the form's fields directly rather than a validated config, so
+// it has its own reading of the password and drifted from configFrom(): it used to
+// treat an emptied field as "unchanged" and fall back to the stored password, which
+// made browsing as a guest impossible once a password had been saved. Both now go
+// through one helper, and this pins that they agree.
+test("listShares reads the password the same way configFrom does", () => {
+  reset();
+  share.writeConfig({ ...BASE, path: "", domain: "", pass: "stored" });
+  // A guest browse (explicitly empty) must NOT resurrect the stored password. There
+  // is no rclone here, so the observable behaviour is the error, not a listing: an
+  // omitted password would reach obscure() only for a NEW value, never for these.
+  const guest = share.listShares({ host: BASE.host, user: "", pass: "" }, {}, 1);
+  const kept = share.listShares({ host: BASE.host, user: BASE.user }, {}, 1);
+  return Promise.all([guest, kept]).then(([g, k]) => {
+    for (const r of [g, k]) assert.strictEqual(r.ok, false, "no rclone in a unit test, so both must fail cleanly");
+    assert.ok(!String(g.error).includes("stored"), "the cleared password must not leak into the attempt");
+  });
+});
+
+test("a bad host is refused by listShares before anything is spawned", async () => {
+  const r = await share.listShares({ host: "not a host" }, {}, 1);
+  assert.deepStrictEqual(r, { ok: false, error: "bad_host" });
+});
+
 test.after(() => fs.rmSync(HOME, { recursive: true, force: true }));

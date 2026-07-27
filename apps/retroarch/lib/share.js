@@ -102,6 +102,15 @@ function obscure(pass) {
   return execFileSync("rclone", ["obscure", "-"], { input: String(pass), encoding: "utf8" }).trim();
 }
 
+// The password the caller means, from what the form sent. Omitting `pass` keeps the
+// stored one; sending it empty clears it. An empty password is legitimate (a guest
+// share), so "unchanged" and "cleared" cannot both be "falsy" - every caller has to
+// read it the same way, which is why this lives in one place.
+function passFrom(input) {
+  if (!input || input.pass === undefined) return (readConfig() || {}).pass || "";
+  return input.pass ? obscure(String(input.pass)) : "";
+}
+
 // Validate + normalise what the phone form sent into a stored config. Throws with
 // a short reason the form can show.
 function configFrom(input) {
@@ -122,13 +131,7 @@ function configFrom(input) {
   if (!mountNameOk(mountName)) throw new Error("bad_mount_name");
   if (!pathOk(sub)) throw new Error("bad_path");
   const cfg = { host, share, path: sub, user, domain, mountName };
-  // An empty password is legitimate (a guest share), but "unchanged" has to be
-  // distinguishable from "cleared", so the form sends pass only when it changed.
-  if (input.pass !== undefined) cfg.pass = input.pass ? obscure(String(input.pass)) : "";
-  else {
-    const prev = readConfig();
-    cfg.pass = (prev && prev.pass) || "";
-  }
+  cfg.pass = passFrom(input);
   return cfg;
 }
 
@@ -222,7 +225,10 @@ function listShares(input, baseEnv, timeoutMs) {
     host,
     user: String((input && input.user) || "").trim(),
     domain: String((input && input.domain) || "").trim(),
-    pass: input && input.pass ? obscure(String(input.pass)) : (readConfig() || {}).pass || "",
+    // Same omit-versus-empty contract as configFrom(): an absent `pass` keeps what
+    // is stored, an empty one means no password. Reading it as truthy would fall
+    // back to the stored password and make it impossible to browse as a guest.
+    pass: passFrom(input),
   };
   return new Promise((resolve) => {
     execFile(
