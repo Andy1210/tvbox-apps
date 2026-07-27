@@ -117,6 +117,8 @@
     <div class="adv">{{pathNote}}</div>
     <label for="user">{{user}}</label>
     <input id="user" autocapitalize="off" autocomplete="off" />
+    <label for="domain">{{domain}}</label>
+    <input id="domain" autocapitalize="off" autocomplete="off" placeholder="{{domainHint}}" />
     <label for="pass">{{pass}}</label>
     <input id="pass" type="password" autocomplete="off" placeholder="{{passKeep}}" />
     <div class="adv">{{advNote}}</div>
@@ -147,6 +149,7 @@
         bad_mount_name: "{{badFolder}}",
         bad_user: "{{badUser}}",
         pickShare: "{{pickShare}}",
+        passCleared: "{{passCleared}}",
         rclone_missing: "{{rcloneMissing}}",
         bad_path: "{{badPath}}",
         pickFolder: "{{pickFolder}}",
@@ -172,17 +175,26 @@
       // rclone message like NT_STATUS_LOGON_FAILURE) is shown as it came.
       const explain = (e) => T[e] || T.errPrefix + " " + e;
 
+      // Whether the password field has been touched since the last load/save. This is
+      // what separates "leave the stored password alone" from "clear it", which a
+      // guest share needs: an empty field on its own cannot mean both.
+      let passEdited = false;
+      $("pass").addEventListener("input", () => {
+        passEdited = true;
+      });
+
       function form(includePass) {
         const body = {
           host: $("host").value.trim(),
           share: $("share").value.trim(),
           path: $("path").value.trim(),
           user: $("user").value.trim(),
+          domain: $("domain").value.trim(),
           mountName: $("mountName").value.trim() || "network",
         };
-        // Only send the password when the user typed one, so saving without
-        // retyping it keeps the stored one.
-        if (includePass && $("pass").value) body.pass = $("pass").value;
+        // Omitted entirely when untouched, so the box keeps what it has; sent as ""
+        // when the field was deliberately emptied.
+        if (includePass && (passEdited || $("pass").value)) body.pass = $("pass").value;
         return body;
       }
 
@@ -201,7 +213,9 @@
         $("share").value = s.share || "";
         $("path").value = s.path || "";
         $("user").value = s.user || "";
+        $("domain").value = s.domain || "";
         $("mountName").value = s.mountName || "";
+        $("pass").placeholder = s.hasPass ? T.passKeep : T.passCleared;
         // Built as DOM nodes rather than markup: the share name and the sub-folder
         // are free text that came back from the box, so concatenating them into
         // HTML would let a stored path inject into this page.
@@ -266,6 +280,7 @@
         const r = await api("/share-save", form(true)).catch(() => ({ ok: false, error: "network" }));
         if (!r.ok) return say(explain(r.error || "failed"), "bad");
         $("pass").value = "";
+        passEdited = false;
         // Mounting takes a moment, and a wrong password only shows up as "still not
         // mounted", so poll instead of leaving "mounting now" on screen forever.
         say(T.saved, "busy");
@@ -282,6 +297,7 @@
         const r = await api("/share-clear", {}).catch(() => ({ ok: false }));
         say(r.ok ? T.cleared : T.errPrefix, r.ok ? "ok" : "bad");
         $("pass").value = "";
+        passEdited = false;
         refresh();
       };
 

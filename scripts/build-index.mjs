@@ -32,14 +32,24 @@ function validate(m, f, id) {
     // A native app has no web bundle to serve; it declares how to launch its own
     // full-screen client instead. The values reach argv, so they are held to the
     // same shape the shell enforces at load and launch time.
-    const nat = (m.runtime && m.runtime.native) || null;
-    if (!nat) err(f, "type native needs runtime.native");
+    // Checked by TYPE, not by truthiness: `{ "bin": {} }` is truthy and would
+    // otherwise sail through, and a non-array requires.flatpak would make the
+    // includes() below throw instead of reporting a bad manifest.
+    const nat = m.runtime && typeof m.runtime.native === "object" ? m.runtime.native : null;
+    if (!nat) err(f, "type native needs a runtime.native object");
     else {
-      if (!nat.flatpak && !nat.bin) err(f, "runtime.native needs flatpak or bin");
-      if (nat.flatpak && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(nat.flatpak)) err(f, "bad runtime.native.flatpak ref");
-      if (nat.args && (!Array.isArray(nat.args) || nat.args.some((a) => typeof a !== "string")))
-        err(f, "runtime.native.args must be strings");
-      if (nat.flatpak && !(m.requires && (m.requires.flatpak || []).includes(nat.flatpak)))
+      const ref = typeof nat.flatpak === "string" ? nat.flatpak : null;
+      const bin = typeof nat.bin === "string" ? nat.bin : null;
+      if (nat.flatpak !== undefined && !ref) err(f, "runtime.native.flatpak must be a string");
+      if (nat.bin !== undefined && !bin) err(f, "runtime.native.bin must be a string");
+      if (!ref && !bin) err(f, "runtime.native needs flatpak or bin");
+      if (ref && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(ref)) err(f, "bad runtime.native.flatpak ref");
+      if (bin && !/^(\/[\w.-]+)+$|^[\w.-]+$/.test(bin)) err(f, "bad runtime.native.bin");
+      if (nat.args !== undefined && (!Array.isArray(nat.args) || nat.args.some((a) => typeof a !== "string")))
+        err(f, "runtime.native.args must be an array of strings");
+      const declared = m.requires && m.requires.flatpak;
+      if (declared !== undefined && !Array.isArray(declared)) err(f, "requires.flatpak must be an array");
+      if (ref && !(Array.isArray(declared) && declared.includes(ref)))
         err(f, "runtime.native.flatpak must also be listed in requires.flatpak (so the tile greys out until installed)");
     }
   } else {
