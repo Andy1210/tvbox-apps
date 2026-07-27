@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="{{lang}}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>{{title}}</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: auto;
+        background: #0b0f14;
+        color: #f4f6fa;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        padding: 24px;
+        max-width: 520px;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      h2 {
+        font-size: 15px;
+        color: #aab4c2;
+        margin: 26px 0 8px;
+        font-weight: 600;
+      }
+      p {
+        color: #aab4c2;
+        font-size: 14px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 0;
+        border-bottom: 1px solid #1b2430;
+      }
+      .nm {
+        flex: 1;
+        min-width: 0;
+      }
+      .nm b {
+        display: block;
+        font-size: 16px;
+      }
+      .nm small {
+        color: #7d8a99;
+        font-size: 12px;
+      }
+      .tag {
+        font-size: 12px;
+        padding: 2px 8px;
+        border-radius: 99px;
+        white-space: nowrap;
+      }
+      .tag.on {
+        background: #16351f;
+        color: #6ad48a;
+      }
+      .tag.upd {
+        background: #3a3016;
+        color: #e0b64a;
+      }
+      .tag.untested {
+        background: #2a2030;
+        color: #b79ae0;
+      }
+      button {
+        border: 0;
+        border-radius: 10px;
+        padding: 10px 14px;
+        font-size: 15px;
+        font-weight: 600;
+        background: #7c5cd6;
+        color: #fff;
+        white-space: nowrap;
+      }
+      button.sec {
+        background: #1c2531;
+        color: #cfd8e3;
+      }
+      button.danger {
+        background: #3a1c1c;
+        color: #f0a0a0;
+      }
+      button[disabled] {
+        opacity: 0.5;
+      }
+      .btn-wide {
+        display: block;
+        width: 100%;
+        padding: 15px;
+        margin-top: 14px;
+        border-radius: 12px;
+        font-size: 17px;
+        font-weight: 700;
+      }
+      #st {
+        margin-top: 14px;
+        font-size: 15px;
+        min-height: 22px;
+      }
+      #st.ok {
+        color: #6ad48a;
+      }
+      #st.bad {
+        color: #e5766b;
+      }
+      #st.busy {
+        color: #7d8a99;
+      }
+      #q {
+        width: 100%;
+        padding: 12px;
+        margin-top: 16px;
+        border-radius: 10px;
+        background: #131a22;
+        color: #f4f6fa;
+        border: 1px solid #263241;
+        font-size: 16px;
+        box-sizing: border-box;
+      }
+      #count {
+        color: #7d8a99;
+        font-size: 13px;
+        margin-top: 12px;
+      }
+      #offline {
+        color: #e0b64a;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>{{title}}</h1>
+    <p>{{hint}}</p>
+    <div id="offline" hidden>{{offline}}</div>
+
+    <input id="q" type="search" autocapitalize="off" autocomplete="off" placeholder="{{searchPlaceholder}}" />
+    <button class="btn-wide" id="updateAll" hidden>{{updateAll}}</button>
+    <div id="st"></div>
+    <div id="count"></div>
+    <div id="list"></div>
+
+    <script>
+      const T = {
+        installBtn: "{{installBtn}}",
+        updateBtn: "{{updateBtn}}",
+        removeBtn: "{{removeBtn}}",
+        installed: "{{installedTag}}",
+        updatable: "{{updatableTag}}",
+        notPublished: "{{notPublishedTag}}",
+        counting: "{{counting}}",
+        nothingFound: "{{nothingFound}}",
+        working: "{{working}}",
+        doneOne: "{{doneOne}}",
+        doneMany: "{{doneMany}}",
+        removeConfirm: "{{removeConfirm}}",
+        errPrefix: "{{errPrefix}}",
+        // one per error code the box can return, plus the generic fallback
+        failed: "{{errFailed}}",
+        network: "{{errNetwork}}",
+        bad_core: "{{errBadCore}}",
+        download_failed: "{{errDownload}}",
+        bad_archive: "{{errArchive}}",
+        crc_mismatch: "{{errCrc}}",
+        write_failed: "{{errWrite}}",
+        remove_failed: "{{errRemove}}",
+        no_index: "{{errNoIndex}}",
+        not_published: "{{errNotPublished}}",
+        newBuild: "{{newBuild}}",
+        updateAll: "{{updateAll}}",
+      };
+      const code = new URLSearchParams(location.search).get("c") || "";
+      const $ = (id) => document.getElementById(id);
+      const say = (m, cls) => {
+        $("st").textContent = m;
+        $("st").className = cls || "";
+      };
+      const explain = (e) => T[e] || T.errPrefix + " " + e;
+      const api = (p, body) =>
+        fetch(p, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...(body || {}), code }),
+        }).then((r) => r.json());
+
+      let busy = false;
+      function setBusy(on) {
+        busy = on;
+        for (const b of document.querySelectorAll("button")) b.disabled = on;
+      }
+
+      async function act(path, body, label) {
+        if (busy) return;
+        setBusy(true);
+        say(T.working + " " + label, "busy");
+        const r = await api(path, body).catch(() => ({ ok: false, error: "network" }));
+        setBusy(false);
+        if (!r.ok) return say(explain(r.error || "failed"), "bad");
+        say(T.doneOne.replace("{name}", label), "ok");
+        load();
+      }
+
+      function row(c, into) {
+        const el = document.createElement("div");
+        el.className = "row";
+        const nm = document.createElement("div");
+        nm.className = "nm";
+        const b = document.createElement("b");
+        b.textContent = c.label;
+        const small = document.createElement("small");
+        // The system it emulates, plus the build date, so "which PlayStation core is
+        // this" is answerable without leaving the page.
+        small.textContent = [c.system, c.core, c.remoteDate && T.newBuild.replace("{date}", c.remoteDate)]
+          .filter(Boolean)
+          .join(" - ");
+        nm.append(b, small);
+        el.appendChild(nm);
+        const tag = (cls, text) => {
+          const t = document.createElement("span");
+          t.className = "tag " + cls;
+          t.textContent = text;
+          el.appendChild(t);
+        };
+        if (c.updatable) tag("upd", T.updatable);
+        else if (c.installed) tag("on", T.installed);
+        if (c.installed && !c.available) tag("untested", T.notPublished);
+        const go = document.createElement("button");
+        if (c.updatable) {
+          go.textContent = T.updateBtn;
+          go.onclick = () => act("/core-install", { core: c.core }, c.label);
+        } else if (c.installed) {
+          go.textContent = T.removeBtn;
+          go.className = "danger";
+          go.onclick = () => {
+            if (!confirm(T.removeConfirm.replace("{name}", c.label))) return;
+            act("/core-remove", { core: c.core }, c.label);
+          };
+        } else {
+          go.textContent = T.installBtn;
+          go.className = "sec";
+          go.onclick = () => act("/core-install", { core: c.core }, c.label);
+        }
+        el.appendChild(go);
+        into.appendChild(el);
+      }
+
+      let all = [];
+
+      function render() {
+        const q = $("q").value.trim().toLowerCase();
+        // Match on everything the row shows, so "ps2", "sony" and "pcsx" all find it.
+        const shown = q ? all.filter((c) => (c.label + " " + c.core + " " + c.system).toLowerCase().includes(q)) : all;
+        const list = $("list");
+        list.textContent = "";
+        for (const c of shown) row(c, list);
+        $("count").textContent = shown.length
+          ? T.counting.replace("{shown}", shown.length).replace("{total}", all.length)
+          : T.nothingFound;
+        const stale = all.filter((c) => c.updatable).map((c) => c.core);
+        const upd = $("updateAll");
+        upd.hidden = stale.length < 2;
+        upd.textContent = T.updateAll.replace("{n}", stale.length);
+        upd.onclick = async () => {
+          if (busy) return;
+          setBusy(true);
+          let done = 0;
+          for (const core of stale) {
+            say(T.working + " " + core, "busy");
+            const r = await api("/core-install", { core }).catch(() => ({ ok: false }));
+            if (r.ok) done++;
+          }
+          setBusy(false);
+          say(T.doneMany.replace("{n}", done), done ? "ok" : "bad");
+          load();
+        };
+      }
+
+      async function load() {
+        let d = {};
+        try {
+          d = await fetch("/cores?c=" + encodeURIComponent(code)).then((r) => r.json());
+        } catch (e) {
+          return;
+        }
+        $("offline").hidden = !d.offline;
+        all = d.cores || [];
+        render();
+      }
+      $("q").addEventListener("input", render);
+      load();
+    </script>
+  </body>
+</html>
