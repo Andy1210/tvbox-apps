@@ -405,11 +405,11 @@
         },
         {
           "path": "pairing/share.html",
-          "sha256": "2d526905af73bdbbebe3cf768940ca0613ef175e085fbc1135d984e56b441b90"
+          "sha256": "77e94e995654281131d5db3fa29db540aa559212d20089b9716872bda32da87c"
         },
         {
           "path": "plugin.js",
-          "sha256": "7dcb9a721219050199d06e7c70d792ceeaa4880d035a294416528740df70c598"
+          "sha256": "24c426edb791518d42bf7189ebd7e8c3ebf77f3f0644d431058ed2f2a3e484c5"
         }
       ]
     },

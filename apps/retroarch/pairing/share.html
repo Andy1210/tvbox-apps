@@ -202,16 +202,18 @@
         $("path").value = s.path || "";
         $("user").value = s.user || "";
         $("mountName").value = s.mountName || "";
-        $("state").innerHTML =
-          "<b>" +
-          (s.mounted ? T.mounted : T.notMounted) +
-          "</b><br>" +
-          (s.host || "") +
-          " / " +
-          (s.share || "") +
-          (s.path ? "/" + s.path : "") +
-          "<br>" +
-          (s.mountPoint || "");
+        // Built as DOM nodes rather than markup: the share name and the sub-folder
+        // are free text that came back from the box, so concatenating them into
+        // HTML would let a stored path inject into this page.
+        const box = $("state");
+        box.textContent = "";
+        const state = document.createElement("b");
+        state.textContent = s.mounted ? T.mounted : T.notMounted;
+        const where = document.createElement("div");
+        where.textContent = (s.host || "") + " / " + (s.share || "") + (s.path ? "/" + s.path : "");
+        const point = document.createElement("div");
+        point.textContent = s.mountPoint || "";
+        box.append(state, where, point);
         return s;
       }
 
@@ -242,7 +244,9 @@
           return;
         }
         say(r.dirs.length ? T.pickFolder : T.emptyHere, "ok");
-        const cur = $("path").value.trim().replace(/^\/+|\/+$/g, "");
+        const cur = $("path")
+          .value.trim()
+          .replace(/^\/+|\/+$/g, "");
         if (cur)
           chip(T.up, () => {
             $("path").value = cur.split("/").slice(0, -1).join("/");

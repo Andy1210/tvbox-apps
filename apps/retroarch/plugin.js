@@ -309,6 +309,9 @@ module.exports = (host) => {
       share.test(cfg, host.childEnv()).then((r) => ctx.json(res, r));
     },
     "POST /share-save": (req, res, ctx) => {
+      // Saving obscures the password with rclone, so without the binary this would
+      // throw an opaque ENOENT instead of the message /share-test already gives.
+      if (!rcloneInstalled()) return ctx.json(res, { ok: false, error: "rclone_missing" });
       let cfg;
       try {
         cfg = share.configFrom(ctx.body || {});
@@ -343,7 +346,9 @@ module.exports = (host) => {
           "POST /rom-delete-system": (req, res, ctx) =>
             ctx.json(res, roms.removeSystem(String((ctx.body || {}).system || ""))),
           "POST /rom-delete": (req, res, ctx) =>
-            ctx.json(res, { ok: roms.remove(String((ctx.body || {}).system || ""), String((ctx.body || {}).name || "")) }),
+            ctx.json(res, {
+              ok: roms.remove(String((ctx.body || {}).system || ""), String((ctx.body || {}).name || "")),
+            }),
         },
       });
       host.pairing.register("share", {
