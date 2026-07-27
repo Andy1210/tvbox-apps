@@ -79,6 +79,8 @@ for (const f of pages) {
     test(f + ": every error code " + lib + " returns has a sentence", () => {
       const src = fs.readFileSync(path.join(PKG, "lib", lib), "utf8");
       const codes = new Set([...src.matchAll(/error:\s*"([a-z0-9_]+)"/g)].map((m) => m[1]));
+      // and the codes the page invents itself, e.g. when the fetch never arrives
+      for (const m of html.matchAll(/error:\s*"([a-z0-9_]+)"/g)) codes.add(m[1]);
       codes.add("failed"); // the page's own fallback when a response carries no code
       const m = /const T = \{([\s\S]*?)\n\s*\};/.exec(html);
       const defined = new Set([...m[1].matchAll(/^\s*([A-Za-z_]\w*)\s*:/gm)].map((x) => x[1]));

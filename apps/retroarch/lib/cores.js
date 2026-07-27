@@ -55,6 +55,17 @@ function coreNameOk(core) {
   return typeof core === "string" && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(core);
 }
 
+// Only a regular file can be a core. A zip entry can be a symlink, and everything
+// after extraction would follow it: the checksum would be of its target, and the
+// install would copy THAT file into the cores dir for RetroArch to load.
+function isRegularFile(p) {
+  try {
+    return fs.lstatSync(p).isFile();
+  } catch (e) {
+    return false; // nothing was extracted under that name
+  }
+}
+
 function crc32OfFile(p) {
   try {
     const buf = fs.readFileSync(p);
@@ -216,7 +227,7 @@ function install(core, env, index) {
         // never unpacked, and a missing entry fails as a bad archive.
         execFile("unzip", ["-o", "-q", zip, coreFile(core), "-d", tmp], { env, timeout: 60000 }, (uerr) => {
           const out = path.join(tmp, coreFile(core));
-          if (uerr || !fs.existsSync(out)) {
+          if (uerr || !isRegularFile(out)) {
             cleanup();
             return resolve({ ok: false, error: "bad_archive" });
           }
@@ -225,10 +236,17 @@ function install(core, env, index) {
             cleanup();
             return resolve({ ok: false, error: "crc_mismatch" });
           }
+          // Land it with a rename: a copy that fails halfway would leave a
+          // truncated .so where a working one used to be, and RetroArch loads
+          // whatever is at that path.
+          const dst = path.join(CORES_DIR, coreFile(core));
+          const staging = dst + ".incoming-" + process.pid;
           try {
             fs.mkdirSync(CORES_DIR, { recursive: true });
-            fs.copyFileSync(out, path.join(CORES_DIR, coreFile(core)));
+            fs.copyFileSync(out, staging);
+            fs.renameSync(staging, dst);
           } catch (e) {
+            fs.rmSync(staging, { force: true });
             cleanup();
             return resolve({ ok: false, error: "write_failed" });
           }
@@ -255,6 +273,7 @@ function remove(core) {
 module.exports = {
   CORES_DIR,
   INFO_DIRS,
+  isRegularFile,
   baseUrl,
   coreNameOk,
   parseIndex,

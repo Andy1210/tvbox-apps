@@ -10,6 +10,7 @@ const test = require("node:test");
 const assert = require("node:assert");
 
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-cores-test-"));
+const REAL_HOME = process.env.HOME; // put back in teardown: a deleted HOME would follow us
 process.env.HOME = HOME;
 const cores = require("./cores");
 
@@ -154,4 +155,24 @@ test("the info dir follows the box's architecture", () => {
   for (const dir of cores.INFO_DIRS) assert.match(dir, /\/(aarch64|x86_64)\//);
 });
 
-test.after(() => fs.rmSync(HOME, { recursive: true, force: true }));
+test.after(() => {
+  fs.rmSync(HOME, { recursive: true, force: true });
+  if (REAL_HOME === undefined) delete process.env.HOME;
+  else process.env.HOME = REAL_HOME;
+});
+
+test("only a regular file is accepted as a core", () => {
+  // A zip entry can be a symlink. If one named like the core were accepted, the
+  // checksum would be of its TARGET and the install would copy that file into the
+  // cores dir - so the extracted entry is checked with lstat, not existsSync.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-entry-"));
+  const real = path.join(dir, "real.so");
+  fs.writeFileSync(real, CRC_VECTOR.data);
+  const link = path.join(dir, "link.so");
+  fs.symlinkSync(real, link);
+  assert.strictEqual(cores.isRegularFile(real), true);
+  assert.strictEqual(cores.isRegularFile(link), false, "a symlink must not pass as a core");
+  assert.strictEqual(cores.isRegularFile(dir), false, "nor a directory");
+  assert.strictEqual(cores.isRegularFile(path.join(dir, "missing.so")), false);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

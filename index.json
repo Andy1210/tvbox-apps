@@ -400,7 +400,7 @@
       "files": [
         {
           "path": "lib/cores.js",
-          "sha256": "e5b395382d5f5434580d5e7a1c4d81a3b526a4ab38783f770d7efb043e83bd79"
+          "sha256": "41923c2d77eda8aaa6d765a716ab9b45d8f94959e348432c5b31d130e5ae1e41"
         },
         {
           "path": "lib/roms.js",
@@ -420,7 +420,7 @@
         },
         {
           "path": "pairing/cores.html",
-          "sha256": "cfc160583ee41872dfb6a0d331d4107078896f4fb95061188cdda628740c88a5"
+          "sha256": "eeabb98fdbdb10414a2859a12899058a652aa5f036f1878a9f1c588ec2087667"
         },
         {
           "path": "pairing/roms.html",
@@ -428,11 +428,11 @@
         },
         {
           "path": "pairing/share.html",
-          "sha256": "37c6c40401df5971f56b35c9ad98ba9672c55bfc7e9a43e4c7913d526f4c33b0"
+          "sha256": "d3134601ac2b61265fc7c44cbacbaf81cd667291fe7cec868892aace8a11d87a"
         },
         {
           "path": "plugin.js",
-          "sha256": "9cadad9cef85eea1b7cb2eb278256c25594c3fd7e1afc908feea2f5f57a91dc0"
+          "sha256": "80d353d4e421d5b1c93597e88ebf8e3960eaec584b1ea35b5cd2ef89a6508495"
         }
       ]
     },
