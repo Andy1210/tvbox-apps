@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="{{lang}}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>{{title}}</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: auto;
+        background: #0b0f14;
+        color: #f4f6fa;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        padding: 24px;
+        max-width: 520px;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      p {
+        color: #aab4c2;
+        font-size: 14px;
+      }
+      label {
+        display: block;
+        font-size: 14px;
+        color: #aab4c2;
+        margin: 16px 0 6px;
+      }
+      input {
+        width: 100%;
+        padding: 12px;
+        border-radius: 10px;
+        background: #131a22;
+        color: #f4f6fa;
+        border: 1px solid #263241;
+        font-size: 16px;
+        box-sizing: border-box;
+      }
+      .btn {
+        display: block;
+        text-align: center;
+        padding: 15px;
+        border-radius: 12px;
+        background: #7c5cd6;
+        color: #fff;
+        font-size: 17px;
+        font-weight: 700;
+        margin-top: 14px;
+        border: 0;
+        width: 100%;
+      }
+      .btn.sec {
+        background: #1c2531;
+      }
+      .btn.danger {
+        background: #3a1c1c;
+        color: #f0a0a0;
+      }
+      .btn[disabled] {
+        opacity: 0.5;
+      }
+      #st {
+        margin-top: 14px;
+        font-size: 15px;
+        min-height: 22px;
+      }
+      #st.ok {
+        color: #6ad48a;
+      }
+      #st.bad {
+        color: #e5766b;
+      }
+      #st.busy {
+        color: #7d8a99;
+      }
+      .state {
+        margin-top: 18px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        background: #131a22;
+        font-size: 14px;
+        color: #aab4c2;
+      }
+      .state b {
+        color: #f4f6fa;
+      }
+      .adv {
+        color: #7d8a99;
+        font-size: 13px;
+        margin-top: 18px;
+      }
+      pre {
+        white-space: pre-wrap;
+        word-break: break-all;
+        font-size: 12px;
+        color: #7d8a99;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>{{title}}</h1>
+    <p>{{hint}}</p>
+
+    <div class="state" id="state"></div>
+
+    <label for="host">{{host}}</label>
+    <input id="host" inputmode="url" autocapitalize="off" autocomplete="off" placeholder="192.168.1.106" />
+    <label for="share">{{share}}</label>
+    <input id="share" autocapitalize="off" autocomplete="off" placeholder="Shared" />
+    <label for="path">{{pathLabel}}</label>
+    <input id="path" autocapitalize="off" autocomplete="off" placeholder="{{pathPlaceholder}}" />
+    <div class="adv">{{pathNote}}</div>
+    <label for="user">{{user}}</label>
+    <input id="user" autocapitalize="off" autocomplete="off" />
+    <label for="domain">{{domain}}</label>
+    <input id="domain" autocapitalize="off" autocomplete="off" placeholder="{{domainHint}}" />
+    <label for="pass">{{pass}}</label>
+    <input id="pass" type="password" autocomplete="off" placeholder="{{passKeep}}" />
+    <div class="adv">{{advNote}}</div>
+    <label for="mountName">{{folder}}</label>
+    <input id="mountName" autocapitalize="off" autocomplete="off" placeholder="network" />
+
+    <button class="btn sec" id="test">{{testBtn}}</button>
+    <button class="btn" id="save">{{saveBtn}}</button>
+    <button class="btn danger" id="clear">{{clearBtn}}</button>
+    <div id="st"></div>
+    <div id="shares"></div>
+    <pre id="listing"></pre>
+
+    <script>
+      const T = {
+        testing: "{{testing}}",
+        testOk: "{{testOk}}",
+        saving: "{{saving}}",
+        saved: "{{saved}}",
+        cleared: "{{cleared}}",
+        clearConfirm: "{{clearConfirm}}",
+        mounted: "{{mounted}}",
+        notMounted: "{{notMounted}}",
+        notConfigured: "{{notConfigured}}",
+        errPrefix: "{{errPrefix}}",
+        bad_host: "{{badHost}}",
+        bad_share: "{{badShare}}",
+        bad_mount_name: "{{badFolder}}",
+        bad_user: "{{badUser}}",
+        pickShare: "{{pickShare}}",
+        passCleared: "{{passCleared}}",
+        rclone_missing: "{{rcloneMissing}}",
+        bad_path: "{{badPath}}",
+        pickFolder: "{{pickFolder}}",
+        emptyHere: "{{emptyHere}}",
+        up: "{{up}}",
+        mountedOk: "{{mountedOk}}",
+        mountFailed: "{{mountFailed}}",
+      };
+      const code = new URLSearchParams(location.search).get("c") || "";
+      const $ = (id) => document.getElementById(id);
+      const st = $("st");
+      const say = (msg, cls) => {
+        st.textContent = msg;
+        st.className = cls || "";
+      };
+      const api = (p, body) =>
+        fetch(p, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...(body || {}), code }),
+        }).then((r) => r.json());
+      // A short error key from the box maps to a local sentence; anything else (an
+      // rclone message like NT_STATUS_LOGON_FAILURE) is shown as it came.
+      const explain = (e) => T[e] || T.errPrefix + " " + e;
+
+      // Whether the password field has been touched since the last load/save. This is
+      // what separates "leave the stored password alone" from "clear it", which a
+      // guest share needs: an empty field on its own cannot mean both.
+      let passEdited = false;
+      $("pass").addEventListener("input", () => {
+        passEdited = true;
+      });
+
+      function form(includePass) {
+        const body = {
+          host: $("host").value.trim(),
+          share: $("share").value.trim(),
+          path: $("path").value.trim(),
+          user: $("user").value.trim(),
+          domain: $("domain").value.trim(),
+          mountName: $("mountName").value.trim() || "network",
+        };
+        // Omitted entirely when untouched, so the box keeps what it has; sent as ""
+        // when the field was deliberately emptied.
+        if (includePass && (passEdited || $("pass").value)) body.pass = $("pass").value;
+        return body;
+      }
+
+      async function refresh() {
+        let s = {};
+        try {
+          s = await fetch("/share-status?c=" + encodeURIComponent(code)).then((r) => r.json());
+        } catch (e) {
+          return null;
+        }
+        if (!s.configured) {
+          $("state").textContent = T.notConfigured;
+          return s;
+        }
+        $("host").value = s.host || "";
+        $("share").value = s.share || "";
+        $("path").value = s.path || "";
+        $("user").value = s.user || "";
+        $("domain").value = s.domain || "";
+        $("mountName").value = s.mountName || "";
+        $("pass").placeholder = s.hasPass ? T.passKeep : T.passCleared;
+        // Built as DOM nodes rather than markup: the share name and the sub-folder
+        // are free text that came back from the box, so concatenating them into
+        // HTML would let a stored path inject into this page.
+        const box = $("state");
+        box.textContent = "";
+        const state = document.createElement("b");
+        state.textContent = s.mounted ? T.mounted : T.notMounted;
+        const where = document.createElement("div");
+        where.textContent = (s.host || "") + " / " + (s.share || "") + (s.path ? "/" + s.path : "");
+        const point = document.createElement("div");
+        point.textContent = s.mountPoint || "";
+        box.append(state, where, point);
+        return s;
+      }
+
+      // Browse rather than guess: with no share name the server lists its shares,
+      // and inside a share it lists folders, so the path is walked by tapping.
+      async function browse() {
+        say(T.testing, "busy");
+        $("shares").textContent = "";
+        const r = await api("/share-test", form(true)).catch(() => ({ ok: false, error: "network" }));
+        if (!r.ok) return say(explain(r.error || "failed"), "bad");
+        const box = $("shares");
+        const chip = (text, onTap) => {
+          const b = document.createElement("button");
+          b.className = "btn sec";
+          b.textContent = text;
+          b.onclick = onTap;
+          box.appendChild(b);
+          return b;
+        };
+        if (r.shares) {
+          say(r.shares.length ? T.pickShare : T.emptyHere, "ok");
+          for (const name of r.shares)
+            chip(name, () => {
+              $("share").value = name;
+              $("path").value = "";
+              browse();
+            });
+          return;
+        }
+        say(r.dirs.length ? T.pickFolder : T.emptyHere, "ok");
+        const cur = $("path")
+          .value.trim()
+          .replace(/^\/+|\/+$/g, "");
+        if (cur)
+          chip(T.up, () => {
+            $("path").value = cur.split("/").slice(0, -1).join("/");
+            browse();
+          });
+        for (const name of r.dirs)
+          chip(name, () => {
+            $("path").value = cur ? cur + "/" + name : name;
+            browse();
+          });
+      }
+      $("test").onclick = browse;
+
+      $("save").onclick = async () => {
+        say(T.saving, "busy");
+        $("shares").textContent = "";
+        const r = await api("/share-save", form(true)).catch(() => ({ ok: false, error: "network" }));
+        if (!r.ok) return say(explain(r.error || "failed"), "bad");
+        $("pass").value = "";
+        passEdited = false;
+        // Mounting takes a moment, and a wrong password only shows up as "still not
+        // mounted", so poll instead of leaving "mounting now" on screen forever.
+        say(T.saved, "busy");
+        for (let i = 0; i < 14; i++) {
+          await new Promise((r2) => setTimeout(r2, 1500));
+          const s2 = await refresh();
+          if (s2 && s2.mounted) return say(T.mountedOk, "ok");
+        }
+        say(T.mountFailed, "bad");
+      };
+
+      $("clear").onclick = async () => {
+        if (!confirm(T.clearConfirm)) return;
+        const r = await api("/share-clear", {}).catch(() => ({ ok: false }));
+        say(r.ok ? T.cleared : T.errPrefix, r.ok ? "ok" : "bad");
+        $("pass").value = "";
+        passEdited = false;
+        refresh();
+      };
+
+      refresh();
+    </script>
+  </body>
+</html>

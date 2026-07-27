@@ -19,6 +19,15 @@ jobs:
         run: node scripts/build-index.mjs
       - name: index.json is committed and current
         run: git diff --exit-code index.json || { echo "index.json is stale — run scripts/build-index.mjs and commit"; exit 1; }
+      - name: package library tests
+        # Host-side plugin code runs trusted in the shell process, and some of it
+        # guards a LAN-reachable upload path, so the libraries that have tests get
+        # them run here. No-op when a package ships none.
+        run: |
+          shopt -s nullglob
+          tests=(apps/*/lib/*.test.js)
+          if [ ${#tests[@]} -gt 0 ]; then node --test "${tests[@]}"; else echo "no package tests"; fi
+        shell: bash
       - name: JSON Schema (from the main tvbox repo)
         run: |
           curl -fsSL -o /tmp/schema.json https://raw.githubusercontent.com/Andy1210/tvbox/main/docs/app-manifest.schema.json
