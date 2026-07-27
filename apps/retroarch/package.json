@@ -1,0 +1,6 @@
+{
+  "name": "tvbox-app-retroarch",
+  "private": true,
+  "type": "commonjs",
+  "description": "Host-side plugin for the tvbox RetroArch app. CommonJS: the shell loads plugin.js with require(), and this states that explicitly so the files are read the same way in the repo as they are on a box."
+}

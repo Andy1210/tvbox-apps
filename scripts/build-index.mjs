@@ -27,18 +27,48 @@ function validate(m, f, id) {
   if (m.status !== "ready" && m.status !== "coming_soon") err(f, "status must be ready|coming_soon");
   if (!m.name) err(f, "missing name");
   if (m.accent && !/^#[0-9a-fA-F]{3,8}$/.test(m.accent)) err(f, "accent must be a hex color");
-  const serve = m.runtime && m.runtime.serve;
-  if (!["static", "remote", "local"].includes(serve)) err(f, "runtime.serve must be static|remote|local");
-  if (serve === "remote" && !m.runtime.url && !m.runtime.urlConfig)
-    err(f, "remote app needs runtime.url or runtime.urlConfig");
+  if (m.type !== "webclient" && m.type !== "native") err(f, "type must be webclient|native");
+  if (m.type === "native") {
+    // A native app has no web bundle to serve; it declares how to launch its own
+    // full-screen client instead. The values reach argv, so they are held to the
+    // same shape the shell enforces at load and launch time.
+    const nat = (m.runtime && m.runtime.native) || null;
+    if (!nat) err(f, "type native needs runtime.native");
+    else {
+      if (!nat.flatpak && !nat.bin) err(f, "runtime.native needs flatpak or bin");
+      if (nat.flatpak && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(nat.flatpak)) err(f, "bad runtime.native.flatpak ref");
+      if (nat.args && (!Array.isArray(nat.args) || nat.args.some((a) => typeof a !== "string")))
+        err(f, "runtime.native.args must be strings");
+      if (nat.flatpak && !(m.requires && (m.requires.flatpak || []).includes(nat.flatpak)))
+        err(f, "runtime.native.flatpak must also be listed in requires.flatpak (so the tile greys out until installed)");
+    }
+  } else {
+    const serve = m.runtime && m.runtime.serve;
+    if (!["static", "remote", "local"].includes(serve)) err(f, "runtime.serve must be static|remote|local");
+    if (serve === "remote" && !m.runtime.url && !m.runtime.urlConfig)
+      err(f, "remote app needs runtime.url or runtime.urlConfig");
+  }
   if (m.icon && /<script|href=|xlink|url\(/i.test(m.icon)) err(f, "icon SVG must not reference external content");
-  if (m.type !== "webclient") err(f, "type must be webclient");
-  // Trust model: CURATED repo — every app is merge-reviewed, so it may carry a
+  if (m.pairing !== undefined) {
+    // A pairing entry only makes sense with a plugin to register the provider.
+    if (!Array.isArray(m.pairing) || m.pairing.length > 4) err(f, "pairing must be an array of at most 4");
+    else
+      for (const p of m.pairing) {
+        if (!p || !/^[a-z0-9_-]{1,32}$/.test(String(p.kind || ""))) err(f, "bad pairing[].kind");
+        if (!p || !p.label) err(f, "pairing[] needs a label");
+      }
+    if (!m.service) err(f, "pairing needs a `service` plugin to register the provider");
+  }
+  // Trust model: CURATED repo, every app is merge-reviewed, so it may carry a
   // `service` plugin (host-side code) or a `builtin` view. The only hard line is
   // `aptRepo`: a third-party root apt source is risky and avoidable (ship
   // binaries as no-root `requires.download`).
   if (m.requires && m.requires.aptRepo) err(f, "no aptRepo — use requires.download for binaries");
 }
+
+// What a package ships to a box, versus what only exists for development here.
+// Tests never run on a box, so shipping them is pure download weight.
+const NOT_SHIPPED = (name) => /\.test\.(js|cjs|mjs|ts)$/.test(name);
 
 // Recursively list a package dir as sorted relative paths (POSIX separators, so
 // the index is byte-stable and the URL joins cleanly), each with its sha256.
@@ -48,6 +78,7 @@ function packageFiles(dir) {
     for (const name of readdirSync(d).sort()) {
       const full = join(d, name);
       if (statSync(full).isDirectory()) walk(full);
+      else if (NOT_SHIPPED(name)) continue;
       else {
         const rel = relative(dir, full).split(sep).join("/");
         const sha256 = createHash("sha256").update(readFileSync(full)).digest("hex");
