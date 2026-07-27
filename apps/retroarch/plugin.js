@@ -100,6 +100,7 @@ const SHARE_STR = {
     notMounted: "Nincs csatolva",
     notConfigured: "Még nincs beállítva.",
     errPrefix: "Hiba:",
+    errFailed: "Nem sikerült.",
     badHost: "Hibás kiszolgálónév.",
     badShare: "Hibás megosztásnév.",
     badFolder: "A mappanév csak kisbetű, szám és kötőjel lehet.",
@@ -142,6 +143,7 @@ const SHARE_STR = {
     notMounted: "Not mounted",
     notConfigured: "Not set up yet.",
     errPrefix: "Error:",
+    errFailed: "That did not work.",
     badHost: "That server name is not valid.",
     badShare: "That share name is not valid.",
     badFolder: "The folder name may use lower-case letters, digits and dashes.",
@@ -182,11 +184,15 @@ const CORES_STR = {
     removeConfirm: "Törlöd a(z) {name} emulátorát?",
     newBuild: "build: {date}",
     errPrefix: "Hiba:",
+    errFailed: "Nem sikerült.",
     errBadCore: "Ismeretlen core.",
     errDownload: "A letöltés nem sikerült. Van hálózat a boxon?",
     errArchive: "A letöltött csomag hibás.",
     errCrc: "A letöltött fájl ellenőrzőösszege nem egyezik, ezért nem telepítettem.",
     errWrite: "Nem sikerült a helyére írni.",
+    errRemove: "Nem sikerült törölni.",
+    errNoIndex: "A core-lista nem elérhető, ezért nem tudok telepíteni. Van hálózat a boxon?",
+    errNotPublished: "Ezt az emulátort a libretro már nem kínálja letöltésre.",
     searchPlaceholder: "Keresés (pl. ps2, sony, snes)",
     counting: "{shown} / {total} emulátor",
     nothingFound: "Nincs találat.",
@@ -208,11 +214,15 @@ const CORES_STR = {
     removeConfirm: "Remove the emulator for {name}?",
     newBuild: "build: {date}",
     errPrefix: "Error:",
+    errFailed: "That did not work.",
     errBadCore: "Unknown core.",
     errDownload: "The download failed. Does the box have network?",
     errArchive: "The downloaded archive is broken.",
     errCrc: "The downloaded file's checksum did not match, so it was not installed.",
     errWrite: "Could not write it into place.",
+    errRemove: "Could not remove it.",
+    errNoIndex: "The core list is unreachable, so nothing can be installed. Does the box have network?",
+    errNotPublished: "libretro no longer offers this emulator for download.",
     searchPlaceholder: "Search (e.g. ps2, sony, snes)",
     counting: "{shown} of {total} emulators",
     nothingFound: "Nothing matches.",
@@ -419,9 +429,14 @@ module.exports = (host) => {
           if (r.ok) host.log("retroarch: core installed:", core);
           ctx.json(res, r);
         })
-        .catch((e) => ctx.json(res, { ok: false, error: String(e.message || e).slice(0, 80) }));
+        .catch((e) => {
+          // The page has a sentence for every code, so an unexpected throw reports
+          // the generic one and the detail goes to the shell log, not to the phone.
+          host.log("retroarch: core install failed:", core, String(e.message || e));
+          ctx.json(res, { ok: false, error: "failed" });
+        });
     },
-    "POST /core-remove": (req, res, ctx) => ctx.json(res, { ok: cores.remove(String((ctx.body || {}).core || "")) }),
+    "POST /core-remove": (req, res, ctx) => ctx.json(res, cores.remove(String((ctx.body || {}).core || ""))),
   };
 
   return {

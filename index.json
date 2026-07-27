@@ -165,8 +165,8 @@
         "hu": "Retro játékok"
       },
       "description": {
-        "en": "Play retro games on the TV. RetroArch runs its own full-screen interface, navigable with the remote or a controller, and the Home button always brings you back to the box. Consoles are added as cores from RetroArch's own Online Updater; your games live in the box's roms folder.",
-        "hu": "Retro játékok a tévén. A RetroArch a saját teljes képernyős felületét használja, amit a távirányítóval vagy kontrollerrel lehet kezelni, a Home gomb pedig mindig visszahoz a boxra. A konzolokat core-ként a RetroArch saját Online Updaterével lehet hozzáadni, a játékok a box roms könyvtárában laknak."
+        "en": "Play retro games on the TV. RetroArch runs its own full-screen interface, navigable with the remote or a controller, and the Home button always brings you back to the box. Consoles and games are added from your phone: the Consoles page installs the emulator you pick, and the upload page takes your game files - or point the box at a network share instead.",
+        "hu": "Retro játékok a tévén. A RetroArch a saját teljes képernyős felületét használja, amit a távirányítóval vagy kontrollerrel lehet kezelni, a Home gomb pedig mindig visszahoz a boxra. A konzolokat és a játékokat telefonról teszed fel: a Konzolok oldalon kiválasztod, melyik emulátor kell, a Játékok feltöltése oldalon pedig a játékfájlokat, vagy a boxot ráállítod egy hálózati megosztásra."
       },
       "service": "retroarch",
       "pairing": [
@@ -400,7 +400,7 @@
       "files": [
         {
           "path": "lib/cores.js",
-          "sha256": "4cd8e6fb14b3ba1f3279db56e66f1c9d673636e607f4203edeb10a24995fa7b7"
+          "sha256": "e5b395382d5f5434580d5e7a1c4d81a3b526a4ab38783f770d7efb043e83bd79"
         },
         {
           "path": "lib/roms.js",
@@ -412,7 +412,7 @@
         },
         {
           "path": "manifest.json",
-          "sha256": "49aee78837fe20be1b932c35f502faf319abaf17f2d85a948da938161d1a45ba"
+          "sha256": "3a101adfd363611376f49895cbbd4dd4ec4ce924f1f6ed8c6b2210d5eccb2420"
         },
         {
           "path": "package.json",
@@ -420,7 +420,7 @@
         },
         {
           "path": "pairing/cores.html",
-          "sha256": "714b6f8a999e4ad2c8b45e6be9c9ea1beb42a8660ace5ac7ea3e1f03a676584c"
+          "sha256": "cfc160583ee41872dfb6a0d331d4107078896f4fb95061188cdda628740c88a5"
         },
         {
           "path": "pairing/roms.html",
@@ -428,11 +428,11 @@
         },
         {
           "path": "pairing/share.html",
-          "sha256": "e30fcccb040de2d6d715fdf024e0a3ba5943897a3f21a16eb94c8dc07750ec26"
+          "sha256": "37c6c40401df5971f56b35c9ad98ba9672c55bfc7e9a43e4c7913d526f4c33b0"
         },
         {
           "path": "plugin.js",
-          "sha256": "8809a4da311d87dddd0700525ce5eaa3dfaa489da116f9f33d6091f4b5cebfce"
+          "sha256": "9cadad9cef85eea1b7cb2eb278256c25594c3fd7e1afc908feea2f5f57a91dc0"
         }
       ]
     },

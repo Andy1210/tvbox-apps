@@ -72,6 +72,21 @@ for (const f of pages) {
     assert.deepStrictEqual(missing, [], f + ": T is missing " + missing.join(", "));
   });
 
+  // A page that shows a raw code when it has no string for it must have one for
+  // every code its library can produce, or the phone gets "Hiba: no_index".
+  const lib = { "share.html": "share.js", "cores.html": "cores.js" }[f];
+  if (lib && /errPrefix/.test(html)) {
+    test(f + ": every error code " + lib + " returns has a sentence", () => {
+      const src = fs.readFileSync(path.join(PKG, "lib", lib), "utf8");
+      const codes = new Set([...src.matchAll(/error:\s*"([a-z0-9_]+)"/g)].map((m) => m[1]));
+      codes.add("failed"); // the page's own fallback when a response carries no code
+      const m = /const T = \{([\s\S]*?)\n\s*\};/.exec(html);
+      const defined = new Set([...m[1].matchAll(/^\s*([A-Za-z_]\w*)\s*:/gm)].map((x) => x[1]));
+      const raw = [...codes].filter((c) => !defined.has(c)).sort();
+      assert.deepStrictEqual(raw, [], f + " would show these codes raw: " + raw.join(", "));
+    });
+  }
+
   test(f + ": nothing is built into the page as markup", () => {
     // Values here come back from the box and include free text (a share name, a
     // folder), so the pages build DOM nodes instead of concatenating HTML.

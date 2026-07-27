@@ -29,23 +29,10 @@ const FLATPAK_REF = "org.libretro.RetroArch";
 const CORES_DIR = path.join(os.homedir(), ".var", "app", FLATPAK_REF, "config", "retroarch", "cores");
 // The core metadata RetroArch ships with itself. Read-only, and the only place a
 // core's human name lives; the buildbot index carries file names only.
+const INFO_SUBPATH = [FLATPAK_REF, arch(), "stable", "active", "files", "share", "libretro", "info"];
 const INFO_DIRS = [
-  path.join(
-    os.homedir(),
-    ".local",
-    "share",
-    "flatpak",
-    "app",
-    FLATPAK_REF,
-    "aarch64",
-    "stable",
-    "active",
-    "files",
-    "share",
-    "libretro",
-    "info",
-  ),
-  path.join("/var/lib/flatpak/app", FLATPAK_REF, "aarch64", "stable", "active", "files", "share", "libretro", "info"),
+  path.join(os.homedir(), ".local", "share", "flatpak", "app", ...INFO_SUBPATH),
+  path.join("/var/lib/flatpak/app", ...INFO_SUBPATH),
 ];
 const SUFFIX = "_libretro.so";
 const DOWNLOAD_TIMEOUT_MS = 180000; // a core can be tens of MB; a slow link should not fail it
@@ -223,7 +210,11 @@ function install(core, env, index) {
           cleanup();
           return resolve({ ok: false, error: "download_failed" });
         }
-        execFile("unzip", ["-o", "-q", zip, "-d", tmp], { env, timeout: 60000 }, (uerr) => {
+        // Extract ONLY the file we came for. A zip is a list of paths the archive
+        // chooses, so extracting all of it would let a crafted archive write
+        // wherever it likes; naming the entry means anything else in there is
+        // never unpacked, and a missing entry fails as a bad archive.
+        execFile("unzip", ["-o", "-q", zip, coreFile(core), "-d", tmp], { env, timeout: 60000 }, (uerr) => {
           const out = path.join(tmp, coreFile(core));
           if (uerr || !fs.existsSync(out)) {
             cleanup();
@@ -249,18 +240,21 @@ function install(core, env, index) {
   });
 }
 
+// Same shape as install(): the phone page turns the error CODE into a sentence,
+// so a bare false would reach it as an untranslated "failed".
 function remove(core) {
-  if (!coreNameOk(core)) return false;
+  if (!coreNameOk(core)) return { ok: false, error: "bad_core" };
   try {
     fs.unlinkSync(path.join(CORES_DIR, coreFile(core)));
-    return true;
+    return { ok: true, core };
   } catch (e) {
-    return false;
+    return { ok: false, error: "remove_failed" };
   }
 }
 
 module.exports = {
   CORES_DIR,
+  INFO_DIRS,
   baseUrl,
   coreNameOk,
   parseIndex,

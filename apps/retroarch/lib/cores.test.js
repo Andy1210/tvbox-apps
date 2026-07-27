@@ -140,11 +140,18 @@ test("remove refuses a traversing name and only deletes inside the cores dir", (
   putCore("fceumm", CRC_VECTOR.data);
   const victim = path.join(HOME, "victim.txt");
   fs.writeFileSync(victim, "keep me");
-  assert.strictEqual(cores.remove("../../victim"), false);
+  assert.deepStrictEqual(cores.remove("../../victim"), { ok: false, error: "bad_core" });
   assert.strictEqual(fs.readFileSync(victim, "utf8"), "keep me");
-  assert.strictEqual(cores.remove("fceumm"), true);
+  assert.deepStrictEqual(cores.remove("fceumm"), { ok: true, core: "fceumm" });
   assert.deepStrictEqual(cores.installed(), []);
-  assert.strictEqual(cores.remove("fceumm"), false, "already gone");
+  // an error CODE, not a bare false: the phone page has a sentence per code
+  assert.deepStrictEqual(cores.remove("fceumm"), { ok: false, error: "remove_failed" }, "already gone");
+});
+
+test("the info dir follows the box's architecture", () => {
+  // Hard-coding aarch64 here would leave an x86_64 box with no core metadata at
+  // all, so every core would show as its bare file name.
+  for (const dir of cores.INFO_DIRS) assert.match(dir, /\/(aarch64|x86_64)\//);
 });
 
 test.after(() => fs.rmSync(HOME, { recursive: true, force: true }));
