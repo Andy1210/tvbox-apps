@@ -423,7 +423,7 @@
         },
         {
           "path": "lib/cores.js",
-          "sha256": "d11068e49ee5f72815a8a7b24023e352dc407cd3269df4bdd8bbd2a6cc6a7414"
+          "sha256": "ea8ef4da8beeaa3c29475485f93c66236286c2b5f4e6ebe445b7a31e9b669205"
         },
         {
           "path": "lib/roms.js",

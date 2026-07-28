@@ -195,21 +195,26 @@ function infoIndex() {
 //
 // The declaration is the core's own `required_hw_api`, so no list of cores is
 // written down here either.
+// EVERY driver the core can use here, not just a favourite: a core that declares
+// both GL and Vulkan must keep whichever one the box runs globally. Picking for it
+// would be worse than doing nothing on a box whose global driver is Vulkan because
+// GL does not reach the GPU there (hardwareGl() in plugin.js) - an override would
+// then move a perfectly good core onto llvmpipe.
 const GL_COMPAT_MAX = 3.1; // desktop GL, compatibility profile
 const GLES_MAX = 3.1;
-function videoDriverFor(api) {
+function videoDriversFor(api) {
   const s = String(api || "");
-  if (!s) return null; // undeclared: leave whatever the global driver is
+  if (!s) return []; // undeclared: leave whatever the global driver is
   const atMost = (re, cap) => {
     const m = re.exec(s);
     return m ? parseFloat(m[1]) <= cap : false;
   };
+  const out = [];
   // "OpenGL >= 3.0" is the compatibility profile; "OpenGL Core >= 3.3" is not the
   // same thing and deliberately does not match here.
-  if (atMost(/OpenGL\s*>=\s*([\d.]+)/, GL_COMPAT_MAX)) return "gl";
-  if (atMost(/OpenGL ES\s*>=\s*([\d.]+)/, GLES_MAX)) return "gl";
-  if (/Vulkan/i.test(s)) return "vulkan";
-  return null; // nothing this hardware can serve; not ours to force
+  if (atMost(/OpenGL\s*>=\s*([\d.]+)/, GL_COMPAT_MAX) || atMost(/OpenGL ES\s*>=\s*([\d.]+)/, GLES_MAX)) out.push("gl");
+  if (/Vulkan/i.test(s)) out.push("vulkan");
+  return out; // empty: nothing this hardware can serve, and not ours to force
 }
 
 // RetroArch loads a per-core override from config/<corename>/<corename>.cfg (its
@@ -264,9 +269,11 @@ function syncDriverOverrides(globalDriver) {
   for (const core of installed()) {
     const meta = info.get(core);
     if (!meta || !meta.name) continue; // no metadata: nothing to name a file after
-    const want = videoDriverFor(meta.api);
-    if (!want) continue;
-    const driver = want === globalDriver ? null : want;
+    const can = videoDriversFor(meta.api);
+    if (!can.length) continue;
+    // the global driver already suits the core: no override (and drop one we wrote
+    // earlier, e.g. after the box gained hardware GL and the global driver changed)
+    const driver = can.includes(globalDriver) ? null : can[0];
     const file = overridePath(meta.name);
     if (!file) continue;
     let have = null;
@@ -411,7 +418,7 @@ function remove(core) {
 module.exports = {
   CORES_DIR,
   OVERRIDES_DIR,
-  videoDriverFor,
+  videoDriversFor,
   setOverrideDriver,
   syncDriverOverrides,
   INFO_DIRS,
