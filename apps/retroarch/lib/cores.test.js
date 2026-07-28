@@ -247,6 +247,19 @@ test("an override file that only carried our key is removed, not left empty", ()
   assert.strictEqual(fs.existsSync(path.dirname(file)), false, "and the directory goes with it");
 });
 
+test("clearing an override succeeds even when the directory keeps other files", () => {
+  // RetroArch stores per-content overrides, remaps and core options in the same
+  // directory. Removing it then fails, which must not read as the clear failing -
+  // syncDriverOverrides decides what to report from that return value.
+  const dir = path.join(cores.OVERRIDES_DIR, "Snes9x");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "Snes9x.cfg"), 'video_driver = "gl"\n');
+  fs.writeFileSync(path.join(dir, "Super Mario World.cfg"), 'video_scale = "3"\n');
+  assert.strictEqual(cores.setOverrideDriver("Snes9x", null), true);
+  assert.strictEqual(fs.existsSync(path.join(dir, "Snes9x.cfg")), false, "ours is gone");
+  assert.strictEqual(fs.existsSync(path.join(dir, "Super Mario World.cfg")), true, "theirs stayed");
+});
+
 test("a corename that could escape its directory is refused", () => {
   for (const bad of ["../../etc", "a/b", "..", ""]) assert.strictEqual(cores.setOverrideDriver(bad, "gl"), false);
 });

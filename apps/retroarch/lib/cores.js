@@ -237,7 +237,14 @@ function setOverrideDriver(coreName, driver) {
   try {
     if (!kept.length) {
       fs.rmSync(file, { force: true });
-      fs.rmdirSync(path.dirname(file)); // only succeeds while it is empty
+      // Tidying the directory is best-effort and must not be mistaken for the
+      // clear failing: RetroArch also keeps per-content overrides, remaps and
+      // core options in here, and then it is not ours to remove.
+      try {
+        fs.rmdirSync(path.dirname(file));
+      } catch (e) {
+        /* something else of RetroArch's still lives there */
+      }
       return true;
     }
     fs.mkdirSync(path.dirname(file), { recursive: true });

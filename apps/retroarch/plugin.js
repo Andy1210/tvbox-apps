@@ -482,7 +482,14 @@ module.exports = (host) => {
         routes: shareRoutes,
       });
       try {
-        if (applyConfig()) host.log("retroarch: settings applied (vulkan video, roms at " + roms.ROMS_DIR + ")");
+        if (applyConfig())
+          host.log(
+            "retroarch: settings applied (" +
+              requiredSettings().video_driver +
+              " video, roms at " +
+              roms.ROMS_DIR +
+              ")",
+          );
       } catch (e) {
         host.log("retroarch: could not write settings:", e.message);
       }

@@ -408,7 +408,7 @@
       "files": [
         {
           "path": "lib/cores.js",
-          "sha256": "152353b255bc2bb043aa33396ce77bf2e2a25194dbb15f3b308b40ba0211e99c"
+          "sha256": "d11068e49ee5f72815a8a7b24023e352dc407cd3269df4bdd8bbd2a6cc6a7414"
         },
         {
           "path": "lib/roms.js",
@@ -440,7 +440,7 @@
         },
         {
           "path": "plugin.js",
-          "sha256": "52b66d895894b620f6a78fbbb1ddfdb2e4d5210b5010fbe214fe66330d139d1c"
+          "sha256": "fa35de1b306c6d04041633bfd391e2a66d5d02b74c542a5d538e2960672d4906"
         }
       ]
     },
