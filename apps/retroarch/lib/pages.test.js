@@ -14,7 +14,7 @@ const assert = require("node:assert");
 const PKG = path.join(__dirname, "..");
 const PAGES_DIR = path.join(PKG, "pairing");
 // page file -> the plugin table that renders it
-const TABLES = { "roms.html": "STR", "share.html": "SHARE_STR", "cores.html": "CORES_STR" };
+const TABLES = { "roms.html": "STR", "share.html": "SHARE_STR", "cores.html": "CORES_STR", "art.html": "ART_STR" };
 const LOCALES = ["hu", "en"];
 
 const plugin = fs.readFileSync(path.join(PKG, "plugin.js"), "utf8");

@@ -158,7 +158,7 @@ module.exports = (host) => {
   host.pairing.register("myapp", { page: (ctx) => "<html>…", routes: { "POST /save": … } });
   host.onConfigChange((sections) => { if (sections.includes("myapp")) reload(); });
   // host also gives: config, BrowserWindow, spawnService/stopService/restartService,
-  // childEnv, audioSink, showLauncher, navTo, widget, base, log
+  // childEnv, audioSink, showLauncher, navTo, widget, idle, base, log
   return {}; // optional { start, stop }
 };
 ```
@@ -177,6 +177,23 @@ host.widget.set({ title: "Now playing", subtitle: "Artist / Track" }); // upsert
 host.widget.clear(); // remove it
 host.navTo("myapp"); // foreground an app by id ("home" = the launcher)
 ```
+
+### Background work: wait for `host.idle()`
+
+A plugin that wants to do something heavy on its own - download a library of
+artwork, rebuild an index - should ask first:
+
+```js
+if (host.idle?.()) startTheSweep(); // nothing on screen, nothing playing
+```
+
+`host.idle()` is the box's own idleness test (no mpv, launcher focused, nothing
+reported playing), the same one that gates the nightly auto-update - so it is
+also false while a `native` app owns the screen. Poll it on a timer and stop
+between units of work rather than assuming it stays true; a user-initiated
+action should ignore it (they asked for it now). It is **shell 1.6+**, so
+feature-detect with `?.` and decide what an older shell does. RetroArch's
+artwork pass (`apps/retroarch/lib/art.js`) is the reference.
 
 The widget slot is per-app (a plugin can only ever write its OWN card),
 sanitized host-side (title capped at 120 chars, subtitle at 160) and cleared on
