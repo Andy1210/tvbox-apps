@@ -153,7 +153,12 @@ function parseInfo(text) {
     const m = new RegExp("^" + key + '\\s*=\\s*"([^"]*)"', "m").exec(text);
     return m ? m[1] : "";
   };
-  return { display: get("display_name"), name: get("corename"), system: get("systemname") };
+  return {
+    display: get("display_name"),
+    name: get("corename"),
+    system: get("systemname"),
+    api: get("required_hw_api"),
+  };
 }
 
 // core -> { display, name, system }, from whichever info dir exists.
@@ -176,6 +181,103 @@ function infoIndex() {
       }
     }
     if (out.size) break; // the first dir that had metadata wins
+  }
+  return out;
+}
+
+// ---- which video driver a core can actually use on this hardware ----
+//
+// V3D gives desktop OpenGL 3.1 (compatibility profile), OpenGL ES 3.1, and Vulkan
+// through v3dv. What it does NOT give is a GL CORE profile above 3.1 - and RetroArch
+// asks for exactly what a core declares, so a core whose only GL option is
+// "OpenGL Core >= 3.3" cannot run on GL here at all (Beetle PSX HW is the one that
+// matters: its GL attempt dies with EGL_BAD_MATCH). Vulkan is its way in.
+//
+// The declaration is the core's own `required_hw_api`, so no list of cores is
+// written down here either.
+const GL_COMPAT_MAX = 3.1; // desktop GL, compatibility profile
+const GLES_MAX = 3.1;
+function videoDriverFor(api) {
+  const s = String(api || "");
+  if (!s) return null; // undeclared: leave whatever the global driver is
+  const atMost = (re, cap) => {
+    const m = re.exec(s);
+    return m ? parseFloat(m[1]) <= cap : false;
+  };
+  // "OpenGL >= 3.0" is the compatibility profile; "OpenGL Core >= 3.3" is not the
+  // same thing and deliberately does not match here.
+  if (atMost(/OpenGL\s*>=\s*([\d.]+)/, GL_COMPAT_MAX)) return "gl";
+  if (atMost(/OpenGL ES\s*>=\s*([\d.]+)/, GLES_MAX)) return "gl";
+  if (/Vulkan/i.test(s)) return "vulkan";
+  return null; // nothing this hardware can serve; not ours to force
+}
+
+// RetroArch loads a per-core override from config/<corename>/<corename>.cfg (its
+// `auto_overrides_enable` default). It writes those files itself for core options
+// and remaps, so only the one key is ever touched here - the rest is the user's.
+const OVERRIDES_DIR = path.join(path.dirname(CORES_DIR), "config");
+function overridePath(coreName) {
+  // The corename is RetroArch's own display name ("Beetle PSX HW"); it becomes a
+  // directory, so anything that could leave it is refused.
+  if (!coreName || /[\\/]|\.\./.test(coreName)) return null;
+  return path.join(OVERRIDES_DIR, coreName, coreName + ".cfg");
+}
+// Set (or clear) video_driver in one core's override, keeping every other line.
+function setOverrideDriver(coreName, driver) {
+  const file = overridePath(coreName);
+  if (!file) return false;
+  let lines = [];
+  try {
+    lines = fs.readFileSync(file, "utf8").split("\n");
+  } catch (e) {
+    if (!driver) return false; // nothing to clear
+  }
+  const kept = lines.filter((l) => !/^\s*video_driver\s*=/.test(l) && l.trim() !== "");
+  if (driver) kept.push('video_driver = "' + driver + '"');
+  try {
+    if (!kept.length) {
+      fs.rmSync(file, { force: true });
+      // Tidying the directory is best-effort and must not be mistaken for the
+      // clear failing: RetroArch also keeps per-content overrides, remaps and
+      // core options in here, and then it is not ours to remove.
+      try {
+        fs.rmdirSync(path.dirname(file));
+      } catch (e) {
+        /* something else of RetroArch's still lives there */
+      }
+      return true;
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, kept.join("\n") + "\n");
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Give every installed core the driver its own metadata says it needs, relative to
+// the driver the plugin sets globally: a core the global driver already suits gets
+// no override (and loses one we wrote earlier). Returns what changed, for the log.
+function syncDriverOverrides(globalDriver) {
+  const info = infoIndex();
+  const out = [];
+  for (const core of installed()) {
+    const meta = info.get(core);
+    if (!meta || !meta.name) continue; // no metadata: nothing to name a file after
+    const want = videoDriverFor(meta.api);
+    if (!want) continue;
+    const driver = want === globalDriver ? null : want;
+    const file = overridePath(meta.name);
+    if (!file) continue;
+    let have = null;
+    try {
+      const m = /^\s*video_driver\s*=\s*"?([a-z_]+)"?/m.exec(fs.readFileSync(file, "utf8"));
+      have = m ? m[1] : null;
+    } catch (e) {
+      /* no override yet */
+    }
+    if (have === driver) continue;
+    if (setOverrideDriver(meta.name, driver)) out.push(meta.name + " -> " + (driver || globalDriver));
   }
   return out;
 }
@@ -308,6 +410,10 @@ function remove(core) {
 
 module.exports = {
   CORES_DIR,
+  OVERRIDES_DIR,
+  videoDriverFor,
+  setOverrideDriver,
+  syncDriverOverrides,
   INFO_DIRS,
   isRegularFile,
   baseUrl,

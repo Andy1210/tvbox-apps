@@ -3,10 +3,13 @@
 // this plugin owns no window and no daemon. What it does own is the SETUP that
 // RetroArch cannot be expected to get right by itself on this hardware:
 //
-//   1. the video driver. On a Pi-class board the GL/EGL path inside the flatpak
-//      has no hardware driver available and Mesa falls back to llvmpipe, which
-//      costs whole CPU cores. Vulkan reaches the real GPU, so it is forced here
-//      rather than left to whatever RetroArch defaults to.
+//   1. the video driver. RetroArch asks for whatever a core declares, and this
+//      hardware serves desktop GL 3.1 (compatibility), GLES 3.1 and Vulkan - but
+//      NOT a GL core profile above 3.1. So the driver is chosen here rather than
+//      left to chance: GL globally (it covers the most cores) once the box renders
+//      GL on the GPU at all, and a per-core override from the core's own
+//      `required_hw_api` for the ones GL cannot serve. Whether GL reaches the GPU
+//      is a session-level matter, not RetroArch's: see hardwareGl() below.
 //   2. where the games are. RetroArch's file browser is pointed at the box's own
 //      roms folder so "Load Content" opens somewhere useful on a TV.
 //   3. how games and consoles GET there. A TV has no file manager, so the plugin
@@ -237,9 +240,26 @@ const CORES_STR = {
 
 // Settings this plugin insists on. Everything else in retroarch.cfg is the
 // user's (or RetroArch's) business.
+// Whether OpenGL reaches the GPU on this box, which is not a given: the Pi renders
+// on v3d and scans out on vc4, and unless the compositor advertises the RENDER node
+// a flatpak's Mesa finds no driver and silently uses llvmpipe. The shell settles
+// that at session start (its labwc environment file); until a box has that, Vulkan
+// is the faster global default even though it locks GL-only cores out.
+function hardwareGl() {
+  try {
+    const f = path.join(os.homedir(), ".config", "labwc", "environment");
+    return /^\s*WLR_RENDER_DRM_DEVICE=\S/m.test(fs.readFileSync(f, "utf8"));
+  } catch (e) {
+    return false;
+  }
+}
+
 function requiredSettings() {
   return {
-    video_driver: "vulkan",
+    // GL covers far more cores (and every software one), so it is the default as
+    // soon as it is real; cores that need something else get a per-core override
+    // from their own metadata (lib/cores.js).
+    video_driver: hardwareGl() ? "gl" : "vulkan",
     audio_driver: "pulse",
     rgui_browser_directory: roms.ROMS_DIR,
     video_fullscreen: "true",
@@ -415,7 +435,11 @@ module.exports = (host) => {
         .fetchIndex(host.childEnv())
         .then((index) => cores.install(core, host.childEnv(), index))
         .then((r) => {
-          if (r.ok) host.log("retroarch: core installed:", core);
+          if (r.ok) {
+            host.log("retroarch: core installed:", core);
+            const changed = cores.syncDriverOverrides(requiredSettings().video_driver);
+            if (changed.length) host.log("retroarch: per-core driver:", changed.join(", "));
+          }
           ctx.json(res, r);
         })
         .catch((e) => {
@@ -458,11 +482,23 @@ module.exports = (host) => {
         routes: shareRoutes,
       });
       try {
-        if (applyConfig()) host.log("retroarch: settings applied (vulkan video, roms at " + roms.ROMS_DIR + ")");
+        if (applyConfig())
+          host.log(
+            "retroarch: settings applied (" +
+              requiredSettings().video_driver +
+              " video, roms at " +
+              roms.ROMS_DIR +
+              ")",
+          );
       } catch (e) {
         host.log("retroarch: could not write settings:", e.message);
       }
       host.log("retroarch: " + cores.installed().length + " core(s) installed, " + roms.count() + " game(s)");
+      // Every installed core gets the driver its own metadata says it needs,
+      // relative to the global one above.
+      const driver = requiredSettings().video_driver;
+      const changed = cores.syncDriverOverrides(driver);
+      host.log("retroarch: video driver " + driver + (changed.length ? ", per-core: " + changed.join(", ") : ""));
       // A configured share comes up with the box, so the games are simply there.
       if (share.readConfig()) {
         if (mountShare()) host.log("retroarch: mounting network share at " + share.mountPoint(share.readConfig()));
