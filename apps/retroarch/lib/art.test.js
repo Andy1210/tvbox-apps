@@ -120,6 +120,16 @@ test("matcher: the pick does not depend on the listing's order", () => {
   assert.strictEqual(pick([...names].reverse()), "Wild Snake (USA)");
 });
 
+test("only a real answer about a console is remembered", () => {
+  // "the server has nothing for this console" is an answer worth not asking about
+  // again; a listing that arrived unreadable or never arrived is not, or a truncated
+  // download would read as "no covers exist here" until the recheck window.
+  assert.ok(art.listingIsAnswer("not_found"));
+  assert.ok(!art.listingIsAnswer("empty_index"));
+  assert.ok(!art.listingIsAnswer("offline"));
+  assert.ok(!art.listingIsAnswer("bad_system"));
+});
+
 test("dueForListing: never seen, playlist changed, or gone stale", () => {
   const now = 1_000_000_000_000;
   assert.ok(art.dueForListing(null, 0, now), "never listed");

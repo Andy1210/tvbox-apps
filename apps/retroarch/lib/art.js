@@ -65,6 +65,18 @@ function nameOk(s) {
   return !/[/\\]/.test(s) && !s.includes("..");
 }
 
+// Cleanup that must not be able to take the pass with it. Both callers run inside
+// an execFile callback, where a throw does NOT reject the promise it sits in - it
+// escapes as an uncaught exception in the shell's own process and leaves the pass
+// waiting on a promise nothing will ever resolve.
+function rmQuiet(target, opts) {
+  try {
+    fs.rmSync(target, opts);
+  } catch (e) {
+    /* best-effort: a leftover temp file is not worth a wedged sweep */
+  }
+}
+
 function boxartDir(system) {
   return path.join(THUMBS_DIR, system, KIND);
 }
@@ -283,7 +295,7 @@ function fetchIndex(system, env) {
         } catch (e) {
           /* nothing arrived */
         }
-        fs.rmSync(dir, { recursive: true, force: true });
+        rmQuiet(dir, { recursive: true, force: true });
         if (err && code !== "200") return resolve({ ok: false, error: "offline" });
         if (code === "404") return resolve({ ok: false, error: "not_found" });
         if (code !== "200") return resolve({ ok: false, error: "offline" });
@@ -359,7 +371,7 @@ function downloadBatch(system, jobs, env) {
           }
         }
         failed++;
-        fs.rmSync(s.part, { force: true });
+        rmQuiet(s.part, { force: true });
       }
       resolve({ saved, failed });
     });
@@ -385,6 +397,13 @@ function writeState(state) {
   } catch (e) {
     return false;
   }
+}
+
+// Which failure to list a console is an ANSWER about that console, and which is
+// only a failure to ask. Remembering the second kind would read as "no covers exist
+// here" for a fortnight because a listing arrived truncated once.
+function listingIsAnswer(error) {
+  return error === "not_found"; // the server carries nothing for this console
 }
 
 // Whether a console with missing covers is worth listing again. Without this a
@@ -435,11 +454,13 @@ async function sweep({ env, force, idle, log, onProgress, stopped } = {}) {
         say("artwork: no network, stopping");
         break;
       }
-      // This console has no artwork on the server at all. Write that down so the
-      // next pass does not ask again until the recheck window.
       say("artwork: " + system + ": " + index.error);
-      state.systems[system] = { checkedAt: now, unavailable: missing.length };
-      writeState(state);
+      // Only an answer is remembered; a listing we could not read leaves the console
+      // unchecked, so the next pass asks again.
+      if (listingIsAnswer(index.error)) {
+        state.systems[system] = { checkedAt: now, unavailable: missing.length };
+        writeState(state);
+      }
       continue;
     }
     const match = matcher(index.names);
@@ -509,6 +530,7 @@ module.exports = {
   downloadBatch,
   readState,
   writeState,
+  listingIsAnswer,
   dueForListing,
   sweep,
 };

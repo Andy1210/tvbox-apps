@@ -419,7 +419,7 @@
       "files": [
         {
           "path": "lib/art.js",
-          "sha256": "0149da6250559b40558e748a4097fa6e084d425984a50fc1543c0be4539c8e83"
+          "sha256": "04de35e8e4ecb325b0f266aa68817cccdd1b1d59e90b0bd506705f66f465861b"
         },
         {
           "path": "lib/cores.js",
@@ -459,7 +459,7 @@
         },
         {
           "path": "plugin.js",
-          "sha256": "3c88c8e9b6958cfe8d1c3c1571069501487599994c67ef3983a3a209493e035e"
+          "sha256": "528b4e4c3f8163f8253abf3d1d13334e14adaaaa4cb7bb9c92f292aa05188bef"
         }
       ]
     },
