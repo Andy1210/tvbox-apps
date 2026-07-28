@@ -141,8 +141,12 @@
       "id": "retroarch",
       "manifestVersion": 1,
       "name": "RetroArch",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "changelog": [
+        {
+          "version": "1.3.0",
+          "notes": "Games have covers now. RetroArch only shows artwork for games in a scanned list and never fetches it, so the box does: it walks your lists and puts a cover in place for every game one exists for, by itself whenever the box is idle, and on demand from the new Artwork page on your phone. Its menu is also shorter - the dead core downloader, the disc entries this box has no drive for, and the pictures/music/videos tabs are gone, so the consoles come first."
+        },
         {
           "version": "1.2.0",
           "notes": "OpenGL games work on the GPU now. Emulators that need OpenGL (OpenLara, Craft and most others) used to render on the processor, which made them unplayable; the box now picks the right graphics API per emulator from what that emulator itself declares, so the ones that need Vulkan keep using it."
@@ -173,8 +177,8 @@
         "hu": "Retro játékok"
       },
       "description": {
-        "en": "Play retro games on the TV. RetroArch runs its own full-screen interface, navigable with the remote or a controller, and the Home button always brings you back to the box. Consoles and games are added from your phone: the Consoles page installs the emulator you pick, and the upload page takes your game files - or point the box at a network share instead.",
-        "hu": "Retro játékok a tévén. A RetroArch a saját teljes képernyős felületét használja, amit a távirányítóval vagy kontrollerrel lehet kezelni, a Home gomb pedig mindig visszahoz a boxra. A konzolokat és a játékokat telefonról teszed fel: a Konzolok oldalon kiválasztod, melyik emulátor kell, a Játékok feltöltése oldalon pedig a játékfájlokat, vagy a boxot ráállítod egy hálózati megosztásra."
+        "en": "Play retro games on the TV. RetroArch runs its own full-screen interface, navigable with the remote or a controller, and the Home button always brings you back to the box. Consoles and games are added from your phone: the Consoles page installs the emulator you pick, and the upload page takes your game files - or point the box at a network share instead. Once a list of games is scanned, the box fetches their covers on its own.",
+        "hu": "Retro játékok a tévén. A RetroArch a saját teljes képernyős felületét használja, amit a távirányítóval vagy kontrollerrel lehet kezelni, a Home gomb pedig mindig visszahoz a boxra. A konzolokat és a játékokat telefonról teszed fel: a Konzolok oldalon kiválasztod, melyik emulátor kell, a Játékok feltöltése oldalon pedig a játékfájlokat, vagy a boxot ráállítod egy hálózati megosztásra. Ha a játéklista beolvasva van, a borítókat a box magától letölti."
       },
       "service": "retroarch",
       "pairing": [
@@ -197,6 +201,13 @@
           "label": {
             "en": "Network share",
             "hu": "Hálózati megosztás"
+          }
+        },
+        {
+          "kind": "art",
+          "label": {
+            "en": "Artwork",
+            "hu": "Borítók"
           }
         }
       ],
@@ -407,8 +418,12 @@
     "retroarch": {
       "files": [
         {
+          "path": "lib/art.js",
+          "sha256": "04de35e8e4ecb325b0f266aa68817cccdd1b1d59e90b0bd506705f66f465861b"
+        },
+        {
           "path": "lib/cores.js",
-          "sha256": "d11068e49ee5f72815a8a7b24023e352dc407cd3269df4bdd8bbd2a6cc6a7414"
+          "sha256": "ea8ef4da8beeaa3c29475485f93c66236286c2b5f4e6ebe445b7a31e9b669205"
         },
         {
           "path": "lib/roms.js",
@@ -420,11 +435,15 @@
         },
         {
           "path": "manifest.json",
-          "sha256": "3bac36a9f3da1f05223d895f179384f31a727c7b309519636d61514f919548ab"
+          "sha256": "78b45bb93bfca8bc269c8a7af575e60abed2ca40b183156d19a66bf272a2178b"
         },
         {
           "path": "package.json",
           "sha256": "d07db5d9d8256b0dac17e377101f797ec0ada9be21bd19a7128a06683656c0e8"
+        },
+        {
+          "path": "pairing/art.html",
+          "sha256": "ec756808711e747f8cec487a6c926d297fa83e006bde32a1ade9b3b9ffce7b2e"
         },
         {
           "path": "pairing/cores.html",
@@ -440,7 +459,7 @@
         },
         {
           "path": "plugin.js",
-          "sha256": "fa35de1b306c6d04041633bfd391e2a66d5d02b74c542a5d538e2960672d4906"
+          "sha256": "528b4e4c3f8163f8253abf3d1d13334e14adaaaa4cb7bb9c92f292aa05188bef"
         }
       ]
     },

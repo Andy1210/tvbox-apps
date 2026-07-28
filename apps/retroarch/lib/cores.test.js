@@ -209,16 +209,48 @@ test("with no index the checksum is not computed at all", () => {
 // that either refuses to start or runs on the CPU.
 test("the video driver comes from what the core says it needs", () => {
   const cases = [
-    ["OpenGL >= 3.0 | OpenGL ES >= 2.0", "gl"], // OpenLara
-    ["OpenGL Core >= 3.3 | Vulkan >= 1.0", "vulkan"], // Beetle PSX HW: its GL needs a core profile we do not have
-    ["OpenGL >= 3.0 | OpenGL ES >= 2.0 | Vulkan >= 1.0", "gl"], // both work; GL is the global default
-    ["OpenGL Core >= 3.3 | OpenGL ES >= 2.0", "gl"], // the ES option is the way in
-    ["OpenGL Core >= 4.5", null], // nothing here can serve it - not ours to force
-    ["Direct3D11 >= 11.0", null],
-    ["", null], // undeclared (a software core): the global driver is fine
-    [undefined, null],
+    ["OpenGL >= 3.0 | OpenGL ES >= 2.0", ["gl"]], // OpenLara
+    ["OpenGL Core >= 3.3 | Vulkan >= 1.0", ["vulkan"]], // Beetle PSX HW: its GL needs a core profile we do not have
+    ["OpenGL >= 3.0 | OpenGL ES >= 2.0 | Vulkan >= 1.0", ["gl", "vulkan"]], // either will do: keep the global one
+    ["OpenGL Core >= 3.3 | OpenGL ES >= 2.0", ["gl"]], // the ES option is the way in
+    ["OpenGL Core >= 4.5", []], // nothing here can serve it - not ours to force
+    ["Direct3D11 >= 11.0", []],
+    ["", []], // undeclared (a software core): the global driver is fine
+    [undefined, []],
   ];
-  for (const [api, want] of cases) assert.strictEqual(cores.videoDriverFor(api), want, JSON.stringify(api));
+  for (const [api, want] of cases) assert.deepStrictEqual(cores.videoDriversFor(api), want, JSON.stringify(api));
+});
+
+test("a core the global driver already suits keeps it, whichever driver that is", () => {
+  // The global driver is Vulkan on a box where GL does not reach the GPU. Overriding
+  // a both-APIs core to GL there would move it onto llvmpipe - the CPU - which is
+  // the opposite of what an override is for.
+  reset();
+  fs.rmSync(cores.OVERRIDES_DIR, { recursive: true, force: true });
+  const infoDir = cores.INFO_DIRS[0];
+  fs.mkdirSync(infoDir, { recursive: true });
+  const put = (core, name, api) =>
+    fs.writeFileSync(
+      path.join(infoDir, core + "_libretro.info"),
+      'corename = "' + name + '"\nrequired_hw_api = "' + api + '"\n',
+    );
+  putCore("flycast", CRC_VECTOR.data);
+  put("flycast", "Flycast", "OpenGL >= 3.0 | OpenGL ES >= 2.0 | Vulkan >= 1.0");
+  putCore("mednafen_psx_hw", CRC_VECTOR.data);
+  put("mednafen_psx_hw", "Beetle PSX HW", "OpenGL Core >= 3.3 | Vulkan >= 1.0");
+
+  const flycast = path.join(cores.OVERRIDES_DIR, "Flycast", "Flycast.cfg");
+  const psx = path.join(cores.OVERRIDES_DIR, "Beetle PSX HW", "Beetle PSX HW.cfg");
+
+  cores.syncDriverOverrides("gl");
+  assert.strictEqual(fs.existsSync(flycast), false, "GL is one of Flycast's own options");
+  assert.match(fs.readFileSync(psx, "utf8"), /video_driver = "vulkan"/, "GL cannot serve this one");
+
+  cores.syncDriverOverrides("vulkan");
+  assert.strictEqual(fs.existsSync(flycast), false, "and so is Vulkan - still nothing to override");
+  assert.strictEqual(fs.existsSync(psx), false, "the global driver now suits it, so our override goes");
+  fs.rmSync(infoDir, { recursive: true, force: true });
+  fs.rmSync(cores.OVERRIDES_DIR, { recursive: true, force: true });
 });
 
 test("an override sets only video_driver and leaves the rest of the file alone", () => {

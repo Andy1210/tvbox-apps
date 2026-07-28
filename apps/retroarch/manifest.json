@@ -2,8 +2,12 @@
   "id": "retroarch",
   "manifestVersion": 1,
   "name": "RetroArch",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "changelog": [
+    {
+      "version": "1.3.0",
+      "notes": "Games have covers now. RetroArch only shows artwork for games in a scanned list and never fetches it, so the box does: it walks your lists and puts a cover in place for every game one exists for, by itself whenever the box is idle, and on demand from the new Artwork page on your phone. Its menu is also shorter - the dead core downloader, the disc entries this box has no drive for, and the pictures/music/videos tabs are gone, so the consoles come first."
+    },
     {
       "version": "1.2.0",
       "notes": "OpenGL games work on the GPU now. Emulators that need OpenGL (OpenLara, Craft and most others) used to render on the processor, which made them unplayable; the box now picks the right graphics API per emulator from what that emulator itself declares, so the ones that need Vulkan keep using it."
@@ -34,8 +38,8 @@
     "hu": "Retro játékok"
   },
   "description": {
-    "en": "Play retro games on the TV. RetroArch runs its own full-screen interface, navigable with the remote or a controller, and the Home button always brings you back to the box. Consoles and games are added from your phone: the Consoles page installs the emulator you pick, and the upload page takes your game files - or point the box at a network share instead.",
-    "hu": "Retro játékok a tévén. A RetroArch a saját teljes képernyős felületét használja, amit a távirányítóval vagy kontrollerrel lehet kezelni, a Home gomb pedig mindig visszahoz a boxra. A konzolokat és a játékokat telefonról teszed fel: a Konzolok oldalon kiválasztod, melyik emulátor kell, a Játékok feltöltése oldalon pedig a játékfájlokat, vagy a boxot ráállítod egy hálózati megosztásra."
+    "en": "Play retro games on the TV. RetroArch runs its own full-screen interface, navigable with the remote or a controller, and the Home button always brings you back to the box. Consoles and games are added from your phone: the Consoles page installs the emulator you pick, and the upload page takes your game files - or point the box at a network share instead. Once a list of games is scanned, the box fetches their covers on its own.",
+    "hu": "Retro játékok a tévén. A RetroArch a saját teljes képernyős felületét használja, amit a távirányítóval vagy kontrollerrel lehet kezelni, a Home gomb pedig mindig visszahoz a boxra. A konzolokat és a játékokat telefonról teszed fel: a Konzolok oldalon kiválasztod, melyik emulátor kell, a Játékok feltöltése oldalon pedig a játékfájlokat, vagy a boxot ráállítod egy hálózati megosztásra. Ha a játéklista beolvasva van, a borítókat a box magától letölti."
   },
   "service": "retroarch",
   "pairing": [
@@ -58,6 +62,13 @@
       "label": {
         "en": "Network share",
         "hu": "Hálózati megosztás"
+      }
+    },
+    {
+      "kind": "art",
+      "label": {
+        "en": "Artwork",
+        "hu": "Borítók"
       }
     }
   ],

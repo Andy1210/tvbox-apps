@@ -13,13 +13,18 @@
 //   2. where the games are. RetroArch's file browser is pointed at the box's own
 //      roms folder so "Load Content" opens somewhere useful on a TV.
 //   3. how games and consoles GET there. A TV has no file manager, so the plugin
-//      registers three phone-pairing kinds: `roms` uploads files into
+//      registers four phone-pairing kinds: `roms` uploads files into
 //      roms/<system>/ (lib/roms.js), `share` points the box at an SMB server so
-//      several boxes can read one library (lib/share.js), and `cores` installs the
+//      several boxes can read one library (lib/share.js), `cores` installs the
 //      emulators themselves (lib/cores.js) - RetroArch's own Core Downloader cannot
-//      fetch anything in this build, so its menu is hidden. All three are forms on
-//      a phone rather than screens on the TV, because a native app has no screen of
-//      its own here and typing a password with a remote is miserable.
+//      fetch anything in this build, so its menu is hidden - and `art` fetches the
+//      games' covers (lib/art.js), which the same dead Online Updater would
+//      otherwise be responsible for. All four are forms on a phone rather than
+//      screens on the TV, because a native app has no screen of its own here and
+//      typing a password with a remote is miserable.
+//   4. the covers themselves, in the background: a pass over the playlists runs
+//      while the box is idle, so a freshly scanned console fills in without anyone
+//      asking (lib/art.js does the work; the phone page is for watching it).
 //
 // Settings are MERGED into RetroArch's own retroarch.cfg, never overwritten:
 // RetroArch saves its config on exit, so anything the user changes in its menus
@@ -31,6 +36,7 @@ const os = require("os");
 const roms = require("./lib/roms");
 const share = require("./lib/share"); // optional SMB game library shared by several boxes
 const cores = require("./lib/cores"); // the box installs and updates libretro cores itself
+const art = require("./lib/art"); // boxart for the playlists, fetched by the box
 
 const FLATPAK_REF = "org.libretro.RetroArch";
 // RetroArch's flatpak keeps its config under the standard per-app data dir.
@@ -238,6 +244,50 @@ const CORES_STR = {
   },
 };
 
+// Strings for the artwork page. The box fetches the covers itself in the
+// background, so this page is mostly a report: which console has how many, and a
+// button for "do it now" when someone does not want to wait for an idle moment.
+const ART_STR = {
+  hu: {
+    title: "tvbox - Borítók",
+    hint: "A RetroArch csak a beolvasott listákban lévő játékoknak tud borítót mutatni, magától viszont nem tölti le őket. A box ezt megteszi: átnézi a listákat, és amihez van kép, azt a helyére teszi. Magától is fut, amikor a box épp nem dolgozik.",
+    startBtn: "Hiányzók letöltése",
+    stopBtn: "Leállítás",
+    idle: "Minden borító megvan.",
+    summary: "{have} / {total} játéknak van borítója",
+    missingNote: "{n} hiányzik",
+    unavailableNote: "{n} játékhoz nincs kép a szerveren",
+    working: "Letöltés: {system}",
+    workingCount: "{done} / {todo}",
+    listing: "Lista kérése: {system}",
+    savedNote: "{n} kép letöltve.",
+    offline: "Nincs hálózat a boxon, ezért most nem tudok képeket letölteni.",
+    stopped: "Leállítva. A már letöltött képek megmaradnak.",
+    noGames: "Még nincs beolvasott játéklista. A RetroArch-ban a játékok beolvasása után lesz mit ide tenni.",
+    done: "kész",
+    errNetwork: "Nem érem el a boxot. Ugyanazon a wifin vagy?",
+  },
+  en: {
+    title: "tvbox - Artwork",
+    hint: "RetroArch can only show a cover for games in a scanned list, and it does not fetch them by itself. The box does: it walks the lists and puts a cover in place wherever one exists. It also runs on its own whenever the box is not busy.",
+    startBtn: "Download missing",
+    stopBtn: "Stop",
+    idle: "Every cover is in place.",
+    summary: "{have} of {total} games have a cover",
+    missingNote: "{n} missing",
+    unavailableNote: "no cover exists for {n} games",
+    working: "Downloading: {system}",
+    workingCount: "{done} of {todo}",
+    listing: "Listing: {system}",
+    savedNote: "{n} covers downloaded.",
+    offline: "The box has no network, so nothing can be downloaded right now.",
+    stopped: "Stopped. What was downloaded stays.",
+    noGames: "No game list has been scanned yet. Scan your games in RetroArch and there will be something to fetch.",
+    done: "done",
+    errNetwork: "Cannot reach the box. Are you on the same wifi?",
+  },
+};
+
 // Settings this plugin insists on. Everything else in retroarch.cfg is the
 // user's (or RetroArch's) business.
 // Whether OpenGL reaches the GPU on this box, which is not a given: the Pi renders
@@ -270,6 +320,26 @@ function requiredSettings() {
     // only ever answer "failed to retrieve core list" is worse than no entry, so
     // consoles are added from the box instead (lib/cores.js).
     menu_show_online_updater: "false",
+    // The Core Downloader has its own switch and is the same dead machinery, so it
+    // goes too - otherwise the one route into it that is left still answers
+    // "failed to retrieve core list".
+    menu_show_core_updater: "false",
+    // Nothing on this box can play a disc, so the two entries that ask for one are
+    // dead ends on a TV.
+    menu_show_load_disc: "false",
+    menu_show_dump_disc: "false",
+    // The pictures/music/videos tabs are RetroArch's own media player, pointed at
+    // its own empty folders - and they sit in the sidebar ABOVE the consoles. The
+    // box plays media itself, so hiding them is what puts the games first.
+    content_show_images: "false",
+    content_show_music: "false",
+    content_show_video: "false",
+    // Explore is a second way to the same games, built by indexing the whole
+    // library on a Pi. The playlists are the fast one.
+    content_show_explore: "false",
+    // Show the boxart the box downloads (lib/art.js). 3 is RetroArch's own value
+    // for "Boxarts" as the main thumbnail.
+    menu_thumbnails: "3",
   };
 }
 
@@ -360,6 +430,73 @@ module.exports = (host) => {
     });
   }
 
+  // ---- artwork ----
+  // A pass fetches the covers the playlists are missing (lib/art.js). It runs by
+  // itself as well as on demand, because a console scanned in RetroArch should
+  // simply have pictures by the time anyone looks at it again.
+  //
+  // Idleness is what it waits for: a full library is a few hundred megabytes over
+  // the same link a game on the network share is being read through. `host.idle` is
+  // shell 1.6+; on an older shell the pass just runs, since the alternative - never
+  // running unless someone finds the phone page - is a box with no covers and
+  // nothing saying why.
+  const ART_FIRST_MS = 90000; // let the box finish coming up before touching the network
+  const ART_EVERY_MS = 30 * 60 * 1000;
+  const boxIdle = () => (typeof host.idle === "function" ? host.idle() : true);
+  let artKick = null;
+  let artTimer = null;
+  let artRunning = false;
+  let artStop = false;
+  let artProgress = { running: false, system: null, listing: false, done: 0, todo: 0, saved: 0, failed: 0 };
+
+  function startArtSweep(force) {
+    if (artRunning) return false;
+    artRunning = true;
+    artStop = false;
+    artProgress = {
+      ...artProgress,
+      running: true,
+      saved: 0,
+      failed: 0,
+      unavailable: 0,
+      offline: false,
+      stopped: false,
+    };
+    art
+      .sweep({
+        env: host.childEnv(),
+        force,
+        idle: boxIdle,
+        stopped: () => artStop,
+        log: (m) => host.log("retroarch: " + m),
+        // `listing` is only ever sent as true, so it is cleared on every update
+        // rather than left to linger through the download that follows.
+        onProgress: (p) => {
+          artProgress = { ...artProgress, listing: false, ...p, running: true };
+        },
+      })
+      .then((r) => {
+        if (r.saved || r.failed)
+          host.log(
+            "retroarch: artwork: " +
+              r.saved +
+              " downloaded, " +
+              r.failed +
+              " failed" +
+              (r.unavailable ? ", " + r.unavailable + " with no cover upstream" : ""),
+          );
+        artProgress = { ...artProgress, ...r, running: false, listing: false, system: null };
+      })
+      .catch((e) => {
+        host.log("retroarch: artwork pass failed:", String((e && e.message) || e));
+        artProgress = { ...artProgress, running: false, listing: false, system: null };
+      })
+      .finally(() => {
+        artRunning = false;
+      });
+    return true;
+  }
+
   const routes = {
     // What the box knows about the retro setup: enough for a settings screen to
     // say "no consoles added yet" or "no games found" instead of sending the user
@@ -372,12 +509,14 @@ module.exports = (host) => {
         share: share.status(share.readConfig()),
         rclone: rcloneInstalled(),
         cores: cores.installed(), // what is on disk, without a network call
+        art: art.status(), // per console: how many games have a cover
       }),
   };
 
   const romsPage = fs.readFileSync(path.join(__dirname, "pairing", "roms.html"), "utf8");
   const sharePage = fs.readFileSync(path.join(__dirname, "pairing", "share.html"), "utf8");
   const coresPage = fs.readFileSync(path.join(__dirname, "pairing", "cores.html"), "utf8");
+  const artPage = fs.readFileSync(path.join(__dirname, "pairing", "art.html"), "utf8");
 
   // The share form's own routes. Saving remounts, so a corrected password takes
   // effect without the user going anywhere else.
@@ -452,6 +591,17 @@ module.exports = (host) => {
     "POST /core-remove": (req, res, ctx) => ctx.json(res, cores.remove(String((ctx.body || {}).core || ""))),
   };
 
+  // The artwork page. Starting is `force`: someone asking from the phone means now,
+  // idle or not, and even for a console that was listed recently.
+  const artRoutes = {
+    "GET /art": (req, res, ctx) => ctx.json(res, { systems: art.status(), progress: artProgress }),
+    "POST /art-start": (req, res, ctx) => ctx.json(res, { ok: true, started: startArtSweep(true) }),
+    "POST /art-stop": (req, res, ctx) => {
+      artStop = true;
+      ctx.json(res, { ok: true });
+    },
+  };
+
   return {
     start() {
       host.registerRoutes("/tvbox/api/retroarch", routes);
@@ -481,6 +631,10 @@ module.exports = (host) => {
         page: (ctx) => renderTemplate(sharePage, { lang: ctx.locale, ...(SHARE_STR[ctx.locale] || SHARE_STR.en) }),
         routes: shareRoutes,
       });
+      host.pairing.register("art", {
+        page: (ctx) => renderTemplate(artPage, { lang: ctx.locale, ...(ART_STR[ctx.locale] || ART_STR.en) }),
+        routes: artRoutes,
+      });
       try {
         if (applyConfig())
           host.log(
@@ -503,9 +657,21 @@ module.exports = (host) => {
       if (share.readConfig()) {
         if (mountShare()) host.log("retroarch: mounting network share at " + share.mountPoint(share.readConfig()));
       }
+      // Covers, in the background. A pass over a library that is already complete
+      // reads a few directories and makes no network request, so a tick is cheap
+      // enough to be regular: what it is really waiting for is a console the user
+      // scanned while the box was busy.
+      const artTick = () => {
+        if (boxIdle()) startArtSweep(false);
+      };
+      artKick = setTimeout(artTick, ART_FIRST_MS);
+      artTimer = setInterval(artTick, ART_EVERY_MS);
     },
     stop() {
       unmountShare();
+      artStop = true;
+      clearTimeout(artKick);
+      clearInterval(artTimer);
     },
   };
 };
