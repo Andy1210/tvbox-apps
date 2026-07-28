@@ -416,7 +416,7 @@
         },
         {
           "path": "manifest.json",
-          "sha256": "896a346027bf080f7d20f2c832c2159d279cafe1ea9b9ca8e787ba7a43caae58"
+          "sha256": "6db728bceb3ad2f4e3e13789757c7402fecdae2d3f1a6a51c9dd366a3738783a"
         },
         {
           "path": "package.json",
