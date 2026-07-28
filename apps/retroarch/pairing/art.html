@@ -171,10 +171,13 @@
         b.textContent = s.system;
         const small = document.createElement("small");
         // Missing and "there is no cover for it" are different answers, and only
-        // the first one is worth waiting for.
+        // the first one is worth waiting for - so the two counts are disjoint here,
+        // and a console whose only gaps are the second kind reads as done.
+        const noCover = s.unavailable || 0;
+        const left = Math.max(0, s.missing - noCover);
         const notes = [fill(T.summary, s)];
-        if (s.missing) notes.push(fill(T.missingNote, { n: s.missing }));
-        if (s.unavailable) notes.push(fill(T.unavailableNote, { n: s.unavailable }));
+        if (left) notes.push(fill(T.missingNote, { n: left }));
+        if (noCover) notes.push(fill(T.unavailableNote, { n: noCover }));
         small.textContent = notes.join(" - ");
         const bar = document.createElement("div");
         bar.className = "bar";
@@ -184,9 +187,9 @@
         nm.append(b, small, bar);
         el.appendChild(nm);
         const tag = document.createElement("span");
-        const complete = !s.missing;
+        const complete = !left;
         tag.className = "tag " + (complete ? "on" : "part");
-        tag.textContent = complete ? T.done : s.total - s.have + "";
+        tag.textContent = complete ? T.done : left + "";
         el.appendChild(tag);
         into.appendChild(el);
       }
@@ -197,6 +200,9 @@
         running = !!p.running;
         const total = systems.reduce((n, s) => n + s.total, 0);
         const have = systems.reduce((n, s) => n + s.have, 0);
+        // What a pass could still fetch. Not total - have: a game the server has no
+        // cover for would keep the page one step short of done for good.
+        const left = systems.reduce((n, s) => n + Math.max(0, s.missing - (s.unavailable || 0)), 0);
         $("total").textContent = total ? fill(T.summary, { have, total }) : "";
         const list = $("list");
         list.textContent = "";
@@ -205,12 +211,17 @@
         const go = $("go");
         go.textContent = running ? T.stopBtn : T.startBtn;
         go.className = "btn-wide" + (running ? " sec" : "");
-        // Nothing to start when every cover is in place; stopping is always allowed.
-        go.disabled = !running && (!total || have >= total);
+        // Nothing to start when every cover a pass could fetch is in place; stopping
+        // is always allowed.
+        go.disabled = !running && (!total || !left);
         go.onclick = async () => {
           go.disabled = true;
           const r = await api(running ? "/art-stop" : "/art-start").catch(() => null);
-          if (!r) return say(T.errNetwork, "bad");
+          if (!r) {
+            // the only control on the page must not stay dead until a refresh
+            go.disabled = false;
+            return say(T.errNetwork, "bad");
+          }
           load();
         };
 
@@ -224,7 +235,7 @@
         if (p.offline) return say(T.offline, "bad");
         if (p.stopped) return say(T.stopped, "busy");
         if (p.saved) return say(fill(T.savedNote, { n: p.saved }), "ok");
-        if (have >= total) return say(T.idle, "ok");
+        if (!left) return say(T.idle, "ok");
         say("");
       }
 
