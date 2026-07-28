@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="{{lang}}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>{{title}}</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: auto;
+        background: #0b0f14;
+        color: #f4f6fa;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        padding: 24px;
+        max-width: 520px;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      p {
+        color: #aab4c2;
+        font-size: 14px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 0;
+        border-bottom: 1px solid #1b2430;
+      }
+      .nm {
+        flex: 1;
+        min-width: 0;
+      }
+      .nm b {
+        display: block;
+        font-size: 16px;
+      }
+      .nm small {
+        color: #7d8a99;
+        font-size: 12px;
+      }
+      .tag {
+        font-size: 12px;
+        padding: 2px 8px;
+        border-radius: 99px;
+        white-space: nowrap;
+      }
+      .tag.on {
+        background: #16351f;
+        color: #6ad48a;
+      }
+      .tag.part {
+        background: #3a3016;
+        color: #e0b64a;
+      }
+      /* The share of a console's games that have a cover. A number plus a bar,
+         because "771 of 773" is the answer but the bar is what is glanceable. */
+      .bar {
+        height: 4px;
+        border-radius: 99px;
+        background: #1b2430;
+        margin-top: 6px;
+        overflow: hidden;
+      }
+      .bar i {
+        display: block;
+        height: 100%;
+        background: #7c5cd6;
+      }
+      button {
+        border: 0;
+        border-radius: 10px;
+        padding: 10px 14px;
+        font-size: 15px;
+        font-weight: 600;
+        background: #7c5cd6;
+        color: #fff;
+        white-space: nowrap;
+      }
+      button.sec {
+        background: #1c2531;
+        color: #cfd8e3;
+      }
+      button[disabled] {
+        opacity: 0.5;
+      }
+      .btn-wide {
+        display: block;
+        width: 100%;
+        padding: 15px;
+        margin-top: 14px;
+        border-radius: 12px;
+        font-size: 17px;
+        font-weight: 700;
+      }
+      #total {
+        margin-top: 18px;
+        font-size: 17px;
+        font-weight: 600;
+      }
+      #st {
+        margin-top: 12px;
+        font-size: 15px;
+        min-height: 22px;
+      }
+      #st.ok {
+        color: #6ad48a;
+      }
+      #st.bad {
+        color: #e5766b;
+      }
+      #st.busy {
+        color: #7d8a99;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>{{title}}</h1>
+    <p>{{hint}}</p>
+
+    <div id="total"></div>
+    <button class="btn-wide" id="go"></button>
+    <div id="st"></div>
+    <div id="list"></div>
+
+    <script>
+      const T = {
+        startBtn: "{{startBtn}}",
+        stopBtn: "{{stopBtn}}",
+        idle: "{{idle}}",
+        summary: "{{summary}}",
+        missingNote: "{{missingNote}}",
+        unavailableNote: "{{unavailableNote}}",
+        working: "{{working}}",
+        workingCount: "{{workingCount}}",
+        listing: "{{listing}}",
+        savedNote: "{{savedNote}}",
+        offline: "{{offline}}",
+        stopped: "{{stopped}}",
+        noGames: "{{noGames}}",
+        done: "{{done}}",
+        errNetwork: "{{errNetwork}}",
+      };
+      const code = new URLSearchParams(location.search).get("c") || "";
+      const $ = (id) => document.getElementById(id);
+      const say = (m, cls) => {
+        $("st").textContent = m || "";
+        $("st").className = cls || "";
+      };
+      const fill = (s, vars) => s.replace(/\{(\w+)\}/g, (_, k) => (vars[k] == null ? "" : vars[k]));
+      const api = (p) =>
+        fetch(p, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code }),
+        }).then((r) => r.json());
+
+      let running = false;
+
+      function row(s, into) {
+        const el = document.createElement("div");
+        el.className = "row";
+        const nm = document.createElement("div");
+        nm.className = "nm";
+        const b = document.createElement("b");
+        b.textContent = s.system;
+        const small = document.createElement("small");
+        // Missing and "there is no cover for it" are different answers, and only
+        // the first one is worth waiting for - so the two counts are disjoint here,
+        // and a console whose only gaps are the second kind reads as done.
+        const noCover = s.unavailable || 0;
+        const left = Math.max(0, s.missing - noCover);
+        const notes = [fill(T.summary, s)];
+        if (left) notes.push(fill(T.missingNote, { n: left }));
+        if (noCover) notes.push(fill(T.unavailableNote, { n: noCover }));
+        small.textContent = notes.join(" - ");
+        const bar = document.createElement("div");
+        bar.className = "bar";
+        const i = document.createElement("i");
+        i.style.width = (s.total ? Math.round((100 * s.have) / s.total) : 0) + "%";
+        bar.appendChild(i);
+        nm.append(b, small, bar);
+        el.appendChild(nm);
+        const tag = document.createElement("span");
+        const complete = !left;
+        tag.className = "tag " + (complete ? "on" : "part");
+        tag.textContent = complete ? T.done : left + "";
+        el.appendChild(tag);
+        into.appendChild(el);
+      }
+
+      function render(d) {
+        const systems = d.systems || [];
+        const p = d.progress || {};
+        running = !!p.running;
+        const total = systems.reduce((n, s) => n + s.total, 0);
+        const have = systems.reduce((n, s) => n + s.have, 0);
+        // What a pass could still fetch. Not total - have: a game the server has no
+        // cover for would keep the page one step short of done for good.
+        const left = systems.reduce((n, s) => n + Math.max(0, s.missing - (s.unavailable || 0)), 0);
+        $("total").textContent = total ? fill(T.summary, { have, total }) : "";
+        const list = $("list");
+        list.textContent = "";
+        for (const s of systems) row(s, list);
+
+        const go = $("go");
+        go.textContent = running ? T.stopBtn : T.startBtn;
+        go.className = "btn-wide" + (running ? " sec" : "");
+        // Nothing to start when every cover a pass could fetch is in place; stopping
+        // is always allowed.
+        go.disabled = !running && (!total || !left);
+        go.onclick = async () => {
+          go.disabled = true;
+          const r = await api(running ? "/art-stop" : "/art-start").catch(() => null);
+          if (!r) {
+            // the only control on the page must not stay dead until a refresh
+            go.disabled = false;
+            return say(T.errNetwork, "bad");
+          }
+          load();
+        };
+
+        if (!total) return say(T.noGames, "busy");
+        if (running) {
+          const what = p.listing ? T.listing : T.working;
+          const line = fill(what, { system: p.system || "" });
+          const count = p.todo ? " " + fill(T.workingCount, { done: p.done || 0, todo: p.todo }) : "";
+          return say(line + count, "busy");
+        }
+        if (p.offline) return say(T.offline, "bad");
+        if (p.stopped) return say(T.stopped, "busy");
+        if (p.saved) return say(fill(T.savedNote, { n: p.saved }), "ok");
+        if (!left) return say(T.idle, "ok");
+        say("");
+      }
+
+      async function load() {
+        try {
+          render(await fetch("/art?c=" + encodeURIComponent(code)).then((r) => r.json()));
+        } catch (e) {
+          say(T.errNetwork, "bad");
+        }
+      }
+      // While a pass runs the numbers move, so the page follows it closely; when it
+      // is idle this only has to notice a pass the box started by itself - hence the
+      // rescheduled timeout rather than one fixed interval.
+      (async function poll() {
+        await load();
+        setTimeout(poll, running ? 1500 : 5000);
+      })();
+    </script>
+  </body>
+</html>
