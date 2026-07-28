@@ -118,6 +118,7 @@ test("the info files give a core its human name, and a nameless core still lists
     display: "Sony - PlayStation 2 (LRPS2)",
     name: "LRPS2",
     system: "Sony PlayStation 2",
+    api: "",
   });
   reset();
   const entry = cores
@@ -198,6 +199,56 @@ test("with no index the checksum is not computed at all", () => {
   const entry = cores.list(null).find((c) => c.core === "fceumm");
   assert.strictEqual(entry.installed, true);
   assert.strictEqual(entry.crc, null, "nothing to compare against, so nothing is read");
+});
+
+// ---- which driver a core gets ----
+//
+// This hardware serves desktop GL 3.1 (compat), GLES 3.1 and Vulkan, but no GL
+// core profile above 3.1, and RetroArch asks for exactly what a core declares. So
+// the rule reads the core's own `required_hw_api`; getting it wrong means a core
+// that either refuses to start or runs on the CPU.
+test("the video driver comes from what the core says it needs", () => {
+  const cases = [
+    ["OpenGL >= 3.0 | OpenGL ES >= 2.0", "gl"], // OpenLara
+    ["OpenGL Core >= 3.3 | Vulkan >= 1.0", "vulkan"], // Beetle PSX HW: its GL needs a core profile we do not have
+    ["OpenGL >= 3.0 | OpenGL ES >= 2.0 | Vulkan >= 1.0", "gl"], // both work; GL is the global default
+    ["OpenGL Core >= 3.3 | OpenGL ES >= 2.0", "gl"], // the ES option is the way in
+    ["OpenGL Core >= 4.5", null], // nothing here can serve it - not ours to force
+    ["Direct3D11 >= 11.0", null],
+    ["", null], // undeclared (a software core): the global driver is fine
+    [undefined, null],
+  ];
+  for (const [api, want] of cases) assert.strictEqual(cores.videoDriverFor(api), want, JSON.stringify(api));
+});
+
+test("an override sets only video_driver and leaves the rest of the file alone", () => {
+  // RetroArch writes these files itself for core options and input remaps, so
+  // anything else in there is the user's.
+  const dir = path.join(cores.OVERRIDES_DIR, "Beetle PSX HW");
+  const file = path.join(dir, "Beetle PSX HW.cfg");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(file, 'input_player1_analog_dpad_mode = "1"\nvideo_driver = "gl"\n');
+  assert.strictEqual(cores.setOverrideDriver("Beetle PSX HW", "vulkan"), true);
+  const after = fs.readFileSync(file, "utf8");
+  assert.match(after, /input_player1_analog_dpad_mode = "1"/, "the user's own line must survive");
+  assert.match(after, /video_driver = "vulkan"/);
+  assert.strictEqual((after.match(/video_driver/g) || []).length, 1, "no duplicate key");
+  // clearing it leaves the file (the other key is still wanted)
+  cores.setOverrideDriver("Beetle PSX HW", null);
+  assert.doesNotMatch(fs.readFileSync(file, "utf8"), /video_driver/);
+});
+
+test("an override file that only carried our key is removed, not left empty", () => {
+  const file = path.join(cores.OVERRIDES_DIR, "Craft", "Craft.cfg");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, 'video_driver = "vulkan"\n');
+  cores.setOverrideDriver("Craft", null);
+  assert.strictEqual(fs.existsSync(file), false);
+  assert.strictEqual(fs.existsSync(path.dirname(file)), false, "and the directory goes with it");
+});
+
+test("a corename that could escape its directory is refused", () => {
+  for (const bad of ["../../etc", "a/b", "..", ""]) assert.strictEqual(cores.setOverrideDriver(bad, "gl"), false);
 });
 
 test.after(() => {

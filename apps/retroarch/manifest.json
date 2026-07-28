@@ -2,8 +2,12 @@
   "id": "retroarch",
   "manifestVersion": 1,
   "name": "RetroArch",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "changelog": [
+    {
+      "version": "1.2.0",
+      "notes": "OpenGL games work on the GPU now. Emulators that need OpenGL (OpenLara, Craft and most others) used to render on the processor, which made them unplayable; the box now picks the right graphics API per emulator from what that emulator itself declares, so the ones that need Vulkan keep using it."
+    },
     {
       "version": "1.1.1",
       "notes": "The consoles page opens faster: the box no longer re-reads every installed emulator in full to check whether it is up to date."
