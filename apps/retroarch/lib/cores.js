@@ -66,22 +66,56 @@ function isRegularFile(p) {
   }
 }
 
+// The checksum of every installed core is what the list compares against the
+// index, and a core is tens of MB. So it is read in CHUNKS rather than whole (a
+// dozen cores would otherwise be a few hundred MB of allocation in the shell's own
+// process), and cached against size+mtime: a file's checksum cannot change while
+// the file does not, and this list is rebuilt every time the page is opened.
+const CRC_CHUNK = 1 << 16;
+const crcCache = new Map(); // path -> { size, mtimeMs, crc }
 function crc32OfFile(p) {
+  let st = null;
   try {
-    const buf = fs.readFileSync(p);
-    return (zlib.crc32 ? zlib.crc32(buf) : legacyCrc32(buf)) >>> 0;
+    st = fs.statSync(p);
   } catch (e) {
     return null;
   }
+  const hit = crcCache.get(p);
+  if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) return hit.crc;
+  let fd = null;
+  try {
+    fd = fs.openSync(p, "r");
+    const buf = Buffer.allocUnsafe(CRC_CHUNK);
+    let crc = 0;
+    for (;;) {
+      const n = fs.readSync(fd, buf, 0, CRC_CHUNK, null);
+      if (n <= 0) break;
+      crc = crc32Chunk(buf.subarray(0, n), crc);
+    }
+    crcCache.set(p, { size: st.size, mtimeMs: st.mtimeMs, crc });
+    return crc;
+  } catch (e) {
+    return null;
+  } finally {
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd);
+      } catch (e) {
+        /* already gone */
+      }
+    }
+  }
 }
-// zlib.crc32 landed in Node 20.15; keep working on an older runtime.
-function legacyCrc32(buf) {
-  let c = ~0;
+// zlib.crc32 landed in Node 20.15; keep working on an older runtime. Both forms
+// continue from a running value, which is what lets a file be read in pieces.
+function crc32Chunk(buf, prev) {
+  if (zlib.crc32) return zlib.crc32(buf, prev >>> 0);
+  let c = ~(prev >>> 0) >>> 0;
   for (let i = 0; i < buf.length; i++) {
     c ^= buf[i];
     for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
   }
-  return ~c;
+  return ~c >>> 0;
 }
 const hex8 = (n) => (n >>> 0).toString(16).padStart(8, "0");
 
@@ -172,7 +206,9 @@ function list(index) {
   for (const core of names) {
     const meta = info.get(core) || {};
     const remote = index ? index.get(core) || null : null;
-    const crc = have.has(core) ? crc32OfFile(path.join(CORES_DIR, coreFile(core))) : null;
+    // No index (offline) means nothing to compare against, so the read is skipped
+    // rather than done for a value nobody looks at.
+    const crc = have.has(core) && index ? crc32OfFile(path.join(CORES_DIR, coreFile(core))) : null;
     out.push({
       core,
       // display_name is the fullest ("Sony - PlayStation 2 (LRPS2)"); fall back to

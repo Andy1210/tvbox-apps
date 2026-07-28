@@ -9,12 +9,14 @@
 //      rather than left to whatever RetroArch defaults to.
 //   2. where the games are. RetroArch's file browser is pointed at the box's own
 //      roms folder so "Load Content" opens somewhere useful on a TV.
-//   3. how games GET there. A TV has no file manager, so the plugin registers two
-//      phone-pairing kinds: `roms` uploads files into roms/<system>/ (lib/roms.js),
-//      and `share` points the box at an SMB server so several boxes can read one
-//      library (lib/share.js). Both are forms on a phone rather than screens on the
-//      TV, because a native app has no screen of its own here and typing a password
-//      with a remote is miserable.
+//   3. how games and consoles GET there. A TV has no file manager, so the plugin
+//      registers three phone-pairing kinds: `roms` uploads files into
+//      roms/<system>/ (lib/roms.js), `share` points the box at an SMB server so
+//      several boxes can read one library (lib/share.js), and `cores` installs the
+//      emulators themselves (lib/cores.js) - RetroArch's own Core Downloader cannot
+//      fetch anything in this build, so its menu is hidden. All three are forms on
+//      a phone rather than screens on the TV, because a native app has no screen of
+//      its own here and typing a password with a remote is miserable.
 //
 // Settings are MERGED into RetroArch's own retroarch.cfg, never overwritten:
 // RetroArch saves its config on exit, so anything the user changes in its menus
@@ -31,7 +33,6 @@ const FLATPAK_REF = "org.libretro.RetroArch";
 // RetroArch's flatpak keeps its config under the standard per-app data dir.
 const CFG_DIR = path.join(os.homedir(), ".var", "app", FLATPAK_REF, "config", "retroarch");
 const CFG_FILE = path.join(CFG_DIR, "retroarch.cfg");
-const CORES_DIR = path.join(CFG_DIR, "cores");
 // One chunk of an upload, base64 in a JSON body, plus room for the envelope.
 const CHUNK_MAX_BODY = 8e6;
 
@@ -295,21 +296,6 @@ module.exports = (host) => {
     return true;
   }
 
-  // Installed cores, by the file name RetroArch uses. Cores are added by the user
-  // from RetroArch's Online Updater; this is only here so the box can tell
-  // whether any console has been set up yet.
-  function installedCores() {
-    try {
-      return fs
-        .readdirSync(CORES_DIR)
-        .filter((f) => f.endsWith("_libretro.so"))
-        .map((f) => f.replace(/_libretro\.so$/, ""))
-        .sort();
-    } catch (e) {
-      return [];
-    }
-  }
-
   // ---- network share ----
   // The mount runs under the shell's service supervisor rather than rclone's own
   // --daemon: a share that goes away with the network then comes back on its own
@@ -360,7 +346,6 @@ module.exports = (host) => {
     // into an empty RetroArch.
     "GET /state": (req, res) =>
       host.json(res, {
-        cores: installedCores(),
         romsDir: roms.ROMS_DIR,
         roms: roms.count(),
         library: roms.list(),
@@ -477,7 +462,7 @@ module.exports = (host) => {
       } catch (e) {
         host.log("retroarch: could not write settings:", e.message);
       }
-      host.log("retroarch: " + installedCores().length + " core(s) installed, " + roms.count() + " game(s)");
+      host.log("retroarch: " + cores.installed().length + " core(s) installed, " + roms.count() + " game(s)");
       // A configured share comes up with the box, so the games are simply there.
       if (share.readConfig()) {
         if (mountShare()) host.log("retroarch: mounting network share at " + share.mountPoint(share.readConfig()));

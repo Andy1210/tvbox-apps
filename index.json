@@ -141,8 +141,12 @@
       "id": "retroarch",
       "manifestVersion": 1,
       "name": "RetroArch",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "changelog": [
+        {
+          "version": "1.1.1",
+          "notes": "The consoles page opens faster: the box no longer re-reads every installed emulator in full to check whether it is up to date."
+        },
         {
           "version": "1.1.0",
           "notes": "Consoles are added from the box now: pick one and the emulator for it is downloaded and checked, with a note when a newer build appears. RetroArch's own Online Updater is hidden, because in this build it cannot fetch anything."
@@ -400,7 +404,7 @@
       "files": [
         {
           "path": "lib/cores.js",
-          "sha256": "41923c2d77eda8aaa6d765a716ab9b45d8f94959e348432c5b31d130e5ae1e41"
+          "sha256": "3d6850e6eab73de60767a617dd883b52f5c1c49a707f11154d3cb1efa9f13427"
         },
         {
           "path": "lib/roms.js",
@@ -412,7 +416,7 @@
         },
         {
           "path": "manifest.json",
-          "sha256": "3a101adfd363611376f49895cbbd4dd4ec4ce924f1f6ed8c6b2210d5eccb2420"
+          "sha256": "896a346027bf080f7d20f2c832c2159d279cafe1ea9b9ca8e787ba7a43caae58"
         },
         {
           "path": "package.json",
@@ -432,7 +436,7 @@
         },
         {
           "path": "plugin.js",
-          "sha256": "80d353d4e421d5b1c93597e88ebf8e3960eaec584b1ea35b5cd2ef89a6508495"
+          "sha256": "382d97b78927f09ed87fe152bad179d7165f386c4dc69cbe8c331a191d3c65f9"
         }
       ]
     },

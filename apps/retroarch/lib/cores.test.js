@@ -6,6 +6,7 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const zlib = require("zlib");
 const test = require("node:test");
 const assert = require("node:assert");
 
@@ -54,7 +55,11 @@ test("an installed core reports its own CRC32", () => {
   reset();
   putCore("fceumm", CRC_VECTOR.data);
   assert.deepStrictEqual(cores.installed(), ["fceumm"]);
-  const entry = cores.list(null).find((c) => c.core === "fceumm");
+  // with an index present: the checksum exists to be compared against it, and is
+  // not read when there is nothing to compare with (see the offline test below)
+  const entry = cores
+    .list(cores.parseIndex("2026-07-26 deadbeef fceumm_libretro.so.zip"))
+    .find((c) => c.core === "fceumm");
   assert.strictEqual(entry.crc, CRC_VECTOR.crc);
 });
 
@@ -153,6 +158,46 @@ test("the info dir follows the box's architecture", () => {
   // Hard-coding aarch64 here would leave an x86_64 box with no core metadata at
   // all, so every core would show as its bare file name.
   for (const dir of cores.INFO_DIRS) assert.match(dir, /\/(aarch64|x86_64)\//);
+});
+
+// The list checksums every installed core, and a core is tens of MB, so the read is
+// chunked. Chunking is easy to get subtly wrong (the running value has to carry
+// between pieces), and the consequence would be a core that always looks stale.
+test("a file larger than one chunk checksums the same as reading it whole", () => {
+  reset();
+  const big = Buffer.alloc(200 * 1024);
+  for (let i = 0; i < big.length; i++) big[i] = (i * 31 + 7) & 0xff;
+  putCore("bigcore", big);
+  const p = path.join(cores.CORES_DIR, "bigcore_libretro.so");
+  const entry = cores
+    .list(cores.parseIndex("2026-07-26 deadbeef bigcore_libretro.so.zip"))
+    .find((c) => c.core === "bigcore");
+  // zlib over the whole buffer is an independent oracle, not this implementation
+  assert.strictEqual(entry.crc, (zlib.crc32(fs.readFileSync(p)) >>> 0).toString(16).padStart(8, "0"));
+  assert.ok(big.length > 65536, "the file has to span more than one chunk to prove anything");
+});
+
+test("a changed core is checksummed again, not served from the cache", () => {
+  reset();
+  putCore("fceumm", CRC_VECTOR.data);
+  const idx = cores.parseIndex("2026-07-26 " + CRC_VECTOR.crc + " fceumm_libretro.so.zip");
+  const of = () => cores.list(idx).find((c) => c.core === "fceumm");
+  assert.strictEqual(of().updatable, false, "the installed core matches the index");
+  // Same length, different bytes, and an explicitly bumped mtime - a cache keyed on
+  // size alone (or on a same-millisecond mtime) would keep answering the old value.
+  const p = path.join(cores.CORES_DIR, "fceumm_libretro.so");
+  fs.writeFileSync(p, "987654321");
+  const t = new Date(Date.now() + 2000);
+  fs.utimesSync(p, t, t);
+  assert.strictEqual(of().updatable, true, "the file changed, so it no longer matches");
+});
+
+test("with no index the checksum is not computed at all", () => {
+  reset();
+  putCore("fceumm", CRC_VECTOR.data);
+  const entry = cores.list(null).find((c) => c.core === "fceumm");
+  assert.strictEqual(entry.installed, true);
+  assert.strictEqual(entry.crc, null, "nothing to compare against, so nothing is read");
 });
 
 test.after(() => {
