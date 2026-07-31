@@ -119,7 +119,14 @@ test("the info files give a core its human name, and a nameless core still lists
     name: "LRPS2",
     system: "Sony PlayStation 2",
     api: "",
+    databases: [],
+    extensions: [],
   });
+  const dbs = cores.parseInfo(
+    'systemname = "Game Boy/Game Boy Color"\ndatabase = "Nintendo - Game Boy|Nintendo - Game Boy Color"\nsupported_extensions = "gb|gbc|DMG"\n',
+  );
+  assert.deepStrictEqual(dbs.databases, ["Nintendo - Game Boy", "Nintendo - Game Boy Color"]);
+  assert.deepStrictEqual(dbs.extensions, ["gb", "gbc", "dmg"]);
   reset();
   const entry = cores
     .list(cores.parseIndex("2026-07-26 deadbeef weird_core_libretro.so.zip"))
