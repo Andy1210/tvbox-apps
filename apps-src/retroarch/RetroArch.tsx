@@ -146,7 +146,9 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
             ? t("retroarch.noCoreFor", { system })
             : r.error === "rom_missing"
               ? t("retroarch.romMissing")
-              : t("retroarch.playFailed"),
+              : r.error === "shell_too_old"
+                ? t("retroarch.shellTooOld")
+                : t("retroarch.playFailed"),
         );
       })
       .catch(() => {
