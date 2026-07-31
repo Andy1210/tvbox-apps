@@ -313,6 +313,21 @@ function requiredSettings() {
     audio_driver: "pulse",
     rgui_browser_directory: roms.ROMS_DIR,
     video_fullscreen: "true",
+    // Where RetroArch's OWN bundled content lives. It ships menu icons, gamepad
+    // autoconfig profiles, core info and the content database inside the flatpak,
+    // but a retroarch.cfg it generates from scratch points all four at user
+    // directories under ~/.var that nothing ever fills. On a fresh box that reads
+    // as three separate faults and none of them look like a path: the menu draws
+    // black squares where the icons should be, the UI is missing its furniture,
+    // and a plugged-in controller logs "not configured" - no profile matched, so
+    // no button is mapped and NOTHING drives the interface, pad or remote.
+    // /app is the flatpak's own prefix, so it is stable for as long as this app
+    // is a flatpak (requires.flatpak in the manifest) - and if RetroArch is ever
+    // run some other way, these are the paths that have to move with it.
+    assets_directory: "/app/share/libretro/assets/",
+    joypad_autoconfig_dir: "/app/share/libretro/autoconfig",
+    libretro_info_path: "/app/share/libretro/info",
+    content_database_path: "/app/share/libretro/database/rdb",
     // RetroArch's own Online Updater is hidden, because in this build it does not
     // work and cannot be made to: opening the Core Downloader starts no network
     // request at all (nothing appears in its log), and setting the buildbot URL,
