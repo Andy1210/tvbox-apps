@@ -6,7 +6,7 @@
   "changelog": [
     {
       "version": "1.4.0",
-      "notes": "The games are on the box now. Opening RetroArch shows your own consoles and covers in a grid you can drive with the remote, and pressing OK starts the game straight away - no emulator menu in between, and when the game ends you are back in the list. Consoles and covers can be managed from the TV as well as from your phone, and on a controller the Xbox/Guide button opens the emulator's own menu (save states, close content) mid-game."
+      "notes": "The games are on the box now. Opening RetroArch shows your own consoles and covers in a grid you can drive with the remote or a controller, and pressing OK starts the game straight away - no emulator menu in between, and when the game ends you are back in the list. Consoles and covers can be managed from the TV as well as from your phone. The Xbox/Guide button also opens the emulator's own menu mid-game (save states, close content) on pads where it previously did nothing: which button that is differs per controller, so the box now reads it from the controller itself instead of trusting one number."
     },
     {
       "version": "1.3.0",

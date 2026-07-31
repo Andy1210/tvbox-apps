@@ -39,6 +39,8 @@ const share = require("./lib/share"); // optional SMB game library shared by sev
 const cores = require("./lib/cores"); // the box installs and updates libretro cores itself
 const art = require("./lib/art"); // boxart for the playlists, fetched by the box
 const games = require("./lib/games"); // the game list the app's own grid renders, and which core plays what
+const pads = require("./lib/pads"); // where a pad's Guide button sits, per device
+const autoconfig = require("./lib/autoconfig"); // our own controller-profile dir, mirrored from the flatpak's
 
 const FLATPAK_REF = "org.libretro.RetroArch";
 // RetroArch's flatpak keeps its config under the standard per-app data dir.
@@ -327,7 +329,12 @@ function requiredSettings() {
     // is a flatpak (requires.flatpak in the manifest) - and if RetroArch is ever
     // run some other way, these are the paths that have to move with it.
     assets_directory: "/app/share/libretro/assets/",
-    joypad_autoconfig_dir: "/app/share/libretro/autoconfig",
+    // Controller profiles come from OUR directory, which mirrors the flatpak's as
+    // symlinks and holds a corrected copy of any profile whose menu-toggle button is
+    // wrong for the device it matches (lib/autoconfig.js, lib/pads.js). The flatpak's
+    // own directory is read-only, so nothing could be corrected there - and
+    // RetroArch's "Save Controller Profile" could not write there either.
+    joypad_autoconfig_dir: autoconfig.DIR,
     libretro_info_path: "/app/share/libretro/info",
     content_database_path: "/app/share/libretro/database/rdb",
     // RetroArch's own Online Updater is hidden, because in this build it does not
@@ -358,15 +365,18 @@ function requiredSettings() {
     // for "Boxarts" as the main thumbnail.
     menu_thumbnails: "3",
     // The Guide button opens RetroArch's Quick Menu mid-game - resume, save states,
-    // close content - and RetroArch pauses the game while it is up. That menu is the
-    // only in-game affordance a pad has here, and it is reached by a bind that is
-    // per-DEVICE: a pad's autoconfig profile overrides this whenever it defines one
-    // (every Xbox profile in the flatpak binds button 8 to exactly this), so the
-    // global default only fills in for the profiles that define none - which is the
-    // case for the official Xbox Wireless Controller, whose profile is the one Xbox
-    // profile without it. 8 is the udev driver's index for BTN_MODE on an
-    // Xbox-layout pad (SELECT 6, START 7, MODE 8).
-    input_menu_toggle_btn: "8",
+    // close content - and RetroArch pauses the game while it is up, which is the only
+    // in-game affordance a pad has here. Which BUTTON that is cannot be one value:
+    // the index depends on the key set the pad's kernel driver reports (8 on a pad
+    // reporting the eleven keys an Xbox layout has, 12 on one reporting the full
+    // gamepad set - see lib/pads.js), so it is set per device, in that device's
+    // autoconfig profile (lib/autoconfig.js).
+    //
+    // This key must therefore stay UNSET: measured on this box, a concrete value here
+    // overrides EVERY profile's bind, so setting it to any one index breaks the menu
+    // button on every pad that does not happen to match it. "nul" is written rather
+    // than left alone because that is what clears a value already in the file.
+    input_menu_toggle_btn: "nul",
     // Closing the content ends RetroArch, which is what puts the games grid back on
     // screen: the shell brings the app's own window back when the process exits.
     // "1" is RetroArch's "only when content came from the command line", and every
@@ -546,6 +556,22 @@ module.exports = (host) => {
       }),
   };
 
+  // ---- controller profiles ----
+  // Mirror the flatpak's profiles into a directory of ours and correct the
+  // menu-toggle button for whatever pad is connected. Cheap and idempotent (the
+  // mirror is rebuilt only when the flatpak moves, a correction written only when
+  // the value differs), so it can run at boot AND before every launch.
+  function applyPadProfiles() {
+    try {
+      return autoconfig.fixMenuToggle(pads.pads(), (m) => host.log("retroarch: " + m));
+    } catch (e) {
+      // A pad we cannot read is not a reason to refuse a game: without a correction
+      // the Guide button is what it was before, and everything else still works.
+      host.log("retroarch: controller profiles:", String((e && e.message) || e));
+      return [];
+    }
+  }
+
   // ---- the app's own UI: the game list, its covers, and starting a game ----
   //
   // The launch is the reason this is a route at all. Only the shell may spawn the
@@ -591,6 +617,10 @@ module.exports = (host) => {
       const spec = games.launchSpec(String(body.system || ""), body.i);
       if (spec.error) return ctx.json(res, { ok: false, error: spec.error, rom: spec.rom || null });
       if (!host.launchNative) return ctx.json(res, { ok: false, error: "shell_too_old" });
+      // A pad that connected since boot needs its profile corrected before RetroArch
+      // reads it, and this is the last moment we own: a launch is the one point where
+      // the set of connected pads is known and RetroArch is not running yet.
+      applyPadProfiles();
       // --fullscreen comes from the manifest; the core and the ROM are this launch.
       const ok = host.launchNative("retroarch", ["-L", spec.corePath, spec.rom]);
       if (ok) host.log("retroarch: play", spec.core, "-", spec.label);
@@ -748,6 +778,8 @@ module.exports = (host) => {
         page: (ctx) => renderTemplate(artPage, { lang: ctx.locale, ...(ART_STR[ctx.locale] || ART_STR.en) }),
         routes: artRoutes,
       });
+      // Before applyConfig, which points RetroArch's joypad_autoconfig_dir at it.
+      applyPadProfiles();
       try {
         if (applyConfig())
           host.log(
