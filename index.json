@@ -141,8 +141,12 @@
       "id": "retroarch",
       "manifestVersion": 1,
       "name": "RetroArch",
-      "version": "1.3.1",
+      "version": "1.4.0",
       "changelog": [
+        {
+          "version": "1.4.0",
+          "notes": "The games are on the box now. Opening RetroArch shows your own consoles and covers in a grid you can drive with the remote or a controller, and pressing OK starts the game straight away - no emulator menu in between, and when the game ends you are back in the list. Consoles and covers can be managed from the TV as well as from your phone. The Xbox/Guide button also opens the emulator's own menu mid-game (save states, close content) on pads where it previously did nothing: which button that is differs per controller, so the box now reads it from the controller itself instead of trusting one number."
+        },
         {
           "version": "1.3.0",
           "notes": "Games have covers now. RetroArch only shows artwork for games in a scanned list and never fetches it, so the box does: it walks your lists and puts a cover in place for every game one exists for, by itself whenever the box is idle, and on demand from the new Artwork page on your phone. Its menu is also shorter - the dead core downloader, the disc entries this box has no drive for, and the pictures/music/videos tabs are gone, so the consoles come first."
@@ -168,7 +172,7 @@
           "notes": "Initial release: RetroArch on the TV, driven by the remote or a controller. Home always returns to the box."
         }
       ],
-      "type": "native",
+      "type": "webclient",
       "status": "ready",
       "accent": "#7c5cd6",
       "icon": "<svg viewBox='0 0 24 24'><rect width='24' height='24' rx='4' fill='#151226'/><path d='M7.6 8h8.8a4.6 4.6 0 0 1 4.5 3.7l.9 4.6a2.2 2.2 0 0 1-3.9 1.8l-1.7-2.1H7.8l-1.7 2.1a2.2 2.2 0 0 1-3.9-1.8l.9-4.6A4.6 4.6 0 0 1 7.6 8Z' fill='#7c5cd6'/><rect x='6' y='11.4' width='1.6' height='4.2' rx='.6' fill='#151226'/><rect x='4.7' y='12.7' width='4.2' height='1.6' rx='.6' fill='#151226'/><circle cx='16' cy='12.6' r='1.1' fill='#151226'/><circle cx='18.1' cy='14.7' r='1.1' fill='#151226'/></svg>",
@@ -177,8 +181,8 @@
         "hu": "Retro játékok"
       },
       "description": {
-        "en": "Play retro games on the TV. RetroArch runs its own full-screen interface, navigable with the remote or a controller, and the Home button always brings you back to the box. Consoles and games are added from your phone: the Consoles page installs the emulator you pick, and the upload page takes your game files - or point the box at a network share instead. Once a list of games is scanned, the box fetches their covers on its own.",
-        "hu": "Retro játékok a tévén. A RetroArch a saját teljes képernyős felületét használja, amit a távirányítóval vagy kontrollerrel lehet kezelni, a Home gomb pedig mindig visszahoz a boxra. A konzolokat és a játékokat telefonról teszed fel: a Konzolok oldalon kiválasztod, melyik emulátor kell, a Játékok feltöltése oldalon pedig a játékfájlokat, vagy a boxot ráállítod egy hálózati megosztásra. Ha a játéklista beolvasva van, a borítókat a box magától letölti."
+        "en": "Play retro games on the TV. The box shows your games as a grid of covers, grouped by console and driven with the remote; OK starts the game straight in the emulator, the Xbox/Guide button on a controller opens its menu mid-game, and Home always brings you back to the box. Consoles and covers are managed on the TV or from your phone; game files are uploaded from your phone, or read from a network share.",
+        "hu": "Retro játékok a tévén. A box a saját borítós rácsában mutatja a játékokat konzolonként, távirányítóval kezelve; az OK egyenesen elindítja a játékot az emulátorban, kontrolleren az Xbox/Guide gomb játék közben előhozza az emulátor menüjét, a Home gomb pedig mindig visszahoz a boxra. A konzolokat és a borítókat a tévén vagy telefonról kezelheted; a játékfájlok telefonról töltődnek fel, vagy hálózati megosztásról olvassa őket."
       },
       "service": "retroarch",
       "pairing": [
@@ -229,13 +233,17 @@
         ]
       },
       "runtime": {
+        "serve": "local",
+        "entry": "index.html",
         "native": {
           "flatpak": "org.libretro.RetroArch",
           "args": [
             "--fullscreen"
           ]
         },
-        "capabilities": []
+        "capabilities": [
+          "nav"
+        ]
       }
     },
     {
@@ -422,8 +430,20 @@
           "sha256": "04de35e8e4ecb325b0f266aa68817cccdd1b1d59e90b0bd506705f66f465861b"
         },
         {
+          "path": "lib/autoconfig.js",
+          "sha256": "d53c308e83fb4c367824d86a58685e665cc60c762bdebe3805855f2300b6cf5a"
+        },
+        {
           "path": "lib/cores.js",
-          "sha256": "ea8ef4da8beeaa3c29475485f93c66236286c2b5f4e6ebe445b7a31e9b669205"
+          "sha256": "a9cae5d3b29cb2d1edf5a2921bcc541e6dced40847d5765c7ba3b2f2a01cc46c"
+        },
+        {
+          "path": "lib/games.js",
+          "sha256": "b445e57116d5ad6c0ddadca94f3c752982bbbd1e84f648f84ca3ffa1c61ba68b"
+        },
+        {
+          "path": "lib/pads.js",
+          "sha256": "4c78d0a6f0e98be7d39cdbee217a308b60f89c49ea3c07c1c98ae2f6b0590854"
         },
         {
           "path": "lib/roms.js",
@@ -435,7 +455,7 @@
         },
         {
           "path": "manifest.json",
-          "sha256": "1aa814435b255f1b75b017b632c23d77dd1c04f8ff7c717af3030f9792fc81f2"
+          "sha256": "cda8f7f7f95d4cb83e2392493aa6ceae2286be999c606669c329e6ecaa232cb4"
         },
         {
           "path": "package.json",
@@ -459,7 +479,19 @@
         },
         {
           "path": "plugin.js",
-          "sha256": "1c3d9696440c4e73fc7a0bd785b46f837c669e821cfc1fbe30ea51f13f5089f1"
+          "sha256": "261e190847648334b10972fd93d8dbd08051c47ee39a34d2d83f9c125b8542ee"
+        },
+        {
+          "path": "web/assets/index-D7DOj2kU.css",
+          "sha256": "6ffcf3b286ec6e0fc44c3cdce484a353eca7e38e2d4ded9679d6b63347315060"
+        },
+        {
+          "path": "web/assets/index-DtZYUtix.js",
+          "sha256": "ecaf55b72bb0028b9e2f6ed58aa1c54bbe4aea280dcc942539454035525fd36c"
+        },
+        {
+          "path": "web/index.html",
+          "sha256": "e1ae8c85e3cf53e0ad1c7a6dafd38ea247edce933e71c47b090915c1a922f5d3"
         }
       ]
     },
