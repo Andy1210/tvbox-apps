@@ -2,19 +2,21 @@ import { useCallback, useEffect, useState } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n, useBackspace, useFocusableItem } from "@sdk";
 import { fetchGames, fetchSystems, play, type GameRow, type SystemRow } from "./api";
+import { ART_PAGE, CONSOLES_PAGE, RAIL, TILES, jump } from "./focus";
 import { GameGrid } from "./GameGrid";
 import { Consoles } from "./Consoles";
 import { Artwork } from "./Artwork";
 
 type View = "games" | "consoles" | "art";
 const LAST_SYSTEM = "tvbox.retroarch.system";
-// The focusable container each view owns. Focusing a CONTAINER restores whatever
-// child was focused in it last, which is what makes "down out of the tabs" land
-// where the user was rather than at the top of the list.
-const VIEW_CONTAINER: Record<View, string> = {
-  games: "grid-page",
-  consoles: "consoles-page",
-  art: "art-page",
+// Where "down out of the tabs" lands, per view: the first of these that is actually
+// mounted. For the games view that is the covers, falling back to the console list
+// when a console has none - NOT the page container, whose children are containers
+// themselves, which is why the tabs used to be a one-way street.
+const VIEW_CONTENT: Record<View, string[]> = {
+  games: [TILES, RAIL],
+  consoles: [CONSOLES_PAGE],
+  art: [ART_PAGE],
 };
 
 function Tab({
@@ -37,8 +39,9 @@ function Tab({
     // way back in is explicit.
     onArrowPress: (dir) => {
       if (dir !== "down") return true;
-      setFocus(VIEW_CONTAINER[view]);
-      return false;
+      // Swallow the press only if it landed somewhere, or the tab row would eat a
+      // press that could still have moved by geometry.
+      return !jump(...VIEW_CONTENT[view]);
     },
   });
   return (
