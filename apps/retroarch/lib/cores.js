@@ -158,6 +158,21 @@ function parseInfo(text) {
     name: get("corename"),
     system: get("systemname"),
     api: get("required_hw_api"),
+    // The libretro DATABASE names this core plays, pipe-separated in the file
+    // ("Nintendo - Game Boy|Nintendo - Game Boy Color"). Worth having next to
+    // `systemname`, which is a human label in whatever shape the core author chose
+    // ("PSP", "Sega 8/16-bit (Various)"): the database names are the very names
+    // RetroArch names its playlists after, so they are what maps a console to a
+    // core (lib/games.js).
+    databases: get("database")
+      .split("|")
+      .map((s) => s.trim())
+      .filter(Boolean),
+    // What the core can load, for a scan that does not go through RetroArch.
+    extensions: get("supported_extensions")
+      .split("|")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
   };
 }
 

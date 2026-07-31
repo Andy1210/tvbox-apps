@@ -2,10 +2,12 @@
   "name": "tvbox-apps",
   "private": true,
   "type": "module",
-  "description": "tvbox app registry — self-contained app packages (manifest + host plugin + built web UI) and their standalone Vite sources.",
+  "description": "tvbox app registry \u2014 self-contained app packages (manifest + host plugin + built web UI) and their standalone Vite sources.",
   "scripts": {
     "build:livetv": "vite build -c apps-src/livetv/vite.config.ts",
     "typecheck:livetv": "tsc --noEmit -p apps-src/livetv/tsconfig.json",
+    "build:retroarch": "vite build -c apps-src/retroarch/vite.config.ts",
+    "typecheck:retroarch": "tsc --noEmit -p apps-src/retroarch/tsconfig.json",
     "build:spotify": "vite build -c apps-src/spotify/vite.config.ts",
     "typecheck:spotify": "tsc --noEmit -p apps-src/spotify/tsconfig.json",
     "index": "node scripts/build-index.mjs"
