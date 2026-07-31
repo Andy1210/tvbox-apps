@@ -151,8 +151,12 @@ function profiles(driver) {
 // exactly this device name. RetroArch's own matcher also scores partial name
 // matches; reimplementing that would be guessing, and a correction written for the
 // wrong profile is worse than none.
-function profileFor(pad, driver) {
-  const all = profiles(driver || "udev");
+//
+// `loaded` lets a caller with several pads read the profiles ONCE - the driver's
+// directory is 420 files here, and re-reading it per pad turns one pass into
+// thousands of file reads on an SD card.
+function profileFor(pad, driver, loaded) {
+  const all = loaded || profiles(driver || "udev");
   const byId = all.filter((p) => p.vendor === pad.vendor && p.product === pad.product);
   if (byId.length === 1) return byId[0];
   const name = String(pad.name || "").toLowerCase();
@@ -166,9 +170,11 @@ function profileFor(pad, driver) {
 function fixMenuToggle(pads, log) {
   if (!sync(log)) return [];
   const fixed = [];
-  for (const pad of pads || []) {
-    if (pad.guide === null || pad.guide === undefined) continue;
-    const profile = profileFor(pad);
+  const connected = (pads || []).filter((p) => p && p.guide !== null && p.guide !== undefined);
+  if (!connected.length) return fixed;
+  const all = profiles("udev"); // read once, matched against every pad
+  for (const pad of connected) {
+    const profile = profileFor(pad, "udev", all);
     if (!profile) continue;
     if (NUM(profile.menu) === pad.guide) continue;
     const line = 'input_menu_toggle_btn = "' + pad.guide + '"';
