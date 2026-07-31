@@ -589,8 +589,12 @@ module.exports = (host) => {
       const system = String(new URL(req.url, "http://x").searchParams.get("system") || "");
       ctx.json(res, { system, games: games.list(system) });
     },
-    // One cover, straight off the disk lib/art.js filled. Cached hard: a tile's
-    // image never changes under a given index, and a grid asks for dozens at once.
+    // One cover, straight off the disk lib/art.js filled. Cached hard: a tile's image
+    // never changes under a given index, and a grid asks for dozens at once.
+    //
+    // STREAMED, not read: a plugin runs in the shell's own Electron main process, and a
+    // cover is a few hundred kB - reading dozens of them synchronously would block the
+    // process that draws the UI and answers every other route.
     "GET /cover": (req, res) => {
       const q = new URL(req.url, "http://x").searchParams;
       const file = games.coverFile(String(q.get("system") || ""), q.get("i"));
@@ -598,19 +602,12 @@ module.exports = (host) => {
         res.writeHead(404);
         return res.end();
       }
-      let png;
-      try {
-        png = fs.readFileSync(file);
-      } catch (e) {
-        res.writeHead(404);
-        return res.end();
-      }
-      res.writeHead(200, {
-        "Content-Type": "image/png",
-        "Content-Length": png.length,
-        "Cache-Control": "public, max-age=86400",
-      });
-      res.end(png);
+      res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" });
+      const png = fs.createReadStream(file);
+      // The header is already out by the time a read can fail (the file was there a
+      // moment ago), so a truncated response is all there is to give.
+      png.on("error", () => res.end());
+      png.pipe(res);
     },
     "POST /play": (req, res, ctx) => {
       const body = ctx.body || {};

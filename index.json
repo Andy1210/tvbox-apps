@@ -431,7 +431,7 @@
         },
         {
           "path": "lib/autoconfig.js",
-          "sha256": "bd21ea47768bf95a0fec47cee88949fc24028925351409a0427a1e22ab221c15"
+          "sha256": "d53c308e83fb4c367824d86a58685e665cc60c762bdebe3805855f2300b6cf5a"
         },
         {
           "path": "lib/cores.js",
@@ -479,7 +479,7 @@
         },
         {
           "path": "plugin.js",
-          "sha256": "a35b575a49a43c684212b160e551781892de6563c32e521f488578321fb99ebb"
+          "sha256": "261e190847648334b10972fd93d8dbd08051c47ee39a34d2d83f9c125b8542ee"
         },
         {
           "path": "web/assets/index-D7DOj2kU.css",
