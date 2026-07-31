@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n, useFocusableItem, Osk } from "@sdk";
 import { coverUrl, shortSystem, type GameRow, type SystemRow } from "./api";
+import { Alphabet, bucketOf } from "./Alphabet";
+import { ALPHA, RAIL, SEARCH, TABS, TILES, jump } from "./focus";
 
 // How many covers a row holds, and how much of the list is MOUNTED around the
 // focused row. A library here is 1044 GBA plus 787 NES games; putting three
@@ -13,22 +15,15 @@ const COLS = 6;
 const WINDOW_ROWS = 12;
 const SHIFT_ROWS = 3;
 const EDGE_ROWS = 2; // shift once focus comes this close to the mounted edge
-// Row pitch, for the spacers that hold open the height of the rows that are not
-// mounted (24vh cover + label + gap). Only the scrollbar and the scroll offset
-// depend on it being close; focus does not.
-const ROW_VH = 29;
+// A row is EXACTLY this tall: 24vh of cover, a 3vh label, and a 1vh gap. The number is
+// load-bearing rather than cosmetic - the spacers that stand in for unmounted rows and
+// the scroll offset a letter jump computes both derive from it, so the tile heights
+// below must stay fixed and add up to it.
+const ROW_VH = 28;
 
-// Where a D-pad goes at the edges of a list. Spatial navigation is geometric, and
-// nothing in the grid lines up with the header: the tabs sit far to the right of the
-// first cover and the search button is a lone control above a wall of tiles, so the
-// search heuristic finds no candidate and the tabs are simply unreachable with a
-// D-pad. These hops make the chain explicit: rail <-> tiles -> search -> tabs.
-// Focusing a CONTAINER (rail/tiles) resumes whatever was focused in it last, which is
-// what keeps a console rail from jumping back to its first row.
-const UP_FROM_TILES = "search";
-const UP_FROM_HEADER = "tab-games";
-const RAIL = "rail";
-const TILES = "tiles";
+// The chain the D-pad walks, since geometry cannot find these edges on its own:
+// consoles <-> covers <-> letters, and up from any of them to the search button and
+// then the tabs. Keys and the safe hop live in focus.ts.
 
 function Console({
   row,
@@ -54,7 +49,7 @@ function Console({
       onEnterPress: onEnter,
       onArrowPress: (dir) => {
         if (dir === "up" && first) {
-          setFocus(UP_FROM_HEADER);
+          jump(TABS);
           return false;
         }
         if (dir === "right") {
@@ -102,14 +97,19 @@ function Tile({
       onFocus: () => onFocusPos(pos),
       onArrowPress: (dir) => {
         if (dir === "up" && pos < COLS) {
-          setFocus(UP_FROM_TILES);
+          jump(SEARCH, TABS);
           return false;
         }
         // Left out of the first column goes to the console rail, at the console it
         // was left on - geometry would pick whichever row happens to sit next to this
         // tile, which is how "left" used to land on the top console.
         if (dir === "left" && pos % COLS === 0) {
-          setFocus(RAIL);
+          jump(RAIL);
+          return false;
+        }
+        // ... and right out of the last column goes to the letter rail.
+        if (dir === "right" && pos % COLS === COLS - 1) {
+          jump(ALPHA);
           return false;
         }
         return true;
@@ -127,7 +127,7 @@ function Tile({
         focused ? "scale-[1.06] outline-[var(--color-focus)] z-10" : "",
       ].join(" ")}
     >
-      <div className="h-[24vh] flex items-center justify-center p-[0.4vh]">
+      <div className="h-[24vh] flex items-center justify-center p-[0.4vh] shrink-0">
         {game.cover ? (
           // Lazy + async decode: a row of six 200 kB PNGs would otherwise block the
           // very focus move that scrolled them into view.
@@ -144,7 +144,7 @@ function Tile({
       </div>
       <div
         className={[
-          "px-[0.6vw] py-[0.7vh] text-[1.4vh] truncate",
+          "px-[0.6vw] h-[3vh] leading-[3vh] text-[1.4vh] truncate shrink-0",
           focused ? "bg-white text-[#06090d] font-semibold" : "text-fg-dim",
         ].join(" ")}
       >
@@ -160,11 +160,13 @@ function SearchButton({ onPress, onClear }: { onPress: () => void; onClear?: () 
   // (setFocus on a container restores its own last child).
   const upDown = (dir: string) => {
     if (dir === "up") {
-      setFocus(UP_FROM_HEADER);
+      jump(TABS);
       return false;
     }
     if (dir === "down") {
-      setFocus("grid-page");
+      // The covers if there are any, else the console list - never "grid-page", whose
+      // children are containers themselves and which resolves to nothing useful.
+      jump(TILES, RAIL);
       return false;
     }
     return true;
@@ -231,6 +233,12 @@ export function GameGrid({
   const [query, setQuery] = useState("");
   const [osk, setOsk] = useState(false);
   const [start, setStart] = useState(0); // first MOUNTED row
+  // A letter jump has to wait for the window: the tile it wants to focus is not
+  // mounted until `start` has moved, so the position is remembered and the effect
+  // below focuses it on the render where it exists.
+  const [pendingPos, setPendingPos] = useState<number | null>(null);
+  const [bucket, setBucket] = useState(""); // which letter the grid is sitting on
+  const scroller = useRef<HTMLDivElement | null>(null);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -260,10 +268,39 @@ export function GameGrid({
   const rows = Math.ceil(shown.length / COLS);
   const end = Math.min(rows, start + WINDOW_ROWS);
   const mounted = shown.slice(start * COLS, end * COLS);
+  const clampRow = (row: number) => Math.max(0, Math.min(Math.max(0, rows - WINDOW_ROWS), row));
+
+  // Scroll the grid to a position without taking focus (walking the letter rail), and
+  // the same plus focus (committing a letter with OK or left).
+  const showPos = (pos: number) => {
+    const g = shown[pos];
+    if (!g) return;
+    const row = Math.floor(pos / COLS);
+    setBucket(bucketOf(g.label));
+    setStart(clampRow(row - 1));
+    // Focus stays on the letter, so nothing scrolls the list into view for us - and a
+    // moved window with an unmoved scroll offset shows the spacer, i.e. a blank grid.
+    if (scroller.current) scroller.current.scrollTop = (Math.max(0, row - 1) * ROW_VH * window.innerHeight) / 100;
+  };
+  const goPos = (pos: number) => {
+    showPos(pos);
+    setPendingPos(pos);
+  };
+  useEffect(() => {
+    if (pendingPos === null) return;
+    const g = shown[pendingPos];
+    if (!g) return setPendingPos(null);
+    const row = Math.floor(pendingPos / COLS);
+    if (row < start || row >= end) return; // the window is still moving; re-runs on it
+    setPendingPos(null);
+    setFocus("g-" + g.i);
+  }, [pendingPos, start, end, shown]);
 
   // Move the mounted window when focus approaches either edge of it. The position
   // is the one in the FILTERED list, not the playlist index the focus key carries.
   const onFocusPos = (pos: number) => {
+    const b = bucketOf((shown[pos] || { label: "" }).label);
+    if (b !== bucket) setBucket(b);
     const row = Math.floor(pos / COLS);
     if (row - start < EDGE_ROWS && start > 0) setStart(Math.max(0, start - SHIFT_ROWS));
     else if (end - row <= EDGE_ROWS && end < rows)
@@ -321,11 +358,19 @@ export function GameGrid({
             </div>
           ) : (
             <FocusContext.Provider value={tilesKey}>
-              <div ref={tilesRef} className="flex-1 overflow-y-auto no-scrollbar">
+              <div
+                ref={(el) => {
+                  // Two owners for one node: our scroller, and spatial navigation's
+                  // container ref (an object ref, like useFocusableItem merges).
+                  scroller.current = el;
+                  (tilesRef as MutableRefObject<HTMLDivElement | null>).current = el;
+                }}
+                className="flex-1 overflow-y-auto no-scrollbar"
+              >
                 {/* Spacers stand in for the rows that are not mounted, so the scroll
                   position does not jump when the window shifts. */}
                 <div style={{ height: start * ROW_VH + "vh" }} />
-                <div className="grid grid-cols-6 gap-[1vw]">
+                <div className="grid grid-cols-6 gap-x-[1vw] gap-y-[1vh]">
                   {mounted.map((g, k) => (
                     <Tile
                       key={g.i}
@@ -342,6 +387,9 @@ export function GameGrid({
             </FocusContext.Provider>
           )}
         </div>
+        {!error && !loading && shown.length > 0 && (
+          <Alphabet games={shown} currentBucket={bucket} onPreview={showPos} onCommit={goPos} />
+        )}
       </div>
     </FocusContext.Provider>
   );
