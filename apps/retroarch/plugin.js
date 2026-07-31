@@ -1,7 +1,8 @@
-// tvbox RetroArch plugin. RetroArch is a `type: native` app: it runs its own
-// full-screen interface and the shell only spawns it (see shell/native.js), so
-// this plugin owns no window and no daemon. What it does own is the SETUP that
-// RetroArch cannot be expected to get right by itself on this hardware:
+// tvbox RetroArch plugin. The app ships its own 10-foot UI (web/, built from
+// apps-src/retroarch): the box browses the games, and RetroArch is the program it
+// launches per game (`runtime.native` + host.launchNative, see shell/native.js) -
+// which is why the plugin serves a games list and a cover for every tile, on top of
+// the SETUP that RetroArch cannot be expected to get right by itself here:
 //
 //   1. the video driver. RetroArch asks for whatever a core declares, and this
 //      hardware serves desktop GL 3.1 (compatibility), GLES 3.1 and Vulkan - but
@@ -12,16 +13,16 @@
 //      is a session-level matter, not RetroArch's: see hardwareGl() below.
 //   2. where the games are. RetroArch's file browser is pointed at the box's own
 //      roms folder so "Load Content" opens somewhere useful on a TV.
-//   3. how games and consoles GET there. A TV has no file manager, so the plugin
-//      registers four phone-pairing kinds: `roms` uploads files into
-//      roms/<system>/ (lib/roms.js), `share` points the box at an SMB server so
-//      several boxes can read one library (lib/share.js), `cores` installs the
-//      emulators themselves (lib/cores.js) - RetroArch's own Core Downloader cannot
-//      fetch anything in this build, so its menu is hidden - and `art` fetches the
-//      games' covers (lib/art.js), which the same dead Online Updater would
-//      otherwise be responsible for. All four are forms on a phone rather than
-//      screens on the TV, because a native app has no screen of its own here and
-//      typing a password with a remote is miserable.
+//   3. how games and consoles GET there. `roms` uploads files into roms/<system>/
+//      (lib/roms.js), `share` points the box at an SMB server so several boxes can
+//      read one library (lib/share.js), `cores` installs the emulators themselves
+//      (lib/cores.js) - RetroArch's own Core Downloader cannot fetch anything in
+//      this build, so its menu is hidden - and `art` fetches the games' covers
+//      (lib/art.js), which the same dead Online Updater would otherwise be
+//      responsible for. Each is a phone form AND, where a remote can drive it
+//      (consoles, covers), a screen in the app: the same handlers serve both, so the
+//      two can never answer differently. File upload and share credentials stay
+//      phone-only - a file picker and a password are miserable on a remote.
 //   4. the covers themselves, in the background: a pass over the playlists runs
 //      while the box is idle, so a freshly scanned console fills in without anyone
 //      asking (lib/art.js does the work; the phone page is for watching it).
@@ -37,6 +38,7 @@ const roms = require("./lib/roms");
 const share = require("./lib/share"); // optional SMB game library shared by several boxes
 const cores = require("./lib/cores"); // the box installs and updates libretro cores itself
 const art = require("./lib/art"); // boxart for the playlists, fetched by the box
+const games = require("./lib/games"); // the game list the app's own grid renders, and which core plays what
 
 const FLATPAK_REF = "org.libretro.RetroArch";
 // RetroArch's flatpak keeps its config under the standard per-app data dir.
@@ -355,6 +357,22 @@ function requiredSettings() {
     // Show the boxart the box downloads (lib/art.js). 3 is RetroArch's own value
     // for "Boxarts" as the main thumbnail.
     menu_thumbnails: "3",
+    // The Guide button opens RetroArch's Quick Menu mid-game - resume, save states,
+    // close content - and RetroArch pauses the game while it is up. That menu is the
+    // only in-game affordance a pad has here, and it is reached by a bind that is
+    // per-DEVICE: a pad's autoconfig profile overrides this whenever it defines one
+    // (every Xbox profile in the flatpak binds button 8 to exactly this), so the
+    // global default only fills in for the profiles that define none - which is the
+    // case for the official Xbox Wireless Controller, whose profile is the one Xbox
+    // profile without it. 8 is the udev driver's index for BTN_MODE on an
+    // Xbox-layout pad (SELECT 6, START 7, MODE 8).
+    input_menu_toggle_btn: "8",
+    // Closing the content ends RetroArch, which is what puts the games grid back on
+    // screen: the shell brings the app's own window back when the process exits.
+    // "1" is RetroArch's "only when content came from the command line", and every
+    // game the grid starts does - so opening RetroArch's own UI by hand still
+    // behaves the way it always did.
+    quit_on_close_content: "1",
   };
 }
 
@@ -528,6 +546,66 @@ module.exports = (host) => {
       }),
   };
 
+  // ---- the app's own UI: the game list, its covers, and starting a game ----
+  //
+  // The launch is the reason this is a route at all. Only the shell may spawn the
+  // emulator, and only the plugin can be trusted with a path: the UI sends a console
+  // and an INDEX, and the ROM and core are resolved here from RetroArch's own
+  // playlist (lib/games.js), so nothing the renderer says ever reaches a command
+  // line.
+  const gameRoutes = {
+    "GET /systems": (req, res, ctx) =>
+      ctx.json(res, {
+        systems: games.systems(),
+        playing: host.nativeRunning ? host.nativeRunning() === "retroarch" : false,
+      }),
+    "GET /games": (req, res, ctx) => {
+      const system = String(new URL(req.url, "http://x").searchParams.get("system") || "");
+      ctx.json(res, { system, games: games.list(system) });
+    },
+    // One cover, straight off the disk lib/art.js filled. Cached hard: a tile's
+    // image never changes under a given index, and a grid asks for dozens at once.
+    "GET /cover": (req, res) => {
+      const q = new URL(req.url, "http://x").searchParams;
+      const file = games.coverFile(String(q.get("system") || ""), q.get("i"));
+      if (!file) {
+        res.writeHead(404);
+        return res.end();
+      }
+      let png;
+      try {
+        png = fs.readFileSync(file);
+      } catch (e) {
+        res.writeHead(404);
+        return res.end();
+      }
+      res.writeHead(200, {
+        "Content-Type": "image/png",
+        "Content-Length": png.length,
+        "Cache-Control": "public, max-age=86400",
+      });
+      res.end(png);
+    },
+    "POST /play": (req, res, ctx) => {
+      const body = ctx.body || {};
+      const spec = games.launchSpec(String(body.system || ""), body.i);
+      if (spec.error) return ctx.json(res, { ok: false, error: spec.error, rom: spec.rom || null });
+      if (!host.launchNative) return ctx.json(res, { ok: false, error: "shell_too_old" });
+      // --fullscreen comes from the manifest; the core and the ROM are this launch.
+      const ok = host.launchNative("retroarch", ["-L", spec.corePath, spec.rom]);
+      if (ok) host.log("retroarch: play", spec.core, "-", spec.label);
+      else host.log("retroarch: launch refused for", spec.label);
+      ctx.json(res, { ok, core: spec.core, label: spec.label });
+    },
+    // Which emulator a console uses, when more than one is installed for it. `core`
+    // null clears the choice and goes back to what the metadata picks.
+    "POST /system-core": (req, res, ctx) => {
+      const body = ctx.body || {};
+      const core = body.core === null || body.core === "" ? null : String(body.core);
+      ctx.json(res, { ok: games.writeOverride(String(body.system || ""), core) });
+    },
+  };
+
   const romsPage = fs.readFileSync(path.join(__dirname, "pairing", "roms.html"), "utf8");
   const sharePage = fs.readFileSync(path.join(__dirname, "pairing", "share.html"), "utf8");
   const coresPage = fs.readFileSync(path.join(__dirname, "pairing", "cores.html"), "utf8");
@@ -617,9 +695,29 @@ module.exports = (host) => {
     },
   };
 
+  // The same handler, serving both servers. A pairing route gets `json` and `body`
+  // on its ctx from the pairing server; the shell's own server passes only `body`,
+  // so `json` is filled in here. Registering the tables instead of copying them is
+  // what keeps the phone page and the on-screen page from ever drifting apart.
+  const onScreen = (table) =>
+    Object.fromEntries(
+      Object.entries(table).map(([key, fn]) => [
+        key,
+        (req, res, ctx) => fn(req, res, { json: host.json, ...(ctx || {}) }),
+      ]),
+    );
+
   return {
     start() {
-      host.registerRoutes("/tvbox/api/retroarch", routes);
+      host.registerRoutes("/tvbox/api/retroarch", {
+        ...routes,
+        ...onScreen(gameRoutes),
+        // Consoles and covers are things a remote can drive, so the app has screens
+        // for them too - the same routes the phone pages call.
+        ...onScreen(coresRoutes),
+        ...onScreen(artRoutes),
+        ...onScreen({ "GET /share-status": shareRoutes["GET /share-status"] }),
+      });
       // Phone upload. The pairing server is only up while the TV shows the code,
       // and every route below it is code-gated by the shell.
       host.pairing.register("roms", {
