@@ -20,6 +20,7 @@
     "stateError": "Nem sikerült beolvasni a játékokat",
     "gamesError": "Nem sikerült beolvasni a konzol játékait",
     "playFailed": "A játék indítása nem sikerült",
+    "shellTooOld": "A box szoftvere túl régi ehhez — frissítsd a boxot, és utána indulnak a játékok.",
     "noCoreFor": "Ehhez nincs telepítve emulátor: {system} — tedd fel a Konzolok fülön",
     "romMissing": "A játékfájl nem érhető el — a hálózati megosztás nincs csatolva?",
     "whichEmulator": "Melyik emulátor",

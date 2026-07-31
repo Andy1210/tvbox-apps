@@ -482,16 +482,16 @@
           "sha256": "a35b575a49a43c684212b160e551781892de6563c32e521f488578321fb99ebb"
         },
         {
-          "path": "web/assets/index-BgyukPk2.js",
-          "sha256": "fcd5e6296e8028f26edc501630ac2623e75ca4301c1a35614a5081663211f3bf"
-        },
-        {
           "path": "web/assets/index-D7DOj2kU.css",
           "sha256": "6ffcf3b286ec6e0fc44c3cdce484a353eca7e38e2d4ded9679d6b63347315060"
         },
         {
+          "path": "web/assets/index-DtZYUtix.js",
+          "sha256": "ecaf55b72bb0028b9e2f6ed58aa1c54bbe4aea280dcc942539454035525fd36c"
+        },
+        {
           "path": "web/index.html",
-          "sha256": "fb55e7c33669b942a766ef227ab27597127f7d8728e63e16c4deff80d87d6a83"
+          "sha256": "e1ae8c85e3cf53e0ad1c7a6dafd38ea247edce933e71c47b090915c1a922f5d3"
         }
       ]
     },

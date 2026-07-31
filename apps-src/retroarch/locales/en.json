@@ -20,6 +20,7 @@
     "stateError": "Could not read the game list",
     "gamesError": "Could not read this console's games",
     "playFailed": "The game could not be started",
+    "shellTooOld": "This box's software is too old to start games — update the box first.",
     "noCoreFor": "No emulator installed for {system} — add one on the Consoles tab",
     "romMissing": "The game file is not reachable — is the network share mounted?",
     "whichEmulator": "Which emulator",
