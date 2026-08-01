@@ -12,7 +12,7 @@
 // unlisted, and a listed file that is missing fails the build here instead of
 // on someone's TV. Manifest-only apps need nothing copied: their manifests
 // travel inside index.json.
-import { readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, existsSync, lstatSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,6 +39,14 @@ for (const [id, pkg] of Object.entries(index.packages || {})) {
     const to = join(site, "apps", id, f.path);
     if (!existsSync(from)) {
       errors.push(`${id}/${f.path}: listed in index.json but not on disk`);
+      continue;
+    }
+    // copyFileSync FOLLOWS a symlink, so a link inside a package would publish
+    // whatever it points at - a file from outside the repo, under an app's name.
+    // build-index.mjs refuses to list one; this is the second lock on the same
+    // door, because this script is what actually writes the site.
+    if (lstatSync(from).isSymbolicLink()) {
+      errors.push(`${id}/${f.path}: is a symlink, which is never published`);
       continue;
     }
     // The sha256 in the index is what the box verifies after downloading. If it
