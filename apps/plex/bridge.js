@@ -38,6 +38,37 @@ module.exports.setup = function setup(ctx) {
       ipcRenderer.send("plog", what, typeof detail === "string" ? detail.replace(SECRETS, "$1REDACTED") : detail);
     } catch (e) {}
   }
+  // The device identity the Qt host used to answer `system.describe` with. The
+  // client turns it into its X-Plex-* dimensions, so what is missing here is
+  // missing from every request it makes.
+  //
+  // `platform` is load-bearing, not cosmetic: a Plex Media Server REQUIRES
+  // X-Plex-Platform on the Companion poll (`/player/proxy/poll`) and answers 400
+  // without it - "request didn't contain required header: X-Plex-Platform" in the
+  // server log. The client's poll loop catches that and retries a second later,
+  // forever, reporting nothing, so the only symptom is a box that never appears
+  // as a Plex player: no casting from a phone, no remote control. Supplying it
+  // cannot be done from the shell side either, because Chromium strips a header
+  // added to a cross-origin request after the fact.
+  //
+  // `machineHostName` is the name a person then picks from Plex's cast list, so
+  // the real host name is worth reaching for Node - this file runs in the
+  // preload's context, where `require` exists, but stays defensive about it.
+  function describe() {
+    var host = "tvbox";
+    var release = "";
+    try {
+      var os = require("os");
+      host = os.hostname() || host;
+      release = os.release() || "";
+    } catch (e) {
+      log("system.describe", "(no os module: " + (e && e.message ? e.message : e) + ")");
+    }
+    // No applicationVersion: the client falls back to the web bundle's own
+    // version, which is the honest answer - the bridge doesn't ship it.
+    return { product: "tvbox", platform: "Linux", platformVersion: release, machineHostName: host };
+  }
+
   // Most callers here fire and forget, and `invoke` returns a PROMISE - a
   // rejection from the main process with nothing attached becomes an unhandled
   // rejection (noisy at best, fatal depending on the runtime's settings). The
@@ -289,6 +320,13 @@ module.exports.setup = function setup(ctx) {
       // happened, which is the one thing worse than not gating it at all.
       if (path.indexOf("system.") === 0) {
         var leaf = path.slice("system.".length);
+        // Answered for every app: this is the client describing ITSELF, not a
+        // host action, so there is nothing here to gate on the `system`
+        // capability the way exit is.
+        if (leaf === "describe") {
+          if (hasCb) cb({ errorCode: Success, result: describe() });
+          return;
+        }
         if (leaf === "exit" || leaf === "quit" || leaf === "closeApp" || leaf === "close") {
           if (!has("system")) {
             log(path, "(denied: app did not declare the system capability)");
