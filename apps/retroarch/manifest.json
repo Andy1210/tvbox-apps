@@ -2,8 +2,12 @@
   "id": "retroarch",
   "manifestVersion": 1,
   "name": "RetroArch",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "changelog": [
+    {
+      "version": "1.6.0",
+      "notes": "Installing an emulator now brings the files it cannot run without. Some emulators need data of their own beside the program - PPSSPP wants its fonts and a flash image, ScummVM its engine data - and without them the emulator started and then said its system files were missing, naming none of them. libretro publishes those files, so the box fetches them with the emulator."
+    },
     {
       "version": "1.5.1",
       "notes": "A console that arrived twice is one console again. Some games are catalogued under a separate database for their digital re-release - PSP titles bought from the store, for instance - and RetroArch made a second console out of them, named the same but with a bracket after it. It also looked like no emulator was installed for it, because no emulator advertises that name. The second one is now merged into the first as soon as a scan runs, and it plays with the emulator it always should have."
