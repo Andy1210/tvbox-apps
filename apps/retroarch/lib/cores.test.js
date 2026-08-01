@@ -349,3 +349,15 @@ test("a core's system pack is matched by the name the core calls itself", () => 
   // whose name merely starts the same way.
   assert.strictEqual(cores._test.assetForCore("ppsspp", index, [{ name: "PPSSPPX", file: "PPSSPPX.zip" }]), null);
 });
+
+test("the pack lookup reads the core-info index, not the buildbot one", () => {
+  // Caught on a box, not here: install() holds the BUILDBOT index, whose entries
+  // are { date, crc } with no name in them, and passing that matched nothing and
+  // silently fetched no pack. The two maps are keyed the same, so only the shape
+  // of a value tells them apart.
+  const list = [{ name: "PPSSPP", file: "PPSSPP.zip" }];
+  const buildbot = new Map([["ppsspp", { date: "2026-07-30", crc: "d2ef7c6b" }]]);
+  const info = new Map([["ppsspp", { name: "PPSSPP" }]]);
+  assert.strictEqual(cores._test.assetForCore("ppsspp", buildbot, list), null, "no name to match on");
+  assert.strictEqual((cores._test.assetForCore("ppsspp", info, list) || {}).name, "PPSSPP");
+});
