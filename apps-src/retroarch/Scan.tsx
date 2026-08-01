@@ -112,14 +112,23 @@ export function Scan({ onScanned }: { onScanned: () => void }) {
 
   // What is in the folder under the cursor. The walk is the expensive part on a network
   // share, so it happens on focus rather than for every folder up front.
+  // The answer is only used if the cursor is still on the folder that asked for
+  // it: moving down a list faster than a network share can be walked would
+  // otherwise let an earlier reply land last and describe the wrong folder.
+  const wanted = useRef("");
   const inspect = useCallback(
     (folder: string) => {
       setPicked(folder);
       setLook(null);
       setForced("");
+      wanted.current = folder;
       inspectFolder(folder)
-        .then(setLook)
-        .catch(() => setError(t("retroarch.scanInspectError")));
+        .then((d) => {
+          if (wanted.current === folder) setLook(d);
+        })
+        .catch(() => {
+          if (wanted.current === folder) setError(t("retroarch.scanInspectError"));
+        });
     },
     [t],
   );

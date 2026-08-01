@@ -179,6 +179,10 @@ function subdirs(dir) {
 function folders() {
   const out = [];
   for (const name of subdirs(roms.ROMS_DIR)) {
+    // Checked at BOTH levels: a library whose own root holds hundreds of
+    // directories would otherwise sail past the cap, which exists so the menu
+    // stays a menu.
+    if (out.length >= FOLDER_MAX) return out;
     const dir = path.join(roms.ROMS_DIR, name);
     const children = subdirs(dir);
     out.push({ name, path: dir, depth: 0, folders: children });
