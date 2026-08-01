@@ -207,6 +207,8 @@ const CORES_STR = {
     errBadCore: "Ismeretlen core.",
     errDownload: "A letöltés nem sikerült. Van hálózat a boxon?",
     errArchive: "A letöltött csomag hibás.",
+    errUnsafeArchive: "A csomag olyan helyre írna, ahova nem szabad. Nem csomagoltuk ki.",
+    errUnpack: "A rendszerfájlokat nem sikerült kicsomagolni.",
     errCrc: "A letöltött fájl ellenőrzőösszege nem egyezik, ezért nem telepítettem.",
     errWrite: "Nem sikerült a helyére írni.",
     errRemove: "Nem sikerült törölni.",
@@ -238,6 +240,8 @@ const CORES_STR = {
     errBadCore: "Unknown core.",
     errDownload: "The download failed. Does the box have network?",
     errArchive: "The downloaded archive is broken.",
+    errUnsafeArchive: "The archive wanted to write outside its own folder, so it was not unpacked.",
+    errUnpack: "The system files could not be unpacked.",
     errCrc: "The downloaded file's checksum did not match, so it was not installed.",
     errWrite: "Could not write it into place.",
     errRemove: "Could not remove it.",
@@ -830,7 +834,15 @@ module.exports = (host) => {
         .then((index) => cores.install(core, host.childEnv(), index))
         .then((r) => {
           if (r.ok) {
-            host.log("retroarch: core installed:", core);
+            const a = r.assets || {};
+            // Say which of the two things happened, because "installed" alone
+            // hides the case that used to strand a core: the binary landed and
+            // the files it cannot run without did not.
+            host.log(
+              "retroarch: core installed:",
+              core,
+              a.pack ? (a.ok ? "+ system files (" + a.pack + ")" : "BUT system files failed: " + a.error) : "",
+            );
             const changed = cores.syncDriverOverrides(requiredSettings().video_driver);
             if (changed.length) host.log("retroarch: per-core driver:", changed.join(", "));
           }
