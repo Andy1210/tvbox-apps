@@ -34,6 +34,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const { spawn } = require("child_process");
 const roms = require("./lib/roms");
 const share = require("./lib/share"); // optional SMB game library shared by several boxes
 const cores = require("./lib/cores"); // the box installs and updates libretro cores itself
@@ -41,6 +42,7 @@ const art = require("./lib/art"); // boxart for the playlists, fetched by the bo
 const games = require("./lib/games"); // the game list the app's own grid renders, and which core plays what
 const pads = require("./lib/pads"); // where a pad's Guide button sits, per device
 const autoconfig = require("./lib/autoconfig"); // our own controller-profile dir, mirrored from the flatpak's
+const scan = require("./lib/scan"); // finding the games: RetroArch's own scanner, plus what it drops
 
 const FLATPAK_REF = "org.libretro.RetroArch";
 // RetroArch's flatpak keeps its config under the standard per-app data dir.
@@ -556,6 +558,115 @@ module.exports = (host) => {
       }),
   };
 
+  // ---- scanning a folder for games ----
+  // A scan is minutes long on a network share (RetroArch hashes every file), so it runs
+  // as a background job with progress, like the artwork sweep - and only one at a time.
+  let scanning = null; // { folder, system, stage, ... } while a scan runs
+  let scanChild = null; // RetroArch's own scanner process, so a launch can end it
+  let scanResult = null; // what the last one did, for the screen to show afterwards
+
+  function stopScan() {
+    if (!scanning) return false;
+    scanning = { ...scanning, stopping: true };
+    if (scanChild) {
+      try {
+        scanChild.kill("SIGTERM");
+      } catch (e) {
+        /* already gone */
+      }
+    }
+    return true;
+  }
+
+  // The inspection walks a folder and reads every playlist, synchronously, and
+  // this code runs in the shell's Electron MAIN process - so doing it here would
+  // freeze the UI for as long as the walk takes, on every folder the cursor lands
+  // on. Electron's own binary as Node (ELECTRON_RUN_AS_NODE), the way the shell
+  // runs its CLI out of process for the same reason.
+  const INSPECT_TIMEOUT_MS = 60000;
+  function inspectOutOfProcess(folder) {
+    return new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [path.join(__dirname, "lib", "inspect-cli.js"), String(folder || "")], {
+        env: { ...host.childEnv(), ELECTRON_RUN_AS_NODE: "1" },
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      let out = "";
+      let done = false;
+      const finish = (fn, arg) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        fn(arg);
+      };
+      // A share that has gone away can block the walk indefinitely; a folder the
+      // user has already moved off must not hold a process for ever.
+      const timer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch (e) {
+          /* already gone */
+        }
+        finish(reject, new Error("timeout"));
+      }, INSPECT_TIMEOUT_MS);
+      child.stdout.on("data", (d) => (out += d));
+      child.on("error", (e) => finish(reject, e));
+      child.on("close", () => {
+        try {
+          finish(resolve, JSON.parse(out));
+        } catch (e) {
+          finish(reject, e);
+        }
+      });
+    });
+  }
+
+  function startScan(folder, system) {
+    if (scanning) return { ok: false, error: "busy" };
+    const dir = scan.resolveFolder(folder);
+    if (!dir) return { ok: false, error: "bad_folder" };
+    // Two RetroArch processes on one box fight over config and controllers, so a scan
+    // waits for the game to end rather than starting underneath it.
+    if (host.nativeRunning && host.nativeRunning() === "retroarch") return { ok: false, error: "playing" };
+    scanning = { folder: dir, system: system || null, stage: "retroarch", matched: 0 };
+    scanResult = null;
+    scan
+      .scan(dir, {
+        system: system || "",
+        env: host.childEnv(),
+        onChild: (child) => {
+          scanChild = child;
+        },
+        stopped: () => !!(scanning && scanning.stopping),
+        onProgress: (p) => {
+          scanning = { ...scanning, ...p };
+        },
+      })
+      .then((r) => {
+        scanResult = r;
+        if (r.ok)
+          host.log(
+            "retroarch: scan of " +
+              path.basename(dir) +
+              (r.stopped ? " STOPPED after " : ": ") +
+              (r.matched || 0) +
+              " recognised, " +
+              (r.added || 0) +
+              " added" +
+              (r.skipped ? ", " + r.skipped + " need a console" : ""),
+          );
+        else host.log("retroarch: scan failed:", r.error || "?");
+      })
+      .catch((e) => {
+        scanResult = { ok: false, error: "failed", detail: String((e && e.message) || e) };
+        host.log("retroarch: scan threw:", String((e && e.message) || e));
+      })
+      .finally(() => {
+        scanning = null;
+        scanChild = null;
+      });
+    return { ok: true, started: true };
+  }
+
   // ---- controller profiles ----
   // Mirror the flatpak's profiles into a directory of ours and correct the
   // menu-toggle button for whatever pad is connected. Cheap and idempotent (the
@@ -614,6 +725,13 @@ module.exports = (host) => {
       const spec = games.launchSpec(String(body.system || ""), body.i);
       if (spec.error) return ctx.json(res, { ok: false, error: spec.error, rom: spec.rom || null });
       if (!host.launchNative) return ctx.json(res, { ok: false, error: "shell_too_old" });
+      // A scan runs RetroArch too, and two of them on one box fight over the config and
+      // the controllers - so the game wins and the scan is ended. A scan is re-runnable
+      // and writes as it goes, so nothing is lost by stopping it here.
+      if (scanning) {
+        stopScan();
+        host.log("retroarch: scan stopped - a game is starting");
+      }
       // A pad that connected since boot needs its profile corrected before RetroArch
       // reads it, and this is the last moment we own: a launch is the one point where
       // the set of connected pads is known and RetroArch is not running yet.
@@ -624,6 +742,23 @@ module.exports = (host) => {
       else host.log("retroarch: launch refused for", spec.label);
       ctx.json(res, { ok, core: spec.core, label: spec.label });
     },
+    // The folders a scan can be pointed at, and what one would find in the one being
+    // looked at. The inspection walks the folder, so it is per request rather than part
+    // of the list - over a network share that walk is the expensive part.
+    "GET /scan-folders": (req, res, ctx) =>
+      ctx.json(res, { romsDir: roms.ROMS_DIR, folders: scan.folders(), consoles: scan.consoles() }),
+    "GET /scan-inspect": (req, res, ctx) => {
+      const folder = new URL(req.url, "http://x").searchParams.get("folder") || "";
+      inspectOutOfProcess(folder)
+        .then((r) => ctx.json(res, r))
+        .catch(() => ctx.json(res, { folder: "", error: "inspect_failed", games: 0, already: 0, ambiguous: 0, systems: [] }));
+    },
+    "GET /scan": (req, res, ctx) => ctx.json(res, { running: !!scanning, progress: scanning, last: scanResult }),
+    "POST /scan-start": (req, res, ctx) => {
+      const body = ctx.body || {};
+      ctx.json(res, startScan(String(body.folder || ""), String(body.system || "")));
+    },
+    "POST /scan-stop": (req, res, ctx) => ctx.json(res, { ok: stopScan() }),
     // Which emulator a console uses, when more than one is installed for it. `core`
     // null clears the choice and goes back to what the metadata picks.
     "POST /system-core": (req, res, ctx) => {
@@ -814,6 +949,10 @@ module.exports = (host) => {
       artStop = true;
       clearTimeout(artKick);
       clearInterval(artTimer);
+      // A scan owns a RetroArch child and writes playlists when it finishes. Left
+      // running it would go on doing both on behalf of a plugin that is gone, and
+      // a shell restart would come back to a scanner nobody is tracking.
+      stopScan();
     },
   };
 };

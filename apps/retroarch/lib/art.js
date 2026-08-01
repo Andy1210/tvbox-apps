@@ -183,6 +183,13 @@ function titleKey(s) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "");
 }
+// "4474 - Maestro! - Jump in Music" -> "Maestro! - Jump in Music". Only a run of
+// digits followed by a separator, and only at the very start, so a title that begins
+// with a number of its own ("1942", "007 - …") is left alone unless it is prefixed.
+function withoutSceneNumber(s) {
+  return String(s).replace(/^\s*\d{2,6}\s*[-.]\s+/, "");
+}
+
 // The bracketed tokens: region, languages, publisher, revision.
 function tagsOf(s) {
   const out = new Set();
@@ -202,6 +209,11 @@ function tagsOf(s) {
 //   2. the same name in different case ("SEGA Smash Pack" / "Sega Smash Pack")
 //   3. the same TITLE, best variant (see titleKey) - the step that covers a
 //      library named by another convention
+//   4. the same title once a leading scene NUMBER is dropped ("4474 - Maestro! -
+//      Jump in Music"), which is how a good part of a downloaded set is named. Last
+//      on purpose: a game whose name genuinely starts with digits ("007 - Everything
+//      or Nothing") has already matched at step 1, so this can only ever help a name
+//      nothing else recognised.
 //
 // Step 3 picks between the variants of one game rather than between games, so the
 // risk it carries is the wrong region's cover, not the wrong cover: prefer the
@@ -224,7 +236,7 @@ function matcher(names) {
     if (exact.has(label)) return label;
     const hit = ci.get(label.toLowerCase());
     if (hit) return hit;
-    const cands = byTitle.get(titleKey(label));
+    const cands = byTitle.get(titleKey(label)) || byTitle.get(titleKey(withoutSceneNumber(label)));
     if (!cands || !cands.length) return null;
     const want = tagsOf(label);
     let best = null;
@@ -380,6 +392,23 @@ function downloadBatch(system, jobs, env) {
 
 // ---- bookkeeping ----
 
+// Forget what a pass concluded about these consoles, so the next one lists them
+// again. A console that just gained games is exactly the case: its "nothing of this
+// is on the server" was true of a list that has since changed, and it would otherwise
+// stand for the two weeks a re-listing is normally worth.
+function forget(systems) {
+  const state = readState();
+  let touched = false;
+  for (const system of systems || []) {
+    if (state.systems && state.systems[system]) {
+      delete state.systems[system];
+      touched = true;
+    }
+  }
+  if (touched) writeState(state);
+  return touched;
+}
+
 function readState() {
   try {
     const doc = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
@@ -521,6 +550,7 @@ module.exports = {
   localNames,
   status,
   titleKey,
+  withoutSceneNumber,
   tagsOf,
   matcher,
   systemUrl,
@@ -529,6 +559,7 @@ module.exports = {
   isPng,
   downloadBatch,
   readState,
+  forget,
   writeState,
   listingIsAnswer,
   dueForListing,
