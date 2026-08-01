@@ -232,3 +232,34 @@ test("a variant whose base console nobody plays is left alone", () => {
   assert.strictEqual(scan.foldVariants(), 0);
   assert.strictEqual(fs.existsSync(path.join(art.PLAYLISTS_DIR, orphan + ".lpl")), true, "still there");
 });
+
+test("an empty variant console is folded away too", () => {
+  // Nothing to merge is not nothing to do: the FILE is what makes a console, so
+  // leaving it there keeps a second, permanently empty console on the grid.
+  const base = "Sony - PlayStation Portable";
+  const empty = base + " (PSN)";
+  fs.mkdirSync(art.PLAYLISTS_DIR, { recursive: true });
+  scan.writePlaylist(empty, { ...scan.readPlaylist(empty), items: [] });
+  installCore("ppsspp", 'corename = "PPSSPP"\nsystemname = "PSP"\ndatabase = "Sony - PlayStation Portable"\n');
+  assert.strictEqual(scan.foldVariants(), 1);
+  assert.strictEqual(fs.existsSync(path.join(art.PLAYLISTS_DIR, empty + ".lpl")), false);
+});
+
+test("a playlist entry with no path is not carried over", () => {
+  const base = "Sony - PlayStation Portable";
+  const psn = base + " (PSN)";
+  fs.mkdirSync(art.PLAYLISTS_DIR, { recursive: true });
+  scan.writePlaylist(base, { ...scan.readPlaylist(base), items: [] });
+  scan.writePlaylist(psn, {
+    ...scan.readPlaylist(psn),
+    items: [{ label: "Broken" }, { label: "Real", path: path.join(HOME, "r.iso") }],
+  });
+  installCore("ppsspp", 'corename = "PPSSPP"\nsystemname = "PSP"\ndatabase = "Sony - PlayStation Portable"\n');
+  scan.foldVariants();
+  const items = scan.readPlaylist(base).items;
+  assert.deepStrictEqual(
+    items.map((i) => i.label),
+    ["Real"],
+    "only the entry that names a game came across",
+  );
+});

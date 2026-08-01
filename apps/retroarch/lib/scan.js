@@ -410,17 +410,26 @@ function foldVariants(opts) {
     // would ever fold. A console some core actually names is a console.
     if (games.systemClaimed(system, opts) || !games.systemClaimed(base, opts)) continue;
     try {
+      // An EMPTY variant is folded too. Skipping it left the file on disk, and a
+      // file is what makes a console: the grid would go on showing a second
+      // PlayStation Portable with no games in it, for ever.
       const from = readPlaylist(system);
-      if (!from.items.length) continue;
       const into = readPlaylist(base);
-      const have = new Set(into.items.map((i) => i && i.path));
+      const have = new Set(into.items.filter((i) => i && i.path).map((i) => i.path));
       for (const item of from.items) {
-        if (!item || have.has(item.path)) continue;
+        // A path is what identifies a game here, so an entry without one is
+        // neither a duplicate nor something worth carrying over - copying it
+        // would make every other pathless entry look like a duplicate of it.
+        if (!item || !item.path || have.has(item.path)) continue;
         have.add(item.path);
         into.items.push({ ...item, db_name: base + ".lpl" });
       }
       writePlaylist(base, into);
       fs.unlinkSync(path.join(art.PLAYLISTS_DIR, system + ".lpl"));
+      // The base's game list just changed, so the cover fetcher's last answer
+      // about it is out of date - the same reason addMissing forgets a console it
+      // added to.
+      art.forget([base]);
       // PLAYLISTS folded, not entries moved: a variant whose games the base
       // already lists still merged a console away, and reporting 0 for that read
       // as "nothing happened" when a console had in fact just disappeared.
