@@ -3,7 +3,7 @@ import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spat
 import { useI18n, useFocusableItem, Osk } from "@sdk";
 import { coverUrl, shortSystem, type GameRow, type SystemRow } from "./api";
 import { Alphabet, bucketOf } from "./Alphabet";
-import { ALPHA, RAIL, SEARCH, TABS, TILES, jump } from "./focus";
+import { ALPHA, EMPTY_ACTION, RAIL, SEARCH, TABS, TILES, jump } from "./focus";
 
 // How many covers a row holds, and how much of the list is MOUNTED around the
 // focused row. A library here is 1044 GBA plus 787 NES games; putting three
@@ -209,6 +209,101 @@ function SearchButton({ onPress, onClear }: { onPress: () => void; onClear?: () 
   );
 }
 
+function EmptyAction({ onPress }: { onPress: () => void }) {
+  const { t } = useI18n();
+  const { ref, focused } = useFocusableItem({ focusKey: EMPTY_ACTION, onEnterPress: onPress });
+  return (
+    <div
+      ref={ref}
+      onClick={onPress}
+      className={[
+        "px-[2vw] py-[1.2vh] rounded-[1.2vh] text-[1.9vh] font-semibold",
+        focused ? "bg-white text-[#06090d]" : "bg-white/10 text-fg",
+      ].join(" ")}
+    >
+      {t("retroarch.noLibraryAction")}
+    </div>
+  );
+}
+
+// The console list. A component, not a branch inside GameGrid, so that when there are
+// no consoles its focus key does not exist either.
+function ConsoleRail({
+  systems,
+  active,
+  onPick,
+  onEnter,
+}: {
+  systems: SystemRow[];
+  active: string;
+  onPick: (system: string) => void;
+  onEnter: () => void;
+}) {
+  const { ref, focusKey } = useFocusable({ focusKey: RAIL });
+  return (
+    <FocusContext.Provider value={focusKey}>
+      <div ref={ref} className="w-[16vw] shrink-0 overflow-y-auto no-scrollbar flex flex-col gap-[0.4vh]">
+        {systems.map((s, k) => (
+          <Console
+            key={s.system}
+            row={s}
+            first={k === 0}
+            active={s.system === active}
+            onPick={onPick}
+            onEnter={onEnter}
+          />
+        ))}
+      </div>
+    </FocusContext.Provider>
+  );
+}
+
+// The covers, for the same reason: an empty grid must not leave a focus key behind.
+function Tiles({
+  system,
+  mounted,
+  start,
+  rows,
+  end,
+  scroller,
+  onPlay,
+  onFocusPos,
+}: {
+  system: string;
+  mounted: GameRow[];
+  start: number;
+  rows: number;
+  end: number;
+  scroller: MutableRefObject<HTMLDivElement | null>;
+  onPlay: (game: GameRow) => void;
+  onFocusPos: (pos: number) => void;
+}) {
+  const { ref, focusKey } = useFocusable({ focusKey: TILES });
+  return (
+    <FocusContext.Provider value={focusKey}>
+      <div
+        ref={(el) => {
+          // Two owners for one node: our scroller, and spatial navigation's container
+          // ref (an object ref, like useFocusableItem merges).
+          scroller.current = el;
+          (ref as MutableRefObject<HTMLDivElement | null>).current = el;
+        }}
+        className="flex-1 overflow-y-auto no-scrollbar"
+      >
+        {/* Spacers stand in for the rows that are not mounted, so the scroll position
+            does not jump when the window shifts. */}
+        <div style={{ height: start * ROW_VH + "vh" }} />
+        <div className="grid grid-cols-6 gap-x-[1vw] gap-y-[1vh]">
+          {mounted.map((g, k) => (
+            <Tile key={g.i} system={system} game={g} pos={start * COLS + k} onPlay={onPlay} onFocusPos={onFocusPos} />
+          ))}
+        </div>
+        <div style={{ height: Math.max(0, rows - end) * ROW_VH + "vh" }} />
+      </div>
+    </FocusContext.Provider>
+  );
+}
+
 export function GameGrid({
   systems,
   system,
@@ -217,6 +312,7 @@ export function GameGrid({
   error,
   onSystem,
   onPlay,
+  onEmptyAction,
 }: {
   systems: SystemRow[];
   system: string;
@@ -225,11 +321,10 @@ export function GameGrid({
   error: string;
   onSystem: (system: string) => void;
   onPlay: (game: GameRow) => void;
+  onEmptyAction: () => void;
 }) {
   const { t } = useI18n();
   const { ref, focusKey } = useFocusable({ focusKey: "grid-page" });
-  const { ref: railRef, focusKey: railKey } = useFocusable({ focusKey: RAIL });
-  const { ref: tilesRef, focusKey: tilesKey } = useFocusable({ focusKey: TILES });
   const [query, setQuery] = useState("");
   const [osk, setOsk] = useState(false);
   const [start, setStart] = useState(0); // first MOUNTED row
@@ -324,20 +419,9 @@ export function GameGrid({
   return (
     <FocusContext.Provider value={focusKey}>
       <div ref={ref} className="h-full flex gap-[1.5vw] px-[3vw] pb-[2vh]">
-        <FocusContext.Provider value={railKey}>
-          <div ref={railRef} className="w-[16vw] shrink-0 overflow-y-auto no-scrollbar flex flex-col gap-[0.4vh]">
-            {systems.map((s, k) => (
-              <Console
-                key={s.system}
-                row={s}
-                first={k === 0}
-                active={s.system === system}
-                onPick={onSystem}
-                onEnter={() => setToTiles(true)}
-              />
-            ))}
-          </div>
-        </FocusContext.Provider>
+        {systems.length > 0 && (
+          <ConsoleRail systems={systems} active={system} onPick={onSystem} onEnter={() => setToTiles(true)} />
+        )}
         <div className="flex-1 min-w-0 flex flex-col">
           <div className="flex items-baseline justify-between gap-[1vw] pb-[1vh]">
             <div className="text-[2.2vh] font-semibold truncate">{system || t("retroarch.noConsoles")}</div>
@@ -353,38 +437,26 @@ export function GameGrid({
               {t("retroarch.loading")}
             </div>
           ) : !shown.length ? (
-            <div className="flex-1 flex items-center justify-center text-[2vh] text-fg-dim">
-              {query ? t("retroarch.noMatch") : t("retroarch.noGames")}
+            <div className="flex-1 flex flex-col items-center justify-center gap-[2vh] text-[2vh] text-fg-dim">
+              <div>
+                {query ? t("retroarch.noMatch") : systems.length ? t("retroarch.noGames") : t("retroarch.noLibrary")}
+              </div>
+              {/* A library with nothing in it has no tile and no console to focus, so
+                  this button is the only thing in the view - and the way to the screen
+                  that fixes it. */}
+              {!query && <EmptyAction onPress={onEmptyAction} />}
             </div>
           ) : (
-            <FocusContext.Provider value={tilesKey}>
-              <div
-                ref={(el) => {
-                  // Two owners for one node: our scroller, and spatial navigation's
-                  // container ref (an object ref, like useFocusableItem merges).
-                  scroller.current = el;
-                  (tilesRef as MutableRefObject<HTMLDivElement | null>).current = el;
-                }}
-                className="flex-1 overflow-y-auto no-scrollbar"
-              >
-                {/* Spacers stand in for the rows that are not mounted, so the scroll
-                  position does not jump when the window shifts. */}
-                <div style={{ height: start * ROW_VH + "vh" }} />
-                <div className="grid grid-cols-6 gap-x-[1vw] gap-y-[1vh]">
-                  {mounted.map((g, k) => (
-                    <Tile
-                      key={g.i}
-                      system={system}
-                      game={g}
-                      pos={start * COLS + k}
-                      onPlay={onPlay}
-                      onFocusPos={onFocusPos}
-                    />
-                  ))}
-                </div>
-                <div style={{ height: Math.max(0, rows - end) * ROW_VH + "vh" }} />
-              </div>
-            </FocusContext.Provider>
+            <Tiles
+              system={system}
+              mounted={mounted}
+              start={start}
+              rows={rows}
+              end={end}
+              scroller={scroller}
+              onPlay={onPlay}
+              onFocusPos={onFocusPos}
+            />
           )}
         </div>
         {!error && !loading && shown.length > 0 && (

@@ -2,21 +2,23 @@ import { useCallback, useEffect, useState } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n, useBackspace, useFocusableItem } from "@sdk";
 import { fetchGames, fetchSystems, play, type GameRow, type SystemRow } from "./api";
-import { ART_PAGE, CONSOLES_PAGE, RAIL, TILES, jump } from "./focus";
+import { ART_PAGE, CONSOLES_PAGE, EMPTY_ACTION, RAIL, SCAN_PAGE, SEARCH, TABS, TILES, focusLost, jump } from "./focus";
 import { GameGrid } from "./GameGrid";
 import { Consoles } from "./Consoles";
 import { Artwork } from "./Artwork";
+import { Scan } from "./Scan";
 
-type View = "games" | "consoles" | "art";
+type View = "games" | "consoles" | "art" | "scan";
 const LAST_SYSTEM = "tvbox.retroarch.system";
 // Where "down out of the tabs" lands, per view: the first of these that is actually
 // mounted. For the games view that is the covers, falling back to the console list
 // when a console has none - NOT the page container, whose children are containers
 // themselves, which is why the tabs used to be a one-way street.
 const VIEW_CONTENT: Record<View, string[]> = {
-  games: [TILES, RAIL],
+  games: [TILES, RAIL, EMPTY_ACTION, SEARCH],
   consoles: [CONSOLES_PAGE],
   art: [ART_PAGE],
+  scan: [SCAN_PAGE],
 };
 
 function Tab({
@@ -171,6 +173,17 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [loadSystems]);
 
+  // Nothing to browse means nothing to focus: a box with no games has an empty grid,
+  // an empty console rail, and therefore not one focusable element in this view - and
+  // with the arrows dead there is no way to reach the tabs and install an emulator.
+  // Whenever focus has nowhere to be, it goes to the content, or failing that the tabs.
+  useEffect(() => {
+    const id = setTimeout(() => {
+      if (focusLost()) jump(...VIEW_CONTENT[view], TABS);
+    }, 60); // after the render that changed what exists
+    return () => clearTimeout(id);
+  }, [view, systems, games, loading, starting]);
+
   const total = systems.reduce((n, s) => n + s.games, 0);
 
   return (
@@ -196,6 +209,7 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
               onPick={setView}
             />
             <Tab id="art" view={view} label={t("retroarch.tabArt")} active={view === "art"} onPick={setView} />
+            <Tab id="scan" view={view} label={t("retroarch.tabScan")} active={view === "scan"} onPick={setView} />
           </div>
         </div>
         <div className="flex-1 min-h-0">
@@ -208,9 +222,17 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
               error={error}
               onSystem={setSystem}
               onPlay={onPlay}
+              onEmptyAction={() => {
+                // No games at all: the way out is a scan, or an emulator if none is
+                // installed yet - the scan screen says which, so start there.
+                setView("scan");
+                setTimeout(() => jump(SCAN_PAGE, TABS), 60);
+              }}
             />
           ) : view === "consoles" ? (
             <Consoles systems={systems} onChanged={loadSystems} />
+          ) : view === "scan" ? (
+            <Scan onScanned={loadSystems} />
           ) : (
             <Artwork />
           )}
