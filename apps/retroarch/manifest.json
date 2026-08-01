@@ -2,8 +2,12 @@
   "id": "retroarch",
   "manifestVersion": 1,
   "name": "RetroArch",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "changelog": [
+    {
+      "version": "1.5.0",
+      "notes": "You can tell the box to read a folder for games now - the Scan tab. A console only appears under Games once a folder has been read for it, and nothing did that before: installing an emulator does not, and RetroArch's own scan silently skips every game it does not recognise from its database, which is most of a library made of bad dumps, hacks or homebrew. The box now runs that scan for the labels it gets right and then adds everything it left behind, so the games appear either way. It also says what it found in a folder before you press anything, and asks which console only when the file types genuinely cannot say. Covers follow a scan on their own, including for games whose file name carries a number in front of the title."
+    },
     {
       "version": "1.4.0",
       "notes": "The games are on the box now. Opening RetroArch shows your own consoles and covers in a grid you can drive with the remote or a controller, and pressing OK starts the game straight away - no emulator menu in between, and when the game ends you are back in the list. Consoles and covers can be managed from the TV as well as from your phone. The Xbox/Guide button also opens the emulator's own menu mid-game (save states, close content) on pads where it previously did nothing: which button that is differs per controller, so the box now reads it from the controller itself instead of trusting one number."

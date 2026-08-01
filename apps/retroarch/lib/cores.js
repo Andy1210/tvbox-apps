@@ -157,6 +157,9 @@ function parseInfo(text) {
     display: get("display_name"),
     name: get("corename"),
     system: get("systemname"),
+    // The core's own id for the console it is FOR - the tie-break when its database
+    // list names several (lib/scan.js).
+    systemid: get("systemid"),
     api: get("required_hw_api"),
     // The libretro DATABASE names this core plays, pipe-separated in the file
     // ("Nintendo - Game Boy|Nintendo - Game Boy Color"). Worth having next to
