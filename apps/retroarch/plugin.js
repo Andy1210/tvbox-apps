@@ -604,7 +604,7 @@ module.exports = (host) => {
           host.log(
             "retroarch: scan of " +
               path.basename(dir) +
-              ": " +
+              (r.stopped ? " STOPPED after " : ": ") +
               (r.matched || 0) +
               " recognised, " +
               (r.added || 0) +

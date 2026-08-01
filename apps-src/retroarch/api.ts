@@ -110,7 +110,17 @@ export interface ScanInspect {
 export interface ScanState {
   running: boolean;
   progress: { folder: string; stage: string; matched?: number } | null;
-  last: { ok: boolean; matched?: number; added?: number; skipped?: number; error?: string } | null;
+  // `stopped` is a scan that was ended on purpose (the Stop button, or a game
+  // starting). It reports ok - nothing failed - but it is NOT a finished scan,
+  // so the counts are partial and the second pass may never have run.
+  last: {
+    ok: boolean;
+    stopped?: boolean;
+    matched?: number;
+    added?: number;
+    skipped?: number;
+    error?: string;
+  } | null;
 }
 
 export const fetchScanFolders = () =>

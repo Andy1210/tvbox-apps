@@ -60,6 +60,7 @@
     "scanAdding": "Hozzáadom, amit a RetroArch nem ismert fel…",
     "scanSlow": "Percekig tarthat: minden fájlt végigolvas. Addig is használhatod a boxot.",
     "scanDone": "Kész: {matched} felismerve, {added} hozzáadva.",
+    "scanStopped": "Leállítva: eddig {matched} felismerve, {added} hozzáadva.",
     "scanSkipped": "{n} kimaradt, mert nem dőlt el a konzol",
     "scanWhichConsole": "Melyik konzolhoz kerüljön",
     "scanFromFiles": "A fájltípusok döntsék el",

@@ -199,10 +199,18 @@ function resolveFolder(input) {
   if (want !== root && !want.startsWith(root + path.sep)) return "";
   try {
     if (!fs.statSync(want).isDirectory()) return "";
+    // Compare what the paths REALLY are, not what they spell. A subdirectory of
+    // the library that is a symlink elsewhere passes the string test above while
+    // pointing anywhere on the box, and this value goes on RetroArch's command
+    // line. The root is resolved too, so a library that is itself a link (an
+    // external drive, say) keeps working - only escaping from inside it does not.
+    const realRoot = fs.realpathSync(root);
+    const real = fs.realpathSync(want);
+    if (real !== realRoot && !real.startsWith(realRoot + path.sep)) return "";
+    return real;
   } catch (e) {
     return "";
   }
-  return want;
 }
 
 // What a folder holds, and what a scan would do with it: how many games, which
@@ -210,7 +218,10 @@ function resolveFolder(input) {
 // screen shows before anyone presses anything.
 function inspect(folder, opts) {
   const dir = resolveFolder(folder);
-  if (!dir) return { error: "bad_folder" };
+  // Same shape as a good answer, so a caller can read the counts without
+  // checking for an error first: a folder that vanished (or turned unreadable)
+  // between the listing and this call holds no games, which is also true.
+  if (!dir) return { folder: "", error: "bad_folder", games: 0, already: 0, ambiguous: 0, systems: [] };
   const map = extensionMap(opts);
   const found = walk(dir, new Set(map.keys()));
   const known = knownPaths();
