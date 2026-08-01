@@ -8,7 +8,7 @@
 // then writes index.json: `apps` (all manifests, for the catalog) plus
 // `packages` (per package-app: the file list + sha256 the box fetches +
 // verifies on install). No deps — full JSON Schema validation runs in CI (ajv).
-import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join, basename, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -59,6 +59,16 @@ function validate(m, f, id) {
       err(f, "remote app needs runtime.url or runtime.urlConfig");
   }
   if (m.icon && /<script|href=|xlink|url\(/i.test(m.icon)) err(f, "icon SVG must not reference external content");
+  // Renderer bridge: a bare name is one of the shell's own bridges/, "./file.js"
+  // one this package ships. The file has to be IN the package, or a box would
+  // install a manifest pointing at a bridge that never arrives.
+  const bridge = m.runtime && m.runtime.bridge;
+  if (bridge !== undefined) {
+    if (typeof bridge !== "string" || !/^([a-z0-9_-]+|\.\/[a-z0-9_-]+\.js)$/.test(bridge))
+      err(f, "runtime.bridge must be a built-in name or ./<file>.js");
+    else if (bridge.startsWith("./") && !existsSync(join(appsDir, id, bridge.slice(2))))
+      err(f, `runtime.bridge ${bridge} is not in the package`);
+  }
   if (m.pairing !== undefined) {
     // A pairing entry only makes sense with a plugin to register the provider.
     if (!Array.isArray(m.pairing) || m.pairing.length > 4) err(f, "pairing must be an array of at most 4");
