@@ -34,6 +34,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const { spawn } = require("child_process");
 const roms = require("./lib/roms");
 const share = require("./lib/share"); // optional SMB game library shared by several boxes
 const cores = require("./lib/cores"); // the box installs and updates libretro cores itself
@@ -577,6 +578,48 @@ module.exports = (host) => {
     return true;
   }
 
+  // The inspection walks a folder and reads every playlist, synchronously, and
+  // this code runs in the shell's Electron MAIN process - so doing it here would
+  // freeze the UI for as long as the walk takes, on every folder the cursor lands
+  // on. Electron's own binary as Node (ELECTRON_RUN_AS_NODE), the way the shell
+  // runs its CLI out of process for the same reason.
+  const INSPECT_TIMEOUT_MS = 60000;
+  function inspectOutOfProcess(folder) {
+    return new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [path.join(__dirname, "lib", "inspect-cli.js"), String(folder || "")], {
+        env: { ...host.childEnv(), ELECTRON_RUN_AS_NODE: "1" },
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      let out = "";
+      let done = false;
+      const finish = (fn, arg) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        fn(arg);
+      };
+      // A share that has gone away can block the walk indefinitely; a folder the
+      // user has already moved off must not hold a process for ever.
+      const timer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch (e) {
+          /* already gone */
+        }
+        finish(reject, new Error("timeout"));
+      }, INSPECT_TIMEOUT_MS);
+      child.stdout.on("data", (d) => (out += d));
+      child.on("error", (e) => finish(reject, e));
+      child.on("close", () => {
+        try {
+          finish(resolve, JSON.parse(out));
+        } catch (e) {
+          finish(reject, e);
+        }
+      });
+    });
+  }
+
   function startScan(folder, system) {
     if (scanning) return { ok: false, error: "busy" };
     const dir = scan.resolveFolder(folder);
@@ -706,7 +749,9 @@ module.exports = (host) => {
       ctx.json(res, { romsDir: roms.ROMS_DIR, folders: scan.folders(), consoles: scan.consoles() }),
     "GET /scan-inspect": (req, res, ctx) => {
       const folder = new URL(req.url, "http://x").searchParams.get("folder") || "";
-      ctx.json(res, scan.inspect(folder));
+      inspectOutOfProcess(folder)
+        .then((r) => ctx.json(res, r))
+        .catch(() => ctx.json(res, { folder: "", error: "inspect_failed", games: 0, already: 0, ambiguous: 0, systems: [] }));
     },
     "GET /scan": (req, res, ctx) => ctx.json(res, { running: !!scanning, progress: scanning, last: scanResult }),
     "POST /scan-start": (req, res, ctx) => {
@@ -904,6 +949,10 @@ module.exports = (host) => {
       artStop = true;
       clearTimeout(artKick);
       clearInterval(artTimer);
+      // A scan owns a RetroArch child and writes playlists when it finishes. Left
+      // running it would go on doing both on behalf of a plugin that is gone, and
+      // a shell restart would come back to a scanner nobody is tracking.
+      stopScan();
     },
   };
 };

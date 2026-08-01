@@ -164,9 +164,13 @@ function SearchButton({ onPress, onClear }: { onPress: () => void; onClear?: () 
       return false;
     }
     if (dir === "down") {
-      // The covers if there are any, else the console list - never "grid-page", whose
-      // children are containers themselves and which resolves to nothing useful.
-      jump(TILES, RAIL);
+      // The covers if there are any, else the empty-library button, else the
+      // console list - never "grid-page", whose children are containers
+      // themselves and which resolves to nothing useful. EMPTY_ACTION is in the
+      // list because with no games that button is the only thing below here, and
+      // it sets no arrow handling of its own: skipping it sent the cursor past
+      // the one control the screen was offering.
+      jump(TILES, EMPTY_ACTION, RAIL);
       return false;
     }
     return true;

@@ -19,8 +19,6 @@ export const CONSOLES_PAGE = "consoles-page";
 export const ART_PAGE = "art-page";
 export const SCAN_PAGE = "scan-page";
 
-// Focus the first of these keys that exists. Returns what it landed on, or "" - a
-// caller can then let the arrow through instead of swallowing it.
 // Is anything actually focused right now? A focus key can outlive the element it named
 // (a list emptied, a view swapped), and then every arrow press goes nowhere - which on a
 // TV is a dead remote, with no way to reach even the tabs.
@@ -29,6 +27,8 @@ export function focusLost(): boolean {
   return !key || !doesFocusableExist(key);
 }
 
+// Focus the first of these keys that exists. Returns what it landed on, or "" - a
+// caller can then let the arrow through instead of swallowing it.
 export function jump(...keys: string[]): string {
   for (const key of keys) {
     if (!key || !doesFocusableExist(key)) continue;
