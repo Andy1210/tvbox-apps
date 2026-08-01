@@ -432,9 +432,12 @@ function unpackAssets(zip, env) {
 // Best effort by design: a core with no pack is the normal case, and a pack that
 // cannot be fetched still leaves a working core for everything that needs no
 // system files. It reports what happened so the caller can say so.
-async function installSystemAssets(core, env, index) {
+// `info` is the CORE INFO index (core -> { name, display, … }), not the buildbot
+// index install() works with - that one carries a date and a crc and no name at
+// all, so passing it here matched nothing and quietly fetched no pack.
+async function installSystemAssets(core, env, info) {
   const list = await fetchAssetList(env);
-  const pack = assetForCore(core, index, list);
+  const pack = assetForCore(core, env ? info || infoIndex() : info, list);
   if (!pack) return { pack: null };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-assets-"));
   const zip = path.join(tmp, "assets.zip");
@@ -527,7 +530,7 @@ function install(core, env, index) {
           cleanup();
           // The core is in place; its system files are a separate, best-effort
           // step so a buildbot hiccup cannot undo a working install.
-          installSystemAssets(core, env, index).then(
+          installSystemAssets(core, env, infoIndex()).then(
             (assets) => resolve({ ok: true, core, crc: hex8(got), assets }),
             () => resolve({ ok: true, core, crc: hex8(got), assets: { pack: null } }),
           );
