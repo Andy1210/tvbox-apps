@@ -433,7 +433,7 @@
       "files": [
         {
           "path": "bridge.js",
-          "sha256": "513f8b846083c9b2f2d54f56773deaece66ee97f662b76a5a78011f5dd7b6acb"
+          "sha256": "f26edd293fa54f8917446d62df77d9b5f299df131ee69737b5cec6db5978ea99"
         },
         {
           "path": "manifest.json",

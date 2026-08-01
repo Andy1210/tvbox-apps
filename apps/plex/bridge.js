@@ -24,16 +24,33 @@ module.exports.setup = function setup(ctx) {
   var Success = 0;
   var Denied = 1; // any non-zero errorCode reads as a failure to a QWebChannel client
 
-  var signals = {}; // QWebChannel signal path -> connected callbacks
+  // Null-prototype: the keys are QWebChannel paths the CLIENT chooses, so a
+  // plain object would let "__proto__" reach Object.prototype instead of
+  // becoming an entry, poisoning every later lookup.
+  var signals = Object.create(null); // QWebChannel signal path -> connected callbacks
   var playing = false; // an mpv session is active (used to pause video on Back)
+  // A Plex URL carries the account's X-Plex-Token as a query parameter, and this
+  // goes to the shell's log FILE. The shell redacts too, but a credential is not
+  // something to hand over and hope: strip it at the source.
+  var SECRETS = /([?&](?:x-plex-token|token|access_token|api_key|apikey|password)=)([^&\s"']*)/gi;
   function log(what, detail) {
     try {
-      ipcRenderer.send("plog", what, detail);
+      ipcRenderer.send("plog", what, typeof detail === "string" ? detail.replace(SECRETS, "$1REDACTED") : detail);
     } catch (e) {}
   }
+  // Most callers here fire and forget, and `invoke` returns a PROMISE - a
+  // rejection from the main process with nothing attached becomes an unhandled
+  // rejection (noisy at best, fatal depending on the runtime's settings). The
+  // catch belongs here rather than at 20 call sites.
   function player(action, payload) {
     try {
-      return ipcRenderer.invoke("player", action, payload || {});
+      var p = ipcRenderer.invoke("player", action, payload || {});
+      if (p && typeof p.catch === "function") {
+        p.catch(function (e) {
+          log("player." + action, "(broker rejected: " + (e && e.message ? e.message : e) + ")");
+        });
+      }
+      return p;
     } catch (e) {
       return null;
     }
@@ -96,6 +113,10 @@ module.exports.setup = function setup(ctx) {
         if (name && signals["input.onKeyReceived"] && signals["input.onKeyReceived"].length) {
           ev.preventDefault();
           ev.stopImmediatePropagation();
+          // An ARRAY of key names, not a bare one: the client's handler is
+          // `(e) => { const t = e.map(this._getKeyEvent); ... }`, so a string
+          // would die on `.map` and take every media key with it. It reads like
+          // a wrapping mistake; it is the contract.
           fire("input.onKeyReceived", [name]);
           return;
         }
@@ -119,7 +140,10 @@ module.exports.setup = function setup(ctx) {
   // ---- stream selection ------------------------------------------------
   // The client resolves audio/subtitle server-side and hands the result to the
   // host; `index` is the 0-based ordinal WITHIN its type (audio 0 = the file's
-  // first audio track), -1 = none. The shell's player broker speaks the same
+  // first audio track). -1 is NOT symmetric: on a subtitle it means "none", on
+  // audio it means the client could not match its chosen stream, which is a
+  // reason to leave the track to the player and never a request to mute - so it
+  // is passed on as "no opinion". The shell's player broker speaks the same
   // ordinals, so this is a rename, not a translation - except for the two cases
   // that are not an index at all:
   //   • `url` - a sidecar subtitle the server serves as its own file
@@ -213,33 +237,42 @@ module.exports.setup = function setup(ctx) {
       var cb = args.length ? args[args.length - 1] : null;
       var hasCb = typeof cb === "function";
 
-      // storage -> raw window.localStorage passthrough
-      if (has("storage")) {
-        try {
-          if (path === "storage.itemKeys") {
-            if (hasCb) cb({ errorCode: Success, result: Object.keys(localStorage) });
-            return;
-          }
-          if (path === "storage.setItem") {
+      // storage -> raw window.localStorage passthrough. A THROW here (quota, or
+      // storage disabled) used to fall out of the block and reach the generic
+      // responder below, which reports Success - so a write that never happened
+      // was answered as if it had. Report the failure instead; the client can
+      // then say so rather than trusting a setting it does not have.
+      if (has("storage") && path.indexOf("storage.") === 0) {
+        var atomic = {
+          "storage.itemKeys": function () {
+            return Object.keys(localStorage);
+          },
+          "storage.setItem": function () {
             localStorage.setItem(args[0], args[1]);
-            if (hasCb) cb({ errorCode: Success, result: {} });
-            return;
-          }
-          if (path === "storage.getItem") {
-            if (hasCb) cb({ errorCode: Success, result: localStorage.getItem(args[0]) });
-            return;
-          }
-          if (path === "storage.removeItem") {
+            return {};
+          },
+          "storage.getItem": function () {
+            return localStorage.getItem(args[0]);
+          },
+          "storage.removeItem": function () {
             localStorage.removeItem(args[0]);
-            if (hasCb) cb({ errorCode: Success, result: {} });
-            return;
-          }
-          if (path === "storage.clear") {
+            return {};
+          },
+          "storage.clear": function () {
             localStorage.clear();
-            if (hasCb) cb({ errorCode: Success, result: {} });
-            return;
+            return {};
+          },
+        };
+        if (Object.prototype.hasOwnProperty.call(atomic, path)) {
+          try {
+            var value = atomic[path]();
+            if (hasCb) cb({ errorCode: Success, result: value === undefined ? null : value });
+          } catch (e) {
+            log(path, "(failed: " + (e && e.message ? e.message : e) + ")");
+            if (hasCb) cb({ errorCode: Denied, result: {} });
           }
-        } catch (e) {}
+          return;
+        }
       }
 
       // system.exit / quit / closeApp -> really CLOSE the app, then HOME.
@@ -305,20 +338,31 @@ module.exports.setup = function setup(ctx) {
       }
 
       if (!hasCb) return;
+      // The bulk get/set form of the same surface. It reaches real localStorage,
+      // so it is gated on the SAME capability as the atomic calls above - an app
+      // that never declared `storage` must not get a back door to it just
+      // because it asked in the plural.
+      var store = has("storage");
       var result = {};
       if (/\.get$/.test(path) && Array.isArray(args[0])) {
         args[0].forEach(function (k) {
-          var v = path === "storage.get" ? localStorage.getItem(k) : defaultFor(k);
+          var v = path === "storage.get" && store ? localStorage.getItem(k) : defaultFor(k);
           result[k] = { errorCode: Success, result: v === undefined ? null : v };
         });
       } else if (/\.set$/.test(path) && args[0] && typeof args[0] === "object") {
         Object.keys(args[0]).forEach(function (k) {
+          var stored = true;
           if (path === "storage.set") {
-            try {
-              localStorage.setItem(k, typeof args[0][k] === "string" ? args[0][k] : JSON.stringify(args[0][k]));
-            } catch (e) {}
+            if (!store) stored = false;
+            else {
+              try {
+                localStorage.setItem(k, typeof args[0][k] === "string" ? args[0][k] : JSON.stringify(args[0][k]));
+              } catch (e) {
+                stored = false;
+              }
+            }
           }
-          result[k] = { errorCode: Success, result: true };
+          result[k] = stored ? { errorCode: Success, result: true } : { errorCode: Denied, result: false };
         });
       }
       cb({ errorCode: Success, result: result });
@@ -337,7 +381,7 @@ module.exports.setup = function setup(ctx) {
       var i = list.indexOf(cb);
       if (i >= 0) list.splice(i, 1);
     };
-    var children = {};
+    var children = Object.create(null); // same reason as `signals`: client-chosen keys
     return new Proxy(fn, {
       get: function (t, prop) {
         if (
