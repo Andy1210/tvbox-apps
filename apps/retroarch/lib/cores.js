@@ -353,6 +353,117 @@ function list(index) {
   return out.sort((a, b) => Number(b.installed) - Number(a.installed) || a.label.localeCompare(b.label));
 }
 
+// ---- the files a core needs beside itself ----
+//
+// Some cores cannot run on their own binary: PPSSPP needs its font atlas and a
+// flash0 image, ScummVM its engine data, Dolphin its sys files. RetroArch keeps
+// them in the SYSTEM directory, and without them the core loads and then says
+// "core system files are missing" - which names nothing and leaves the owner of a
+// TV with no idea what to add. libretro publishes those packs itself, so
+// installing a core can simply bring them.
+//
+// The buildbot names each pack after the core's own `corename` ("PPSSPP.zip"),
+// sometimes with a note in brackets ("FinalBurn Neo (hiscore).zip"), so the
+// listing IS the mapping and there is no table here to fall out of date.
+const SYSTEM_DIR = path.join(os.homedir(), ".var", "app", FLATPAK_REF, "config", "retroarch", "system");
+const ASSETS_URL = "https://buildbot.libretro.com/assets/system/";
+const ASSETS_TIMEOUT_MS = 180000;
+let assetListCache = null; // [{ name, url }], fetched once per shell run
+
+function fetchAssetList(env) {
+  if (assetListCache) return Promise.resolve(assetListCache);
+  return new Promise((resolve) => {
+    execFile(
+      "curl",
+      ["-fsSL", "--proto", "=https", "--max-time", "30", ASSETS_URL],
+      { env, timeout: 35000, maxBuffer: 4 * 1024 * 1024 },
+      (err, out) => {
+        if (err) return resolve([]); // offline, or the buildbot is down: no packs, no failure
+        const list = [];
+        const re = /href="([^"]+\.zip)"/gi;
+        let m;
+        while ((m = re.exec(out))) {
+          let file;
+          try {
+            file = decodeURIComponent(m[1].split("/").pop());
+          } catch (e) {
+            continue; // a href we cannot decode is not a pack we can ask for
+          }
+          list.push({ name: file.slice(0, -4), file });
+        }
+        assetListCache = list;
+        resolve(list);
+      },
+    );
+  });
+}
+
+// The pack for this core, or null. Matched on the core's own name, either exactly
+// or with the buildbot's bracketed note after it.
+function assetForCore(core, index, list) {
+  const info = (index && index.get(core)) || {};
+  const name = String(info.name || info.display || "").trim();
+  if (!name) return null;
+  return list.find((a) => a.name === name || a.name.startsWith(name + " (")) || null;
+}
+
+// Unpack into the system dir. The archive decides its own paths, so they are read
+// FIRST and anything absolute or climbing out is refused - the core zip above can
+// name the one entry it wants, and this one cannot. There is no checksum to check
+// (the index covers cores only), so the guarantee here is https to the same host
+// the core itself came from, and the path check.
+function unpackAssets(zip, env) {
+  return new Promise((resolve) => {
+    execFile("unzip", ["-Z1", zip], { env, timeout: 30000, maxBuffer: 4 * 1024 * 1024 }, (err, out) => {
+      if (err) return resolve({ ok: false, error: "bad_archive" });
+      const entries = String(out).split("\n").filter(Boolean);
+      if (!entries.length) return resolve({ ok: false, error: "bad_archive" });
+      for (const e of entries) {
+        if (e.startsWith("/") || e.split("/").includes("..")) return resolve({ ok: false, error: "unsafe_archive" });
+      }
+      fs.mkdirSync(SYSTEM_DIR, { recursive: true });
+      execFile("unzip", ["-o", "-q", zip, "-d", SYSTEM_DIR], { env, timeout: 120000 }, (uerr) =>
+        resolve(uerr ? { ok: false, error: "unpack_failed" } : { ok: true, entries: entries.length }),
+      );
+    });
+  });
+}
+
+// Best effort by design: a core with no pack is the normal case, and a pack that
+// cannot be fetched still leaves a working core for everything that needs no
+// system files. It reports what happened so the caller can say so.
+async function installSystemAssets(core, env, index) {
+  const list = await fetchAssetList(env);
+  const pack = assetForCore(core, index, list);
+  if (!pack) return { pack: null };
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-assets-"));
+  const zip = path.join(tmp, "assets.zip");
+  try {
+    const got = await new Promise((resolve) =>
+      execFile(
+        "curl",
+        [
+          "-fsSL",
+          "--proto",
+          "=https",
+          "--max-time",
+          String(Math.round(ASSETS_TIMEOUT_MS / 1000)),
+          "-o",
+          zip,
+          ASSETS_URL + encodeURIComponent(pack.file),
+        ],
+        { env, timeout: ASSETS_TIMEOUT_MS },
+        (err) => resolve(!err),
+      ),
+    );
+    if (!got) return { pack: pack.name, ok: false, error: "download_failed" };
+    const r = await unpackAssets(zip, env);
+    return { pack: pack.name, ...r };
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 // Download one core and put its .so in place. Only a core the index actually
 // publishes is accepted, and the CRC32 the index advertised is verified against the
 // extracted file, so a truncated or swapped download is refused rather than handed
@@ -414,7 +525,12 @@ function install(core, env, index) {
             return resolve({ ok: false, error: "write_failed" });
           }
           cleanup();
-          resolve({ ok: true, core, crc: hex8(got) });
+          // The core is in place; its system files are a separate, best-effort
+          // step so a buildbot hiccup cannot undo a working install.
+          installSystemAssets(core, env, index).then(
+            (assets) => resolve({ ok: true, core, crc: hex8(got), assets }),
+            () => resolve({ ok: true, core, crc: hex8(got), assets: { pack: null } }),
+          );
         });
       },
     );
@@ -435,6 +551,9 @@ function remove(core) {
 
 module.exports = {
   CORES_DIR,
+  SYSTEM_DIR,
+  installSystemAssets,
+  _test: { assetForCore },
   OVERRIDES_DIR,
   videoDriversFor,
   setOverrideDriver,
