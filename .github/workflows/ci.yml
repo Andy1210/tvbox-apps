@@ -23,11 +23,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  registry:
+  # Build and check everything, on pull requests as well as on main. It carries no
+  # `environment:` on purpose - the github-pages environment only admits main, and
+  # declaring it here would have the whole job refused on a PR before it runs a
+  # single step, conditional deploy steps or not.
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -75,6 +76,16 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           path: _site
+
+  # Merging to main is the release. Separate job so the environment (and its
+  # main-only protection rule) applies to the deployment alone.
+  publish:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
       - id: deploy
         uses: actions/deploy-pages@v4
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
