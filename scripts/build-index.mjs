@@ -8,7 +8,7 @@
 // then writes index.json: `apps` (all manifests, for the catalog) plus
 // `packages` (per package-app: the file list + sha256 the box fetches +
 // verifies on install). No deps — full JSON Schema validation runs in CI (ajv).
-import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, statSync, lstatSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join, basename, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -59,14 +59,14 @@ function validate(m, f, id) {
       err(f, "remote app needs runtime.url or runtime.urlConfig");
   }
   if (m.icon && /<script|href=|xlink|url\(/i.test(m.icon)) err(f, "icon SVG must not reference external content");
-  // Renderer bridge: a bare name is one of the shell's own bridges/, "./file.js"
-  // one this package ships. The file has to be IN the package, or a box would
+  // Renderer bridge: always "./file.js" shipped by the package - the shell has
+  // no bridges of its own. The file has to BE in the package, or a box would
   // install a manifest pointing at a bridge that never arrives.
   const bridge = m.runtime && m.runtime.bridge;
   if (bridge !== undefined) {
-    if (typeof bridge !== "string" || !/^([a-z0-9_-]+|\.\/[a-z0-9_-]+\.js)$/.test(bridge))
-      err(f, "runtime.bridge must be a built-in name or ./<file>.js");
-    else if (bridge.startsWith("./") && !existsSync(join(appsDir, id, bridge.slice(2))))
+    if (typeof bridge !== "string" || !/^\.\/[a-z0-9_-]+\.js$/.test(bridge))
+      err(f, "runtime.bridge must be ./<file>.js shipped by the package");
+    else if (!existsSync(join(appsDir, id, bridge.slice(2))))
       err(f, `runtime.bridge ${bridge} is not in the package`);
   }
   if (m.pairing !== undefined) {
@@ -92,11 +92,20 @@ const NOT_SHIPPED = (name) => /\.test\.(js|cjs|mjs|ts)$/.test(name);
 
 // Recursively list a package dir as sorted relative paths (POSIX separators, so
 // the index is byte-stable and the URL joins cleanly), each with its sha256.
-function packageFiles(dir) {
+function packageFiles(dir, onError) {
   const out = [];
   const walk = (d) => {
     for (const name of readdirSync(d).sort()) {
       const full = join(d, name);
+      // lstat, and a symlink is refused rather than followed. Everything listed
+      // here gets copied to the published site and hashed as if it belonged to
+      // the package, so a link is a way to put a file from OUTSIDE the repo (the
+      // CI runner's home, say) into the registry under an app's name. A package
+      // has no legitimate use for one.
+      if (lstatSync(full).isSymbolicLink()) {
+        onError(`${relative(appsDir, full)}: symlinks are not shipped`);
+        continue;
+      }
       if (statSync(full).isDirectory()) walk(full);
       else if (NOT_SHIPPED(name)) continue;
       else {
@@ -125,7 +134,7 @@ for (const entry of readdirSync(appsDir).sort()) {
       continue;
     }
     validate(m, entry + "/manifest.json", entry);
-    const files = packageFiles(full);
+    const files = packageFiles(full, (msg) => err(entry, msg));
     if (!files.some((x) => x.path === "manifest.json")) err(entry, "package must contain manifest.json");
     packages[m.id] = { files };
     apps.push(m);
