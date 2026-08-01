@@ -87,7 +87,13 @@
       "id": "plex",
       "manifestVersion": 1,
       "name": "Plex",
-      "version": "1.0.0",
+      "version": "1.1.0",
+      "changelog": [
+        {
+          "version": "1.1.0",
+          "notes": "Play the audio track and subtitles Plex actually chose, and stop the pause spinner that ended in a playback error."
+        }
+      ],
       "type": "webclient",
       "status": "ready",
       "accent": "#e5a00d",
@@ -126,7 +132,7 @@
         "serve": "static",
         "entry": "index.html",
         "mount": "root",
-        "bridge": "qwebchannel",
+        "bridge": "./bridge.js",
         "transparentSelector": "#media-container",
         "capabilities": [
           "storage",
@@ -420,6 +426,18 @@
         {
           "path": "web/index.html",
           "sha256": "408d360eea726bd3cf566c19e7707d178b073ce81c74cc66901bed015be7b6f0"
+        }
+      ]
+    },
+    "plex": {
+      "files": [
+        {
+          "path": "bridge.js",
+          "sha256": "513f8b846083c9b2f2d54f56773deaece66ee97f662b76a5a78011f5dd7b6acb"
+        },
+        {
+          "path": "manifest.json",
+          "sha256": "32219f9aa25cf4217d61a28325c369688815fe79d20be869244423ca31e56fbe"
         }
       ]
     },

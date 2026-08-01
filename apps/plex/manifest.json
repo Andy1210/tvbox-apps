@@ -2,7 +2,13 @@
   "id": "plex",
   "manifestVersion": 1,
   "name": "Plex",
-  "version": "1.0.0",
+  "version": "1.1.0",
+  "changelog": [
+    {
+      "version": "1.1.0",
+      "notes": "Play the audio track and subtitles Plex actually chose, and stop the pause spinner that ended in a playback error."
+    }
+  ],
   "type": "webclient",
   "status": "ready",
   "accent": "#e5a00d",
@@ -16,8 +22,12 @@
     "hu": "A hivatalos Plex nappali-app. A Plex-szervereden lévő filmek, sorozatok és zene lejátszása a nagy képernyőn, a videót a box natívan játssza. Egyszeri belépés a plex.tv/link címen, nem kell gépelni a TV-n."
   },
   "requires": {
-    "bin": ["mpv"],
-    "apt": ["mpv"]
+    "bin": [
+      "mpv"
+    ],
+    "apt": [
+      "mpv"
+    ]
   },
   "install": {
     "source": {
@@ -37,9 +47,14 @@
     "serve": "static",
     "entry": "index.html",
     "mount": "root",
-    "bridge": "qwebchannel",
+    "bridge": "./bridge.js",
     "transparentSelector": "#media-container",
-    "capabilities": ["storage", "player", "input", "system"],
+    "capabilities": [
+      "storage",
+      "player",
+      "input",
+      "system"
+    ],
     "player": "mpv-overlay"
   }
 }
