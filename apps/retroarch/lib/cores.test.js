@@ -325,3 +325,27 @@ test("only a regular file is accepted as a core", () => {
   assert.strictEqual(cores.isRegularFile(path.join(dir, "missing.so")), false);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test("a core's system pack is matched by the name the core calls itself", () => {
+  // The buildbot names the pack after `corename`, sometimes with a note after it,
+  // so the listing is the mapping - there is no table here to go stale.
+  const list = [
+    { name: "PPSSPP", file: "PPSSPP.zip" },
+    { name: "FinalBurn Neo (hiscore)", file: "FinalBurn Neo (hiscore).zip" },
+    { name: "Dolphin", file: "Dolphin.zip" },
+  ];
+  const index = new Map([
+    ["ppsspp", { name: "PPSSPP" }],
+    ["fbneo", { name: "FinalBurn Neo" }],
+    ["gambatte", { name: "Gambatte" }],
+    ["nameless", {}],
+  ]);
+  const pick = (core) => (cores._test.assetForCore(core, index, list) || {}).name || null;
+  assert.strictEqual(pick("ppsspp"), "PPSSPP");
+  assert.strictEqual(pick("fbneo"), "FinalBurn Neo (hiscore)", "the bracketed note still belongs to the core");
+  assert.strictEqual(pick("gambatte"), null, "a core that needs no system files gets none");
+  assert.strictEqual(pick("nameless"), null, "no corename, nothing to match on");
+  // A prefix is not a match: "PPSSPP" must not claim a pack for some other core
+  // whose name merely starts the same way.
+  assert.strictEqual(cores._test.assetForCore("ppsspp", index, [{ name: "PPSSPPX", file: "PPSSPPX.zip" }]), null);
+});
