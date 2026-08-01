@@ -1,6 +1,8 @@
-# tvbox-apps CI — validates every manifest (trust rules + JSON Schema from
-# the main tvbox repo) and keeps index.json in sync. Merging to main is what
-# publishes the registry: boxes fetch index.json over GitHub raw.
+# tvbox-apps CI: builds every app UI, validates every manifest (trust rules +
+# JSON Schema from the main tvbox repo), and on main PUBLISHES the registry to
+# GitHub Pages. Merging to main is what releases it. The built bundles and
+# index.json are NOT in git: they are produced here from apps-src/, so the repo
+# carries source and the site carries output.
 name: registry
 on:
   push:
@@ -8,17 +10,68 @@ on:
   pull_request:
   workflow_dispatch: # manual "Run workflow" button / `gh workflow run`
 
+# Pages deployment needs these; the default token is read-only.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One publish at a time, and never cancel one half-way: a registry deployed in
+# pieces is one that lies about its own sha256s.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 jobs:
-  validate:
+  # Build and check everything, on pull requests as well as on main. It carries no
+  # `environment:` on purpose - the github-pages environment only admits main, and
+  # declaring it here would have the whole job refused on a PR before it runs a
+  # single step, conditional deploy steps or not.
+  build:
     runs-on: ubuntu-latest
+    # Every step runs in the registry checkout; the tvbox one next to it exists
+    # only to be imported from.
+    defaults:
+      run:
+        working-directory: tvbox/tvbox-apps
     steps:
+      # An app's UI imports the shared SDK AS SOURCE (`@sdk` ->
+      # `../../../app-sdk/src`, see any apps-src/<id>/vite.config.ts), and that
+      # source lives in the tvbox repo, not this one. So the two are checked out
+      # in the same shape a developer has them - tvbox with tvbox-apps inside it -
+      # and the alias resolves with no path juggling. This is also why the built
+      # bundles used to be committed: on its own, this repo cannot build them.
+      # tvbox FIRST: checkout cleans its target directory, so doing it second
+      # would delete the registry checkout nested inside it. (tvbox gitignores
+      # tvbox-apps/, so nothing of its own is in the way.)
       - uses: actions/checkout@v4
+        with:
+          repository: Andy1210/tvbox
+          path: tvbox
+          # The SDK the apps compile against is whatever the shell ships today.
+          # Pin this to a tag if the two ever need to move apart.
+          ref: main
+      - uses: actions/checkout@v4
+        with:
+          path: tvbox/tvbox-apps
       - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - name: trust rules + rebuild index
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tvbox/tvbox-apps/package-lock.json
+      - run: npm ci
+
+      # The app UIs are BUILT here. Each vite config writes into its package at
+      # apps/<id>/web/, which is where build-index.mjs then finds it - so the
+      # index always describes what this run produced, never a stale commit.
+      - name: typecheck app sources
+        run: for app in livetv retroarch spotify; do npm run typecheck:$app; done
+      - name: build app UIs
+        run: for app in livetv retroarch spotify; do npm run build:$app; done
+
+      - name: trust rules + build index
         run: node scripts/build-index.mjs
-      - name: index.json is committed and current
-        run: git diff --exit-code index.json || { echo "index.json is stale — run scripts/build-index.mjs and commit"; exit 1; }
+
       - name: package library tests
         # Host-side plugin code runs trusted in the shell process, and some of it
         # guards a LAN-reachable upload path, so the libraries that have tests get
@@ -28,10 +81,37 @@ jobs:
           tests=(apps/*/lib/*.test.js)
           if [ ${#tests[@]} -gt 0 ]; then node --test "${tests[@]}"; else echo "no package tests"; fi
         shell: bash
+
       - name: JSON Schema (from the main tvbox repo)
         run: |
           curl -fsSL -o /tmp/schema.json https://raw.githubusercontent.com/Andy1210/tvbox/main/docs/app-manifest.schema.json
           # Validate BOTH manifest-only apps (apps/<id>.json) and the package
-          # manifests (apps/<id>/manifest.json) — the package apps ship trusted
+          # manifests (apps/<id>/manifest.json) - the package apps ship trusted
           # host-side plugin.js, so they must get the SAME schema scrutiny.
           npx --yes ajv-cli@5 validate --spec=draft2020 -s /tmp/schema.json -d "apps/*.json" -d "apps/*/manifest.json"
+
+      # Assemble exactly what the index promises and re-verify every sha256
+      # against the bytes about to be published. A pull request runs this too:
+      # the point is to fail here rather than on someone's TV.
+      - name: stage the site
+        run: node scripts/stage-site.mjs
+
+      - uses: actions/configure-pages@v5
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: tvbox/tvbox-apps/_site
+
+  # Merging to main is the release. Separate job so the environment (and its
+  # main-only protection rule) applies to the deployment alone.
+  publish:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
