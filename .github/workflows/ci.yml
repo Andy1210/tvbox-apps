@@ -41,9 +41,9 @@ jobs:
       # in the same shape a developer has them - tvbox with tvbox-apps inside it -
       # and the alias resolves with no path juggling. This is also why the built
       # bundles used to be committed: on its own, this repo cannot build them.
-      - uses: actions/checkout@v4
-        with:
-          path: tvbox/tvbox-apps
+      # tvbox FIRST: checkout cleans its target directory, so doing it second
+      # would delete the registry checkout nested inside it. (tvbox gitignores
+      # tvbox-apps/, so nothing of its own is in the way.)
       - uses: actions/checkout@v4
         with:
           repository: Andy1210/tvbox
@@ -51,6 +51,9 @@ jobs:
           # The SDK the apps compile against is whatever the shell ships today.
           # Pin this to a tag if the two ever need to move apart.
           ref: main
+      - uses: actions/checkout@v4
+        with:
+          path: tvbox/tvbox-apps
       - uses: actions/setup-node@v4
         with:
           node-version: 22
