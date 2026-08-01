@@ -2,8 +2,12 @@
   "id": "retroarch",
   "manifestVersion": 1,
   "name": "RetroArch",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "changelog": [
+    {
+      "version": "1.7.0",
+      "notes": "Your game lists and save files travel with the box's backup now. Everything the emulator keeps for you - which games are on which console, where you got to in each one, and how you set the emulator up - used to live only on that box: re-flash it, or set up a second one, and you started over. The backup carries it, and a restore puts it back. Game files and covers are not in it, because a backup goes through your phone: those come from a folder or get fetched again."
+    },
     {
       "version": "1.6.1",
       "notes": "Fixes the previous version: an emulator's own data files were looked up against the wrong list and so were never actually fetched."
@@ -92,10 +96,18 @@
       }
     }
   ],
-  "requires": {
-    "flatpak": [
-      "org.libretro.RetroArch"
+  "backup": {
+    "flatpak": "org.libretro.RetroArch",
+    "paths": [
+      "config/retroarch/saves",
+      "config/retroarch/playlists",
+      "config/retroarch/retroarch.cfg",
+      "config/retroarch/config"
     ],
+    "state": ["retroarch-share.json", "retroarch-systems.json", "retroarch-art.json"]
+  },
+  "requires": {
+    "flatpak": ["org.libretro.RetroArch"],
     "download": [
       {
         "bin": "rclone",
@@ -114,12 +126,8 @@
     "entry": "index.html",
     "native": {
       "flatpak": "org.libretro.RetroArch",
-      "args": [
-        "--fullscreen"
-      ]
+      "args": ["--fullscreen"]
     },
-    "capabilities": [
-      "nav"
-    ]
+    "capabilities": ["nav"]
   }
 }
