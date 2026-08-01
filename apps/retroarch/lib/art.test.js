@@ -158,3 +158,25 @@ test("isPng accepts a PNG and refuses whatever else the server sent", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a scene-numbered file name still finds its cover, and a real leading number is untouched", () => {
+  // A downloaded set often prefixes the dump number; the server never does. This is
+  // the LAST rung, so a title that genuinely starts with digits matches before it.
+  const m = art.matcher([
+    "Maestro! - Jump in Music (Europe) (En,Fr,De,Es,It,Nl,Pt,Sv,No,Da)",
+    "007 - Everything or Nothing (USA, Europe) (En,Fr,De)",
+    "1942 (Capcom) (JP-US)",
+  ]);
+  assert.strictEqual(
+    m("4474 - Maestro! - Jump in Music (Europe) (En,Fr,De,Es,It,Nl,Pt,Sv,No,Da) [b]"),
+    "Maestro! - Jump in Music (Europe) (En,Fr,De,Es,It,Nl,Pt,Sv,No,Da)",
+  );
+  assert.strictEqual(
+    m("007 - Everything or Nothing (USA, Europe) (En,Fr,De)"),
+    "007 - Everything or Nothing (USA, Europe) (En,Fr,De)",
+  );
+  assert.strictEqual(m("1942 (Capcom) (JP-US)"), "1942 (Capcom) (JP-US)", "a number IS the title here");
+  assert.strictEqual(m("9999 - Nothing Like This"), null, "stripping a number is not a licence to guess");
+  assert.strictEqual(art.withoutSceneNumber("007 - Everything or Nothing"), "Everything or Nothing");
+  assert.strictEqual(art.withoutSceneNumber("1942 (Capcom)"), "1942 (Capcom)", "no separator, no prefix");
+});

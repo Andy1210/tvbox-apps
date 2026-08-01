@@ -118,6 +118,7 @@ test("the info files give a core its human name, and a nameless core still lists
     display: "Sony - PlayStation 2 (LRPS2)",
     name: "LRPS2",
     system: "Sony PlayStation 2",
+    systemid: "",
     api: "",
     databases: [],
     extensions: [],

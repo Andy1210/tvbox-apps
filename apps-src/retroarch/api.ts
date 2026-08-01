@@ -88,6 +88,49 @@ export const play = (system: string, i: number) =>
 export const setSystemCore = (system: string, core: string | null) =>
   post<{ ok: boolean }>("/system-core", { system, core });
 
+export interface ScanFolder {
+  name: string;
+  path: string;
+  depth: number; // 1 = a folder inside one of the top-level ones (the share's consoles)
+  parent?: string;
+  folders: string[];
+}
+
+// What a folder holds, worked out from the file types in it and what the installed
+// emulators claim - shown before a scan runs so it is never a surprise.
+export interface ScanInspect {
+  folder?: string;
+  error?: string;
+  games: number;
+  already: number;
+  ambiguous: number;
+  systems: Array<{ system: string; games: number }>;
+}
+
+export interface ScanState {
+  running: boolean;
+  progress: { folder: string; stage: string; matched?: number } | null;
+  // `stopped` is a scan that was ended on purpose (the Stop button, or a game
+  // starting). It reports ok - nothing failed - but it is NOT a finished scan,
+  // so the counts are partial and the second pass may never have run.
+  last: {
+    ok: boolean;
+    stopped?: boolean;
+    matched?: number;
+    added?: number;
+    skipped?: number;
+    error?: string;
+  } | null;
+}
+
+export const fetchScanFolders = () =>
+  get<{ romsDir: string; folders: ScanFolder[]; consoles: string[] }>("/scan-folders");
+export const inspectFolder = (folder: string) => get<ScanInspect>("/scan-inspect?folder=" + encodeURIComponent(folder));
+export const fetchScan = () => get<ScanState>("/scan");
+export const startScan = (folder: string, system: string | null) =>
+  post<{ ok: boolean; error?: string }>("/scan-start", { folder, system });
+export const stopScan = () => post<{ ok: boolean }>("/scan-stop", {});
+
 export const fetchCores = () => get<{ offline: boolean; cores: CoreRow[] }>("/cores");
 export const installCore = (core: string) => post<{ ok: boolean; error?: string }>("/core-install", { core });
 export const removeCore = (core: string) => post<{ ok: boolean }>("/core-remove", { core });
