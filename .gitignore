@@ -1,4 +1,10 @@
-# Build tooling for the app sources under apps-src/. The built app UIs
-# (apps/<id>/web/) ARE committed — they ship in the registry package the box
-# fetches — so only the local install/build scratch is ignored here.
+# Build tooling for the app sources under apps-src/.
 node_modules/
+
+# GENERATED, not committed. CI builds the app UIs from apps-src/ into their
+# packages, compiles index.json from what it produced, and publishes both to
+# GitHub Pages - so the registry a box fetches is built from source on every
+# merge instead of being a snapshot someone remembered to regenerate.
+apps/*/web/
+index.json
+_site/

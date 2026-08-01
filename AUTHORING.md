@@ -278,12 +278,14 @@ swapped in atomically). No tvbox release involved — just merge a version bump 
 
 ## Publishing
 
-1. Add `apps/<id>.json` or the `apps/<id>/` package (build its `web/` from
-   `apps-src/<id>/`).
-2. Run `node scripts/build-index.mjs` — it validates every manifest against the
-   trust rules and regenerates `index.json` (for a package it records each file's
-   path + sha256). Commit the regenerated `index.json`.
-3. Open a PR. CI validates the manifests against the JSON Schema and checks the
-   index is current. A maintainer reviews (the trust boundary) and merges.
+1. Add `apps/<id>.json` or the `apps/<id>/` package. For a package UI, the
+   source is `apps-src/<id>/`; **`apps/<id>/web/` and `index.json` are generated
+   and gitignored**, so there is nothing to build or commit for them.
+2. Open a PR. CI builds every app UI from `apps-src/`, compiles `index.json`
+   from what it built (recording each package file's path + sha256), validates
+   the manifests against the JSON Schema, and stages the exact bytes it would
+   serve - re-checking every sha256 against the file.
+3. A maintainer reviews (the trust boundary) and merges. Merging to `main`
+   deploys the registry to GitHub Pages.
 4. Boxes fetch the updated `index.json` and install/update on the user's action —
    independently of any tvbox/shell release.
