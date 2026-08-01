@@ -60,6 +60,7 @@
     "scanAdding": "Adding what RetroArch did not recognise…",
     "scanSlow": "This can take minutes: every file is read through. The box stays usable meanwhile.",
     "scanDone": "Done: {matched} recognised, {added} added.",
+    "scanStopped": "Stopped: {matched} recognised, {added} added so far.",
     "scanSkipped": "{n} skipped, console undecided",
     "scanWhichConsole": "Which console to file it under",
     "scanFromFiles": "Let the file types decide",

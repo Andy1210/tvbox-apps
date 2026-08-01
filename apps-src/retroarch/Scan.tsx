@@ -90,13 +90,17 @@ export function Scan({ onScanned }: { onScanned: () => void }) {
 
   // The progress of a running scan. Polled, like the cover sweep: the plugin keeps it
   // in memory and a scan is minutes long.
+  // "was it running last time" is kept in a ref, not read from state: the poll
+  // SETS state, so depending on it would tear the interval down and build a new
+  // one on every tick.
+  const wasRunning = useRef(false);
   useEffect(() => {
     const load = () =>
       fetchScan()
         .then((d) => {
-          const wasRunning = !!(state && state.running);
           setState(d);
-          if (wasRunning && !d.running) onScanned(); // the lists changed: reread them
+          if (wasRunning.current && !d.running) onScanned(); // the lists changed: reread them
+          wasRunning.current = d.running;
         })
         .catch(() => {});
     load();
@@ -104,7 +108,7 @@ export function Scan({ onScanned }: { onScanned: () => void }) {
     return () => {
       if (timer.current) clearInterval(timer.current);
     };
-  }, [state, onScanned]);
+  }, [onScanned]);
 
   // What is in the folder under the cursor. The walk is the expensive part on a network
   // share, so it happens on focus rather than for every folder up front.
@@ -162,7 +166,9 @@ export function Scan({ onScanned }: { onScanned: () => void }) {
           last &&
           last.ok && (
             <div className="px-[1.4vw] py-[1.2vh] rounded-[1vh] bg-white/10 text-[1.7vh]">
-              {t("retroarch.scanDone", {
+              {/* A stopped scan says so: nothing failed, but it did not finish,
+                  so the counts are partial and calling it "done" would be a lie. */}
+              {t(last.stopped ? "retroarch.scanStopped" : "retroarch.scanDone", {
                 matched: String(last.matched || 0),
                 added: String(last.added || 0),
               })}
