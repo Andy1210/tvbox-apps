@@ -80,6 +80,28 @@ test("a console resolves to a core that declares its DATABASE name, not its syst
   assert.strictEqual(games.coreFor("Sony - PlayStation Portable"), "ppsspp");
 });
 
+test("a re-release database variant resolves to the base console's core", () => {
+  reset();
+  // libretro scans PSN releases into their own database, so RetroArch writes
+  // "Sony - PlayStation Portable (PSN)" beside the plain one. No core lists that
+  // name, and the variant came up as a console with no emulator installed.
+  installCore("ppsspp", 'corename = "PPSSPP"\nsystemname = "PSP"\ndatabase = "Sony - PlayStation Portable"\n');
+  const PSN = "Sony - PlayStation Portable (PSN)";
+  playlist(PSN, [{ label: "G", path: path.join(HOME, "g.pkg"), core_path: "DETECT" }]);
+  assert.strictEqual(games.coreFor(PSN), "ppsspp");
+});
+
+test("brackets alone do not make one console match another", () => {
+  reset();
+  // The fallback only ever ADDS a candidate: a core still has to claim the bare
+  // name, so a bracketed console whose base nobody plays stays unmatched rather
+  // than borrowing an unrelated emulator.
+  installCore("ppsspp", 'corename = "PPSSPP"\nsystemname = "PSP"\ndatabase = "Sony - PlayStation Portable"\n');
+  const OTHER = "Nintendo - Nintendo DS (Download Play)";
+  playlist(OTHER, [{ label: "G", path: path.join(HOME, "g.nds"), core_path: "DETECT" }]);
+  assert.strictEqual(games.coreFor(OTHER), null);
+});
+
 test("a two-console core resolves for each of its consoles (systemname fallback)", () => {
   reset();
   installCore("gambatte", 'corename = "Gambatte"\nsystemname = "Game Boy/Game Boy Color"\n');

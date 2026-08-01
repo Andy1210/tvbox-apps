@@ -2,8 +2,12 @@
   "id": "retroarch",
   "manifestVersion": 1,
   "name": "RetroArch",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "changelog": [
+    {
+      "version": "1.5.1",
+      "notes": "A console that arrived twice is one console again. Some games are catalogued under a separate database for their digital re-release - PSP titles bought from the store, for instance - and RetroArch made a second console out of them, named the same but with a bracket after it. It also looked like no emulator was installed for it, because no emulator advertises that name. The second one is now merged into the first as soon as a scan runs, and it plays with the emulator it always should have."
+    },
     {
       "version": "1.5.0",
       "notes": "You can tell the box to read a folder for games now - the Scan tab. A console only appears under Games once a folder has been read for it, and nothing did that before: installing an emulator does not, and RetroArch's own scan silently skips every game it does not recognise from its database, which is most of a library made of bad dumps, hacks or homebrew. The box now runs that scan for the labels it gets right and then adds everything it left behind, so the games appear either way. It also says what it found in a folder before you press anything, and asks which console only when the file types genuinely cannot say. Covers follow a scan on their own, including for games whose file name carries a number in front of the title."
@@ -81,7 +85,9 @@
     }
   ],
   "requires": {
-    "flatpak": ["org.libretro.RetroArch"],
+    "flatpak": [
+      "org.libretro.RetroArch"
+    ],
     "download": [
       {
         "bin": "rclone",
@@ -100,8 +106,12 @@
     "entry": "index.html",
     "native": {
       "flatpak": "org.libretro.RetroArch",
-      "args": ["--fullscreen"]
+      "args": [
+        "--fullscreen"
+      ]
     },
-    "capabilities": ["nav"]
+    "capabilities": [
+      "nav"
+    ]
   }
 }

@@ -193,3 +193,42 @@ test("a console that gains games is re-checked for covers instead of trusting th
   const state = JSON.parse(fs.readFileSync(art.STATE_FILE, "utf8"));
   assert.strictEqual(state.systems[GBA], undefined, "the stale conclusion is dropped");
 });
+
+test("a re-release variant playlist is folded back into its console", () => {
+  // RetroArch writes "Sony - PlayStation Portable (PSN)" beside the plain list
+  // because libretro matched a different content database, and the grid then
+  // showed one console twice - the second with no emulator, because no core
+  // names the variant.
+  const base = "Sony - PlayStation Portable";
+  const psn = base + " (PSN)";
+  fs.mkdirSync(art.PLAYLISTS_DIR, { recursive: true });
+  const item = (label, file) => ({ label, path: path.join(HOME, file), core_path: "DETECT", db_name: "x.lpl" });
+  scan.writePlaylist(base, { ...scan.readPlaylist(base), items: [item("Plain", "a.iso")] });
+  scan.writePlaylist(psn, { ...scan.readPlaylist(psn), items: [item("Digital", "b.pkg")] });
+  installCore("ppsspp", 'corename = "PPSSPP"\nsystemname = "PSP"\ndatabase = "Sony - PlayStation Portable"\n');
+
+  assert.strictEqual(scan.foldVariants(), 1, "one console folded away");
+  assert.strictEqual(fs.existsSync(path.join(art.PLAYLISTS_DIR, psn + ".lpl")), false, "the variant is gone");
+  const items = scan.readPlaylist(base).items;
+  assert.deepStrictEqual(
+    items.map((i) => i.label).sort(),
+    ["Digital", "Plain"],
+    "both games are on the one console now",
+  );
+  // The moved entry says which playlist it belongs to, or RetroArch's own views
+  // disagree with the file it sits in.
+  assert.strictEqual(items.find((i) => i.label === "Digital").db_name, base + ".lpl");
+  // Idempotent: nothing left to fold, and the base is not touched again.
+  assert.strictEqual(scan.foldVariants(), 0);
+});
+
+test("a variant whose base console nobody plays is left alone", () => {
+  const orphan = "Nintendo - Nintendo DS (Download Play)";
+  fs.mkdirSync(art.PLAYLISTS_DIR, { recursive: true });
+  scan.writePlaylist(orphan, {
+    ...scan.readPlaylist(orphan),
+    items: [{ label: "G", path: path.join(HOME, "g.nds"), core_path: "DETECT", db_name: "x.lpl" }],
+  });
+  assert.strictEqual(scan.foldVariants(), 0);
+  assert.strictEqual(fs.existsSync(path.join(art.PLAYLISTS_DIR, orphan + ".lpl")), true, "still there");
+});

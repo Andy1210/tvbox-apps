@@ -228,6 +228,40 @@ function systemAliases(info) {
   return out;
 }
 
+// The console name with its vendor prefix dropped as well, because a core may
+// name either. With `bare`, also the same pair for the name minus a trailing
+// bracket: libretro keeps a SEPARATE content database for some re-releases -
+// "Sony - PlayStation Portable (PSN)" beside "Sony - PlayStation Portable" - and
+// RetroArch names each playlist after whichever database matched, so the variant
+// matches no core's `database` line and came up as a console with no emulator
+// installed. It only ever ADDS a candidate: a core still has to claim the bare
+// name, so a console that genuinely has brackets in its name matches nothing new.
+function wantedNames(system, bare) {
+  const tail = (s) => (s.includes(" - ") ? s.slice(s.indexOf(" - ") + 3) : s);
+  const out = new Set([norm(system), norm(tail(system))]);
+  const m = bare && /^(.*\S)\s+\([^()]+\)$/.exec(system);
+  if (m) {
+    out.add(norm(m[1]));
+    out.add(norm(tail(m[1])));
+  }
+  return out;
+}
+
+// Does an installed core name this console ITSELF, rather than being reached
+// through the bracket fallback above? That is the difference between a console
+// of its own and a naming split of one that already exists - which is what
+// decides whether a variant playlist may be folded away (lib/scan.js).
+function systemClaimed(system, opts) {
+  const installed = (opts && opts.installed) || cores.installed();
+  const index = (opts && opts.index) || cores.infoIndex();
+  const want = wantedNames(system, false);
+  for (const core of installed) {
+    const aliases = systemAliases(index.get(core) || {});
+    for (const a of want) if (a && aliases.has(a)) return true;
+  }
+  return false;
+}
+
 // Every installed core that claims this console, best first. Metadata decides who
 // is a candidate at all; the playlist's own choice only orders them, because it is
 // often simply wrong (a PlayStation list scanned with an arcade core) but when it
@@ -237,7 +271,7 @@ function coreCandidates(system, opts) {
   const installed = (opts && opts.installed) || cores.installed();
   const index = (opts && opts.index) || cores.infoIndex();
   const hints = (opts && opts.hints) || new Map();
-  const want = new Set([norm(system), norm(system.includes(" - ") ? system.slice(system.indexOf(" - ") + 3) : system)]);
+  const want = wantedNames(system, true);
   const out = [];
   for (const core of installed) {
     const info = index.get(core) || {};
@@ -354,6 +388,7 @@ module.exports = {
   readOverrides,
   writeOverride,
   systemNames,
+  systemClaimed,
   games,
   coreCandidates,
   coreHints,
