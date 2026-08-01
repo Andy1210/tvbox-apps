@@ -386,6 +386,52 @@ function addMissing(dir, opts) {
   return { added, skipped, systems: [...bySystem.keys()] };
 }
 
+// One console arriving as two consoles.
+//
+// libretro keeps a separate content database for some re-releases - "Sony -
+// PlayStation Portable (PSN)" beside "Sony - PlayStation Portable" - and
+// RetroArch names each playlist after whichever database matched, so scanning one
+// folder of PSP games can produce both. They are the same hardware and the same
+// emulator, so the grid should not offer them as two consoles.
+//
+// A variant is folded into its base when an installed core claims the BASE and
+// none claims the variant: that is what makes it a naming split rather than a
+// console of its own. Idempotent - RetroArch recreating it on its own scan just
+// means the next one folds it again.
+function foldVariants(opts) {
+  let folded = 0;
+  for (const system of games.systemNames()) {
+    const m = /^(.*\S)\s+\([^()]+\)$/.exec(system);
+    if (!m) continue;
+    const base = m[1];
+    if (!art.nameOk(base)) continue;
+    // Claimed BY NAME, not "has a core": games.coreFor falls back to the bare name
+    // for exactly these variants, so asking it would always answer yes and nothing
+    // would ever fold. A console some core actually names is a console.
+    if (games.systemClaimed(system, opts) || !games.systemClaimed(base, opts)) continue;
+    try {
+      const from = readPlaylist(system);
+      if (!from.items.length) continue;
+      const into = readPlaylist(base);
+      const have = new Set(into.items.map((i) => i && i.path));
+      for (const item of from.items) {
+        if (!item || have.has(item.path)) continue;
+        have.add(item.path);
+        into.items.push({ ...item, db_name: base + ".lpl" });
+      }
+      writePlaylist(base, into);
+      fs.unlinkSync(path.join(art.PLAYLISTS_DIR, system + ".lpl"));
+      // PLAYLISTS folded, not entries moved: a variant whose games the base
+      // already lists still merged a console away, and reporting 0 for that read
+      // as "nothing happened" when a console had in fact just disappeared.
+      folded++;
+    } catch (e) {
+      /* a playlist we cannot read or replace is left exactly as it is */
+    }
+  }
+  return folded;
+}
+
 // One folder, both passes. `onProgress` is called with the stage so a screen can say
 // what is happening: RetroArch's pass is the long one.
 async function scan(folder, opts) {
@@ -408,6 +454,7 @@ async function scan(folder, opts) {
   let mine = { added: 0, skipped: 0, systems: [] };
   try {
     mine = addMissing(dir, o);
+    foldVariants(o);
   } catch (e) {
     return { ok: false, error: "write_failed", detail: String((e && e.message) || e) };
   }
@@ -434,6 +481,7 @@ module.exports = {
   readPlaylist,
   writePlaylist,
   addMissing,
+  foldVariants,
   retroarchScan,
   scan,
   NOT_GAMES,
