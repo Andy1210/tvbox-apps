@@ -6,7 +6,7 @@
   "changelog": [
     {
       "version": "1.7.0",
-      "notes": "Your game lists and save files travel with the box's backup now. Everything the emulator keeps for you - which games are on which console, where you got to in each one, and how you set the emulator up - used to live only on that box: re-flash it, or set up a second one, and you started over. The backup carries it, and a restore puts it back. Game files and covers are not in it, because a backup goes through your phone: those come from a folder or get fetched again."
+      "notes": "Your game lists and in-game saves travel with the box's backup now. Which games are on which console, the saves a game writes for itself, and how you set the emulator up used to live only on that box: re-flash it, or set up a second one, and you started over. Three things stay out, because a backup goes through your phone and has to stay small: the game files themselves, the covers (the box fetches those again on its own), and save states - the snapshots you take from the emulator's own menu, which are far bigger than everything else put together."
     },
     {
       "version": "1.6.1",
