@@ -2,8 +2,12 @@
   "id": "retroarch",
   "manifestVersion": 1,
   "name": "RetroArch",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "changelog": [
+    {
+      "version": "1.6.1",
+      "notes": "Fixes the previous version: an emulator's own data files were looked up against the wrong list and so were never actually fetched."
+    },
     {
       "version": "1.6.0",
       "notes": "Installing an emulator now brings the files it cannot run without. Some emulators need data of their own beside the program - PPSSPP wants its fonts and a flash image, ScummVM its engine data - and without them the emulator started and then said its system files were missing, naming none of them. libretro publishes those files, so the box fetches them with the emulator."
