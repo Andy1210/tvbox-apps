@@ -141,8 +141,20 @@ function walk(dir, allowed, seenDirs) {
     for (const e of entries) {
       if (e.name.startsWith(".")) continue;
       const full = path.join(here, e.name);
-      if (e.isDirectory()) stack.push(full);
-      else if (e.isFile()) files.push(full);
+      // A symlink is neither isDirectory() nor isFile() to readdir, so asking
+      // only those two dropped every linked ROM and linked folder on the floor -
+      // and the realpath loop guard above exists precisely because links ARE
+      // meant to be followed here (a library assembled out of them is normal).
+      let dirent = e;
+      if (e.isSymbolicLink()) {
+        try {
+          dirent = fs.statSync(full);
+        } catch (err) {
+          continue; // a dangling link is not a game
+        }
+      }
+      if (dirent.isDirectory()) stack.push(full);
+      else if (dirent.isFile()) files.push(full);
     }
     // Per directory, because a disc's descriptor and its tracks live together.
     const descriptors = new Set(
@@ -382,7 +394,16 @@ async function scan(folder, opts) {
   if (!dir) return { ok: false, error: "bad_folder" };
   if (o.onProgress) o.onProgress({ stage: "retroarch", folder: dir });
   const ra = await retroarchScan(dir, o.env, o.onChild);
-  if (o.stopped && o.stopped()) return { ok: true, stopped: true, matched: ra.seen - ra.missed, added: 0 };
+  // A stop is a stop first: it is why the pass ended, and reporting it as a
+  // failure would be a lie about something the user did on purpose. `missed`
+  // counts every "??" in the output while `seen` counts progress lines, so a
+  // SIGTERM landing mid-line can leave more of the first than the second.
+  if (o.stopped && o.stopped())
+    return { ok: true, stopped: true, matched: Math.max(0, ra.seen - ra.missed), added: 0 };
+  // Otherwise a pass that did not run is a failed scan, not an empty one. Without
+  // this, a missing flatpak or a non-zero exit came back as "done, 0 recognised"
+  // and the screen said the folder simply had nothing in it.
+  if (!ra.ok) return { ok: false, error: "retroarch_failed", detail: ra.error || "" };
   if (o.onProgress) o.onProgress({ stage: "adding", folder: dir, matched: ra.seen - ra.missed });
   let mine = { added: 0, skipped: 0, systems: [] };
   try {

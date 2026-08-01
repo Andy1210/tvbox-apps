@@ -121,6 +121,7 @@ export function Scan({ onScanned }: { onScanned: () => void }) {
       setPicked(folder);
       setLook(null);
       setForced("");
+      setError(""); // last folder's failure is not this folder's
       wanted.current = folder;
       inspectFolder(folder)
         .then((d) => {
@@ -170,6 +171,13 @@ export function Scan({ onScanned }: { onScanned: () => void }) {
             </div>
             <div className="text-[1.5vh] text-fg-dim pt-[0.4vh]">{t("retroarch.scanSlow")}</div>
             <StopButton onPress={() => stopScan().catch(() => {})} />
+          </div>
+        ) : last && !last.ok ? (
+          // A scan can fail in the background, after the progress banner is gone.
+          // Rendering only the ok case left the screen with nothing where the
+          // answer should be, which reads as "it never ran".
+          <div className="px-[1.4vw] py-[1.2vh] rounded-[1vh] bg-white/10 text-[1.7vh]">
+            {t("retroarch.scanFailed")}
           </div>
         ) : (
           last &&
