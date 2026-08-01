@@ -29,10 +29,33 @@ jobs:
   # single step, conditional deploy steps or not.
   build:
     runs-on: ubuntu-latest
+    # Every step runs in the registry checkout; the tvbox one next to it exists
+    # only to be imported from.
+    defaults:
+      run:
+        working-directory: tvbox/tvbox-apps
     steps:
+      # An app's UI imports the shared SDK AS SOURCE (`@sdk` ->
+      # `../../../app-sdk/src`, see any apps-src/<id>/vite.config.ts), and that
+      # source lives in the tvbox repo, not this one. So the two are checked out
+      # in the same shape a developer has them - tvbox with tvbox-apps inside it -
+      # and the alias resolves with no path juggling. This is also why the built
+      # bundles used to be committed: on its own, this repo cannot build them.
       - uses: actions/checkout@v4
+        with:
+          path: tvbox/tvbox-apps
+      - uses: actions/checkout@v4
+        with:
+          repository: Andy1210/tvbox
+          path: tvbox
+          # The SDK the apps compile against is whatever the shell ships today.
+          # Pin this to a tag if the two ever need to move apart.
+          ref: main
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tvbox/tvbox-apps/package-lock.json
       - run: npm ci
 
       # The app UIs are BUILT here. Each vite config writes into its package at
@@ -75,7 +98,7 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
-          path: _site
+          path: tvbox/tvbox-apps/_site
 
   # Merging to main is the release. Separate job so the environment (and its
   # main-only protection rule) applies to the deployment alone.
