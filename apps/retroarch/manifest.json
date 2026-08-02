@@ -2,8 +2,12 @@
   "id": "retroarch",
   "manifestVersion": 1,
   "name": "RetroArch",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "changelog": [
+    {
+      "version": "1.7.1",
+      "notes": "Covers no longer flash up blank for a moment while you scroll the games grid."
+    },
     {
       "version": "1.7.0",
       "notes": "Your game lists and in-game saves travel with the box's backup now. Which games are on which console, the saves a game writes for itself, and how you set the emulator up used to live only on that box: re-flash it, or set up a second one, and you started over. Three things stay out, because a backup goes through your phone and has to stay small: the game files themselves, the covers (the box fetches those again on its own), and save states - the snapshots you take from the emulator's own menu, which are far bigger than everything else put together."
