@@ -129,12 +129,18 @@ function Tile({
     >
       <div className="h-[24vh] flex items-center justify-center p-[0.4vh] shrink-0">
         {game.cover ? (
-          // Lazy + async decode: a row of six 200 kB PNGs would otherwise block the
-          // very focus move that scrolled them into view.
+          // Async decode, but NOT `loading="lazy"`. The window above is already the
+          // virtualization - at most WINDOW_ROWS * COLS tiles exist at once, and a
+          // shift adds SHIFT_ROWS * COLS of them - so deferring the fetch on top of
+          // that saves nothing (a cover is served from this box's own disk) and
+          // costs the one thing that shows: lazy waits for Chromium's intersection
+          // check, which lands a frame behind the scroll that a keypress just
+          // caused, so the tiles that crossed into view painted EMPTY and only
+          // filled in on the next press. Decoding is what could block the focus
+          // move, and `decoding="async"` is what answers that.
           <img
             src={coverUrl(system, game.i)}
             alt=""
-            loading="lazy"
             decoding="async"
             className="max-h-full max-w-full object-contain"
           />
