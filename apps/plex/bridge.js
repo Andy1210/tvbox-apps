@@ -17,6 +17,33 @@
 module.exports.setup = function setup(ctx) {
   "use strict";
   var ipcRenderer = ctx.ipcRenderer;
+
+  // The client builds `X-Plex-Device-Screen-Resolution` from
+  // `${window.screen.width}x${window.screen.height}`, once, when it starts - and
+  // the server picks the stream from that header. On this box the UI runs at
+  // 1080p on a 4K panel and the mode only switches to 4K once a video starts, so
+  // the honest-looking answer is the wrong one: a 4K film arrives as a 1080p
+  // transcode, decided before anything could have switched.
+  //
+  // Tell it what the panel can show. The shell reads that from the output's
+  // preferred mode; the window is still whatever size it is, and layout uses that,
+  // not this.
+  if (ctx.panel && ctx.panel.width && ctx.panel.height) {
+    try {
+      if (window.screen.width < ctx.panel.width || window.screen.height < ctx.panel.height) {
+        Object.defineProperty(window.screen, "width", {
+          get: function () {
+            return ctx.panel.width;
+          },
+        });
+        Object.defineProperty(window.screen, "height", {
+          get: function () {
+            return ctx.panel.height;
+          },
+        });
+      }
+    } catch (e) {}
+  }
   var caps = ctx.caps || [];
   function has(c) {
     return caps.indexOf(c) >= 0;
@@ -364,7 +391,8 @@ module.exports.setup = function setup(ctx) {
         else if (path === "player.stop" || path === "player.teardown") player("stop");
         else if (path === "player.pause") player("pause");
         else if (path === "player.resume" || path === "player.unpause") player("resume");
-        else if (path === "player.seekTo") player("seek", { posSec: typeof args[0] === "number" ? args[0] / 1000 : 0 }); // seekTo is in ms
+        else if (path === "player.seekTo")
+          player("seek", { posSec: typeof args[0] === "number" ? args[0] / 1000 : 0 }); // seekTo is in ms
         else if (path === "player.seek") player("seek", { posSec: typeof args[0] === "number" ? args[0] : 0 });
         else if (path === "player.set") applyAttributes(args[0]);
         // .set and .get still fall through: their reply is a per-KEY result map,
