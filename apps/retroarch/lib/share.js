@@ -21,13 +21,22 @@ const REMOTE = "tvboxsmb"; // rclone remote name; only ever used internally
 const DEFAULT_MOUNT_NAME = "network";
 // The mount is read through by an emulator loading a disc image, so cache what
 // has been read to local disk: without it every seek inside a 700MB image goes
-// back over the network. Bounded so a big library cannot fill the box.
+// back over the network. Measured on a Pi 5 over SMB: a random 64K read costs
+// ~700ms cold and 0ms once cached, and a GameCube game seeks constantly - so the
+// difference between a cached region and an uncached one is the difference
+// between a game that runs and one that stalls.
+//
+// The size limit therefore decides how much of the library stays fast, not just
+// how much disk is spent. 8G was too small to hold even a few disc images beside
+// each other (a GameCube ISO is ~1.4G, a PSP one similar), so returning to a game
+// meant re-fetching parts of it. Bounded still - a box has other things to store,
+// and the cache is a convenience, not the library.
 const VFS_ARGS = [
   "--read-only",
   "--vfs-cache-mode",
   "full",
   "--vfs-cache-max-size",
-  "8G",
+  "40G",
   "--vfs-cache-max-age",
   "168h",
   "--vfs-read-ahead",
