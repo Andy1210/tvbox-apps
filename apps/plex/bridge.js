@@ -151,8 +151,9 @@ module.exports.setup = function setup(ctx) {
         // the screen off. The client's own Stop path leaves the session the way
         // its Stop button does, and this falls back to the ending when nothing is
         // listening for that.
-        var stop = ev.reason && signals["input.onKeyReceived"] && signals["input.onKeyReceived"].length;
-        if (stop) fire("input.onKeyReceived", ["stop"]);
+        var keyListeners = signals["input.onKeyReceived"];
+        var stopInstead = !!(ev.reason && keyListeners && keyListeners.length);
+        if (stopInstead) fire("input.onKeyReceived", ["stop"]);
         else fire("player.onFinish");
       } else if (ev.type === "error") fire("player.onError");
     });
