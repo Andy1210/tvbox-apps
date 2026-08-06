@@ -228,7 +228,7 @@ Shipped by the SD image (and `deploy/provision.sh`), kept in sync between them:
 | **Media** | `mpv` (the shared player — Live TV/Plex use it), `libpulse0`, `libasound2t64` (audio runtime) |
 | **Audio stack** | `pipewire`, `pipewire-pulse`, `wireplumber` |
 | **Runtime** | `nodejs`, `npm`, `python3`, `python3-evdev` |
-| **Session** | `labwc`, `seatd`, `greetd`, `wlrctl`, `kanshi` (Wayland kiosk) |
+| **Session** | `tvbox-wc` (the box's own Wayland compositor), `seatd`, `greetd`. A box provisioned before 2.0 has `labwc` + `wlrctl` + `kanshi` instead; a package that cares about the difference should ask rather than assume - `TVBOX_WC_SOCKET` in the environment, or `$XDG_RUNTIME_DIR/tvbox-wc.sock`, is what says which one is running. |
 | **Tooling** | `curl`, `git`, `unzip`, `jq`, `flatpak`, `ca-certificates`, `cec-utils` |
 
 Notably **NOT shipped** (declare a `download` or `apt` dep if you need them):

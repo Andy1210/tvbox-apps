@@ -302,10 +302,30 @@ const ART_STR = {
 // user's (or RetroArch's) business.
 // Whether OpenGL reaches the GPU on this box, which is not a given: the Pi renders
 // on v3d and scans out on vc4, and unless the compositor advertises the RENDER node
-// a flatpak's Mesa finds no driver and silently uses llvmpipe. The shell settles
-// that at session start (its labwc environment file); until a box has that, Vulkan
-// is the faster global default even though it locks GL-only cores out.
+// a flatpak's Mesa finds no driver and silently uses llvmpipe.
+//
+// Two eras, two answers, and the newer one first:
+//
+//   • tvbox-wc, the box's own compositor, names the render node in its dmabuf
+//     feedback, so GL is real. It puts the path to its control socket in the
+//     environment the shell inherits, which is the cheapest honest signal there is
+//     - and the socket itself is checked as well, for a shell started some other
+//     way.
+//   • labwc had to be pointed at the render node by hand, through an environment
+//     file the session wrote. A box that never got that file rendered in software.
+//
+// Getting this wrong is not a small thing: a box where GL is real but the answer
+// says otherwise runs Vulkan globally, and on tvbox-wc a Vulkan client could not
+// create a swapchain at all before compositor 0.1.4 - a black screen and an app
+// that exits by itself.
 function hardwareGl() {
+  if (process.env.TVBOX_WC_SOCKET) return true;
+  try {
+    const runtime = process.env.XDG_RUNTIME_DIR || "/run/user/" + process.getuid();
+    if (fs.statSync(path.join(runtime, "tvbox-wc.sock")).isSocket()) return true;
+  } catch (e) {
+    /* not that compositor, or no runtime dir - try the older one */
+  }
   try {
     const f = path.join(os.homedir(), ".config", "labwc", "environment");
     return /^\s*WLR_RENDER_DRM_DEVICE=\S/m.test(fs.readFileSync(f, "utf8"));
