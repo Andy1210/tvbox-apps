@@ -2,8 +2,12 @@
   "id": "retroarch",
   "manifestVersion": 1,
   "name": "RetroArch",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "changelog": [
+    {
+      "version": "1.7.2",
+      "notes": "Games start again on a box running the new system software. RetroArch picks between two ways of drawing, and it decided by looking for a file the new version does not have - so it chose the one that cannot draw at all there, and a game came up black and closed itself."
+    },
     {
       "version": "1.7.1",
       "notes": "Covers no longer flash up blank for a moment while you scroll the games grid."

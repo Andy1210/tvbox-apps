@@ -302,10 +302,33 @@ const ART_STR = {
 // user's (or RetroArch's) business.
 // Whether OpenGL reaches the GPU on this box, which is not a given: the Pi renders
 // on v3d and scans out on vc4, and unless the compositor advertises the RENDER node
-// a flatpak's Mesa finds no driver and silently uses llvmpipe. The shell settles
-// that at session start (its labwc environment file); until a box has that, Vulkan
-// is the faster global default even though it locks GL-only cores out.
+// a flatpak's Mesa finds no driver and silently uses llvmpipe.
+//
+// Two eras, two answers, and the newer one first:
+//
+//   • tvbox-wc, the box's own compositor, names the render node in its dmabuf
+//     feedback, so GL is real. It puts the path to its control socket in the
+//     environment the shell inherits; that path is checked, and the default one
+//     after it, for a shell started some other way.
+//   • labwc had to be pointed at the render node by hand, through an environment
+//     file the session wrote. A box that never got that file rendered in software.
+//
+// Getting this wrong is not a small thing: a box where GL is real but the answer
+// says otherwise runs Vulkan globally, and on tvbox-wc a Vulkan client could not
+// create a swapchain at all before compositor 0.1.4 - a black screen and an app
+// that exits by itself.
 function hardwareGl() {
+  // The env var names a path, so it is checked as one: a stale value inherited from
+  // some other session would otherwise answer for a compositor that is not running.
+  const runtime = process.env.XDG_RUNTIME_DIR || "/run/user/" + process.getuid();
+  for (const socket of [process.env.TVBOX_WC_SOCKET, path.join(runtime, "tvbox-wc.sock")]) {
+    if (!socket) continue;
+    try {
+      if (fs.statSync(socket).isSocket()) return true;
+    } catch (e) {
+      /* not there - try the next one, then the older compositor */
+    }
+  }
   try {
     const f = path.join(os.homedir(), ".config", "labwc", "environment");
     return /^\s*WLR_RENDER_DRM_DEVICE=\S/m.test(fs.readFileSync(f, "utf8"));
