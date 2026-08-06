@@ -144,7 +144,16 @@ module.exports.setup = function setup(ctx) {
       else if (ev.type === "buffering") fire("player.onBuffering", !!ev.on);
       else if (ev.type === "finished") {
         playing = false;
-        fire("player.onFinish");
+        // A stop is not an ending. The shell stops playback when the TV goes to
+        // standby and says so in `reason`; reported as the end of the item, the
+        // client goes to its post-play screen, and on a series that starts the
+        // next episode a few seconds later - a box working through a season with
+        // the screen off. The client's own Stop path leaves the session the way
+        // its Stop button does, and this falls back to the ending when nothing is
+        // listening for that.
+        var stop = ev.reason && signals["input.onKeyReceived"] && signals["input.onKeyReceived"].length;
+        if (stop) fire("input.onKeyReceived", ["stop"]);
+        else fire("player.onFinish");
       } else if (ev.type === "error") fire("player.onError");
     });
   }
