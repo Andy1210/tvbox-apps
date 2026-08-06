@@ -308,9 +308,8 @@ const ART_STR = {
 //
 //   • tvbox-wc, the box's own compositor, names the render node in its dmabuf
 //     feedback, so GL is real. It puts the path to its control socket in the
-//     environment the shell inherits, which is the cheapest honest signal there is
-//     - and the socket itself is checked as well, for a shell started some other
-//     way.
+//     environment the shell inherits; that path is checked, and the default one
+//     after it, for a shell started some other way.
 //   • labwc had to be pointed at the render node by hand, through an environment
 //     file the session wrote. A box that never got that file rendered in software.
 //
@@ -319,12 +318,16 @@ const ART_STR = {
 // create a swapchain at all before compositor 0.1.4 - a black screen and an app
 // that exits by itself.
 function hardwareGl() {
-  if (process.env.TVBOX_WC_SOCKET) return true;
-  try {
-    const runtime = process.env.XDG_RUNTIME_DIR || "/run/user/" + process.getuid();
-    if (fs.statSync(path.join(runtime, "tvbox-wc.sock")).isSocket()) return true;
-  } catch (e) {
-    /* not that compositor, or no runtime dir - try the older one */
+  // The env var names a path, so it is checked as one: a stale value inherited from
+  // some other session would otherwise answer for a compositor that is not running.
+  const runtime = process.env.XDG_RUNTIME_DIR || "/run/user/" + process.getuid();
+  for (const socket of [process.env.TVBOX_WC_SOCKET, path.join(runtime, "tvbox-wc.sock")]) {
+    if (!socket) continue;
+    try {
+      if (fs.statSync(socket).isSocket()) return true;
+    } catch (e) {
+      /* not there - try the next one, then the older compositor */
+    }
   }
   try {
     const f = path.join(os.homedir(), ".config", "labwc", "environment");
