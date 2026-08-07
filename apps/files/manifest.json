@@ -1,0 +1,48 @@
+{
+  "id": "files",
+  "manifestVersion": 1,
+  "name": {
+    "hu": "Fájlok",
+    "en": "Files"
+  },
+  "version": "1.0.1",
+  "changelog": [
+    {
+      "version": "1.0.1",
+      "notes": "The review round: the cursor comes back after ejecting a stick, a box whose software is too old says so instead of showing a spinner, and two films ending at once cannot lose each other's resume point."
+    },
+    {
+      "version": "1.0.0",
+      "notes": "Play films and music from the box's own folders or from a USB stick, with resume and subtitle selection."
+    }
+  ],
+  "type": "webclient",
+  "status": "ready",
+  "accent": "#e0669a",
+  "icon": "<svg viewBox='0 0 24 24' fill='none' stroke='#e0669a' stroke-width='2'><path d='M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h7A1.5 1.5 0 0 1 19 10v7.5A1.5 1.5 0 0 1 17.5 19h-13A1.5 1.5 0 0 1 3 17.5z'/><path d='M10 11.5v5l4.5-2.5z' stroke-linejoin='round'/></svg>",
+  "tagline": {
+    "hu": "USB és saját mappák",
+    "en": "USB and your own folders"
+  },
+  "description": {
+    "en": "Play video and music files the box already has: your own folders (anything you copy in over the file server) and USB sticks, which are mounted when you open them and ejected from the same screen. Remembers where each film got to, and lets you switch audio track and subtitles while watching.",
+    "hu": "A boxon lévő videó- és zenefájlok lejátszása: a saját mappáid (bármi, amit a fájlkiszolgálón átmásolsz) és az USB-kulcsok, amelyeket megnyitáskor csatol, és ugyanonnan ki is adhatsz. Megjegyzi, hol tartottál egy filmben, és nézés közben válthatsz hangsávot vagy feliratot."
+  },
+  "requires": {
+    "bin": [
+      "mpv"
+    ],
+    "apt": [
+      "mpv"
+    ]
+  },
+  "runtime": {
+    "serve": "local",
+    "entry": "index.html",
+    "capabilities": [
+      "player",
+      "storage",
+      "nav"
+    ]
+  }
+}

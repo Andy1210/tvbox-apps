@@ -3,7 +3,7 @@
 tvbox apps are **packages in this registry** — the Kodi model. The tvbox shell
 ships only the SDK (a launcher shell + a host/runtime API); every app brings its
 own code and UI here. This repo is **curated**: every app is merge-reviewed, and
-that review *is* the trust boundary. An app updates independently of any tvbox
+that review _is_ the trust boundary. An app updates independently of any tvbox
 release — push a new version here and boxes pick it up (they poll `index.json`).
 
 - [The two kinds of app](#the-two-kinds-of-app)
@@ -73,6 +73,7 @@ its build output lands in `apps/<id>/web/`. See [The web UI](#the-web-ui). Only
 ```
 
 **`runtime.serve`:**
+
 - `local` — your package ships a `web/` bundle; the shell serves it at `/<id>/`
   in the privileged main window (full `window.tvbox` SDK). The usual choice for a
   first-party UI.
@@ -145,6 +146,43 @@ Feature-detect with `?.` - shells older than the API don't expose the
 functions at all. Apply optimistically, then re-query `tracks()` after ~500ms
 to confirm what mpv actually selected. Live TV's `TrackMenu.tsx`
 (`apps-src/livetv/`) is the reference implementation.
+
+### Files on the box, and USB sticks
+
+The shell offers what there is to play locally, so an app does not need a plugin
+(or any filesystem access of its own) to reach it. `apps/files/` is the reference
+consumer; the design notes are in the core repo's
+[docs/local-media.md](https://github.com/Andy1210/tvbox/blob/main/docs/local-media.md).
+
+```ts
+// The roots: the user's own folders (~/, ~/.tvbox user content), every partition
+// of every removable drive (mounted or merely plugged in), and every mounted
+// network share - `kind` says which, and a share needs no work from the app.
+const { sources, removable } = await (await fetch("/tvbox/api/browse/sources")).json();
+// One directory INSIDE one of those roots. Anything else is refused.
+const listing = await (await fetch("/tvbox/api/browse/list?path=" + encodeURIComponent(p))).json();
+// Nothing auto-mounts on this box: opening a stick IS the mount.
+await fetch("/tvbox/api/browse/mount", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ device }),
+});
+```
+
+Three things to build around:
+
+- **These routes are newer than some shells in the field.** A 404 means the box
+  cannot do this at all; say so on screen rather than showing an empty list. Same
+  for `removable.supported: false`, which is a box without `udisks2`.
+- **A path is checked, not trusted.** Both sides are resolved with `realpath` and
+  compared as `root + separator`, so `..`, a symlink on the stick and a
+  same-prefix sibling folder are all refused - do not try to construct paths, walk
+  from what a listing gave you.
+- **A file plays like any other URL:** `window.tvbox.play?.(entry.path, undefined,
+startPos)` with the `player` capability, plus `pause`/`resume`/`seek` for
+  something that is not a live stream. Feature-detect all of them with `?.` - a
+  shell older than the API exposes none of them, and a screen that assumes they
+  are there is a spinner nobody can leave.
 
 ## The host plugin
 
@@ -223,13 +261,14 @@ Declare what your app needs under `requires`:
 You do **not** need a dep for these; just `requires.bin` if you want the load-gate.
 Shipped by the SD image (and `deploy/provision.sh`), kept in sync between them:
 
-| Category | Ships |
-| --- | --- |
-| **Media** | `mpv` (the shared player — Live TV/Plex use it), `libpulse0`, `libasound2t64` (audio runtime) |
-| **Audio stack** | `pipewire`, `pipewire-pulse`, `wireplumber` |
-| **Runtime** | `nodejs`, `npm`, `python3`, `python3-evdev` |
-| **Session** | `tvbox-wc` (the box's own Wayland compositor), `seatd`, `greetd`. A box provisioned before 2.0 has `labwc` + `wlrctl` + `kanshi` instead; a package that cares about the difference should ask rather than assume - `TVBOX_WC_SOCKET` in the environment, or `$XDG_RUNTIME_DIR/tvbox-wc.sock`, is what says which one is running. |
-| **Tooling** | `curl`, `git`, `unzip`, `jq`, `flatpak`, `ca-certificates`, `cec-utils` |
+| Category        | Ships                                                                                                                                                                                                                                                                                                                             |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Media**       | `mpv` (the shared player — Live TV/Plex use it), `libpulse0`, `libasound2t64` (audio runtime)                                                                                                                                                                                                                                     |
+| **Audio stack** | `pipewire`, `pipewire-pulse`, `wireplumber`                                                                                                                                                                                                                                                                                       |
+| **Runtime**     | `nodejs`, `npm`, `python3`, `python3-evdev`                                                                                                                                                                                                                                                                                       |
+| **Session**     | `tvbox-wc` (the box's own Wayland compositor), `seatd`, `greetd`. A box provisioned before 2.0 has `labwc` + `wlrctl` + `kanshi` instead; a package that cares about the difference should ask rather than assume - `TVBOX_WC_SOCKET` in the environment, or `$XDG_RUNTIME_DIR/tvbox-wc.sock`, is what says which one is running. |
+| **Tooling**     | `curl`, `git`, `unzip`, `jq`, `flatpak`, `ca-certificates`, `cec-utils`                                                                                                                                                                                                                                                           |
+| **Storage**     | `udisks2` - what mounts a USB stick with no root. Reach it through the shell's browse API (below), never directly. A box that only ever took OTA updates does not have it (OTA cannot install apt packages), so treat it as optional and degrade.                                                                                 |
 
 Notably **NOT shipped** (declare a `download` or `apt` dep if you need them):
 the `ffmpeg` **CLI** (mpv links the libs, but the standalone `ffmpeg`/`ffprobe`

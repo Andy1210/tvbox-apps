@@ -2,13 +2,26 @@ import { useCallback, useEffect, useState } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n, useBackspace, useFocusableItem } from "@sdk";
 import { fetchGames, fetchSystems, play, type GameRow, type SystemRow } from "./api";
-import { ART_PAGE, CONSOLES_PAGE, EMPTY_ACTION, RAIL, SCAN_PAGE, SEARCH, TABS, TILES, focusLost, jump } from "./focus";
+import {
+  ART_PAGE,
+  CONSOLES_PAGE,
+  EMPTY_ACTION,
+  FOLDERS_PAGE,
+  RAIL,
+  SCAN_PAGE,
+  SEARCH,
+  TABS,
+  TILES,
+  focusLost,
+  jump,
+} from "./focus";
 import { GameGrid } from "./GameGrid";
 import { Consoles } from "./Consoles";
 import { Artwork } from "./Artwork";
 import { Scan } from "./Scan";
+import { Folders } from "./Folders";
 
-type View = "games" | "consoles" | "art" | "scan";
+type View = "games" | "consoles" | "art" | "scan" | "folders";
 const LAST_SYSTEM = "tvbox.retroarch.system";
 // Where "down out of the tabs" lands, per view: the first of these that is actually
 // mounted. For the games view that is the covers, falling back to the console list
@@ -19,6 +32,7 @@ const VIEW_CONTENT: Record<View, string[]> = {
   consoles: [CONSOLES_PAGE],
   art: [ART_PAGE],
   scan: [SCAN_PAGE],
+  folders: [FOLDERS_PAGE],
 };
 
 function Tab({
@@ -210,6 +224,13 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
             />
             <Tab id="art" view={view} label={t("retroarch.tabArt")} active={view === "art"} onPick={setView} />
             <Tab id="scan" view={view} label={t("retroarch.tabScan")} active={view === "scan"} onPick={setView} />
+            <Tab
+              id="folders"
+              view={view}
+              label={t("retroarch.tabFolders")}
+              active={view === "folders"}
+              onPick={setView}
+            />
           </div>
         </div>
         <div className="flex-1 min-h-0">
@@ -233,6 +254,8 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
             <Consoles systems={systems} onChanged={loadSystems} />
           ) : view === "scan" ? (
             <Scan onScanned={loadSystems} />
+          ) : view === "folders" ? (
+            <Folders />
           ) : (
             <Artwork />
           )}

@@ -180,7 +180,19 @@ function subdirs(dir) {
   try {
     return fs
       .readdirSync(dir, { withFileTypes: true })
-      .filter((c) => c.isDirectory() && !c.name.startsWith("."))
+      .filter((c) => !c.name.startsWith("."))
+      .filter((c) => {
+        // A symlink is not isDirectory() to readdir, and a linked-in library
+        // (folders.js) is exactly that - so filtering on isDirectory() alone
+        // offered the whole of roms/ and nothing inside a linked folder, which
+        // is where somebody's games actually are.
+        if (!c.isSymbolicLink()) return c.isDirectory();
+        try {
+          return fs.statSync(path.join(dir, c.name)).isDirectory();
+        } catch (e) {
+          return false; // dangling: a stick that is out
+        }
+      })
       .map((c) => c.name)
       .sort();
   } catch (e) {

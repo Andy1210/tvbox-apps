@@ -13,16 +13,16 @@
 //      is a session-level matter, not RetroArch's: see hardwareGl() below.
 //   2. where the games are. RetroArch's file browser is pointed at the box's own
 //      roms folder so "Load Content" opens somewhere useful on a TV.
-//   3. how games and consoles GET there. `roms` uploads files into roms/<system>/
-//      (lib/roms.js), `share` points the box at an SMB server so several boxes can
-//      read one library (lib/share.js), `cores` installs the emulators themselves
+//   3. how games and consoles GET there. `cores` installs the emulators
 //      (lib/cores.js) - RetroArch's own Core Downloader cannot fetch anything in
-//      this build, so its menu is hidden - and `art` fetches the games' covers
+//      this build, so its menu is hidden - `art` fetches the games' covers
 //      (lib/art.js), which the same dead Online Updater would otherwise be
-//      responsible for. Each is a phone form AND, where a remote can drive it
-//      (consoles, covers), a screen in the app: the same handlers serve both, so the
-//      two can never answer differently. File upload and share credentials stay
-//      phone-only - a file picker and a password are miserable on a remote.
+//      responsible for, `folders` links in games that live elsewhere on the box
+//      (lib/folders.js: a stick, a mounted share), and `roms` uploads files into
+//      roms/<system>/ (lib/roms.js). All of it is a screen in the APP, because a
+//      setting nobody can find is a setting nobody has. The one exception is the
+//      upload's file picker, which is a phone page the app opens with a QR - a
+//      file picker on a remote is miserable.
 //   4. the covers themselves, in the background: a pass over the playlists runs
 //      while the box is idle, so a freshly scanned console fills in without anyone
 //      asking (lib/art.js does the work; the phone page is for watching it).
@@ -36,7 +36,7 @@ const path = require("path");
 const os = require("os");
 const { spawn } = require("child_process");
 const roms = require("./lib/roms");
-const share = require("./lib/share"); // optional SMB game library shared by several boxes
+const folders = require("./lib/folders"); // games elsewhere on the box, linked into the library
 const cores = require("./lib/cores"); // the box installs and updates libretro cores itself
 const art = require("./lib/art"); // boxart for the playlists, fetched by the box
 const games = require("./lib/games"); // the game list the app's own grid renders, and which core plays what
@@ -87,214 +87,6 @@ const STR = {
     delAll: "Delete all",
     delAllConfirm: "Delete {n} games from {sys}? This cannot be undone.",
     deleted: "{n} games deleted.",
-  },
-};
-
-// Strings for the network-share form. Kept apart from the upload page's table so
-// each page's copy stands on its own.
-const SHARE_STR = {
-  hu: {
-    title: "tvbox - Hálózati megosztás",
-    hint: "A játékok maradhatnak a NAS-on, a box onnan olvassa őket, és több box is ugyanezt a megosztást használhatja. SMB kell hozzá: NFS-t csak rendszergazdaként lehet csatolni, amit a box szándékosan nem tesz.",
-    host: "Kiszolgáló (IP vagy név)",
-    share: "Megosztás neve",
-    user: "Felhasználó",
-    pass: "Jelszó",
-    passKeep: "változatlan",
-    folder: "Mappa neve a játékok között",
-    advNote: "Ezen a néven jelenik meg a RetroArch fájlböngészőjében.",
-    testBtn: "Kapcsolat tesztelése",
-    saveBtn: "Mentés és csatolás",
-    clearBtn: "Megosztás törlése",
-    testing: "Tesztelés...",
-    testOk: "Sikeres kapcsolat.",
-    saving: "Mentés...",
-    saved: "Elmentve, a csatolás folyamatban.",
-    cleared: "Törölve.",
-    clearConfirm: "Törlöd a hálózati megosztás beállítását?",
-    mounted: "Csatolva",
-    notMounted: "Nincs csatolva",
-    notConfigured: "Még nincs beállítva.",
-    errPrefix: "Hiba:",
-    errFailed: "Nem sikerült.",
-    errNetwork: "Nem érem el a boxot. Ugyanazon a wifin vagy?",
-    badHost: "Hibás kiszolgálónév.",
-    badShare: "Hibás megosztásnév.",
-    badFolder: "A mappanév csak kisbetű, szám és kötőjel lehet.",
-    badUser: "Túl hosszú felhasználónév.",
-    pickShare: "Válaszd ki a megosztást:",
-    domain: "Tartomány (domain, opcionális)",
-    domainHint: "csak tartományi fiókhoz",
-    passCleared: "nincs mentve",
-    pathLabel: "Alútvonal a megosztáson (opcionális)",
-    pathPlaceholder: "Emulators/roms",
-    pathNote: "Ha üresen hagyod, a megosztás gyökere csatolódik. A gombokkal le tudsz lépni a mappákba.",
-    pickFolder: "Válassz mappát, vagy mentsd el itt:",
-    emptyHere: "Itt nincs mappa. Ha ez a jó hely, nyomj Mentést.",
-    up: ".. vissza",
-    mountedOk: "Csatolva, a játékok megjelentek a boxon.",
-    mountFailed: "Nem sikerült csatolni. Ellenőrizd a jelszót és az útvonalat.",
-    badPath: "Hibás alútvonal.",
-    rcloneMissing: "Az rclone nincs telepítve. Nyisd meg a RetroArch csempét egyszer, hogy a box letöltse.",
-  },
-  en: {
-    title: "tvbox - Network share",
-    hint: "Games can stay on the NAS and the box reads them from there, so several boxes can use the same share. This needs SMB: mounting NFS requires root, which the box deliberately never uses.",
-    host: "Server (IP or name)",
-    share: "Share name",
-    user: "Username",
-    pass: "Password",
-    passKeep: "unchanged",
-    folder: "Folder name among the games",
-    advNote: "This is the name it appears under in RetroArch's file browser.",
-    testBtn: "Test connection",
-    saveBtn: "Save and mount",
-    clearBtn: "Remove share",
-    testing: "Testing...",
-    testOk: "Connected.",
-    saving: "Saving...",
-    saved: "Saved, mounting now.",
-    cleared: "Removed.",
-    clearConfirm: "Remove the network share settings?",
-    mounted: "Mounted",
-    notMounted: "Not mounted",
-    notConfigured: "Not set up yet.",
-    errPrefix: "Error:",
-    errFailed: "That did not work.",
-    errNetwork: "Cannot reach the box. Are you on the same wifi?",
-    badHost: "That server name is not valid.",
-    badShare: "That share name is not valid.",
-    badFolder: "The folder name may use lower-case letters, digits and dashes.",
-    badUser: "That username is too long.",
-    pickShare: "Pick a share:",
-    domain: "Domain (optional)",
-    domainHint: "only for a domain account",
-    passCleared: "none saved",
-    pathLabel: "Sub-folder in the share (optional)",
-    pathPlaceholder: "Emulators/roms",
-    pathNote: "Leave it empty to mount the share's root. Use the buttons to step into folders.",
-    pickFolder: "Pick a folder, or save at this level:",
-    emptyHere: "No folders here. If this is the right place, press Save.",
-    up: ".. back",
-    mountedOk: "Mounted, the games are on the box.",
-    mountFailed: "Could not mount. Check the password and the path.",
-    badPath: "That sub-folder path is not valid.",
-    rcloneMissing: "rclone is not installed. Open the RetroArch tile once so the box downloads it.",
-  },
-};
-
-// Strings for the console (core) page. The box installs cores itself, so this is
-// where a console is added, updated or removed.
-const CORES_STR = {
-  hu: {
-    title: "tvbox - Konzolok",
-    hint: "Írd be, mit keresel, vagy nézd végig a listát. A box letölti a kiválasztott emulátort és ellenőrzi is, plusz jelzi, ha újabb build jelent meg. Nem minden emulátor fut jól ezen a hardveren.",
-    offline: "A core-lista most nem elérhető, ezért a frissítések nem látszanak. A telepítés is hálózatot igényel.",
-    installBtn: "Telepítés",
-    updateBtn: "Frissítés",
-    removeBtn: "Törlés",
-    installedTag: "telepítve",
-    updatableTag: "frissíthető",
-    updateAll: "Mind a {n} frissítése",
-    working: "Folyamatban:",
-    doneOne: "{name} kész.",
-    doneMany: "{n} core frissítve.",
-    removeConfirm: "Törlöd a(z) {name} emulátorát?",
-    newBuild: "build: {date}",
-    errPrefix: "Hiba:",
-    errFailed: "Nem sikerült.",
-    errNetwork: "Nem érem el a boxot. Ugyanazon a wifin vagy?",
-    errBadCore: "Ismeretlen core.",
-    errDownload: "A letöltés nem sikerült. Van hálózat a boxon?",
-    errArchive: "A letöltött csomag hibás.",
-    errUnsafeArchive: "A csomag olyan helyre írna, ahova nem szabad. Nem csomagoltuk ki.",
-    errUnpack: "A rendszerfájlokat nem sikerült kicsomagolni.",
-    errCrc: "A letöltött fájl ellenőrzőösszege nem egyezik, ezért nem telepítettem.",
-    errWrite: "Nem sikerült a helyére írni.",
-    errRemove: "Nem sikerült törölni.",
-    errNoIndex: "A core-lista nem elérhető, ezért nem tudok telepíteni. Van hálózat a boxon?",
-    errNotPublished: "Ezt az emulátort a libretro már nem kínálja letöltésre.",
-    searchPlaceholder: "Keresés (pl. ps2, sony, snes)",
-    counting: "{shown} / {total} emulátor",
-    nothingFound: "Nincs találat.",
-    notPublishedTag: "már nem kínált",
-  },
-  en: {
-    title: "tvbox - Consoles",
-    hint: "Search, or scroll the list. The box downloads the emulator you pick and verifies it, and tells you when a newer build appears. Not every emulator runs well on this hardware.",
-    offline: "The core list is unreachable right now, so updates are not shown. Installing also needs the network.",
-    installBtn: "Install",
-    updateBtn: "Update",
-    removeBtn: "Remove",
-    installedTag: "installed",
-    updatableTag: "update",
-    updateAll: "Update all {n}",
-    working: "Working:",
-    doneOne: "{name} done.",
-    doneMany: "{n} cores updated.",
-    removeConfirm: "Remove the emulator for {name}?",
-    newBuild: "build: {date}",
-    errPrefix: "Error:",
-    errFailed: "That did not work.",
-    errNetwork: "Cannot reach the box. Are you on the same wifi?",
-    errBadCore: "Unknown core.",
-    errDownload: "The download failed. Does the box have network?",
-    errArchive: "The downloaded archive is broken.",
-    errUnsafeArchive: "The archive wanted to write outside its own folder, so it was not unpacked.",
-    errUnpack: "The system files could not be unpacked.",
-    errCrc: "The downloaded file's checksum did not match, so it was not installed.",
-    errWrite: "Could not write it into place.",
-    errRemove: "Could not remove it.",
-    errNoIndex: "The core list is unreachable, so nothing can be installed. Does the box have network?",
-    errNotPublished: "libretro no longer offers this emulator for download.",
-    searchPlaceholder: "Search (e.g. ps2, sony, snes)",
-    counting: "{shown} of {total} emulators",
-    nothingFound: "Nothing matches.",
-    notPublishedTag: "no longer offered",
-  },
-};
-
-// Strings for the artwork page. The box fetches the covers itself in the
-// background, so this page is mostly a report: which console has how many, and a
-// button for "do it now" when someone does not want to wait for an idle moment.
-const ART_STR = {
-  hu: {
-    title: "tvbox - Borítók",
-    hint: "A RetroArch csak a beolvasott listákban lévő játékoknak tud borítót mutatni, magától viszont nem tölti le őket. A box ezt megteszi: átnézi a listákat, és amihez van kép, azt a helyére teszi. Magától is fut, amikor a box épp nem dolgozik.",
-    startBtn: "Hiányzók letöltése",
-    stopBtn: "Leállítás",
-    idle: "Minden borító megvan.",
-    summary: "{have} / {total} játéknak van borítója",
-    missingNote: "{n} hiányzik",
-    unavailableNote: "{n} játékhoz nincs kép a szerveren",
-    working: "Letöltés: {system}",
-    workingCount: "{done} / {todo}",
-    listing: "Lista kérése: {system}",
-    savedNote: "{n} kép letöltve.",
-    offline: "Nincs hálózat a boxon, ezért most nem tudok képeket letölteni.",
-    stopped: "Leállítva. A már letöltött képek megmaradnak.",
-    noGames: "Még nincs beolvasott játéklista. A RetroArch-ban a játékok beolvasása után lesz mit ide tenni.",
-    done: "kész",
-    errNetwork: "Nem érem el a boxot. Ugyanazon a wifin vagy?",
-  },
-  en: {
-    title: "tvbox - Artwork",
-    hint: "RetroArch can only show a cover for games in a scanned list, and it does not fetch them by itself. The box does: it walks the lists and puts a cover in place wherever one exists. It also runs on its own whenever the box is not busy.",
-    startBtn: "Download missing",
-    stopBtn: "Stop",
-    idle: "Every cover is in place.",
-    summary: "{have} of {total} games have a cover",
-    missingNote: "{n} missing",
-    unavailableNote: "no cover exists for {n} games",
-    working: "Downloading: {system}",
-    workingCount: "{done} of {todo}",
-    listing: "Listing: {system}",
-    savedNote: "{n} covers downloaded.",
-    offline: "The box has no network, so nothing can be downloaded right now.",
-    stopped: "Stopped. What was downloaded stays.",
-    noGames: "No game list has been scanned yet. Scan your games in RetroArch and there will be something to fetch.",
-    done: "done",
-    errNetwork: "Cannot reach the box. Are you on the same wifi?",
   },
 };
 
@@ -458,50 +250,6 @@ module.exports = (host) => {
     return true;
   }
 
-  // ---- network share ----
-  // The mount runs under the shell's service supervisor rather than rclone's own
-  // --daemon: a share that goes away with the network then comes back on its own
-  // (capped backoff), and the shell owns the process so a shell restart cannot
-  // leave an orphaned mount behind.
-  const SHARE_SVC = "retroarch-share";
-  function mountShare() {
-    const cfg = share.readConfig();
-    if (!cfg) return false;
-    if (!rcloneInstalled()) {
-      host.log("retroarch: network share configured but rclone is missing");
-      return false;
-    }
-    share.unmount(cfg); // clear a stale FUSE mount from an unclean shutdown
-    share.ensureMountPoint(cfg);
-    host.spawnService(SHARE_SVC, {
-      argv: () => {
-        const live = share.readConfig() || cfg; // pick up an edit without re-registering
-        return ["rclone", ...share.mountArgs(live)];
-      },
-      env: share.envFor(cfg, host.childEnv()),
-      minUptimeMs: 8000, // a mount that dies inside 8s is a failure, not a normal exit
-      log: (m) => host.log("share:", m),
-    });
-    return true;
-  }
-  function unmountShare() {
-    const cfg = share.readConfig();
-    host.stopService(SHARE_SVC);
-    if (cfg) share.unmount(cfg);
-  }
-  // rclone lives in ~/.tvbox/bin (the app's own no-root download), which the shell
-  // has already put on PATH; this only reports whether the install has happened.
-  function rcloneInstalled() {
-    return (process.env.PATH || "").split(path.delimiter).some((d) => {
-      try {
-        fs.accessSync(path.join(d, "rclone"), fs.constants.X_OK);
-        return true;
-      } catch (e) {
-        return false;
-      }
-    });
-  }
-
   // ---- artwork ----
   // A pass fetches the covers the playlists are missing (lib/art.js). It runs by
   // itself as well as on demand, because a console scanned in RetroArch should
@@ -578,8 +326,6 @@ module.exports = (host) => {
         romsDir: roms.ROMS_DIR,
         roms: roms.count(),
         library: roms.list(),
-        share: share.status(share.readConfig()),
-        rclone: rcloneInstalled(),
         cores: cores.installed(), // what is on disk, without a network call
         art: art.status(), // per console: how many games have a cover
       }),
@@ -778,7 +524,9 @@ module.exports = (host) => {
       const folder = new URL(req.url, "http://x").searchParams.get("folder") || "";
       inspectOutOfProcess(folder)
         .then((r) => ctx.json(res, r))
-        .catch(() => ctx.json(res, { folder: "", error: "inspect_failed", games: 0, already: 0, ambiguous: 0, systems: [] }));
+        .catch(() =>
+          ctx.json(res, { folder: "", error: "inspect_failed", games: 0, already: 0, ambiguous: 0, systems: [] }),
+        );
     },
     "GET /scan": (req, res, ctx) => ctx.json(res, { running: !!scanning, progress: scanning, last: scanResult }),
     "POST /scan-start": (req, res, ctx) => {
@@ -796,55 +544,19 @@ module.exports = (host) => {
   };
 
   const romsPage = fs.readFileSync(path.join(__dirname, "pairing", "roms.html"), "utf8");
-  const sharePage = fs.readFileSync(path.join(__dirname, "pairing", "share.html"), "utf8");
-  const coresPage = fs.readFileSync(path.join(__dirname, "pairing", "cores.html"), "utf8");
-  const artPage = fs.readFileSync(path.join(__dirname, "pairing", "art.html"), "utf8");
 
   // The share form's own routes. Saving remounts, so a corrected password takes
   // effect without the user going anywhere else.
-  const shareRoutes = {
-    "GET /share-status": (req, res, ctx) => ctx.json(res, share.status(share.readConfig())),
-    "POST /share-test": (req, res, ctx) => {
-      const body = ctx.body || {};
-      if (!rcloneInstalled()) return ctx.json(res, { ok: false, error: "rclone_missing" });
-      // No share name yet: list what the server offers instead of failing. A NAS
-      // does not necessarily name its SMB shares the way it names anything else,
-      // so guessing is worse than asking the server.
-      if (!String(body.share || "").trim()) {
-        return share.listShares(body, host.childEnv()).then((r) => ctx.json(res, r));
-      }
-      let cfg;
-      try {
-        cfg = share.configFrom(body);
-      } catch (e) {
-        return ctx.json(res, { ok: false, error: e.message });
-      }
-      share.test(cfg, host.childEnv()).then((r) => ctx.json(res, r));
-    },
-    "POST /share-save": (req, res, ctx) => {
-      // Saving obscures the password with rclone, so without the binary this would
-      // throw an opaque ENOENT instead of the message /share-test already gives.
-      if (!rcloneInstalled()) return ctx.json(res, { ok: false, error: "rclone_missing" });
-      let cfg;
-      try {
-        cfg = share.configFrom(ctx.body || {});
-      } catch (e) {
-        return ctx.json(res, { ok: false, error: e.message });
-      }
-      // A changed folder name leaves the old mount behind otherwise.
-      unmountShare();
-      share.writeConfig(cfg);
-      const mounted = mountShare();
-      ctx.json(res, { ok: true, mounting: mounted });
-    },
-    "POST /share-clear": (req, res, ctx) => {
-      unmountShare();
-      ctx.json(res, { ok: share.clearConfig() });
-    },
+  // Games that live somewhere else on the box - a stick, a network share the box
+  // mounts, a folder dropped in over the file server - linked into the library.
+  // The picking happens against the SHELL's sources (/tvbox/api/browse), so this
+  // side only has to say yes or no to a path.
+  const folderRoutes = {
+    "GET /folders": (req, res, ctx) => ctx.json(res, { folders: folders.status(), max: folders.MAX_FOLDERS }),
+    "POST /folder-add": (req, res, ctx) => ctx.json(res, folders.add(ctx.body || {})),
+    "POST /folder-remove": (req, res, ctx) => ctx.json(res, folders.remove(String((ctx.body || {}).name || ""))),
   };
 
-  // The consoles page. Installing reaches the network, so every handler is async
-  // and reports a short error code the page turns into a sentence.
   const coresRoutes = {
     "GET /cores": (req, res, ctx) =>
       cores
@@ -904,6 +616,58 @@ module.exports = (host) => {
       ]),
     );
 
+  // One-time: this package used to mount an SMB share of its own at
+  // roms/<name>. The box does that now, and a folder inside a mounted share is
+  // linked into the library like any other, so the old mount is taken down and
+  // its config removed.
+  //
+  // The order matters and the checks are not decoration: unmount, VERIFY the
+  // path is no longer a mount point, and only then remove the directory - with
+  // rmdir, which cannot delete anything inside it. The mount was read-only, but
+  // "was" is not a thing to rely on when the target is somebody's NAS.
+  function retireLegacyShare() {
+    const file = path.join(os.homedir(), ".tvbox", "retroarch-share.json");
+    let cfg;
+    try {
+      cfg = JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch (e) {
+      return; // nothing to retire
+    }
+    const point = path.join(roms.ROMS_DIR, (cfg && cfg.mountName) || "network");
+    const mounted = () => {
+      try {
+        return fs
+          .readFileSync("/proc/self/mountinfo", "utf8")
+          .split("\n")
+          .some((line) => line.split(" ").includes(point));
+      } catch (e) {
+        return true; // cannot tell -> treat it as mounted and leave it alone
+      }
+    };
+    if (mounted()) {
+      try {
+        require("child_process").execFileSync("fusermount", ["-u", "-z", point], { stdio: "ignore" });
+      } catch (e) {
+        /* reported by the check below */
+      }
+    }
+    if (mounted()) {
+      host.log("retroarch: the old network share is still mounted at " + point + " - leaving it alone");
+      return;
+    }
+    try {
+      fs.rmdirSync(point); // never recursive: an unmounted mount point is empty
+    } catch (e) {
+      host.log("retroarch: " + point + " is not empty, keeping it (" + e.code + ")");
+    }
+    try {
+      fs.unlinkSync(file);
+    } catch (e) {
+      /* already gone */
+    }
+    host.log("retroarch: retired the app's own network share; the box mounts shares now");
+  }
+
   return {
     start() {
       host.registerRoutes("/tvbox/api/retroarch", {
@@ -913,7 +677,7 @@ module.exports = (host) => {
         // for them too - the same routes the phone pages call.
         ...onScreen(coresRoutes),
         ...onScreen(artRoutes),
-        ...onScreen({ "GET /share-status": shareRoutes["GET /share-status"] }),
+        ...onScreen(folderRoutes),
       });
       // Phone upload. The pairing server is only up while the TV shows the code,
       // and every route below it is code-gated by the shell.
@@ -933,18 +697,16 @@ module.exports = (host) => {
             }),
         },
       });
-      host.pairing.register("cores", {
-        page: (ctx) => renderTemplate(coresPage, { lang: ctx.locale, ...(CORES_STR[ctx.locale] || CORES_STR.en) }),
-        routes: coresRoutes,
-      });
-      host.pairing.register("share", {
-        page: (ctx) => renderTemplate(sharePage, { lang: ctx.locale, ...(SHARE_STR[ctx.locale] || SHARE_STR.en) }),
-        routes: shareRoutes,
-      });
-      host.pairing.register("art", {
-        page: (ctx) => renderTemplate(artPage, { lang: ctx.locale, ...(ART_STR[ctx.locale] || ART_STR.en) }),
-        routes: artRoutes,
-      });
+      // Re-link what was added before the box restarted. A target that is not
+      // there right now (a stick that is out) keeps its name and comes back with
+      // it - the name is written into every playlist entry, so dropping it would
+      // invalidate a scanned library.
+      try {
+        const linked = folders.apply();
+        if (linked.length) host.log("retroarch: linked folders " + linked.map((f) => f.name).join(", "));
+      } catch (e) {
+        host.log("retroarch: could not link folders:", e.message);
+      }
       // Before applyConfig, which points RetroArch's joypad_autoconfig_dir at it.
       applyPadProfiles();
       try {
@@ -965,10 +727,7 @@ module.exports = (host) => {
       const driver = requiredSettings().video_driver;
       const changed = cores.syncDriverOverrides(driver);
       host.log("retroarch: video driver " + driver + (changed.length ? ", per-core: " + changed.join(", ") : ""));
-      // A configured share comes up with the box, so the games are simply there.
-      if (share.readConfig()) {
-        if (mountShare()) host.log("retroarch: mounting network share at " + share.mountPoint(share.readConfig()));
-      }
+      retireLegacyShare();
       // Covers, in the background. A pass over a library that is already complete
       // reads a few directories and makes no network request, so a tick is cheap
       // enough to be regular: what it is really waiting for is a console the user
@@ -980,7 +739,6 @@ module.exports = (host) => {
       artTimer = setInterval(artTick, ART_EVERY_MS);
     },
     stop() {
-      unmountShare();
       artStop = true;
       clearTimeout(artKick);
       clearInterval(artTimer);
