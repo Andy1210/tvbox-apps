@@ -4,6 +4,8 @@
   "type": "module",
   "description": "tvbox app registry \u2014 self-contained app packages (manifest + host plugin + built web UI) and their standalone Vite sources.",
   "scripts": {
+    "build:files": "vite build -c apps-src/files/vite.config.ts",
+    "typecheck:files": "tsc --noEmit -p apps-src/files/tsconfig.json",
     "build:livetv": "vite build -c apps-src/livetv/vite.config.ts",
     "typecheck:livetv": "tsc --noEmit -p apps-src/livetv/tsconfig.json",
     "build:retroarch": "vite build -c apps-src/retroarch/vite.config.ts",

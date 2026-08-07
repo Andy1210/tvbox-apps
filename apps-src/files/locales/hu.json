@@ -1,0 +1,37 @@
+{
+  "_meta": {
+    "name": "Magyar",
+    "tag": "hu-HU"
+  },
+  "files": {
+    "title": "Fájlok",
+    "subtitle": "Lejátszás a boxról vagy USB-kulcsról",
+    "noSources": "Még nincs mappa, amiből lejátszhatnál",
+    "mounted": "Kész",
+    "pluggedIn": "Bedugva",
+    "opening": "Megnyitás…",
+    "eject": "Kiadás",
+    "ejected": "A(z) {name} kihúzható",
+    "usbUnavailable": "Ez a box még nem tud USB-kulcsot olvasni. Újra be kell állítani a szoftverét (hiányzik az udisks2).",
+    "emptyFolder": "Ez a mappa üres",
+    "onlyOtherFiles": "Itt nincs lejátszható fájl ({n} egyéb fájl)",
+    "tooManyFiles": "Csak a mappa eleje látszik",
+    "resumeFrom": "Folytatás innen: {time}",
+    "startOver": "Elölről",
+    "paused": "Szünet",
+    "playerHint": "OK: szünet · Balra/Jobbra: 10 mp",
+    "playerTracksHint": "Fel: hang és felirat",
+    "tracksTitle": "Hang és felirat",
+    "tracksAudio": "Hang",
+    "tracksSubtitles": "Felirat",
+    "tracksOff": "Kikapcsolva",
+    "trackN": "{n}. sáv",
+    "errNotAuthorized": "Ez a box nem csatolhat USB-kulcsot. Állítsd be újra a szoftverét, hogy megkapja a jogot.",
+    "errUnsupported": "Ehhez a box szoftvere túl régi.",
+    "errGone": "Ez a meghajtó már nincs bedugva",
+    "errBusy": "A kulcs még használatban van - előbb állítsd le a lejátszást",
+    "errFilesystem": "Ennek a kulcsnak a formátumát nem tudja olvasni",
+    "errFolderGone": "Ez a mappa már nincs meg",
+    "errFailed": "Nem sikerült"
+  }
+}

@@ -146,6 +146,36 @@ functions at all. Apply optimistically, then re-query `tracks()` after ~500ms
 to confirm what mpv actually selected. Live TV's `TrackMenu.tsx`
 (`apps-src/livetv/`) is the reference implementation.
 
+### Files on the box, and USB sticks
+
+The shell offers what there is to play locally, so an app does not need a plugin
+(or any filesystem access of its own) to reach it. `apps/files/` is the reference
+consumer; the design notes are in the core repo's
+[docs/local-media.md](https://github.com/Andy1210/tvbox/blob/main/docs/local-media.md).
+
+```ts
+// The roots: the user's own folders (~/, ~/.tvbox user content) plus every
+// partition of every removable drive, mounted or merely plugged in.
+const { sources, removable } = await (await fetch("/tvbox/api/browse/sources")).json();
+// One directory INSIDE one of those roots. Anything else is refused.
+const listing = await (await fetch("/tvbox/api/browse/list?path=" + encodeURIComponent(p))).json();
+// Nothing auto-mounts on this box: opening a stick IS the mount.
+await fetch("/tvbox/api/browse/mount", { method: "POST", body: JSON.stringify({ device }), headers });
+```
+
+Three things to build around:
+
+- **These routes are newer than some shells in the field.** A 404 means the box
+  cannot do this at all; say so on screen rather than showing an empty list. Same
+  for `removable.supported: false`, which is a box without `udisks2`.
+- **A path is checked, not trusted.** Both sides are resolved with `realpath` and
+  compared as `root + separator`, so `..`, a symlink on the stick and a
+  same-prefix sibling folder are all refused - do not try to construct paths, walk
+  from what a listing gave you.
+- **A file plays like any other URL:** `window.tvbox.play(entry.path, undefined,
+  startPos)` with the `player` capability, plus `pause`/`resume`/`seek` for
+  something that is not a live stream. Feature-detect all of them with `?.`.
+
 ## The host plugin
 
 If your app needs host-side Node (a daemon, an OAuth window, server routes),
@@ -230,6 +260,7 @@ Shipped by the SD image (and `deploy/provision.sh`), kept in sync between them:
 | **Runtime** | `nodejs`, `npm`, `python3`, `python3-evdev` |
 | **Session** | `tvbox-wc` (the box's own Wayland compositor), `seatd`, `greetd`. A box provisioned before 2.0 has `labwc` + `wlrctl` + `kanshi` instead; a package that cares about the difference should ask rather than assume - `TVBOX_WC_SOCKET` in the environment, or `$XDG_RUNTIME_DIR/tvbox-wc.sock`, is what says which one is running. |
 | **Tooling** | `curl`, `git`, `unzip`, `jq`, `flatpak`, `ca-certificates`, `cec-utils` |
+| **Storage** | `udisks2` - what mounts a USB stick with no root. Reach it through the shell's browse API (below), never directly. A box that only ever took OTA updates does not have it (OTA cannot install apt packages), so treat it as optional and degrade. |
 
 Notably **NOT shipped** (declare a `download` or `apt` dep if you need them):
 the `ffmpeg` **CLI** (mpv links the libs, but the standalone `ffmpeg`/`ffprobe`

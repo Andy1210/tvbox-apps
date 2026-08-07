@@ -1,0 +1,147 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
+import { useI18n, useBackspace, FocusButton } from "@sdk";
+
+// The audio/subtitle picker over a running film. A local file is where this
+// matters most: a recording carries whatever tracks it was made with, and nothing
+// upstream has resolved them for us the way a media server does.
+//
+// Own focus boundary: while it is open the playback key handler stands down, the
+// D-pad moves focus here and Back closes it. A choice is applied at once and then
+// confirmed by re-reading mpv, which is the only thing that knows what it did.
+
+function trackLabel(track: TvboxTrack, tag: string, fallback: string): string {
+  if (track.title) return track.title;
+  if (track.lang) {
+    try {
+      const name = new Intl.DisplayNames([tag], { type: "language" }).of(track.lang);
+      if (name) return name;
+    } catch {
+      /* an invalid code is shown as itself */
+    }
+    return track.lang;
+  }
+  return fallback;
+}
+
+function CheckMark({ visible }: { visible: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={["w-[2.4vh] h-[2.4vh] shrink-0", visible ? "" : "opacity-0"].join(" ")}
+    >
+      <path d="M4.5 12.5l5 5 10-11" />
+    </svg>
+  );
+}
+
+function TrackRow({
+  fk,
+  label,
+  selected,
+  onEnter,
+}: {
+  fk: string;
+  label: string;
+  selected: boolean;
+  onEnter: () => void;
+}) {
+  return (
+    <FocusButton
+      focusKey={fk}
+      onEnter={onEnter}
+      className="flex items-center justify-between gap-[1vw] px-[1.4vw] py-[1.3vh] rounded-[1vh] bg-white/5 text-[2.1vh] font-medium"
+    >
+      <span className="truncate">{label}</span>
+      <CheckMark visible={selected} />
+    </FocusButton>
+  );
+}
+
+export function TrackMenu({ tracks, onClose }: { tracks: TvboxTrack[]; onClose: () => void }) {
+  const { t, tag } = useI18n();
+  const { ref, focusKey } = useFocusable({ focusKey: "track-menu", isFocusBoundary: true });
+  const [list, setList] = useState<TvboxTrack[]>(tracks);
+  const confirmTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useBackspace(onClose);
+  useEffect(() => () => clearTimeout(confirmTimer.current), []);
+
+  useEffect(() => {
+    const audio = tracks.filter((x) => x.type === "audio");
+    const subs = tracks.filter((x) => x.type === "sub");
+    const a = audio.find((x) => x.selected) || audio[0];
+    const s = subs.find((x) => x.selected);
+    const key = a ? `track-audio-${a.id}` : s ? `track-sub-${s.id}` : "track-sub-off";
+    const id = setTimeout(() => setFocus(key), 0);
+    return () => clearTimeout(id);
+    // mount-only on purpose: the opening snapshot decides where focus lands
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const apply = useCallback((type: "audio" | "sub", id: number | "no") => {
+    window.tvbox?.setTrack?.(type, id);
+    setList((l) => l.map((x) => (x.type === type ? { ...x, selected: typeof id === "number" && x.id === id } : x)));
+    clearTimeout(confirmTimer.current);
+    confirmTimer.current = setTimeout(() => {
+      window.tvbox
+        ?.tracks?.()
+        ?.then((ts) => {
+          if (ts.length) setList(ts);
+        })
+        .catch(() => {});
+    }, 500);
+  }, []);
+
+  const audio = list.filter((x) => x.type === "audio");
+  const subs = list.filter((x) => x.type === "sub");
+  const subsOff = !subs.some((x) => x.selected);
+
+  return (
+    <FocusContext.Provider value={focusKey}>
+      <div ref={ref} className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center">
+        <div className="w-[38vw] min-w-[420px] max-h-[82vh] overflow-y-auto no-scrollbar flex flex-col gap-[1vh] p-[1vh]">
+          <div className="text-[2.8vh] font-bold mb-[0.5vh]">{t("files.tracksTitle")}</div>
+          {audio.length > 0 && (
+            <>
+              <div className="text-[1.7vh] text-fg-dim font-semibold mt-[1vh]">{t("files.tracksAudio")}</div>
+              {audio.map((x) => (
+                <TrackRow
+                  key={x.id}
+                  fk={`track-audio-${x.id}`}
+                  label={trackLabel(x, tag, t("files.trackN", { n: x.id }))}
+                  selected={x.selected}
+                  onEnter={() => apply("audio", x.id)}
+                />
+              ))}
+            </>
+          )}
+          {subs.length > 0 && (
+            <>
+              <div className="text-[1.7vh] text-fg-dim font-semibold mt-[1vh]">{t("files.tracksSubtitles")}</div>
+              <TrackRow
+                fk="track-sub-off"
+                label={t("files.tracksOff")}
+                selected={subsOff}
+                onEnter={() => apply("sub", "no")}
+              />
+              {subs.map((x) => (
+                <TrackRow
+                  key={x.id}
+                  fk={`track-sub-${x.id}`}
+                  label={trackLabel(x, tag, t("files.trackN", { n: x.id }))}
+                  selected={x.selected}
+                  onEnter={() => apply("sub", x.id)}
+                />
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+    </FocusContext.Provider>
+  );
+}

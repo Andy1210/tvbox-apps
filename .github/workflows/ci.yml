@@ -65,9 +65,9 @@ jobs:
       # apps/<id>/web/, which is where build-index.mjs then finds it - so the
       # index always describes what this run produced, never a stale commit.
       - name: typecheck app sources
-        run: for app in livetv retroarch spotify; do npm run typecheck:$app; done
+        run: for app in files livetv retroarch spotify; do npm run typecheck:$app; done
       - name: build app UIs
-        run: for app in livetv retroarch spotify; do npm run build:$app; done
+        run: for app in files livetv retroarch spotify; do npm run build:$app; done
 
       - name: trust rules + build index
         run: node scripts/build-index.mjs
