@@ -20,7 +20,7 @@ const os = require("os");
 
 const cores = require("./cores");
 const art = require("./art");
-const share = require("./share");
+const folders = require("./folders");
 
 const OVERRIDES_FILE = path.join(os.homedir(), ".tvbox", "retroarch-systems.json");
 
@@ -38,21 +38,25 @@ function extRank(p) {
   return e in EXT_RANK ? EXT_RANK[e] : 9;
 }
 
-// A whole ROM set commonly exists twice - once copied onto the box, once on the
-// network share it came from (this box has all 787 of its NES games in both) - and
-// the local copy is the one to launch: it loads faster and it is there when the
+// A whole ROM set commonly exists twice - once copied onto the box, once wherever
+// it came from (this box has all 787 of its NES games in both) - and the local copy
+// is the one to launch: it loads faster, and it is there when a stick is out or a
 // share is not mounted.
-// The share's mount point, read once per playlist pass - not per comparison, which
-// on this box's NES list would be 1568 config reads.
-function sharePoint() {
+//
+// "Elsewhere" is a linked folder (folders.js): the link lives IN the library, so a
+// game on a NAS and a game on a stick are both simply a path under roms/<link>.
+// Read once per playlist pass, not per comparison - on this box's NES list that
+// would be 1568 config reads.
+function linkedPoints() {
   try {
-    return share.mountPoint(share.readConfig()) || "";
+    return folders.read().map((f) => folders.linkPath(f.name));
   } catch (e) {
-    return "";
+    return [];
   }
 }
-function onShare(p, point) {
-  return !!point && String(p || "").startsWith(point + path.sep);
+function onLink(p, points) {
+  const s = String(p || "");
+  return (points || []).some((point) => s.startsWith(point + path.sep));
 }
 
 // Whether a ROM's FOLDER is still there, which is what tells a live copy from a
@@ -75,15 +79,16 @@ function dirLives(rom, seen) {
 }
 
 // Of two entries with the same label, which one to launch: a folder that still
-// exists before one that is gone, then local before the network share (faster, and
-// there when the share is not mounted), then a disc DESCRIPTOR before a raw track (a
+// exists before one that is gone, then the box's own copy before a linked one
+// (faster, and there when the stick is out), then a disc DESCRIPTOR before a raw
+// track (a
 // game scanned per track as well as per .cue plays silence or nothing from the
 // track), then the shorter path - so the choice is stable rather than dependent on
 // scan order.
-function better(a, b, point, seen) {
+function better(a, b, points, seen) {
   const [al, bl] = [dirLives(a.rom, seen), dirLives(b.rom, seen)];
   if (al !== bl) return al ? a : b;
-  if (onShare(a.rom, point) !== onShare(b.rom, point)) return onShare(a.rom, point) ? b : a;
+  if (onLink(a.rom, points) !== onLink(b.rom, points)) return onLink(a.rom, points) ? b : a;
   if (extRank(a.rom) !== extRank(b.rom)) return extRank(a.rom) < extRank(b.rom) ? a : b;
   return a.rom.length <= b.rom.length ? a : b;
 }
@@ -156,7 +161,7 @@ function read(system) {
   }
   const byLabel = new Map();
   const hints = new Map();
-  const point = sharePoint();
+  const points = linkedPoints();
   const dirs = new Map(); // folder -> does it still exist (one stat each, this pass only)
   for (const item of (doc && doc.items) || []) {
     const label = String((item && item.label) || "").trim();
@@ -169,7 +174,7 @@ function read(system) {
     const hint = corePathName(item.core_path);
     if (hint) hints.set(hint, (hints.get(hint) || 0) + 1);
     const prev = byLabel.get(label);
-    byLabel.set(label, prev ? better(prev, { label, rom }, point, dirs) : { label, rom });
+    byLabel.set(label, prev ? better(prev, { label, rom }, points, dirs) : { label, rom });
   }
   const games = [...byLabel.values()].sort((a, b) => a.label.localeCompare(b.label));
   // The index IS the id the UI sends back (for a cover or a launch), so it must be

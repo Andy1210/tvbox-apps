@@ -2,8 +2,12 @@
   "id": "retroarch",
   "manifestVersion": 1,
   "name": "RetroArch",
-  "version": "1.7.2",
+  "version": "1.8.0",
   "changelog": [
+    {
+      "version": "1.8.0",
+      "notes": "Games can live anywhere the box can see: link a folder from a USB stick or a network share into the library. The app's own network-share setup is gone - the box mounts shares now (Settings > Network), and the app links a folder inside one. Uploading games from a phone moved into the app."
+    },
     {
       "version": "1.7.2",
       "notes": "Games start again on a box running the new system software. RetroArch picks between two ways of drawing, and it decided by looking for a file the new version does not have - so it chose the one that cannot draw at all there, and a game came up black and closed itself."
@@ -74,36 +78,6 @@
     "hu": "Retro játékok a tévén. A box a saját borítós rácsában mutatja a játékokat konzolonként, távirányítóval kezelve; az OK egyenesen elindítja a játékot az emulátorban, kontrolleren az Xbox/Guide gomb játék közben előhozza az emulátor menüjét, a Home gomb pedig mindig visszahoz a boxra. A konzolokat és a borítókat a tévén vagy telefonról kezelheted; a játékfájlok telefonról töltődnek fel, vagy hálózati megosztásról olvassa őket."
   },
   "service": "retroarch",
-  "pairing": [
-    {
-      "kind": "cores",
-      "label": {
-        "en": "Consoles",
-        "hu": "Konzolok"
-      }
-    },
-    {
-      "kind": "roms",
-      "label": {
-        "en": "Upload games",
-        "hu": "Játékok feltöltése"
-      }
-    },
-    {
-      "kind": "share",
-      "label": {
-        "en": "Network share",
-        "hu": "Hálózati megosztás"
-      }
-    },
-    {
-      "kind": "art",
-      "label": {
-        "en": "Artwork",
-        "hu": "Borítók"
-      }
-    }
-  ],
   "backup": {
     "flatpak": "org.libretro.RetroArch",
     "paths": [
@@ -112,21 +86,15 @@
       "config/retroarch/retroarch.cfg",
       "config/retroarch/config"
     ],
-    "state": ["retroarch-share.json", "retroarch-systems.json", "retroarch-art.json"]
+    "state": [
+      "retroarch-share.json",
+      "retroarch-systems.json",
+      "retroarch-art.json"
+    ]
   },
   "requires": {
-    "flatpak": ["org.libretro.RetroArch"],
-    "download": [
-      {
-        "bin": "rclone",
-        "arch": {
-          "arm64": {
-            "url": "https://github.com/rclone/rclone/releases/download/v1.74.4/rclone-v1.74.4-linux-arm64.zip",
-            "sha256": "97685285c9ad6a0cf17d5844115d2a67245af6444db672187074bd9c358de419",
-            "extract": "rclone-v1.74.4-linux-arm64/rclone"
-          }
-        }
-      }
+    "flatpak": [
+      "org.libretro.RetroArch"
     ]
   },
   "runtime": {
@@ -134,8 +102,12 @@
     "entry": "index.html",
     "native": {
       "flatpak": "org.libretro.RetroArch",
-      "args": ["--fullscreen"]
+      "args": [
+        "--fullscreen"
+      ]
     },
-    "capabilities": ["nav"]
+    "capabilities": [
+      "nav"
+    ]
   }
 }
