@@ -5,8 +5,12 @@
     "hu": "Fájlok",
     "en": "Files"
   },
-  "version": "1.0.0",
+  "version": "1.0.1",
   "changelog": [
+    {
+      "version": "1.0.1",
+      "notes": "The review round: the cursor comes back after ejecting a stick, a box whose software is too old says so instead of showing a spinner, and two films ending at once cannot lose each other's resume point."
+    },
     {
       "version": "1.0.0",
       "notes": "Play films and music from the box's own folders or from a USB stick, with resume and subtitle selection."
@@ -25,12 +29,20 @@
     "hu": "A boxon lévő videó- és zenefájlok lejátszása: a saját mappáid (bármi, amit a fájlkiszolgálón átmásolsz) és az USB-kulcsok, amelyeket megnyitáskor csatol, és ugyanonnan ki is adhatsz. Megjegyzi, hol tartottál egy filmben, és nézés közben válthatsz hangsávot vagy feliratot."
   },
   "requires": {
-    "bin": ["mpv"],
-    "apt": ["mpv"]
+    "bin": [
+      "mpv"
+    ],
+    "apt": [
+      "mpv"
+    ]
   },
   "runtime": {
     "serve": "local",
     "entry": "index.html",
-    "capabilities": ["player", "storage", "nav"]
+    "capabilities": [
+      "player",
+      "storage",
+      "nav"
+    ]
   }
 }

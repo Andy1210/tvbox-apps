@@ -71,6 +71,10 @@ export function TrackMenu({ tracks, onClose }: { tracks: TvboxTrack[]; onClose: 
 
   useBackspace(onClose);
   useEffect(() => () => clearTimeout(confirmTimer.current), []);
+  // The caller re-reads the track list as it opens this, so the fresh one lands
+  // after mount - a snapshot taken at mount would be the stale one it was meant
+  // to replace.
+  useEffect(() => setList(tracks), [tracks]);
 
   useEffect(() => {
     const audio = tracks.filter((x) => x.type === "audio");

@@ -50,10 +50,14 @@ export function Player({
   const live = useRef({ pos: startPos, dur: 0 });
 
   const title = baseName(file.name);
+  // An older shell exposes no player at all. Without this the screen is a spinner
+  // that never resolves and only Back leaves - the app has to say what happened.
+  const canPlay = !!window.tvbox?.play;
 
   // Start it. `startPos` reaches mpv as its own --start, so a resumed film opens
   // at the right frame instead of jumping there once playback is under way.
   useEffect(() => {
+    if (!canPlay) return;
     window.tvbox?.play?.(file.path, undefined, startPos);
     postNowPlaying({ app: "files", state: "playing", title });
     // file.path identifies the film; startPos/title are decided with it
@@ -130,6 +134,10 @@ export function Player({
   }, [banner, paused, bannerSeq]);
 
   const togglePause = useCallback(() => {
+    // Only claim the state the shell can actually be in: an older bridge has no
+    // pause, and a screen that says "Paused" over a film that is still running is
+    // worse than a button that does nothing.
+    if (!window.tvbox?.pause || !window.tvbox?.resume) return;
     const nowPaused = !paused;
     setPaused(nowPaused);
     if (nowPaused) {
@@ -146,6 +154,7 @@ export function Player({
 
   const seekBy = useCallback(
     (delta: number) => {
+      if (!window.tvbox?.seek) return; // same as pause: do not move a position we cannot move
       const d = live.current.dur;
       const to = Math.max(0, d ? Math.min(d - 1, live.current.pos + delta) : live.current.pos + delta);
       live.current.pos = to;
@@ -211,10 +220,16 @@ export function Player({
 
   return (
     <div className="fixed inset-0 pointer-events-none">
+      {!canPlay && (
+        <div className="absolute inset-0 bg-black flex flex-col items-center justify-center gap-[2vh] px-[10vw] text-center">
+          <div className="text-[2.4vh] font-semibold">{title}</div>
+          <div className="text-[2vh] text-fg-dim">{t("files.errUnsupported")}</div>
+        </div>
+      )}
       {/* Before the first frame the page is still opaque, so this IS the screen.
           Mid-film it must not be: a stick that stalls for a second would black out
           a picture that is about to carry on. */}
-      {buffering && !started && (
+      {canPlay && buffering && !started && (
         <div className="absolute inset-0 bg-black flex flex-col items-center justify-center gap-[2vh]">
           <div className="w-[6vh] h-[6vh] rounded-full border-[0.5vh] border-white/20 border-t-white animate-spin" />
           <div className="text-[2.4vh] font-semibold px-[10vw] text-center truncate">{title}</div>

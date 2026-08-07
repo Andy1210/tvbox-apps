@@ -42,16 +42,22 @@ export interface Listing {
   truncated: boolean;
 }
 
+// A shell that does not have these routes answers 404, and that is the only
+// answer that means "this box cannot do this". Anything else - a 500, a socket
+// that went away - is a failure to report as one, or the app tells someone their
+// software is too old every time something hiccups.
 const EMPTY_SOURCES: SourceList = { sources: [], removable: { supported: false, error: null }, unsupported: true };
+const FAILED_SOURCES: SourceList = { sources: [], removable: { supported: false, error: "failed" } };
 
 export async function fetchSources(): Promise<SourceList> {
   try {
     const res = await fetch("/tvbox/api/browse/sources", { cache: "no-store" });
-    if (!res.ok) return EMPTY_SOURCES;
+    if (res.status === 404) return EMPTY_SOURCES;
+    if (!res.ok) return FAILED_SOURCES;
     const d = await res.json();
     return { sources: d.sources || [], removable: d.removable || { supported: false, error: null } };
   } catch {
-    return EMPTY_SOURCES;
+    return FAILED_SOURCES;
   }
 }
 
@@ -59,7 +65,8 @@ export async function fetchList(path: string): Promise<Listing> {
   const empty = { path, name: "", parent: null, root: { id: "", kind: "", name: "", path: "" }, entries: [] };
   try {
     const res = await fetch("/tvbox/api/browse/list?path=" + encodeURIComponent(path), { cache: "no-store" });
-    if (!res.ok) return { ok: false, error: "unsupported", truncated: false, ...empty };
+    if (res.status === 404) return { ok: false, error: "unsupported", truncated: false, ...empty };
+    if (!res.ok) return { ok: false, error: "failed", truncated: false, ...empty };
     return await res.json();
   } catch {
     return { ok: false, error: "unreachable", truncated: false, ...empty };
@@ -73,8 +80,14 @@ async function post(path: string, body: unknown): Promise<{ ok: boolean; error?:
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!res.ok) return { ok: false, error: "unsupported" };
-    return await res.json();
+    // The shell answers a refusal as JSON with its own reason (not_authorized,
+    // busy, …), and that reason is what the screen should say.
+    if (res.status === 404) return { ok: false, error: "unsupported" };
+    try {
+      return await res.json();
+    } catch {
+      return { ok: false, error: "failed" };
+    }
   } catch {
     return { ok: false, error: "unreachable" };
   }

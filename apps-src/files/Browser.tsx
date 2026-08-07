@@ -91,8 +91,9 @@ export function Browser({
 
   useFocusFallback(shown.length ? "entry-0" : undefined, (k) => k.startsWith("entry-"));
 
-  // Focus the first row of THIS folder: the key includes the path, so walking
-  // into a folder re-runs it and focus never stays on the row that was pressed.
+  // Focus the first row of THIS folder. The keys are positional (`entry-0`), so
+  // what re-runs this is the PATH in the dependencies: without it, walking into a
+  // folder would leave the focus on the row that was pressed.
   useEffect(() => {
     if (!shown.length) return;
     const id = setTimeout(() => setFocus("entry-0"), 0);

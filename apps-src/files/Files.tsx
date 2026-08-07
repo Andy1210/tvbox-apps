@@ -190,6 +190,9 @@ export function Files({ onExit }: { onExit: () => void }) {
         .then((r) => {
           setNote(r.ok ? t("files.ejected", { name: s.name }) : errorText(r.error));
           loadSources();
+          // The button that was pressed is the one that disappears: an ejected
+          // stick has nothing left to eject. Hand the focus back to its row.
+          setTimeout(() => setFocus("src-" + s.id), 0);
         })
         .finally(() => setBusyId(""));
     },

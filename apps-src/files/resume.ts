@@ -22,10 +22,13 @@ export interface ResumePoint {
 
 type Store = Record<string, ResumePoint>;
 
-// The PROMISE is cached, not the value: two writes that overlap (a film ends while
-// the next one is already loading) would otherwise both read the store before
-// either had written, and the second would drop the first's entry.
+// The PROMISE is cached, not the value, and every WRITE is chained onto the last
+// one: two that overlap (a film ends while the next is already loading) would
+// otherwise both read the store before either wrote, and the second would drop the
+// first's entry. Caching the read alone does not prevent that - the copies are
+// taken before either write runs.
 let loading: Promise<Store> | null = null;
+let queue: Promise<unknown> = Promise.resolve();
 
 function load(): Promise<Store> {
   if (!loading) {
@@ -62,7 +65,13 @@ export async function resumePoint(path: string): Promise<ResumePoint | null> {
 }
 
 // Called as playback ends (or is left): remember, or forget a film that ran out.
-export async function remember(path: string, pos: number, dur: number): Promise<void> {
+export function remember(path: string, pos: number, dur: number): Promise<void> {
+  const next = queue.then(() => write(path, pos, dur));
+  queue = next.catch(() => {});
+  return next;
+}
+
+async function write(path: string, pos: number, dur: number): Promise<void> {
   try {
     const store = { ...(await load()) };
     const worth = pos >= MIN_POSITION && (!dur || dur - pos >= MIN_REMAINING);

@@ -20,10 +20,15 @@ const NAV_KEYS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "En
 // sometimes leaves a 0x0 target at the top left of the screen, which the D-pad
 // will happily land on.
 export function useFocusFallback(firstKey: string | undefined, owns: (key: string) => boolean) {
+  // Written after the commit, never during render: a render React replays or
+  // throws away would otherwise publish the screen state of a UI that never
+  // existed, and the listener below reads these long after the fact.
   const key = useRef(firstKey);
-  key.current = firstKey;
   const mine = useRef(owns);
-  mine.current = owns;
+  useEffect(() => {
+    key.current = firstKey;
+    mine.current = owns;
+  });
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!NAV_KEYS.has(e.key) || !key.current) return;
