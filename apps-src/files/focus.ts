@@ -14,14 +14,21 @@ import { doesFocusableExist, getCurrentFocusKey, setFocus } from "@noriginmedia/
 // would otherwise act on the dead focus first.
 const NAV_KEYS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter"]);
 
-export function useFocusFallback(firstKey: string | undefined) {
+// `owns` says which keys belong to the screen that is up. "Does it still exist"
+// is not enough on its own: a focusable can be registered and yet be nowhere -
+// a hook that must run unconditionally while its element is only rendered
+// sometimes leaves a 0x0 target at the top left of the screen, which the D-pad
+// will happily land on.
+export function useFocusFallback(firstKey: string | undefined, owns: (key: string) => boolean) {
   const key = useRef(firstKey);
   key.current = firstKey;
+  const mine = useRef(owns);
+  mine.current = owns;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!NAV_KEYS.has(e.key) || !key.current) return;
       const current = getCurrentFocusKey();
-      if (current && doesFocusableExist(current)) return;
+      if (current && mine.current(current) && doesFocusableExist(current)) return;
       setFocus(key.current);
     };
     window.addEventListener("keydown", onKey, true);

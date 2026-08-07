@@ -89,7 +89,7 @@ export function Browser({
   const playable = shown.filter(isPlayable);
   const hidden = listing.entries.length - shown.length;
 
-  useFocusFallback(shown.length ? "entry-0" : undefined);
+  useFocusFallback(shown.length ? "entry-0" : undefined, (k) => k.startsWith("entry-"));
 
   // Focus the first row of THIS folder: the key includes the path, so walking
   // into a folder re-runs it and focus never stays on the row that was pressed.

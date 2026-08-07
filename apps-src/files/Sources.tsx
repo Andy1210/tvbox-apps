@@ -59,7 +59,18 @@ function SourceRow({
     { focusKey: "src-" + source.id, onEnterPress: onOpen },
     { block: "center" },
   );
-  const eject = useFocusableItem<HTMLButtonElement>({ focusKey: "eject-" + source.id, onEnterPress: onEject });
+  // The button is only RENDERED for a mounted stick, but the hook has to run
+  // either way (hooks cannot be conditional) - and a registered focusable whose
+  // ref never reached a DOM node is a 0x0 rectangle at the top left of the
+  // screen. That is a real target for the D-pad: Up from the first row landed on
+  // it, nothing highlighted, and the cursor was gone. `focusable` is what keeps a
+  // hook that must run out of the navigation tree.
+  const showEject = source.kind === "removable" && source.mounted;
+  const eject = useFocusableItem<HTMLButtonElement>({
+    focusKey: "eject-" + source.id,
+    focusable: showEject,
+    onEnterPress: onEject,
+  });
   const detail =
     source.kind === "removable"
       ? [source.mounted ? t("files.mounted") : t("files.pluggedIn"), formatSize(source.size || 0), source.fstype]
@@ -87,7 +98,7 @@ function SourceRow({
           </div>
         </div>
       </div>
-      {source.kind === "removable" && source.mounted && (
+      {showEject && (
         <button
           ref={eject.ref}
           onClick={onEject}
@@ -139,7 +150,7 @@ export function Sources({
   // (a stick plugged in while this screen is open), so this waits for content
   // rather than running on mount.
   const first = sources[0]?.id;
-  useFocusFallback(first ? "src-" + first : undefined);
+  useFocusFallback(first ? "src-" + first : undefined, (k) => k.startsWith("src-") || k.startsWith("eject-"));
   useEffect(() => {
     if (!first) return;
     const id = setTimeout(() => setFocus("src-" + first), 0);
