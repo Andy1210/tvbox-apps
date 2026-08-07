@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n, useFocusableItem } from "@sdk";
 import { baseName, formatSize, isPlayable, mediaKind, type Entry, type Listing } from "./api";
+import { useFocusFallback } from "./focus";
 
 // One folder. Folders first, then what this box can play - the shell lists
 // everything a directory holds and the filtering happens here, because "what is a
@@ -70,11 +71,25 @@ export function Browser({
   onOpen: (entry: Entry, playable: Entry[]) => void;
 }) {
   const { t } = useI18n();
-  const { ref, focusKey } = useFocusable({ focusKey: "browser-page" });
+  // The page GROUPS its rows, it is not a target itself. A focusable container is
+  // a full-screen rectangle sitting above the first row, so Up from the top row
+  // lands ON it: nothing highlights, and every arrow after that measures from a
+  // rect that covers the screen - the cursor is gone with no way back, which on a
+  // TV is a dead end. The launcher's own pages are `focusable: false` for exactly
+  // this reason. The boundary is the other half: there is nothing outside this
+  // screen to reach.
+  const { ref, focusKey } = useFocusable({
+    focusKey: "browser-page",
+    focusable: false,
+    isFocusBoundary: true,
+    saveLastFocusedChild: true,
+  });
 
   const shown = listing.entries.filter((e) => e.dir || isPlayable(e));
   const playable = shown.filter(isPlayable);
   const hidden = listing.entries.length - shown.length;
+
+  useFocusFallback(shown.length ? "entry-0" : undefined);
 
   // Focus the first row of THIS folder: the key includes the path, so walking
   // into a folder re-runs it and focus never stays on the row that was pressed.

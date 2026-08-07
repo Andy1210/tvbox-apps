@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n, useFocusableItem } from "@sdk";
 import { formatSize, type Source } from "./api";
+import { useFocusFallback } from "./focus";
 
 // Where to look: the box's own folders and whatever is plugged into a USB port.
 //
@@ -122,12 +123,23 @@ export function Sources({
   onEject: (s: Source) => void;
 }) {
   const { t } = useI18n();
-  const { ref, focusKey } = useFocusable({ focusKey: "sources-page" });
+  // Grouping container, not a target: a focusable one is a full-screen rectangle
+  // above the first row, so Up from the top row lands on it - nothing highlights,
+  // and the D-pad then measures from a rect covering the screen, with no way back.
+  // The launcher's own pages are `focusable: false` for the same reason; the
+  // boundary is because there is nothing outside this screen to reach.
+  const { ref, focusKey } = useFocusable({
+    focusKey: "sources-page",
+    focusable: false,
+    isFocusBoundary: true,
+    saveLastFocusedChild: true,
+  });
 
   // Focus the first source once there is one. The list can arrive after a poll
   // (a stick plugged in while this screen is open), so this waits for content
   // rather than running on mount.
   const first = sources[0]?.id;
+  useFocusFallback(first ? "src-" + first : undefined);
   useEffect(() => {
     if (!first) return;
     const id = setTimeout(() => setFocus("src-" + first), 0);
