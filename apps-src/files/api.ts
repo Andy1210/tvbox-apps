@@ -8,7 +8,7 @@
 
 export interface Source {
   id: string;
-  kind: "folder" | "removable";
+  kind: "folder" | "removable" | "network";
   name: string;
   path: string | null; // null for a stick that is plugged in but not mounted
   mounted: boolean;

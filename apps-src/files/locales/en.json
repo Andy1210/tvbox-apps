@@ -9,6 +9,7 @@
     "noSources": "No folders to play from yet",
     "mounted": "Ready",
     "pluggedIn": "Plugged in",
+    "networkShare": "Network share",
     "opening": "Opening…",
     "eject": "Eject",
     "ejected": "{name} can be unplugged",

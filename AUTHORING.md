@@ -154,8 +154,9 @@ consumer; the design notes are in the core repo's
 [docs/local-media.md](https://github.com/Andy1210/tvbox/blob/main/docs/local-media.md).
 
 ```ts
-// The roots: the user's own folders (~/, ~/.tvbox user content) plus every
-// partition of every removable drive, mounted or merely plugged in.
+// The roots: the user's own folders (~/, ~/.tvbox user content), every partition
+// of every removable drive (mounted or merely plugged in), and every mounted
+// network share - `kind` says which, and a share needs no work from the app.
 const { sources, removable } = await (await fetch("/tvbox/api/browse/sources")).json();
 // One directory INSIDE one of those roots. Anything else is refused.
 const listing = await (await fetch("/tvbox/api/browse/list?path=" + encodeURIComponent(p))).json();

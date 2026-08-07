@@ -9,6 +9,7 @@
     "noSources": "Még nincs mappa, amiből lejátszhatnál",
     "mounted": "Kész",
     "pluggedIn": "Bedugva",
+    "networkShare": "Hálózati megosztás",
     "opening": "Megnyitás…",
     "eject": "Kiadás",
     "ejected": "A(z) {name} kihúzható",

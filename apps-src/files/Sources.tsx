@@ -11,12 +11,22 @@ import { formatSize, type Source } from "./api";
 // is mounted: pulling a stick out mid-write is the one thing a TV cannot undo.
 
 function FolderIcon({ kind }: { kind: Source["kind"] }) {
-  return kind === "removable" ? (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-[3vh] h-[3vh] shrink-0">
-      <rect x="8" y="9" width="8" height="12" rx="1.5" />
-      <path d="M10 9V4.5h4V9M12 12.5v4" strokeLinecap="round" />
-    </svg>
-  ) : (
+  if (kind === "removable")
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-[3vh] h-[3vh] shrink-0">
+        <rect x="8" y="9" width="8" height="12" rx="1.5" />
+        <path d="M10 9V4.5h4V9M12 12.5v4" strokeLinecap="round" />
+      </svg>
+    );
+  if (kind === "network")
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-[3vh] h-[3vh] shrink-0">
+        <rect x="3" y="5" width="18" height="7" rx="1.5" />
+        <path d="M7 8.5h.01M12 16v3M7 19h10" strokeLinecap="round" />
+        <path d="M6 16h12" strokeLinecap="round" />
+      </svg>
+    );
+  return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-[3vh] h-[3vh] shrink-0">
       <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h7A1.5 1.5 0 0 1 19 10v7.5A1.5 1.5 0 0 1 17.5 19h-13A1.5 1.5 0 0 1 3 17.5z" />
     </svg>
@@ -54,7 +64,9 @@ function SourceRow({
       ? [source.mounted ? t("files.mounted") : t("files.pluggedIn"), formatSize(source.size || 0), source.fstype]
           .filter(Boolean)
           .join(" · ")
-      : source.path || "";
+      : source.kind === "network"
+        ? t("files.networkShare")
+        : source.path || "";
 
   return (
     <div className="flex items-stretch gap-[0.8vw]">
