@@ -146,3 +146,57 @@ export function shortSystem(system: string): string {
   const i = system.indexOf(" - ");
   return i < 0 ? system : system.slice(i + 3);
 }
+
+// ---- games that live elsewhere on the box ----
+// Two APIs meet here. The SHELL knows what the box has mounted (its own folders,
+// every plugged-in stick, every network share) and lists a directory inside one
+// of those roots; the PLUGIN links a chosen folder into the library. Neither
+// copies anything.
+export interface LinkedFolder {
+  name: string; // the folder's name in the library, and a path segment in every playlist
+  path: string;
+  present: boolean; // the target is there right now (a stick can be out)
+  linked: boolean;
+}
+export interface BrowseSource {
+  id: string;
+  kind: "folder" | "removable" | "network";
+  name: string;
+  path: string | null;
+  mounted: boolean;
+}
+export interface BrowseEntry {
+  name: string;
+  path: string;
+  dir: boolean;
+}
+
+export const fetchFolders = () => get<{ folders: LinkedFolder[]; max: number }>("/folders");
+export const addFolder = (name: string, path: string) =>
+  post<{ ok: boolean; error?: string }>("/folder-add", { name, path });
+export const removeFolder = (name: string) => post<{ ok: boolean; error?: string }>("/folder-remove", { name });
+
+// The shell's own browse API. A shell too old to have it answers 404, which is
+// reported as `unsupported` rather than as an empty box with no explanation.
+export async function fetchSources(): Promise<{ sources: BrowseSource[]; unsupported?: boolean }> {
+  try {
+    const res = await fetch("/tvbox/api/browse/sources", { cache: "no-store" });
+    if (!res.ok) return { sources: [], unsupported: true };
+    const d = await res.json();
+    return { sources: d.sources || [] };
+  } catch {
+    return { sources: [], unsupported: true };
+  }
+}
+export async function listFolder(
+  path: string,
+): Promise<{ ok: boolean; path: string; name: string; parent: string | null; entries: BrowseEntry[] }> {
+  const empty = { ok: false, path, name: "", parent: null, entries: [] };
+  try {
+    const res = await fetch("/tvbox/api/browse/list?path=" + encodeURIComponent(path), { cache: "no-store" });
+    if (!res.ok) return empty;
+    return await res.json();
+  } catch {
+    return empty;
+  }
+}

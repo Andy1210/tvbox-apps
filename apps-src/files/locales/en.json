@@ -1,0 +1,38 @@
+{
+  "_meta": {
+    "name": "English",
+    "tag": "en-GB"
+  },
+  "files": {
+    "title": "Files",
+    "subtitle": "Play what is on the box or on a USB stick",
+    "noSources": "No folders to play from yet",
+    "mounted": "Ready",
+    "pluggedIn": "Plugged in",
+    "networkShare": "Network share",
+    "opening": "Opening…",
+    "eject": "Eject",
+    "ejected": "{name} can be unplugged",
+    "usbUnavailable": "This box cannot read USB sticks yet. Its software needs to be set up again (udisks2 is missing).",
+    "emptyFolder": "This folder is empty",
+    "onlyOtherFiles": "Nothing here can be played ({n} other files)",
+    "tooManyFiles": "Only the first part of this folder is shown",
+    "resumeFrom": "Resume from {time}",
+    "startOver": "Start over",
+    "paused": "Paused",
+    "playerHint": "OK: pause · Left/Right: 10 s",
+    "playerTracksHint": "Up: audio & subtitles",
+    "tracksTitle": "Audio & subtitles",
+    "tracksAudio": "Audio",
+    "tracksSubtitles": "Subtitles",
+    "tracksOff": "Off",
+    "trackN": "Track {n}",
+    "errNotAuthorized": "This box is not allowed to mount USB sticks. Set its software up again to grant it.",
+    "errUnsupported": "This box's software is too old for local playback.",
+    "errGone": "That drive is no longer plugged in",
+    "errBusy": "The stick is still in use - stop playback first",
+    "errFilesystem": "This stick's format cannot be read",
+    "errFolderGone": "That folder is no longer there",
+    "errFailed": "That didn't work"
+  }
+}
