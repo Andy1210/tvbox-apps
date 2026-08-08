@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n, useFocusableItem } from "@sdk";
 import { formatSize, type Source } from "./api";
@@ -31,6 +31,54 @@ function FolderIcon({ kind }: { kind: Source["kind"] }) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-[3vh] h-[3vh] shrink-0">
       <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h7A1.5 1.5 0 0 1 19 10v7.5A1.5 1.5 0 0 1 17.5 19h-13A1.5 1.5 0 0 1 3 17.5z" />
     </svg>
+  );
+}
+
+// A group heading, in the launcher's own idiom (its "Futó appok" / "Alkalmazások"
+// rows). Deliberately not focusable and not a row: the D-pad walks sources, and a
+// label it could land on would be a stop with nothing to press.
+function GroupLabel({ children, first }: { children: ReactNode; first?: boolean }) {
+  return (
+    <div className={["text-[1.6vh] font-semibold text-fg-dim px-[0.4vw]", first ? "" : "mt-[2vh]"].join(" ")}>
+      {children}
+    </div>
+  );
+}
+
+function PhoneIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-[3vh] h-[3vh] shrink-0">
+      <rect x="7" y="2.5" width="10" height="19" rx="2" />
+      <path d="M11 18.5h2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// Photos from a phone. Not a source in the shell's sense - there is no folder
+// behind it and nothing to mount - but this is the screen someone is on when they
+// want their holiday on the TV, and a feature nobody can find is a feature nobody
+// has. It belongs to the top group with the stick and the share: all three are
+// somewhere other than this box.
+function PhoneRow({ count, onOpen }: { count: number; onOpen: () => void }) {
+  const { t } = useI18n();
+  const { ref, focused } = useFocusableItem({ focusKey: "src-phone", onEnterPress: onOpen }, { block: "center" });
+  return (
+    <div
+      ref={ref}
+      onClick={onOpen}
+      className={[
+        "flex items-center gap-[1.2vw] px-[1.6vw] py-[1.6vh] rounded-[1.2vh] transition-transform duration-150",
+        focused ? "bg-white text-[#06090d] scale-[1.01]" : "bg-white/5",
+      ].join(" ")}
+    >
+      <PhoneIcon />
+      <div className="min-w-0 flex-1">
+        <div className="text-[2.3vh] font-semibold truncate">{t("files.fromPhone")}</div>
+        <div className={["text-[1.6vh] truncate", focused ? "opacity-70" : "text-fg-dim"].join(" ")}>
+          {count ? t("files.phoneArrived", { n: count }) : t("files.fromPhoneHint")}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -122,16 +170,22 @@ export function Sources({
   loading,
   busyId,
   note,
+  castCount,
+  photosSupported,
   onOpen,
   onEject,
+  onPhone,
 }: {
   sources: Source[];
   removable: { supported: boolean; error: string | null };
   loading: boolean;
   busyId: string;
   note: string;
+  castCount: number;
+  photosSupported: boolean;
   onOpen: (s: Source) => void;
   onEject: (s: Source) => void;
+  onPhone: () => void;
 }) {
   const { t } = useI18n();
   // Grouping container, not a target: a focusable one is a full-screen rectangle
@@ -149,11 +203,23 @@ export function Sources({
   // Focus the first source once there is one. The list can arrive after a poll
   // (a stick plugged in while this screen is open), so this waits for content
   // rather than running on mount.
-  const first = sources[0]?.id;
-  useFocusFallback(first ? "src-" + first : undefined, (k) => k.startsWith("src-") || k.startsWith("eject-"));
+  // Two groups, because they are two different questions. A stick, a NAS share and
+  // a phone are somewhere ELSE and are what someone came here to reach; the box's
+  // own folders are a long, mostly uninteresting list that a home directory
+  // decides the length of. Sorted together they read as one list in which the
+  // interesting rows happen to sit at position nine.
+  const elsewhere = sources.filter((s) => s.kind !== "folder");
+  const own = sources.filter((s) => s.kind === "folder");
+
+  // The phone row means this screen has somewhere to put the cursor even on a box
+  // with no folders and nothing plugged in - unless the shell is too old to have
+  // it, which is the one case that can still leave nothing to focus.
+  const firstOf = (list: Source[]) => (list[0] ? "src-" + list[0].id : undefined);
+  const first = firstOf(elsewhere) || (photosSupported ? "src-phone" : firstOf(own));
+  useFocusFallback(first, (k) => k.startsWith("src-") || k.startsWith("eject-"));
   useEffect(() => {
     if (!first) return;
-    const id = setTimeout(() => setFocus("src-" + first), 0);
+    const id = setTimeout(() => setFocus(first), 0);
     return () => clearTimeout(id);
   }, [first]);
 
@@ -163,8 +229,12 @@ export function Sources({
         <div className="text-[3.4vh] font-bold mb-[0.6vh]">{t("files.title")}</div>
         <div className="text-[1.8vh] text-fg-dim mb-[2.5vh]">{t("files.subtitle")}</div>
 
-        <div className="flex-1 overflow-y-auto no-scrollbar flex flex-col gap-[1.2vh] pr-[0.5vw]">
-          {sources.map((s) => (
+        {/* Room for a focused row to grow into - see the same pair in Browser.tsx:
+            this box clips horizontally as well as vertically, so without it a
+            scaled row loses its rounded ends against the edge. */}
+        <div className="flex-1 overflow-y-auto no-scrollbar flex flex-col gap-[1.2vh] -mx-[1vw] px-[1vw]">
+          {(elsewhere.length > 0 || photosSupported) && <GroupLabel first>{t("files.srcElsewhere")}</GroupLabel>}
+          {elsewhere.map((s) => (
             <SourceRow
               key={s.id}
               source={s}
@@ -173,7 +243,21 @@ export function Sources({
               onEject={() => onEject(s)}
             />
           ))}
-          {!sources.length && !loading && <div className="text-[2vh] text-fg-dim">{t("files.noSources")}</div>}
+          {photosSupported && <PhoneRow count={castCount} onOpen={onPhone} />}
+
+          {own.length > 0 && <GroupLabel>{t("files.srcOnBox")}</GroupLabel>}
+          {own.map((s) => (
+            <SourceRow
+              key={s.id}
+              source={s}
+              busy={busyId === s.id}
+              onOpen={() => onOpen(s)}
+              onEject={() => onEject(s)}
+            />
+          ))}
+          {!sources.length && !loading && !photosSupported && (
+            <div className="text-[2vh] text-fg-dim">{t("files.noSources")}</div>
+          )}
         </div>
 
         {note && <div className="text-[1.8vh] mt-[2vh] text-[#ffb3b3]">{note}</div>}
