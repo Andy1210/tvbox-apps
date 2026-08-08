@@ -149,7 +149,12 @@ export function Browser({
         <div className="text-[3vh] font-bold truncate">{listing.name}</div>
         <div className="text-[1.6vh] text-fg-dim mb-[2vh] truncate">{listing.path}</div>
 
-        <div className="flex-1 overflow-y-auto no-scrollbar flex flex-col gap-[0.9vh] pr-[0.5vw]">
+        {/* The negative margin and the padding cancelling it give a focused row
+            somewhere to grow into. `overflow-y-auto` makes this box clip on the
+            OTHER axis too (a non-visible overflow on one axis computes the other
+            to auto), so a row scaled to 1.01 has its rounded ends sliced flat
+            against the edge. The pair moves the clip outwards, not the rows. */}
+        <div className="flex-1 overflow-y-auto no-scrollbar flex flex-col gap-[0.9vh] -mx-[1vw] px-[1vw]">
           {folders.map((e, i) => (
             <EntryRow key={e.path} entry={e} index={i} onOpen={() => onOpen(e, playable)} />
           ))}

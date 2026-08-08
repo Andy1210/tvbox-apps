@@ -22,6 +22,8 @@
     "phoneView": "Look at them",
     "phoneClose": "Done",
     "noSources": "No folders to play from yet",
+    "srcElsewhere": "From elsewhere",
+    "srcOnBox": "On the box",
     "mounted": "Ready",
     "pluggedIn": "Plugged in",
     "networkShare": "Network share",

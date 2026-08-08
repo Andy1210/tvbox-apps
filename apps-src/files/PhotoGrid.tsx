@@ -20,9 +20,15 @@ const COLS = 5;
 const WINDOW_ROWS = 8;
 const SHIFT_ROWS = 3;
 const EDGE_ROWS = 2; // shift once focus comes this close to the mounted edge
-// A row is exactly this tall, and the number is load-bearing rather than cosmetic:
-// the spacers standing in for unmounted rows are computed from it.
-const ROW_VH = 17;
+// A row is exactly this tall - 24vh of tile plus a 1.5vh gap - and the number is
+// load-bearing rather than cosmetic: the spacers standing in for unmounted rows
+// are computed from it, so the tile height and the vertical gap below must keep
+// adding up to it.
+//
+// The tile is deliberately nearer square than a film's cover would be. A cell has
+// to hold portrait and landscape photos side by side without either being cropped
+// to a strip, and a phone folder is mostly portrait.
+const ROW_VH = 25.5;
 
 const KEY = (i: number) => "ph-" + i;
 
@@ -46,7 +52,7 @@ function Tile({
       ref={ref}
       onClick={onOpen}
       className={[
-        "h-[16vh] rounded-[1vh] overflow-hidden bg-white/5",
+        "h-[24vh] rounded-[1vh] overflow-hidden bg-white/5",
         "transition-[transform,outline-color] duration-150 outline outline-[3px] outline-transparent outline-offset-2",
         focused ? "scale-[1.06] outline-[var(--color-focus)] z-10" : "",
       ].join(" ")}
@@ -110,12 +116,20 @@ export function PhotoGrid({
         <div className="text-[3vh] font-bold truncate">{title}</div>
         <div className="text-[1.6vh] text-fg-dim mb-[2vh]">{t("files.photoCount", { n: photos.length })}</div>
         {/* The focusable container is the SCROLLER and not the page: it is the node
-            the tiles live in, and it is what each tile's scrollIntoView moves. */}
-        <div ref={ref} className="flex-1 overflow-y-auto no-scrollbar">
+            the tiles live in, and it is what each tile's scrollIntoView moves.
+
+            The negative margin and the padding that cancels it are what keep a
+            focused tile whole. `overflow-y-auto` makes the OTHER axis a clip
+            boundary too (a non-visible overflow on one axis computes the other to
+            auto), so a tile grown to 1.06 with an outline around it has its
+            rounded corners sliced flat against the edge of this box - which is
+            most obvious on the leftmost column, where there is nothing else to
+            hide it. The pair moves the clip outwards without moving the tiles. */}
+        <div ref={ref} className="flex-1 overflow-y-auto no-scrollbar -mx-[1vw] px-[1vw] -my-[1vh] py-[1vh]">
           {/* Spacers stand in for the rows that are not mounted, so the scroll
               position does not jump when the window shifts. */}
           <div style={{ height: start * ROW_VH + "vh" }} />
-          <div className="grid grid-cols-5 gap-[1vw]">
+          <div className="grid grid-cols-5 gap-x-[1vw] gap-y-[1.5vh]">
             {mounted.map((p, k) => (
               <Tile
                 key={p.key}

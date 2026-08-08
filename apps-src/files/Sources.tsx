@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n, useFocusableItem } from "@sdk";
 import { formatSize, type Source } from "./api";
@@ -31,6 +31,17 @@ function FolderIcon({ kind }: { kind: Source["kind"] }) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-[3vh] h-[3vh] shrink-0">
       <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h7A1.5 1.5 0 0 1 19 10v7.5A1.5 1.5 0 0 1 17.5 19h-13A1.5 1.5 0 0 1 3 17.5z" />
     </svg>
+  );
+}
+
+// A group heading, in the launcher's own idiom (its "Futó appok" / "Alkalmazások"
+// rows). Deliberately not focusable and not a row: the D-pad walks sources, and a
+// label it could land on would be a stop with nothing to press.
+function GroupLabel({ children, first }: { children: ReactNode; first?: boolean }) {
+  return (
+    <div className={["text-[1.6vh] font-semibold text-fg-dim px-[0.4vw]", first ? "" : "mt-[2vh]"].join(" ")}>
+      {children}
+    </div>
   );
 }
 
@@ -192,10 +203,19 @@ export function Sources({
   // Focus the first source once there is one. The list can arrive after a poll
   // (a stick plugged in while this screen is open), so this waits for content
   // rather than running on mount.
+  // Two groups, because they are two different questions. A stick, a NAS share and
+  // a phone are somewhere ELSE and are what someone came here to reach; the box's
+  // own folders are a long, mostly uninteresting list that a home directory
+  // decides the length of. Sorted together they read as one list in which the
+  // interesting rows happen to sit at position nine.
+  const elsewhere = sources.filter((s) => s.kind !== "folder");
+  const own = sources.filter((s) => s.kind === "folder");
+
   // The phone row means this screen has somewhere to put the cursor even on a box
   // with no folders and nothing plugged in - unless the shell is too old to have
   // it, which is the one case that can still leave nothing to focus.
-  const first = sources[0] ? "src-" + sources[0].id : photosSupported ? "src-phone" : undefined;
+  const firstOf = (list: Source[]) => (list[0] ? "src-" + list[0].id : undefined);
+  const first = firstOf(elsewhere) || (photosSupported ? "src-phone" : firstOf(own));
   useFocusFallback(first, (k) => k.startsWith("src-") || k.startsWith("eject-"));
   useEffect(() => {
     if (!first) return;
@@ -209,8 +229,12 @@ export function Sources({
         <div className="text-[3.4vh] font-bold mb-[0.6vh]">{t("files.title")}</div>
         <div className="text-[1.8vh] text-fg-dim mb-[2.5vh]">{t("files.subtitle")}</div>
 
-        <div className="flex-1 overflow-y-auto no-scrollbar flex flex-col gap-[1.2vh] pr-[0.5vw]">
-          {sources.map((s) => (
+        {/* Room for a focused row to grow into - see the same pair in Browser.tsx:
+            this box clips horizontally as well as vertically, so without it a
+            scaled row loses its rounded ends against the edge. */}
+        <div className="flex-1 overflow-y-auto no-scrollbar flex flex-col gap-[1.2vh] -mx-[1vw] px-[1vw]">
+          {(elsewhere.length > 0 || photosSupported) && <GroupLabel first>{t("files.srcElsewhere")}</GroupLabel>}
+          {elsewhere.map((s) => (
             <SourceRow
               key={s.id}
               source={s}
@@ -219,8 +243,21 @@ export function Sources({
               onEject={() => onEject(s)}
             />
           ))}
-          {!sources.length && !loading && <div className="text-[2vh] text-fg-dim">{t("files.noSources")}</div>}
           {photosSupported && <PhoneRow count={castCount} onOpen={onPhone} />}
+
+          {own.length > 0 && <GroupLabel>{t("files.srcOnBox")}</GroupLabel>}
+          {own.map((s) => (
+            <SourceRow
+              key={s.id}
+              source={s}
+              busy={busyId === s.id}
+              onOpen={() => onOpen(s)}
+              onEject={() => onEject(s)}
+            />
+          ))}
+          {!sources.length && !loading && !photosSupported && (
+            <div className="text-[2vh] text-fg-dim">{t("files.noSources")}</div>
+          )}
         </div>
 
         {note && <div className="text-[1.8vh] mt-[2vh] text-[#ffb3b3]">{note}</div>}

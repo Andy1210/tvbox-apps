@@ -22,6 +22,8 @@
     "phoneView": "Megnézem",
     "phoneClose": "Kész",
     "noSources": "Még nincs mappa, amiből lejátszhatnál",
+    "srcElsewhere": "Máshonnan",
+    "srcOnBox": "A boxon",
     "mounted": "Kész",
     "pluggedIn": "Bedugva",
     "networkShare": "Hálózati megosztás",
