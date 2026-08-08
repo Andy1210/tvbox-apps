@@ -41,15 +41,20 @@ export function Viewer({
   onClose: (index: number) => void;
 }) {
   const { t } = useI18n();
-  const [index, setIndex] = useState(startIndex);
+  const [rawIndex, setIndex] = useState(startIndex);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 }); // -1..1 of the pannable range
   const [banner, setBanner] = useState(true);
   const [failed, setFailed] = useState(false);
+  // A cast gallery can shrink under this screen - the phone can take its photos
+  // back while someone is looking at them - so the index is clamped rather than
+  // trusted, and a shortened set lands on its last photo.
+  const index = Math.min(rawIndex, Math.max(0, photos.length - 1));
+
   // Read by the key handler, which is attached once and must not see the state it
   // was created with. Everything it needs lives here rather than in its deps, so
   // that a keypress never races a re-subscribe.
-  const live = useRef({ index: startIndex, zoom: 1, pan: { x: 0, y: 0 }, count: photos.length });
+  const live = useRef({ index, zoom: 1, pan: { x: 0, y: 0 }, count: photos.length });
   useEffect(() => {
     live.current = { index, zoom, pan, count: photos.length };
   }, [index, zoom, pan, photos.length]);

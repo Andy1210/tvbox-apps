@@ -102,13 +102,15 @@ export function PhotoGrid({
 
   useFocusFallback(photos.length ? KEY(at) : undefined, (k) => k.startsWith("ph-"));
 
+  // Once, on the way in. NOT when the list grows: a cast gallery fills up while it
+  // is on screen, and re-running this on every arriving photo would drag the
+  // cursor back to where the screen opened, mid-scroll. `useFocusFallback` above
+  // is what covers the case of the cursor ending up nowhere.
   useEffect(() => {
     if (!photos.length) return;
     const id = setTimeout(() => setFocus(KEY(at)), 0);
     return () => clearTimeout(id);
-    // Only on mount and when the list itself changes: `at` is where this screen
-    // opened, not something that should pull the cursor around afterwards.
-  }, [photos.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Move the mounted window when focus comes near its edge. The tile that has focus
   // is inside the window both before and after, which is what keeps the cursor.
