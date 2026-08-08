@@ -77,8 +77,9 @@ you install from here stays with this registry even if the same id later appears
 in the official one.
 
 This is the way to test anything that changes what a box installs, including a
-breaking change, without publishing it first. `--watch` rebuilds the index when a
-manifest changes; `--port N` moves it.
+breaking change, without publishing it first. Flags go after `--`, so npm passes
+them on: `npm run store:serve -- --watch` rebuilds the index when a manifest
+changes, and `npm run store:serve -- --port 9000` moves it off 8790.
 
 ## Layout
 
