@@ -34,6 +34,43 @@ function FolderIcon({ kind }: { kind: Source["kind"] }) {
   );
 }
 
+function PhoneIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-[3vh] h-[3vh] shrink-0">
+      <rect x="7" y="2.5" width="10" height="19" rx="2" />
+      <path d="M11 18.5h2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// Photos from a phone. Not a source in the shell's sense - there is no folder
+// behind it and nothing to mount - but this is the screen someone is on when they
+// want their holiday on the TV, and a feature nobody can find is a feature nobody
+// has. It sits after the real folders so that the first thing focused is still one
+// of them.
+function PhoneRow({ count, onOpen }: { count: number; onOpen: () => void }) {
+  const { t } = useI18n();
+  const { ref, focused } = useFocusableItem({ focusKey: "src-phone", onEnterPress: onOpen }, { block: "center" });
+  return (
+    <div
+      ref={ref}
+      onClick={onOpen}
+      className={[
+        "flex items-center gap-[1.2vw] px-[1.6vw] py-[1.6vh] rounded-[1.2vh] transition-transform duration-150",
+        focused ? "bg-white text-[#06090d] scale-[1.01]" : "bg-white/5",
+      ].join(" ")}
+    >
+      <PhoneIcon />
+      <div className="min-w-0 flex-1">
+        <div className="text-[2.3vh] font-semibold truncate">{t("files.fromPhone")}</div>
+        <div className={["text-[1.6vh] truncate", focused ? "opacity-70" : "text-fg-dim"].join(" ")}>
+          {count ? t("files.phoneArrived", { n: count }) : t("files.fromPhoneHint")}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function EjectIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-[2.4vh] h-[2.4vh]">
@@ -122,16 +159,22 @@ export function Sources({
   loading,
   busyId,
   note,
+  castCount,
+  photosSupported,
   onOpen,
   onEject,
+  onPhone,
 }: {
   sources: Source[];
   removable: { supported: boolean; error: string | null };
   loading: boolean;
   busyId: string;
   note: string;
+  castCount: number;
+  photosSupported: boolean;
   onOpen: (s: Source) => void;
   onEject: (s: Source) => void;
+  onPhone: () => void;
 }) {
   const { t } = useI18n();
   // Grouping container, not a target: a focusable one is a full-screen rectangle
@@ -149,11 +192,14 @@ export function Sources({
   // Focus the first source once there is one. The list can arrive after a poll
   // (a stick plugged in while this screen is open), so this waits for content
   // rather than running on mount.
-  const first = sources[0]?.id;
-  useFocusFallback(first ? "src-" + first : undefined, (k) => k.startsWith("src-") || k.startsWith("eject-"));
+  // The phone row means this screen has somewhere to put the cursor even on a box
+  // with no folders and nothing plugged in - unless the shell is too old to have
+  // it, which is the one case that can still leave nothing to focus.
+  const first = sources[0] ? "src-" + sources[0].id : photosSupported ? "src-phone" : undefined;
+  useFocusFallback(first, (k) => k.startsWith("src-") || k.startsWith("eject-"));
   useEffect(() => {
     if (!first) return;
-    const id = setTimeout(() => setFocus("src-" + first), 0);
+    const id = setTimeout(() => setFocus(first), 0);
     return () => clearTimeout(id);
   }, [first]);
 
@@ -174,6 +220,7 @@ export function Sources({
             />
           ))}
           {!sources.length && !loading && <div className="text-[2vh] text-fg-dim">{t("files.noSources")}</div>}
+          {photosSupported && <PhoneRow count={castCount} onOpen={onPhone} />}
         </div>
 
         {note && <div className="text-[1.8vh] mt-[2vh] text-[#ffb3b3]">{note}</div>}
