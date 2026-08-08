@@ -315,6 +315,25 @@ compares the registry version to what's installed; when yours is newer, the App
 Store shows an **Update** button (a re-install of the package, sha256-verified,
 swapped in atomically). No tvbox release involved — just merge a version bump here.
 
+## Trying it on a box before you publish
+
+A box can install from any `index.json` it can reach, so serve this checkout:
+
+```sh
+npm run build:<id>     # your app's UI, if it has one
+npm run store:serve    # prints http://<your LAN address>:8790/index.json
+```
+
+Add that address in **Settings → Apps → Store sources** on the box (tvbox 2.10.0
+or newer), next to the official registry rather than instead of it. Your app then
+appears in the store, installs the same way it will after publishing, and stays
+tied to your local registry even if the official one carries the same id.
+
+Two notes. Plain `http` works only because the address is on your own network:
+the box refuses a public http registry. And the box will not update this app by
+itself unless you turn unattended updates on for that source, which is off by
+default for anything you add.
+
 ## Publishing
 
 1. Add `apps/<id>.json` or the `apps/<id>/` package. For a package UI, the

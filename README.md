@@ -62,6 +62,25 @@ official repo works. An app here MAY carry real power:
 Locally, `node scripts/build-index.mjs` (after `npm run build:<id>`) does the
 same thing if you want to see the index; it is ignored by git.
 
+## Trying it on a real box first
+
+```sh
+npm run build:<id>          # only if your app has a web/ UI
+npm run store:serve         # builds the index, stages the site, serves it on :8790
+```
+
+It prints a `http://<your LAN address>:8790/index.json` line. Add that in
+**Settings → Apps → Store sources** on a box (tvbox 2.10.0 or newer) and this
+checkout becomes a registry the box installs from, next to the official one. Add
+it rather than replacing the official registry: the box merges both, and an app
+you install from here stays with this registry even if the same id later appears
+in the official one.
+
+This is the way to test anything that changes what a box installs, including a
+breaking change, without publishing it first. Flags go after `--`, so npm passes
+them on: `npm run store:serve -- --watch` rebuilds the index when a manifest
+changes, and `npm run store:serve -- --port 9000` moves it off 8790.
+
 ## Layout
 
 ```
