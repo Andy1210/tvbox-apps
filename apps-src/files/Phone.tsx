@@ -1,53 +1,70 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n, FocusButton } from "@sdk";
-import { startPairing, stopPairing } from "./api";
+import type { PairingInfo } from "./api";
 
 // Getting photos off a phone and onto the TV, without asking anyone to type an
 // address on a remote.
 //
 // The TV shows a QR; the phone opens the page and picks photos out of its own
-// gallery. That division is the point: a phone already has a picker, a camera roll
-// and a keyboard, and a remote has none of the three. The pairing server binds to
-// the LAN only while this screen is up, and every write carries the four-digit code
-// shown here, so a stray device on the network cannot push anything at the TV.
+// gallery. That division is the point: a phone already has a picker, a camera
+// roll and a keyboard, and a remote has none of the three. Every write carries
+// the four-digit code shown here, so a stray device on the network cannot push
+// anything at the TV.
 //
-// Photos appear as they arrive rather than at the end - the caller polls - so the
-// person holding the phone watches the TV fill up as they tap.
-export function Phone({ count, onDone, onExit }: { count: number; onDone: () => void; onExit: () => void }) {
-  const { t, locale } = useI18n();
-  const { ref, focusKey } = useFocusable({ focusKey: "phone-page", isFocusBoundary: true });
-  const [info, setInfo] = useState<{ shortUrl: string; code: string } | null>(null);
+// The session itself is NOT started here. Starting it mints a new code, and this
+// screen is left and returned to while a phone still has the page open - so it
+// belongs to the casting flow in Files.tsx, which outlives this component.
+export function Phone({
+  info,
+  failed,
+  count,
+  onDone,
+  onExit,
+}: {
+  info: PairingInfo | null;
+  failed: boolean;
+  count: number;
+  onDone: () => void;
+  onExit: () => void;
+}) {
+  const { t } = useI18n();
+  // A grouping container, not a target: a focusable page is a full-screen
+  // rectangle that the D-pad can land on, and once it has, nothing is highlighted
+  // and every arrow measures from a rect covering the screen.
+  const { ref, focusKey } = useFocusable({
+    focusKey: "phone-page",
+    focusable: false,
+    isFocusBoundary: true,
+    saveLastFocusedChild: true,
+  });
   const [qr, setQr] = useState("");
-  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let alive = true;
-    startPairing(locale)
-      .then(async (d) => {
-        if (!alive) return;
-        if (!d || !d.url) return setFailed(true);
-        setInfo(d);
-        try {
-          setQr(await QRCode.toDataURL(d.url, { width: 480, margin: 1 }));
-        } catch {
-          /* the address and the code are still on screen */
-        }
-      })
-      .catch(() => alive && setFailed(true));
-    // The server is open on the LAN, so it goes down with this screen rather than
-    // waiting out its own timeout.
+    if (!info) return setQr("");
+    QRCode.toDataURL(info.url, { width: 480, margin: 1 })
+      .then((d) => alive && setQr(d))
+      .catch(() => {
+        /* the address and the code are still on screen */
+      });
     return () => {
       alive = false;
-      void stopPairing();
     };
-  }, [locale]);
+  }, [info]);
 
+  // Focus moves when the buttons CHANGE, not when a photo arrives. Photos arrive
+  // one at a time while someone is choosing on the phone, and re-focusing on each
+  // one would take the cursor off whatever they had just selected here.
+  const had = useRef(false);
+  const has = count > 0;
   useEffect(() => {
-    const id = setTimeout(() => setFocus(count ? "phone-view" : "phone-done"), 0);
+    if (had.current === has) return;
+    had.current = has;
+    const id = setTimeout(() => setFocus(has ? "phone-view" : "phone-done"), 0);
     return () => clearTimeout(id);
-  }, [count]);
+  }, [has]);
 
   return (
     <FocusContext.Provider value={focusKey}>
@@ -73,16 +90,14 @@ export function Phone({ count, onDone, onExit }: { count: number; onDone: () => 
           </>
         )}
 
-        <div className="text-[2vh] min-h-[3vh]">
-          {count ? t("files.phoneArrived", { n: count }) : t("files.phoneWaiting")}
-        </div>
+        <div className="text-[2vh] min-h-[3vh]">{has ? t("files.phoneArrived", { n: count }) : t("files.phoneWaiting")}</div>
 
         <div className="flex gap-[1.5vw]">
           {/* Only once something has arrived - a button that opens an empty viewer
               does nothing. Not rendered rather than hidden: a registered focusable
               whose element is `display:none` is a 0x0 rectangle at the top left of
               the screen, and the D-pad will happily land on it. */}
-          {count > 0 && (
+          {has && (
             <FocusButton
               focusKey="phone-view"
               onEnter={onDone}

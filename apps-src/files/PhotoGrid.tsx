@@ -71,10 +71,12 @@ function Tile({
 export function PhotoGrid({
   title,
   photos,
+  startIndex,
   onOpen,
 }: {
   title: string;
   photos: Photo[];
+  startIndex: number;
   onOpen: (index: number) => void;
 }) {
   const { t } = useI18n();
@@ -87,25 +89,31 @@ export function PhotoGrid({
     isFocusBoundary: true,
     saveLastFocusedChild: true,
   });
-  const [start, setStart] = useState(0); // first MOUNTED row
-
   const rows = Math.ceil(photos.length / COLS);
+  const last = Math.max(0, rows - WINDOW_ROWS);
+  // Opened at the photo it was left on. The viewer replaces this screen rather
+  // than covering it, so coming back is a fresh mount - and starting again at the
+  // top would lose the place on every photo closed in a folder of hundreds.
+  const at = Math.min(Math.max(0, startIndex), Math.max(0, photos.length - 1));
+  const [start, setStart] = useState(() => Math.min(last, Math.max(0, Math.floor(at / COLS) - 1))); // first MOUNTED row
+
   const end = Math.min(rows, start + WINDOW_ROWS);
   const mounted = photos.slice(start * COLS, end * COLS);
 
-  useFocusFallback(photos.length ? KEY(0) : undefined, (k) => k.startsWith("ph-"));
+  useFocusFallback(photos.length ? KEY(at) : undefined, (k) => k.startsWith("ph-"));
 
   useEffect(() => {
     if (!photos.length) return;
-    const id = setTimeout(() => setFocus(KEY(0)), 0);
+    const id = setTimeout(() => setFocus(KEY(at)), 0);
     return () => clearTimeout(id);
-  }, [photos.length]);
+    // Only on mount and when the list itself changes: `at` is where this screen
+    // opened, not something that should pull the cursor around afterwards.
+  }, [photos.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Move the mounted window when focus comes near its edge. The tile that has focus
   // is inside the window both before and after, which is what keeps the cursor.
   const onFocusPos = (pos: number) => {
     const row = Math.floor(pos / COLS);
-    const last = Math.max(0, rows - WINDOW_ROWS);
     if (row >= end - EDGE_ROWS && start < last) setStart(Math.min(last, start + SHIFT_ROWS));
     else if (row <= start + EDGE_ROWS - 1 && start > 0) setStart(Math.max(0, start - SHIFT_ROWS));
   };

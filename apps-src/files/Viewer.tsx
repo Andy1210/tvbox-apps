@@ -36,7 +36,9 @@ export function Viewer({
 }: {
   photos: Photo[];
   startIndex: number;
-  onClose: () => void;
+  // Carries the photo that was on screen, so the grid can come back to it rather
+  // than to the top of a folder that may be three hundred long.
+  onClose: (index: number) => void;
 }) {
   const { t } = useI18n();
   const [index, setIndex] = useState(startIndex);
@@ -83,7 +85,7 @@ export function Viewer({
         if (z > 1) {
           setZoom(1);
           setPan({ x: 0, y: 0 });
-        } else onClose();
+        } else onClose(i);
         return;
       }
       const step = (dir: "x" | "y", by: number) => {

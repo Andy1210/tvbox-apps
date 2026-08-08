@@ -131,7 +131,11 @@ export async function fetchCast(): Promise<Cast> {
     if (res.status === 404) return { names: [], unsupported: true };
     if (!res.ok) return { names: [] };
     const d = await res.json();
-    return { names: Array.isArray(d.names) ? d.names : [] };
+    // Filtered to strings at the boundary rather than trusted: every one of these
+    // is put through `String.replace` to build a label, and a single non-string in
+    // the list would throw there instead of here.
+    const names = Array.isArray(d.names) ? d.names.filter((n: unknown) => typeof n === "string") : [];
+    return { names };
   } catch {
     return { names: [] };
   }
@@ -154,10 +158,18 @@ export const castPhotoOf = (name: string): Photo => ({
   image: (w) => castImageUrl(name, w),
 });
 
-// The phone page the QR points at. Starting it opens a small server on the LAN
-// that stops with the screen (or by itself, five minutes later). The locale is
-// whatever the launcher is running; the pairing server defaults to English on its
-// own when it is given nothing.
+export interface PairingInfo {
+  url: string;
+  shortUrl: string;
+  code: string;
+}
+
+// The phone page the QR points at. Starting it opens a small server on the LAN,
+// and MINTS A NEW CODE each time - so this belongs to the whole casting session
+// and not to the screen showing the QR. Restarting it while someone's phone still
+// has the page open would leave them holding a code the box no longer accepts.
+// The locale is whatever the launcher is running; the pairing server defaults to
+// English on its own when it is given nothing.
 export const startPairing = (locale: string | null) =>
   fetch("/tvbox/api/pairing/start", {
     method: "POST",

@@ -10,9 +10,12 @@ import {
   formatTime,
   mountDevice,
   photoOf,
+  startPairing,
+  stopPairing,
   unmountDevice,
   type Entry,
   type Listing,
+  type PairingInfo,
   type Photo,
   type Source,
   type SourceList,
@@ -86,7 +89,7 @@ function ResumeAsk({ ask, onAnswer }: { ask: Ask; onAnswer: (from: number) => vo
 }
 
 export function Files({ onExit }: { onExit: () => void }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [sources, setSources] = useState<SourceList>({
     sources: [],
     removable: { supported: true, error: null },
@@ -103,8 +106,18 @@ export function Files({ onExit }: { onExit: () => void }) {
   // is rebuilt from the poll, so it grows while it is on screen.
   const [gallery, setGallery] = useState<{ title: string; photos: Photo[]; cast: boolean } | null>(null);
   const [viewing, setViewing] = useState<number | null>(null);
+  // Which tile the grid comes back to. The viewer replaces the grid rather than
+  // covering it - two screens mounted at once would both answer the arrows - so
+  // the position has to be held out here, or a folder of three hundred photos
+  // would start again from the top every time one of them was closed.
+  const [galleryPos, setGalleryPos] = useState(0);
   const [phone, setPhone] = useState(false);
   const [cast, setCast] = useState<string[]>([]);
+  // The pairing session belongs to the whole casting flow, not to the QR screen:
+  // starting it mints a new code, and that screen is left and returned to while a
+  // phone still has the page open.
+  const [pairing, setPairing] = useState<PairingInfo | null>(null);
+  const [pairingFailed, setPairingFailed] = useState(false);
   // A box whose shell predates the photo routes answers 404 to the first probe.
   // Everything photo-shaped is withheld there rather than offered and then failing:
   // a greyed-out feature is a feature, an empty grid is a fault.
@@ -167,7 +180,10 @@ export function Files({ onExit }: { onExit: () => void }) {
   // and only on the screens where it shows.
   const castOpen = phone || (gallery?.cast ?? false);
   useEffect(() => {
-    if (playing) return;
+    // A box whose shell has no such route answers 404, and the answer does not
+    // change while the app is open - so the first one ends the poll instead of
+    // leaving an old box fetching a 404 every five seconds for the session.
+    if (playing || !photosSupported) return;
     if (!castOpen && (listing || ask)) return;
     let alive = true;
     const read = () =>
@@ -182,7 +198,7 @@ export function Files({ onExit }: { onExit: () => void }) {
       alive = false;
       clearInterval(id);
     };
-  }, [castOpen, listing, ask, playing]);
+  }, [castOpen, listing, ask, playing, photosSupported]);
 
   // A cast gallery IS the session, so it follows it: photos appear while it is
   // open, and it closes by itself when the phone empties it.
@@ -288,6 +304,18 @@ export function Files({ onExit }: { onExit: () => void }) {
     setPlaying({ file: next, playlist: cur.playlist, startPos: 0 });
   }, [stopPlayback]);
 
+  // Opening the casting flow. The session is started ONCE and kept until the flow
+  // ends: coming back here from the gallery must not mint a new code, or the phone
+  // still holding the page would be answered 403 for the rest of the session.
+  const openCast = useCallback(() => {
+    setPhone(true);
+    if (pairing) return;
+    setPairingFailed(false);
+    startPairing(locale)
+      .then((d) => (d && d.url ? setPairing(d) : setPairingFailed(true)))
+      .catch(() => setPairingFailed(true));
+  }, [pairing, locale]);
+
   // The one deliberate end of a cast: the photos go, and the LAN server with them.
   // Everything else is a way back to the QR, because someone who has just looked at
   // thirty photos usually has more to send.
@@ -296,20 +324,28 @@ export function Files({ onExit }: { onExit: () => void }) {
     setGallery(null);
     setPhone(false);
     setCast([]);
+    setPairing(null);
+    setPairingFailed(false);
     void clearCast();
+    void stopPairing();
   }, []);
 
   // Leaving the app must not leave a film running behind the launcher - nor a
   // stranger's holiday on the box's disk. The boot sweep is the backstop for a TV
   // switched off at the wall; this is the ordinary case.
-  const castRef = useRef<string[]>([]);
+  // Read on the way out, so the cleanup can see what the last render did without
+  // re-subscribing on every change.
+  const leaving = useRef({ cast: [] as string[], pairing: false });
   useEffect(() => {
-    castRef.current = cast;
-  }, [cast]);
+    leaving.current = { cast, pairing: !!pairing };
+  }, [cast, pairing]);
   useEffect(
     () => () => {
       postNowPlaying({ app: "files", state: "idle" });
-      if (castRef.current.length) void clearCast();
+      if (leaving.current.cast.length) void clearCast();
+      // The pairing server is open on the LAN. It times itself out after five
+      // minutes, but leaving the app is an answer sooner than that.
+      if (leaving.current.pairing) void stopPairing();
     },
     [],
   );
@@ -332,7 +368,7 @@ export function Files({ onExit }: { onExit: () => void }) {
     // is still in someone's hand, and the next thing they do is usually send more.
     if (gallery) {
       setGallery(null);
-      if (gallery.cast) setPhone(true);
+      if (gallery.cast) setPhone(true); // back to the QR, session and code intact
       return;
     }
     if (phone) return endCast();
@@ -358,17 +394,31 @@ export function Files({ onExit }: { onExit: () => void }) {
   }
 
   if (gallery && viewing !== null) {
-    return <Viewer photos={gallery.photos} startIndex={viewing} onClose={() => setViewing(null)} />;
+    return (
+      <Viewer
+        photos={gallery.photos}
+        startIndex={viewing}
+        onClose={(at) => {
+          // Come back to the photo that was on screen, not to the top of a folder
+          // that may be three hundred long.
+          setGalleryPos(at);
+          setViewing(null);
+        }}
+      />
+    );
   }
 
   return (
     <div className="h-full">
       {gallery ? (
-        <PhotoGrid title={gallery.title} photos={gallery.photos} onOpen={setViewing} />
+        <PhotoGrid title={gallery.title} photos={gallery.photos} startIndex={galleryPos} onOpen={setViewing} />
       ) : phone ? (
         <Phone
+          info={pairing}
+          failed={pairingFailed}
           count={cast.length}
           onDone={() => {
+            setGalleryPos(0);
             setGallery({ title: t("files.fromPhone"), photos: cast.map(castPhotoOf), cast: true });
             setPhone(false);
           }}
@@ -393,7 +443,7 @@ export function Files({ onExit }: { onExit: () => void }) {
           photosSupported={photosSupported}
           onOpen={openSource}
           onEject={eject}
-          onPhone={() => setPhone(true)}
+          onPhone={openCast}
         />
       )}
       {listing && note && <div className="fixed left-[4vw] bottom-[3vh] text-[1.8vh] text-[#ffb3b3]">{note}</div>}

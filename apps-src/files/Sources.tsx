@@ -57,8 +57,8 @@ function PhoneIcon() {
 // Photos from a phone. Not a source in the shell's sense - there is no folder
 // behind it and nothing to mount - but this is the screen someone is on when they
 // want their holiday on the TV, and a feature nobody can find is a feature nobody
-// has. It sits after the real folders so that the first thing focused is still one
-// of them.
+// has. It belongs to the top group with the stick and the share: all three are
+// somewhere other than this box.
 function PhoneRow({ count, onOpen }: { count: number; onOpen: () => void }) {
   const { t } = useI18n();
   const { ref, focused } = useFocusableItem({ focusKey: "src-phone", onEnterPress: onOpen }, { block: "center" });
