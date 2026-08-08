@@ -12,7 +12,8 @@
     "typecheck:retroarch": "tsc --noEmit -p apps-src/retroarch/tsconfig.json",
     "build:spotify": "vite build -c apps-src/spotify/vite.config.ts",
     "typecheck:spotify": "tsc --noEmit -p apps-src/spotify/tsconfig.json",
-    "index": "node scripts/build-index.mjs"
+    "index": "node scripts/build-index.mjs",
+    "store:serve": "node scripts/serve-store.mjs"
   },
   "dependencies": {
     "@noriginmedia/norigin-spatial-navigation": "^3.2.1",
