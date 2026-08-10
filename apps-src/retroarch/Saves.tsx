@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
+import {
+  FocusContext,
+  useFocusable,
+} from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n, useFocusableItem } from "@sdk";
 import { SAVES_PAGE } from "./focus";
 
@@ -24,10 +27,17 @@ type Peer = { id: string; name: string };
 type Share = { id: string; name: string; present: boolean; on: boolean };
 // What a pull would do, summed over this app's folders: when each side was last
 // written, how much would arrive, and how much would be replaced by an older copy.
-type Cmp =
-  | { here: number | null; there: number | null; arriving: number; olderThere: number }
-  | "checking"
-  | "off";
+type Sides = {
+  here: number | null;
+  there: number | null;
+  arriving: number;
+  olderThere: number;
+};
+// Per emulator, under the box it came from. The name is the folder the emulator
+// keeps its saves in - RetroArch already writes one per core, so it is a name a
+// person recognises ("Snes9x", "dolphin-emu") and the app needs no list of its own.
+type Group = Sides & { name: string };
+type Cmp = (Sides & { groups: Group[] }) | "checking" | "off";
 
 function Row({
   title,
@@ -42,7 +52,10 @@ function Row({
   focusKey: string;
   onEnter: () => void;
 }) {
-  const { ref, focused } = useFocusableItem({ focusKey, onEnterPress: onEnter }, { block: "nearest" });
+  const { ref, focused } = useFocusableItem(
+    { focusKey, onEnterPress: onEnter },
+    { block: "nearest" },
+  );
   return (
     <div
       ref={ref}
@@ -54,16 +67,29 @@ function Row({
     >
       <div className="min-w-0">
         <div className="text-[1.9vh] font-semibold truncate">{title}</div>
-        <div className={["text-[1.4vh] truncate", focused ? "opacity-70" : "text-fg-dim"].join(" ")}>{subtitle}</div>
+        <div
+          className={[
+            "text-[1.4vh] truncate",
+            focused ? "opacity-70" : "text-fg-dim",
+          ].join(" ")}
+        >
+          {subtitle}
+        </div>
       </div>
-      {action && <div className="text-[1.6vh] font-semibold shrink-0">{action}</div>}
+      {action && (
+        <div className="text-[1.6vh] font-semibold shrink-0">{action}</div>
+      )}
     </div>
   );
 }
 
 export function Saves() {
   const { t, tag } = useI18n();
-  const { ref, focusKey } = useFocusable({ focusKey: SAVES_PAGE, focusable: false, saveLastFocusedChild: true });
+  const { ref, focusKey } = useFocusable({
+    focusKey: SAVES_PAGE,
+    focusable: false,
+    saveLastFocusedChild: true,
+  });
   const [peers, setPeers] = useState<Peer[]>([]);
   const [shares, setShares] = useState<Share[]>([]);
   const [ready, setReady] = useState<boolean | null>(null); // null = still asking
@@ -78,8 +104,19 @@ export function Saves() {
   // Not every failure is the other box's. The known codes come from the shell's
   // own answer; anything else falls back to the general sentence.
   const reason = (code: string) => {
-    const known = ["rclone_missing", "unknown_peer", "unknown_share", "busy", "pull_failed"];
-    return t(known.includes(code) ? "retroarch.savesErr." + code : "retroarch.savesErr.failed");
+    const known = [
+      "rclone_missing",
+      "unknown_peer",
+      "unknown_share",
+      "unknown_group",
+      "busy",
+      "pull_failed",
+    ];
+    return t(
+      known.includes(code)
+        ? "retroarch.savesErr." + code
+        : "retroarch.savesErr.failed",
+    );
   };
 
   // When a side was last written, in the box's own language. A date rather than
@@ -87,9 +124,12 @@ export function Saves() {
   const when = (ms: number | null) =>
     ms === null
       ? t("retroarch.savesNever")
-      : new Intl.DateTimeFormat(tag, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(
-          new Date(ms),
-        );
+      : new Intl.DateTimeFormat(tag, {
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }).format(new Date(ms));
 
   const load = useCallback(() => {
     const bridge = window.tvbox?.shares;
@@ -122,6 +162,9 @@ export function Saves() {
         let arriving = 0;
         let olderThere = 0;
         let answered = false;
+        // An emulator's saves and its save states are two shares on the box and one
+        // thing to a person, so the groups are summed across them by name.
+        const byName = new Map<string, Group>();
         for (const s of shares) {
           if (!alive) return; // the screen is gone; stop asking the network for it
           const r = await bridge.compare?.(peer.id, s.id)?.catch(() => null);
@@ -134,11 +177,39 @@ export function Saves() {
           // time, so that last one is copied too.
           arriving += (r.newerThere || 0) + (r.sameTimeDiffers || 0);
           olderThere += r.olderThere || 0;
+          for (const g of r.groups || []) {
+            const cur = byName.get(g.name) || {
+              name: g.name,
+              here: null,
+              there: null,
+              arriving: 0,
+              olderThere: 0,
+            };
+            cur.here = latest(cur.here, g.here?.newest);
+            cur.there = latest(cur.there, g.there?.newest);
+            cur.arriving += (g.newerThere || 0) + (g.sameTimeDiffers || 0);
+            cur.olderThere += g.olderThere || 0;
+            byName.set(g.name, cur);
+          }
         }
+        // What there is to gain first, then what it would cost, then the rest by
+        // name: the emulator someone came here for is the one with something to
+        // bring, and on a TV it should not be third in an alphabetical list.
+        const groups = [...byName.values()].sort(
+          (x, y) =>
+            y.arriving - x.arriving ||
+            y.olderThere - x.olderThere ||
+            x.name.localeCompare(y.name),
+        );
         if (!alive) return;
         // A box that did not answer gets no verdict rather than a wrong one - the
         // row still works, it just says nothing about dates.
-        setCmp((cur) => ({ ...cur, [peer.id]: answered ? { here, there, arriving, olderThere } : "off" }));
+        setCmp((cur) => ({
+          ...cur,
+          [peer.id]: answered
+            ? { here, there, arriving, olderThere, groups }
+            : "off",
+        }));
       }
     })();
     return () => {
@@ -146,9 +217,13 @@ export function Saves() {
     };
   }, [peers, shares]);
 
-  const bring = (peer: Peer) => {
-    if (arm !== peer.id) {
-      setArm(peer.id);
+  // `group` names one emulator's folder; without it the whole share travels. Both
+  // arm first, and they arm on their own key - pressing an emulator must not leave
+  // the box row one press from copying everything.
+  const bring = (peer: Peer, group?: string) => {
+    const key = peer.id + (group ? "/" + group : "");
+    if (arm !== key) {
+      setArm(key);
       return;
     }
     setArm("");
@@ -157,7 +232,7 @@ export function Saves() {
     // Nothing declared means nothing to ask for. Without this the loop below runs
     // zero times and reports a success for a copy that never happened.
     if (!shares.length) return setNote(t("retroarch.savesNothing"));
-    setBusy(peer.id);
+    setBusy(key);
     // Every folder this app declares, one after another: saves and save states are
     // one thing to a person, and asking twice for one game would be theatre.
     // Sequential rather than parallel - two rclone copies over one wifi link finish
@@ -165,10 +240,25 @@ export function Saves() {
     (async () => {
       const failed: string[] = [];
       let why = "";
+      let copied = 0;
+      let missing = 0;
       for (const s of shares) {
         // Every hop optional: with no bridge, pull() is never called and `.catch`
         // on the undefined it left behind would throw inside the loop.
-        const r = await window.tvbox?.shares?.pull(peer.id, s.id)?.catch(() => ({ ok: false, error: "failed" }));
+        const r = await window.tvbox?.shares
+          ?.pull(peer.id, s.id, group)
+          ?.catch(() => ({ ok: false, error: "failed" }));
+        // An emulator with saves but no states (or the other way round) is
+        // ordinary, and the box says unknown_group. Not a failure worth putting on
+        // the screen - the half that exists still arrived.
+        if (r?.ok) {
+          copied++;
+          continue;
+        }
+        if (r && group && r.error === "unknown_group") {
+          missing++;
+          continue;
+        }
         if (!r || !r.ok) {
           failed.push(s.name);
           why = why || (r && r.error) || "failed";
@@ -178,8 +268,21 @@ export function Saves() {
       // The box says WHY, and the reasons are not interchangeable: a missing rclone
       // or a folder that could not be created are problems on this box, and sending
       // someone to check the other TV for them wastes their afternoon.
-      if (failed.length) setNote(t("retroarch.savesFailed", { names: failed.join(", ") }) + " " + reason(why));
-      else setDone(t("retroarch.savesBrought", { box: peer.name }));
+      if (failed.length)
+        setNote(
+          t("retroarch.savesFailed", { names: failed.join(", ") }) +
+            " " +
+            reason(why),
+        );
+      // Every share answering "no such folder" is not a success with nothing in it:
+      // the emulator was there when the screen last looked and is not there now.
+      else if (!copied && missing) setNote(reason("unknown_group"));
+      else
+        setDone(
+          t("retroarch.savesBrought", {
+            box: group ? group + " · " + peer.name : peer.name,
+          }),
+        );
       load();
     })();
   };
@@ -200,25 +303,48 @@ export function Saves() {
   // ahead, and - the part that decides whether to press - how much of what is here
   // would be replaced by something older. rclone copies whatever differs in the
   // direction asked for; it does not prefer the newer file.
+  const sides = (c: Sides) => {
+    const parts = [
+      t("retroarch.savesDates", { there: when(c.there), here: when(c.here) }),
+    ];
+    // Both halves when both apply: files newer in each room is the normal state
+    // after two people played, and hearing only the warning hides what there is to
+    // gain - hearing only the gain hides what it costs.
+    if (c.arriving)
+      parts.push(t("retroarch.savesArriving", { n: String(c.arriving) }));
+    if (c.olderThere)
+      parts.push(t("retroarch.savesWouldReplace", { n: String(c.olderThere) }));
+    if (!c.arriving && !c.olderThere) parts.push(t("retroarch.savesSame"));
+    return parts.join(" · ");
+  };
+
   const verdict = (peer: Peer) => {
     const c = cmp[peer.id];
     if (!c) return t("retroarch.savesBringHint");
     if (c === "checking") return t("retroarch.savesChecking");
     if (c === "off") return t("retroarch.savesBringHint");
-    const parts = [t("retroarch.savesDates", { there: when(c.there), here: when(c.here) })];
-    // Both halves when both apply: files newer in each room is the normal state
-    // after two people played, and hearing only the warning hides what there is to
-    // gain - hearing only the gain hides what it costs.
-    if (c.arriving) parts.push(t("retroarch.savesArriving", { n: String(c.arriving) }));
-    if (c.olderThere) parts.push(t("retroarch.savesWouldReplace", { n: String(c.olderThere) }));
-    if (!c.arriving && !c.olderThere) parts.push(t("retroarch.savesSame"));
-    return parts.join(" · ");
+    return sides(c);
+  };
+
+  // The emulators under a box, once its answer is in.
+  const groupsOf = (peer: Peer): Group[] => {
+    const c = cmp[peer.id];
+    // The comparison outlives the list it was made from: if the app stops offering
+    // anything, its rows would still be here and every press would answer "nothing
+    // to ask for".
+    if (!shares.length) return [];
+    return c && c !== "checking" && c !== "off" ? c.groups : [];
   };
 
   return (
     <FocusContext.Provider value={focusKey}>
-      <div ref={ref} className="h-full overflow-y-auto no-scrollbar px-[3vw] pb-[3vh] flex flex-col gap-[1.2vh]">
-        <div className="text-[1.7vh] text-fg-dim">{t("retroarch.savesIntro")}</div>
+      <div
+        ref={ref}
+        className="h-full overflow-y-auto no-scrollbar px-[3vw] pb-[3vh] flex flex-col gap-[1.2vh]"
+      >
+        <div className="text-[1.7vh] text-fg-dim">
+          {t("retroarch.savesIntro")}
+        </div>
         {note && <div className="text-[1.7vh] text-[#ffb3b3]">{note}</div>}
         {done && <div className="text-[1.7vh] text-[#b6f0c0]">{done}</div>}
 
@@ -232,27 +358,71 @@ export function Saves() {
         {!peers.length && (
           <Row
             focusKey="peer-none"
-            title={ready === null ? t("retroarch.loading") : t("retroarch.savesNoBoxes")}
+            title={
+              ready === null
+                ? t("retroarch.loading")
+                : t("retroarch.savesNoBoxes")
+            }
             subtitle={ready === null ? "" : t("retroarch.savesNoBoxesHint")}
             action={ready === null ? "" : t("retroarch.savesRecheck")}
             onEnter={load}
           />
         )}
         {peers.map((p) => (
-          <Row
-            key={p.id}
-            focusKey={"peer-" + p.id}
-            title={p.name}
-            subtitle={
-              busy === p.id
-                ? t("retroarch.savesBringing")
-                : arm === p.id
-                  ? t("retroarch.savesReplaceWarn")
-                  : verdict(p)
-            }
-            action={busy === p.id ? "…" : arm === p.id ? t("retroarch.savesBringSure") : t("retroarch.savesBring")}
-            onEnter={() => !busy && bring(p)}
-          />
+          <div key={p.id} className="flex flex-col gap-[0.6vh]">
+            <Row
+              focusKey={"peer-" + p.id}
+              title={p.name}
+              subtitle={
+                busy === p.id
+                  ? t("retroarch.savesBringing")
+                  : arm === p.id
+                    ? t("retroarch.savesReplaceWarn")
+                    : verdict(p)
+              }
+              action={
+                busy
+                  ? busy === p.id
+                    ? "…"
+                    : ""
+                  : arm === p.id
+                    ? t("retroarch.savesBringSure")
+                    : t("retroarch.savesBringAll")
+              }
+              onEnter={() => !busy && bring(p)}
+            />
+            {/* One emulator at a time, for the case the box-level line cannot
+                answer: the SNES played in one room and the GameCube in the other,
+                where each box is "newer" and neither date helps. */}
+            {groupsOf(p).map((g) => {
+              const key = p.id + "/" + g.name;
+              return (
+                <div key={key} className="pl-[2vw]">
+                  <Row
+                    focusKey={"group-" + key}
+                    title={g.name}
+                    subtitle={
+                      busy === key
+                        ? t("retroarch.savesBringing")
+                        : arm === key
+                          ? t("retroarch.savesReplaceWarn")
+                          : sides(g)
+                    }
+                    action={
+                      busy
+                        ? busy === key
+                          ? "…"
+                          : ""
+                        : arm === key
+                          ? t("retroarch.savesBringSure")
+                          : t("retroarch.savesBring")
+                    }
+                    onEnter={() => !busy && bring(p, g.name)}
+                  />
+                </div>
+              );
+            })}
+          </div>
         ))}
 
         {/* What this box gives back. Not a control - the switch is Settings' - but
@@ -261,7 +431,9 @@ export function Saves() {
           {t("retroarch.savesOffered")}
         </div>
         <div className="text-[1.7vh] text-fg-dim">
-          {offered.length ? t("retroarch.savesOfferedOn", { names: offered.join(", ") }) : t("retroarch.savesOfferedOff")}
+          {offered.length
+            ? t("retroarch.savesOfferedOn", { names: offered.join(", ") })
+            : t("retroarch.savesOfferedOff")}
         </div>
       </div>
     </FocusContext.Provider>

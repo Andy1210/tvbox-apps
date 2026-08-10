@@ -123,13 +123,15 @@
       "unknown_peer": "Az a box már nincs összekötve ezzel.",
       "unknown_share": "Azon a boxon nincs meg ez az alkalmazás, vagy nem kínálja ezt a mappát.",
       "busy": "Még fut egy másolás.",
-      "pull_failed": "A másolás nem fejeződött be - be van kapcsolva a másik box, és megosztja még?"
+      "pull_failed": "A másolás nem fejeződött be - be van kapcsolva a másik box, és megosztja még?",
+      "unknown_group": "Annak az emulátornak a mappája már nincs meg."
     },
     "savesChecking": "Összehasonlítás ezzel a boxszal…",
     "savesDates": "Ott: {there} · itt: {here}",
     "savesNever": "még semmi",
     "savesWouldReplace": "{n} itt újabb, azt felülírná",
     "savesSame": "mindkettőn ugyanaz",
-    "savesArriving": "{n} fájl érkezne"
+    "savesArriving": "{n} fájl érkezne",
+    "savesBringAll": "Mind áthozása"
   }
 }
