@@ -22,6 +22,9 @@ import { SAVES_PAGE } from "./focus";
 
 type Peer = { id: string; name: string };
 type Share = { id: string; name: string; present: boolean; on: boolean };
+// What a pull would do, summed over this app's folders: when each side was last
+// written, how much would arrive, and how much would be replaced by an older copy.
+type Cmp = { here: number | null; there: number | null; newerThere: number; olderThere: number } | "checking" | "off";
 
 function Row({
   title,
@@ -56,7 +59,7 @@ function Row({
 }
 
 export function Saves() {
-  const { t } = useI18n();
+  const { t, tag } = useI18n();
   const { ref, focusKey } = useFocusable({ focusKey: SAVES_PAGE, focusable: false, saveLastFocusedChild: true });
   const [peers, setPeers] = useState<Peer[]>([]);
   const [shares, setShares] = useState<Share[]>([]);
@@ -67,6 +70,7 @@ export function Saves() {
   // Bringing a save replaces the one here, so it asks first - the same one-press
   // arming a linked folder's removal uses.
   const [arm, setArm] = useState("");
+  const [cmp, setCmp] = useState<Record<string, Cmp>>({});
 
   // Not every failure is the other box's. The known codes come from the shell's
   // own answer; anything else falls back to the general sentence.
@@ -74,6 +78,15 @@ export function Saves() {
     const known = ["rclone_missing", "unknown_peer", "unknown_share", "busy", "pull_failed"];
     return t(known.includes(code) ? "retroarch.savesErr." + code : "retroarch.savesErr.failed");
   };
+
+  // When a side was last written, in the box's own language. A date rather than
+  // "2 hours ago": the person is matching it against an evening they remember.
+  const when = (ms: number | null) =>
+    ms
+      ? new Intl.DateTimeFormat(tag, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(
+          new Date(ms),
+        )
+      : t("retroarch.savesNever");
 
   const load = useCallback(() => {
     const bridge = window.tvbox?.shares;
@@ -88,6 +101,41 @@ export function Saves() {
       .catch(() => setReady(false));
   }, []);
   useEffect(load, [load]);
+
+  // Ask the box what a pull would actually do, once the two lists are in. Each
+  // answer costs a listing over the network, so it happens on opening the screen
+  // and after a pull - not on every render.
+  useEffect(() => {
+    const bridge = window.tvbox?.shares;
+    if (!bridge?.compare || !peers.length || !shares.length) return;
+    let alive = true;
+    setCmp(Object.fromEntries(peers.map((p) => [p.id, "checking" as Cmp])));
+    (async () => {
+      for (const peer of peers) {
+        let here: number | null = null;
+        let there: number | null = null;
+        let newerThere = 0;
+        let olderThere = 0;
+        let answered = false;
+        for (const s of shares) {
+          const r = await bridge.compare?.(peer.id, s.id)?.catch(() => null);
+          if (!r || !r.ok) continue;
+          answered = true;
+          here = Math.max(here || 0, r.here?.newest || 0) || null;
+          there = Math.max(there || 0, r.there?.newest || 0) || null;
+          newerThere += r.newerThere || 0;
+          olderThere += r.olderThere || 0;
+        }
+        if (!alive) return;
+        // A box that did not answer gets no verdict rather than a wrong one - the
+        // row still works, it just says nothing about dates.
+        setCmp((cur) => ({ ...cur, [peer.id]: answered ? { here, there, newerThere, olderThere } : "off" }));
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [peers, shares]);
 
   const bring = (peer: Peer) => {
     if (arm !== peer.id) {
@@ -139,6 +187,21 @@ export function Saves() {
 
   const offered = shares.filter((s) => s.on).map((s) => s.name);
 
+  // One line under the box's name: when each side was last written, which is
+  // ahead, and - the part that decides whether to press - how much of what is here
+  // would be replaced by something older. rclone copies whatever differs in the
+  // direction asked for; it does not prefer the newer file.
+  const verdict = (peer: Peer) => {
+    const c = cmp[peer.id];
+    if (!c) return t("retroarch.savesBringHint");
+    if (c === "checking") return t("retroarch.savesChecking");
+    if (c === "off") return t("retroarch.savesBringHint");
+    const dates = t("retroarch.savesDates", { there: when(c.there), here: when(c.here) });
+    if (c.olderThere) return dates + " · " + t("retroarch.savesWouldReplace", { n: String(c.olderThere) });
+    if (c.newerThere) return dates + " · " + t("retroarch.savesNewerThere", { n: String(c.newerThere) });
+    return dates + " · " + t("retroarch.savesSame");
+  };
+
   return (
     <FocusContext.Provider value={focusKey}>
       <div ref={ref} className="h-full overflow-y-auto no-scrollbar px-[3vw] pb-[3vh] flex flex-col gap-[1.2vh]">
@@ -172,7 +235,7 @@ export function Saves() {
                 ? t("retroarch.savesBringing")
                 : arm === p.id
                   ? t("retroarch.savesReplaceWarn")
-                  : t("retroarch.savesBringHint")
+                  : verdict(p)
             }
             action={busy === p.id ? "…" : arm === p.id ? t("retroarch.savesBringSure") : t("retroarch.savesBring")}
             onEnter={() => !busy && bring(p)}

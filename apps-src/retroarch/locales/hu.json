@@ -124,6 +124,12 @@
       "unknown_share": "Azon a boxon nincs meg ez az alkalmazás, vagy nem kínálja ezt a mappát.",
       "busy": "Még fut egy másolás.",
       "pull_failed": "A másolás nem fejeződött be - be van kapcsolva a másik box, és megosztja még?"
-    }
+    },
+    "savesChecking": "Összehasonlítás ezzel a boxszal…",
+    "savesDates": "Ott: {there} · itt: {here}",
+    "savesNever": "még semmi",
+    "savesNewerThere": "{n} újabb ott",
+    "savesWouldReplace": "{n} itt újabb, azt felülírná",
+    "savesSame": "mindkettőn ugyanaz"
   }
 }
