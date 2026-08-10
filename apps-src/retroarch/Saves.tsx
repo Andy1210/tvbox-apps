@@ -109,7 +109,9 @@ export function Saves() {
       const failed: string[] = [];
       let why = "";
       for (const s of shares) {
-        const r = await window.tvbox?.shares?.pull(peer.id, s.id).catch(() => ({ ok: false, error: "failed" }));
+        // Every hop optional: with no bridge, pull() is never called and `.catch`
+        // on the undefined it left behind would throw inside the loop.
+        const r = await window.tvbox?.shares?.pull(peer.id, s.id)?.catch(() => ({ ok: false, error: "failed" }));
         if (!r || !r.ok) {
           failed.push(s.name);
           why = why || (r && r.error) || "failed";
@@ -147,15 +149,16 @@ export function Saves() {
         <div className="text-[1.6vh] font-semibold text-fg-dim uppercase tracking-wide">
           {t("retroarch.savesFromBox")}
         </div>
-        {/* A row rather than a sentence, even when there is nothing to list: a
-            screen with no focusable element on it is a dead remote - Down out of
-            the tabs lands on the empty page and the highlight disappears. */}
-        {ready && !peers.length && (
+        {/* A row rather than a sentence, even when there is nothing to list, and
+            from the first render rather than once the answer is in: a screen with
+            no focusable element on it is a dead remote - Down out of the tabs lands
+            on the empty page and the highlight disappears. */}
+        {!peers.length && (
           <Row
             focusKey="peer-none"
-            title={t("retroarch.savesNoBoxes")}
-            subtitle={t("retroarch.savesNoBoxesHint")}
-            action={t("retroarch.savesRecheck")}
+            title={ready === null ? t("retroarch.loading") : t("retroarch.savesNoBoxes")}
+            subtitle={ready === null ? "" : t("retroarch.savesNoBoxesHint")}
+            action={ready === null ? "" : t("retroarch.savesRecheck")}
             onEnter={load}
           />
         )}
