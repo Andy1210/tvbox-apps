@@ -85,9 +85,10 @@ its build output lands in `apps/<id>/web/`. See [The web UI](#the-web-ui). Only
 **`capabilities`** (what the preload bridge exposes to the page):
 `nav` (always), `player` (shared mpv: play/stop/pip/onPlayer), `fetch`
 (origin-locked server-side fetch), `storage` (per-app key/value), `config`,
-`input`, `system`. A `local` app in the main window already gets the full
-`window.tvbox` surface via the shell preload; declare only what you actually use.
-A remote/sandboxed app gets exactly its declared capabilities and nothing else.
+`input`, `system`, `shares` (this app's own folders, brought from a paired tvbox -
+what may be offered is `shares.paths` below, and switching it on is a person's job
+in Settings). Declare only what you actually use: an app gets exactly its declared
+capabilities and nothing else, in the main window as well as a sandboxed one.
 
 ## The web UI
 
