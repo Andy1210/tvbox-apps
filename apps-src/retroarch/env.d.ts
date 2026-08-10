@@ -23,6 +23,7 @@ interface TvboxSharesBridge {
     there?: { newest: number | null; files: number };
     newerThere?: number;
     olderThere?: number;
+    sameTimeDiffers?: number;
     error?: string;
   }>;
   pull(peerId: string, shareId: string): Promise<{ ok: boolean; error?: string }>;

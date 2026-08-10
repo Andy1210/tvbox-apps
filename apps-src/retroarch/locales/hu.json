@@ -128,8 +128,8 @@
     "savesChecking": "Összehasonlítás ezzel a boxszal…",
     "savesDates": "Ott: {there} · itt: {here}",
     "savesNever": "még semmi",
-    "savesNewerThere": "{n} újabb ott",
     "savesWouldReplace": "{n} itt újabb, azt felülírná",
-    "savesSame": "mindkettőn ugyanaz"
+    "savesSame": "mindkettőn ugyanaz",
+    "savesArriving": "{n} fájl érkezne"
   }
 }

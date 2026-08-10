@@ -24,7 +24,10 @@ type Peer = { id: string; name: string };
 type Share = { id: string; name: string; present: boolean; on: boolean };
 // What a pull would do, summed over this app's folders: when each side was last
 // written, how much would arrive, and how much would be replaced by an older copy.
-type Cmp = { here: number | null; there: number | null; newerThere: number; olderThere: number } | "checking" | "off";
+type Cmp =
+  | { here: number | null; there: number | null; arriving: number; olderThere: number }
+  | "checking"
+  | "off";
 
 function Row({
   title,
@@ -82,11 +85,11 @@ export function Saves() {
   // When a side was last written, in the box's own language. A date rather than
   // "2 hours ago": the person is matching it against an evening they remember.
   const when = (ms: number | null) =>
-    ms
-      ? new Intl.DateTimeFormat(tag, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(
+    ms === null
+      ? t("retroarch.savesNever")
+      : new Intl.DateTimeFormat(tag, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(
           new Date(ms),
-        )
-      : t("retroarch.savesNever");
+        );
 
   const load = useCallback(() => {
     const bridge = window.tvbox?.shares;
@@ -110,26 +113,32 @@ export function Saves() {
     if (!bridge?.compare || !peers.length || !shares.length) return;
     let alive = true;
     setCmp(Object.fromEntries(peers.map((p) => [p.id, "checking" as Cmp])));
+    const latest = (a: number | null, b: number | null | undefined) =>
+      typeof b === "number" ? (a === null ? b : Math.max(a, b)) : a;
     (async () => {
       for (const peer of peers) {
         let here: number | null = null;
         let there: number | null = null;
-        let newerThere = 0;
+        let arriving = 0;
         let olderThere = 0;
         let answered = false;
         for (const s of shares) {
+          if (!alive) return; // the screen is gone; stop asking the network for it
           const r = await bridge.compare?.(peer.id, s.id)?.catch(() => null);
           if (!r || !r.ok) continue;
           answered = true;
-          here = Math.max(here || 0, r.here?.newest || 0) || null;
-          there = Math.max(there || 0, r.there?.newest || 0) || null;
-          newerThere += r.newerThere || 0;
+          here = latest(here, r.here?.newest);
+          there = latest(there, r.there?.newest);
+          // What a copy would actually move: newer over there, missing here, and
+          // the same second but a different size - rclone checks size as well as
+          // time, so that last one is copied too.
+          arriving += (r.newerThere || 0) + (r.sameTimeDiffers || 0);
           olderThere += r.olderThere || 0;
         }
         if (!alive) return;
         // A box that did not answer gets no verdict rather than a wrong one - the
         // row still works, it just says nothing about dates.
-        setCmp((cur) => ({ ...cur, [peer.id]: answered ? { here, there, newerThere, olderThere } : "off" }));
+        setCmp((cur) => ({ ...cur, [peer.id]: answered ? { here, there, arriving, olderThere } : "off" }));
       }
     })();
     return () => {
@@ -196,10 +205,14 @@ export function Saves() {
     if (!c) return t("retroarch.savesBringHint");
     if (c === "checking") return t("retroarch.savesChecking");
     if (c === "off") return t("retroarch.savesBringHint");
-    const dates = t("retroarch.savesDates", { there: when(c.there), here: when(c.here) });
-    if (c.olderThere) return dates + " · " + t("retroarch.savesWouldReplace", { n: String(c.olderThere) });
-    if (c.newerThere) return dates + " · " + t("retroarch.savesNewerThere", { n: String(c.newerThere) });
-    return dates + " · " + t("retroarch.savesSame");
+    const parts = [t("retroarch.savesDates", { there: when(c.there), here: when(c.here) })];
+    // Both halves when both apply: files newer in each room is the normal state
+    // after two people played, and hearing only the warning hides what there is to
+    // gain - hearing only the gain hides what it costs.
+    if (c.arriving) parts.push(t("retroarch.savesArriving", { n: String(c.arriving) }));
+    if (c.olderThere) parts.push(t("retroarch.savesWouldReplace", { n: String(c.olderThere) }));
+    if (!c.arriving && !c.olderThere) parts.push(t("retroarch.savesSame"));
+    return parts.join(" · ");
   };
 
   return (

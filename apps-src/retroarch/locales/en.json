@@ -128,8 +128,8 @@
     "savesChecking": "Comparing with this box…",
     "savesDates": "There: {there} · here: {here}",
     "savesNever": "nothing yet",
-    "savesNewerThere": "{n} newer there",
     "savesWouldReplace": "{n} here are newer and would be replaced",
-    "savesSame": "the same on both"
+    "savesSame": "the same on both",
+    "savesArriving": "{n} would arrive"
   }
 }
