@@ -24,10 +24,12 @@ type Peer = { id: string; name: string };
 type Share = { id: string; name: string; present: boolean; on: boolean };
 // What a pull would do, summed over this app's folders: when each side was last
 // written, how much would arrive, and how much would be replaced by an older copy.
-type Cmp =
-  | { here: number | null; there: number | null; arriving: number; olderThere: number }
-  | "checking"
-  | "off";
+type Sides = { here: number | null; there: number | null; arriving: number; olderThere: number };
+// Per emulator, under the box it came from. The name is the folder the emulator
+// keeps its saves in - RetroArch already writes one per core, so it is a name a
+// person recognises ("Snes9x", "dolphin-emu") and the app needs no list of its own.
+type Group = Sides & { name: string };
+type Cmp = (Sides & { groups: Group[] }) | "checking" | "off";
 
 function Row({
   title,
@@ -122,6 +124,9 @@ export function Saves() {
         let arriving = 0;
         let olderThere = 0;
         let answered = false;
+        // An emulator's saves and its save states are two shares on the box and one
+        // thing to a person, so the groups are summed across them by name.
+        const byName = new Map<string, Group>();
         for (const s of shares) {
           if (!alive) return; // the screen is gone; stop asking the network for it
           const r = await bridge.compare?.(peer.id, s.id)?.catch(() => null);
@@ -134,11 +139,25 @@ export function Saves() {
           // time, so that last one is copied too.
           arriving += (r.newerThere || 0) + (r.sameTimeDiffers || 0);
           olderThere += r.olderThere || 0;
+          for (const g of r.groups || []) {
+            const cur = byName.get(g.name) || { name: g.name, here: null, there: null, arriving: 0, olderThere: 0 };
+            cur.here = latest(cur.here, g.here?.newest);
+            cur.there = latest(cur.there, g.there?.newest);
+            cur.arriving += (g.newerThere || 0) + (g.sameTimeDiffers || 0);
+            cur.olderThere += g.olderThere || 0;
+            byName.set(g.name, cur);
+          }
         }
+        // What there is to gain first, then what it would cost, then the rest by
+        // name: the emulator someone came here for is the one with something to
+        // bring, and on a TV it should not be third in an alphabetical list.
+        const groups = [...byName.values()].sort(
+          (x, y) => y.arriving - x.arriving || y.olderThere - x.olderThere || x.name.localeCompare(y.name),
+        );
         if (!alive) return;
         // A box that did not answer gets no verdict rather than a wrong one - the
         // row still works, it just says nothing about dates.
-        setCmp((cur) => ({ ...cur, [peer.id]: answered ? { here, there, arriving, olderThere } : "off" }));
+        setCmp((cur) => ({ ...cur, [peer.id]: answered ? { here, there, arriving, olderThere, groups } : "off" }));
       }
     })();
     return () => {
@@ -146,9 +165,13 @@ export function Saves() {
     };
   }, [peers, shares]);
 
-  const bring = (peer: Peer) => {
-    if (arm !== peer.id) {
-      setArm(peer.id);
+  // `group` names one emulator's folder; without it the whole share travels. Both
+  // arm first, and they arm on their own key - pressing an emulator must not leave
+  // the box row one press from copying everything.
+  const bring = (peer: Peer, group?: string) => {
+    const key = peer.id + (group ? "/" + group : "");
+    if (arm !== key) {
+      setArm(key);
       return;
     }
     setArm("");
@@ -157,7 +180,7 @@ export function Saves() {
     // Nothing declared means nothing to ask for. Without this the loop below runs
     // zero times and reports a success for a copy that never happened.
     if (!shares.length) return setNote(t("retroarch.savesNothing"));
-    setBusy(peer.id);
+    setBusy(key);
     // Every folder this app declares, one after another: saves and save states are
     // one thing to a person, and asking twice for one game would be theatre.
     // Sequential rather than parallel - two rclone copies over one wifi link finish
@@ -168,7 +191,11 @@ export function Saves() {
       for (const s of shares) {
         // Every hop optional: with no bridge, pull() is never called and `.catch`
         // on the undefined it left behind would throw inside the loop.
-        const r = await window.tvbox?.shares?.pull(peer.id, s.id)?.catch(() => ({ ok: false, error: "failed" }));
+        const r = await window.tvbox?.shares?.pull(peer.id, s.id, group)?.catch(() => ({ ok: false, error: "failed" }));
+        // An emulator with saves but no states (or the other way round) is
+        // ordinary, and the box says unknown_group. Not a failure worth putting on
+        // the screen - the half that exists still arrived.
+        if (r && !r.ok && group && r.error === "unknown_group") continue;
         if (!r || !r.ok) {
           failed.push(s.name);
           why = why || (r && r.error) || "failed";
@@ -179,7 +206,7 @@ export function Saves() {
       // or a folder that could not be created are problems on this box, and sending
       // someone to check the other TV for them wastes their afternoon.
       if (failed.length) setNote(t("retroarch.savesFailed", { names: failed.join(", ") }) + " " + reason(why));
-      else setDone(t("retroarch.savesBrought", { box: peer.name }));
+      else setDone(t("retroarch.savesBrought", { box: group ? group + " · " + peer.name : peer.name }));
       load();
     })();
   };
@@ -200,11 +227,7 @@ export function Saves() {
   // ahead, and - the part that decides whether to press - how much of what is here
   // would be replaced by something older. rclone copies whatever differs in the
   // direction asked for; it does not prefer the newer file.
-  const verdict = (peer: Peer) => {
-    const c = cmp[peer.id];
-    if (!c) return t("retroarch.savesBringHint");
-    if (c === "checking") return t("retroarch.savesChecking");
-    if (c === "off") return t("retroarch.savesBringHint");
+  const sides = (c: Sides) => {
     const parts = [t("retroarch.savesDates", { there: when(c.there), here: when(c.here) })];
     // Both halves when both apply: files newer in each room is the normal state
     // after two people played, and hearing only the warning hides what there is to
@@ -213,6 +236,20 @@ export function Saves() {
     if (c.olderThere) parts.push(t("retroarch.savesWouldReplace", { n: String(c.olderThere) }));
     if (!c.arriving && !c.olderThere) parts.push(t("retroarch.savesSame"));
     return parts.join(" · ");
+  };
+
+  const verdict = (peer: Peer) => {
+    const c = cmp[peer.id];
+    if (!c) return t("retroarch.savesBringHint");
+    if (c === "checking") return t("retroarch.savesChecking");
+    if (c === "off") return t("retroarch.savesBringHint");
+    return sides(c);
+  };
+
+  // The emulators under a box, once its answer is in.
+  const groupsOf = (peer: Peer): Group[] => {
+    const c = cmp[peer.id];
+    return c && c !== "checking" && c !== "off" ? c.groups : [];
   };
 
   return (
@@ -239,20 +276,46 @@ export function Saves() {
           />
         )}
         {peers.map((p) => (
-          <Row
-            key={p.id}
-            focusKey={"peer-" + p.id}
-            title={p.name}
-            subtitle={
-              busy === p.id
-                ? t("retroarch.savesBringing")
-                : arm === p.id
-                  ? t("retroarch.savesReplaceWarn")
-                  : verdict(p)
-            }
-            action={busy === p.id ? "…" : arm === p.id ? t("retroarch.savesBringSure") : t("retroarch.savesBring")}
-            onEnter={() => !busy && bring(p)}
-          />
+          <div key={p.id} className="flex flex-col gap-[0.6vh]">
+            <Row
+              focusKey={"peer-" + p.id}
+              title={p.name}
+              subtitle={
+                busy === p.id
+                  ? t("retroarch.savesBringing")
+                  : arm === p.id
+                    ? t("retroarch.savesReplaceWarn")
+                    : verdict(p)
+              }
+              action={busy === p.id ? "…" : arm === p.id ? t("retroarch.savesBringSure") : t("retroarch.savesBringAll")}
+              onEnter={() => !busy && bring(p)}
+            />
+            {/* One emulator at a time, for the case the box-level line cannot
+                answer: the SNES played in one room and the GameCube in the other,
+                where each box is "newer" and neither date helps. */}
+            {groupsOf(p).map((g) => {
+              const key = p.id + "/" + g.name;
+              return (
+                <div key={key} className="pl-[2vw]">
+                  <Row
+                    focusKey={"group-" + key}
+                    title={g.name}
+                    subtitle={
+                      busy === key
+                        ? t("retroarch.savesBringing")
+                        : arm === key
+                          ? t("retroarch.savesReplaceWarn")
+                          : sides(g)
+                    }
+                    action={
+                      busy === key ? "…" : arm === key ? t("retroarch.savesBringSure") : t("retroarch.savesBring")
+                    }
+                    onEnter={() => !busy && bring(p, g.name)}
+                  />
+                </div>
+              );
+            })}
+          </div>
         ))}
 
         {/* What this box gives back. Not a control - the switch is Settings' - but

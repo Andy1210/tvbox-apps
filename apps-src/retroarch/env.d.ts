@@ -24,9 +24,20 @@ interface TvboxSharesBridge {
     newerThere?: number;
     olderThere?: number;
     sameTimeDiffers?: number;
+    // The same numbers per folder inside the share - one per emulator, which is
+    // how RetroArch already keeps saves and states.
+    groups?: {
+      name: string;
+      here?: { newest: number | null; files: number };
+      there?: { newest: number | null; files: number };
+      newerThere?: number;
+      olderThere?: number;
+      sameTimeDiffers?: number;
+    }[];
     error?: string;
   }>;
-  pull(peerId: string, shareId: string): Promise<{ ok: boolean; error?: string }>;
+  // `group` (optional) brings one emulator's folder instead of the whole share.
+  pull(peerId: string, shareId: string, group?: string): Promise<{ ok: boolean; error?: string }>;
 }
 
 interface TvboxBridgeGlobal {
