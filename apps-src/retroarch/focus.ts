@@ -19,6 +19,7 @@ export const CONSOLES_PAGE = "consoles-page";
 export const ART_PAGE = "art-page";
 export const SCAN_PAGE = "scan-page";
 export const FOLDERS_PAGE = "folders-page";
+export const SAVES_PAGE = "saves-page";
 
 // Is anything actually focused right now? A focus key can outlive the element it named
 // (a list emptied, a view swapped), and then every arrow press goes nowhere - which on a

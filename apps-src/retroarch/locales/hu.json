@@ -98,6 +98,32 @@
     "phoneUpload": "Játékok feltöltése telefonról",
     "phoneUploadHint": "Olvasd be a QR-kódot, és a telefonon válaszd ki a fájlokat",
     "phoneCode": "Kód",
-    "phoneDone": "Kész"
+    "phoneDone": "Kész",
+    "tabSaves": "Mentések",
+    "savesIntro": "Ugyanazzal a játékkal játszol egy másik tvboxon? Hozd át onnan a mentéseket, és folytasd, ahol abbahagytad. A box csak egy irányba másol - ide -, tehát a másik szobában lévő mentéseidet nem írja felül.",
+    "savesFromBox": "Mentések áthozása innen",
+    "savesNoBoxes": "Még nincs összekötve másik box",
+    "savesBring": "Áthozás",
+    "savesBringSure": "Felülírás",
+    "savesBringHint": "Átmásolja a másik box mentéseit és pillanatképeit erre a boxra",
+    "savesReplaceWarn": "A két szobában is játszott játékok mentéseit ez felülírja ezen a boxon",
+    "savesBringing": "Másolás…",
+    "savesBrought": "A mentések megérkeztek innen: {box}. Indítsd el a játékot.",
+    "savesFailed": "Nem sikerült áthozni: {names}.",
+    "savesOffered": "Ez a box ezt kínálja",
+    "savesOfferedOn": "{names}. Az összekötött box ezeket tudja innen áthozni.",
+    "savesOfferedOff": "Még semmit. A Beállítások > Hálózat > Alkalmazások megosztásai alatt kapcsold be az alkalmazás mappáit, különben a másik szoba nem éri el a mentéseidet.",
+    "savesUnsupported": "Ennek a boxnak a szoftvere még nem tud alkalmazás-mappát megosztani - frissítsd a boxot, majd a Beállítások > Hálózat > Alkalmazások megosztásai alatt kösd össze a kettőt.",
+    "savesNoBoxesHint": "Beállítások > Hálózat > Alkalmazások megosztásai - egy kód, egyszer, az egyik tévén, és onnantól mindkét irányba működik.",
+    "savesRecheck": "Nézzük újra",
+    "savesNothing": "Ez az alkalmazás egyetlen mappáját sem kínálja fel.",
+    "savesErr": {
+      "failed": "Be van kapcsolva a másik box, és megosztja még?",
+      "rclone_missing": "Ezen a boxon nincs rclone - a Beállítások fájlszervere telepíti.",
+      "unknown_peer": "Az a box már nincs összekötve ezzel.",
+      "unknown_share": "Azon a boxon nincs meg ez az alkalmazás, vagy nem kínálja ezt a mappát.",
+      "busy": "Még fut egy másolás.",
+      "pull_failed": "A másolás nem fejeződött be - be van kapcsolva a másik box, és megosztja még?"
+    }
   }
 }

@@ -8,6 +8,7 @@ import {
   EMPTY_ACTION,
   FOLDERS_PAGE,
   RAIL,
+  SAVES_PAGE,
   SCAN_PAGE,
   SEARCH,
   TABS,
@@ -20,8 +21,9 @@ import { Consoles } from "./Consoles";
 import { Artwork } from "./Artwork";
 import { Scan } from "./Scan";
 import { Folders } from "./Folders";
+import { Saves } from "./Saves";
 
-type View = "games" | "consoles" | "art" | "scan" | "folders";
+type View = "games" | "consoles" | "art" | "scan" | "folders" | "saves";
 const LAST_SYSTEM = "tvbox.retroarch.system";
 // Where "down out of the tabs" lands, per view: the first of these that is actually
 // mounted. For the games view that is the covers, falling back to the console list
@@ -33,6 +35,7 @@ const VIEW_CONTENT: Record<View, string[]> = {
   art: [ART_PAGE],
   scan: [SCAN_PAGE],
   folders: [FOLDERS_PAGE],
+  saves: [SAVES_PAGE],
 };
 
 function Tab({
@@ -231,6 +234,7 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
               active={view === "folders"}
               onPick={setView}
             />
+            <Tab id="saves" view={view} label={t("retroarch.tabSaves")} active={view === "saves"} onPick={setView} />
           </div>
         </div>
         <div className="flex-1 min-h-0">
@@ -256,6 +260,8 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
             <Scan onScanned={loadSystems} />
           ) : view === "folders" ? (
             <Folders />
+          ) : view === "saves" ? (
+            <Saves />
           ) : (
             <Artwork />
           )}

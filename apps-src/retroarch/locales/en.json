@@ -98,6 +98,32 @@
     "phoneUpload": "Upload games from a phone",
     "phoneUploadHint": "Scan a QR and pick the files on your phone",
     "phoneCode": "Code",
-    "phoneDone": "Done"
+    "phoneDone": "Done",
+    "tabSaves": "Saves",
+    "savesIntro": "Playing the same game on another tvbox? Bring its saves here and carry on where you left off. The box copies them one way only - into this box - so nothing you have in another room is overwritten by it.",
+    "savesFromBox": "Bring saves from",
+    "savesNoBoxes": "No other box is connected yet",
+    "savesBring": "Bring",
+    "savesBringSure": "Replace",
+    "savesBringHint": "Copies that box's saves and save states onto this one",
+    "savesReplaceWarn": "This replaces the saves on this box for games you have played in both rooms",
+    "savesBringing": "Copying…",
+    "savesBrought": "Saves brought from {box}. Start the game to carry on.",
+    "savesFailed": "Could not bring: {names}.",
+    "savesOffered": "This box offers",
+    "savesOfferedOn": "{names}. A box that has been connected can bring these from here.",
+    "savesOfferedOff": "Nothing yet. Switch this app's folders on under Settings > Network > App sharing, or the other room cannot fetch your saves.",
+    "savesUnsupported": "This box's software cannot share app folders yet - update the box, then connect the two under Settings > Network > App sharing.",
+    "savesNoBoxesHint": "Settings > Network > App sharing - one code, entered once on either TV, connects them both ways.",
+    "savesRecheck": "Look again",
+    "savesNothing": "This app is offering none of its folders.",
+    "savesErr": {
+      "failed": "Is the other box on, and is it still sharing?",
+      "rclone_missing": "This box is missing rclone - the file server in Settings installs it.",
+      "unknown_peer": "That box is not connected to this one any more.",
+      "unknown_share": "That box does not have this app, or is not offering this folder.",
+      "busy": "Another copy is still running.",
+      "pull_failed": "The copy did not finish - is the other box on, and still sharing?"
+    }
   }
 }
