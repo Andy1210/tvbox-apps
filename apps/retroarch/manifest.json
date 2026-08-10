@@ -6,7 +6,7 @@
   "changelog": [
     {
       "version": "1.9.0",
-      "notes": "Your saves can travel to your other box. Turn it on in Settings > Network > Saves sharing, connect the two boxes once, and a game you started in one room can be carried to the other - save files and save states both. Nothing is ever sent back the other way, so two people playing in two rooms cannot overwrite each other: you go to the box you want the save on, and bring it there."
+      "notes": "Your saves can travel to your other box. Turn it on in Settings > Network > Saves sharing, connect the two boxes once, and a game you started in one room can be carried to the other - save files and save states both. Nothing is ever sent back the other way, so two people playing in two rooms cannot overwrite each other: you go to the box you want the save on, and bring it there. What travels is the saves themselves - an emulator's own settings, its shader cache and its logs stay with the box they belong to."
     },
     {
       "version": "1.8.0",
@@ -104,7 +104,8 @@
     ],
     "exclude": [
       "**/Cache/**",
-      "**/Logs/**"
+      "**/Logs/**",
+      "**/Config/**"
     ]
   },
   "requires": {
