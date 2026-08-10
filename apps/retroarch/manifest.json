@@ -2,8 +2,12 @@
   "id": "retroarch",
   "manifestVersion": 1,
   "name": "RetroArch",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "changelog": [
+    {
+      "version": "1.10.0",
+      "notes": "Carry on in the other room: a new Saves tab brings your saves and save states over from another tvbox, so a game started on one TV can be finished on the other. It used to be a button in the box's own settings, which meant a TV with no emulator on it still talked about saves; the box now only asks whether the folders may be shared at all, and the rest is here. Connecting the two boxes is one code typed once - they can read each other from then on."
+    },
     {
       "version": "1.9.0",
       "notes": "Your saves can travel to your other box. Turn it on in Settings > Network > Saves sharing, connect the two boxes once, and a game you started in one room can be carried to the other - save files and save states both. Nothing is ever sent back the other way, so two people playing in two rooms cannot overwrite each other: you go to the box you want the save on, and bring it there. What travels is the saves themselves - an emulator's own settings, its shader cache and its logs stay with the box they belong to."
@@ -123,7 +127,8 @@
       ]
     },
     "capabilities": [
-      "nav"
+      "nav",
+      "shares"
     ]
   }
 }
