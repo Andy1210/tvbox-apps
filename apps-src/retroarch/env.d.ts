@@ -11,6 +11,21 @@ interface TvboxSharesBridge {
     peers?: { id: string; name: string }[];
     shares?: { id: string; name: string; present: boolean; on: boolean }[];
   }>;
+  // What a pull would do, without doing it: when each side was last written, how
+  // many files would arrive, and how many here are newer than what would replace
+  // them.
+  compare?(
+    peerId: string,
+    shareId: string,
+  ): Promise<{
+    ok: boolean;
+    here?: { newest: number | null; files: number };
+    there?: { newest: number | null; files: number };
+    newerThere?: number;
+    olderThere?: number;
+    sameTimeDiffers?: number;
+    error?: string;
+  }>;
   pull(peerId: string, shareId: string): Promise<{ ok: boolean; error?: string }>;
 }
 
