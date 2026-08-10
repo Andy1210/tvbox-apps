@@ -2,8 +2,12 @@
   "id": "retroarch",
   "manifestVersion": 1,
   "name": "RetroArch",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "changelog": [
+    {
+      "version": "1.11.0",
+      "notes": "A Mentések fülön most már látod, melyik box mentése az újabb, mielőtt áthoznád: ott van a két dátum és hogy hány fájl frissebb a másik boxon. Ha valami ezen a boxon újabb, azt külön kiírja - a másolás azt is felülírná. / The Saves tab now shows which box has the newer saves before you bring anything over: both dates, and how many files are fresher on the other box. If something on this box is newer, it says so separately - a copy would replace that too."
+    },
     {
       "version": "1.10.0",
       "notes": "Carry on in the other room: a new Saves tab brings your saves and save states over from another tvbox, so a game started on one TV can be finished on the other. It used to be a button in the box's own settings, which meant a TV with no emulator on it still talked about saves; the box now only asks whether the folders may be shared at all, and the rest is here. Connecting the two boxes is one code typed once - they can read each other from then on."
