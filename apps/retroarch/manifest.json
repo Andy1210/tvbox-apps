@@ -2,8 +2,12 @@
   "id": "retroarch",
   "manifestVersion": 1,
   "name": "RetroArch",
-  "version": "1.11.0",
+  "version": "1.12.0",
   "changelog": [
+    {
+      "version": "1.12.0",
+      "notes": "Emulátoronként is áthozhatod a mentéseket, nem csak egyben: a Mentések fülön minden emulátor külön sorban áll a saját két dátumával, és külön hozható át. Így az is látszik, melyik boxon frissebb egy adott konzol mentése - egyetlen dátum a boxra ezt nem tudja megmondani, ha az egyik szobában SNES-szel, a másikban GameCube-bal játszottak. / You can bring saves per emulator now, not just all at once: the Saves tab lists each emulator on its own row with its own two dates and its own copy. That also shows which box has the fresher saves for a given console - one date per box cannot say, if one room played the SNES and the other the GameCube."
+    },
     {
       "version": "1.11.0",
       "notes": "A Mentések fülön most már látod, melyik box mentése az újabb, mielőtt áthoznád: ott van a két dátum és hogy hány fájl frissebb a másik boxon. Ha valami ezen a boxon újabb, azt külön kiírja - a másolás azt is felülírná. / The Saves tab now shows which box has the newer saves before you bring anything over: both dates, and how many files are fresher on the other box. If something on this box is newer, it says so separately - a copy would replace that too."
@@ -113,7 +117,9 @@
     "exclude": [
       "**/Cache/**",
       "**/Logs/**",
-      "**/Config/**"
+      "**/Config/**",
+      "**/CACHE/**",
+      "**/cache/**"
     ]
   },
   "requires": {

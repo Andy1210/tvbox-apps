@@ -123,13 +123,15 @@
       "unknown_peer": "That box is not connected to this one any more.",
       "unknown_share": "That box does not have this app, or is not offering this folder.",
       "busy": "Another copy is still running.",
-      "pull_failed": "The copy did not finish - is the other box on, and still sharing?"
+      "pull_failed": "The copy did not finish - is the other box on, and still sharing?",
+      "unknown_group": "That emulator's folder is not there any more."
     },
     "savesChecking": "Comparing with this box…",
     "savesDates": "There: {there} · here: {here}",
     "savesNever": "nothing yet",
     "savesWouldReplace": "{n} here are newer and would be replaced",
     "savesSame": "the same on both",
-    "savesArriving": "{n} would arrive"
+    "savesArriving": "{n} would arrive",
+    "savesBringAll": "Bring all"
   }
 }
