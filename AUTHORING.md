@@ -14,6 +14,7 @@ release — push a new version here and boxes pick it up (they poll `index.json`
 - [Dependencies — and the platform baseline](#dependencies--and-the-platform-baseline)
 - [Hosting a download-dep binary](#hosting-a-download-dep-binary)
 - [Versioning & updates](#versioning--updates)
+- [Trying it on a box before you publish](#trying-it-on-a-box-before-you-publish)
 - [Publishing](#publishing)
 
 ## The two kinds of app
@@ -46,31 +47,53 @@ its build output lands in `apps/<id>/web/`. See [The web UI](#the-web-ui). Only
 
 ## Manifest reference
 
+The **schema defines the shape**, and CI here validates every manifest against
+it - then applies this registry's own rules on top, which are stricter (no
+`requires.aptRepo`, a `bridge` that must be in the package, a `runtime.native`
+flatpak that must also be a declared dep). A manifest can be schema-valid and
+still be refused here; `scripts/build-index.mjs` is where those rules live. The
+schema itself:
+[docs/app-manifest.schema.json](https://github.com/Andy1210/tvbox/blob/main/docs/app-manifest.schema.json)
+in the core repo, with the field-by-field prose next to it in
+[docs/app-manifest.md](https://github.com/Andy1210/tvbox/blob/main/docs/app-manifest.md).
+This is the working subset.
+
 ```jsonc
 {
   "id": "myapp",                     // [a-z0-9_-]+, must equal the file/dir name
   "manifestVersion": 1,
   "name": { "hu": "…", "en": "…" },  // or a plain string
-  "version": "1.0.0",                // bump this to offer users an Update
-  "type": "webclient",               // the only type — apps are web apps the shell serves/loads
+  "version": "1.0.0",                // semver; bumping it is what offers every box an Update
+  "type": "webclient",               // webclient | native  (see below)
   "status": "ready",                 // or "coming_soon"
   "accent": "#39c0d6",               // hex only (interpolated into launcher CSS)
   "icon": "<svg …>",                 // inline SVG, no external refs/scripts
   "tagline": { "hu": "…", "en": "…" },
+  "description": { "en": "…" },      // the store's detail view, under the tagline
+  "changelog": [{ "version": "1.1.0", "notes": "What changed, for the person on the couch." }],
+  "screenshots": ["https://…"],      // up to 8, shown in the detail view; host them in this repo
   "service": "myapp",                // optional — load apps/<id>/plugin.js at boot as this service
   "requires": { … },                 // optional — see Dependencies
+  "pairing": [{ "kind": "roms", "label": { "en": "Upload games" } }], // phone actions; needs a service
+  "backup": { … },                   // optional — what a settings backup carries (see below)
+  "shares": { … },                   // optional — what another box may read (see below)
   "runtime": {
     "serve": "local",                // local | remote | static  (see below)
     "entry": "index.html",           // local/static: the bundle entry
     "url": "https://…",              // remote: the site to load
     "urlConfig": "myapp",            // remote: config key holding a user-set base URL (self-hosted)
     "mount": "root",                 // static only: single root-mounted bundle (legacy, e.g. Plex)
-    "bridge": "qwebchannel",         // optional SDK bridge adapter for a remote QtWebEngine client
+    "bridge": "./bridge.js",         // optional renderer bridge YOUR package ships (see below)
+    "native": { "flatpak": "…" },    // a program of its own to launch (see below)
     "capabilities": ["nav"],         // what the preload exposes — see below
     "origins": ["example.com"]       // hosts the `fetch` capability may reach (bare hostnames)
   }
 }
 ```
+
+**`changelog` is what the store shows as "What's new"** before someone presses
+Update, newest version first, `notes` one plain English string. Write it for the
+person on the couch, like the box's own release notes.
 
 **`runtime.serve`:**
 
@@ -82,13 +105,71 @@ its build output lands in `apps/<id>/web/`. See [The web UI](#the-web-ui). Only
 - `static` — the legacy single root-mounted bundle (`mount:"root"`). Only one per
   box; Plex uses it.
 
-**`capabilities`** (what the preload bridge exposes to the page):
-`nav` (always), `player` (shared mpv: play/stop/pip/onPlayer), `fetch`
+**`type` and a program of your own.** `webclient` covers everything above: the
+shell serves or loads a page. `native` is the other kind - the app IS a program
+that draws its own fullscreen Wayland window, the shell spawns it and hides its
+own windows while it runs, and `runtime.native` says what to launch
+(`{ flatpak }` or `{ bin }`, plus `args`).
+
+A `webclient` app may declare `runtime.native` **as well**, and that is the more
+useful shape: your own 10-foot UI, which launches the program per item. RetroArch
+is exactly this - a covers grid of ours that starts the emulator on the game you
+picked, and comes back to the grid when it exits. A flatpak named there must also
+be in `requires.flatpak`, so the tile greys out until it is installed rather than
+failing at launch; CI checks that pairing.
+
+**`runtime.bridge`** is a renderer bridge **your package ships**, named as
+`"./<file>.js"` next to the manifest - lowercase `[a-z0-9_-]`, no subdirectory,
+and the file has to be in the package (CI checks both). It exists to emulate a foreign host API a
+third-party client expects - Plex HTPC wants Qt's QWebChannel - which is one
+client's shape, so it belongs to that app and updates from the registry with it.
+The shell ships none of its own.
+
+**`capabilities`** (what the preload bridge exposes to the page). Leave the field
+out and you get `["nav"]`; an explicit `[]` grants nothing at all, which is what a
+`native` app wants (it has no renderer of ours). The rest:
+`nav` (home/back/launch), `player` (shared mpv: play/stop/pip/onPlayer), `fetch`
 (origin-locked server-side fetch), `storage` (per-app key/value), `config`,
-`input`, `system`, `shares` (this app's own folders, brought from a paired tvbox -
-what may be offered is `shares.paths` below, and switching it on is a person's job
-in Settings). Declare only what you actually use: an app gets exactly its declared
+`display` (claim an output mode for video the app plays itself), `input`,
+`system`, `shares` (this app's own folders, brought from a paired tvbox - what may
+be offered is `shares.paths` below, and switching it on is a person's job in
+Settings). Declare only what you actually use: an app gets exactly its declared
 capabilities and nothing else, in the main window as well as a sandboxed one.
+
+### What travels: `backup` and `shares`
+
+Two blocks name paths of the app's OWN, and neither is a runtime call: the box
+only ever acts on what the manifest declares, so an app cannot ask for a path
+later. `backup.paths` takes files as well as folders (RetroArch carries its
+`retroarch.cfg`); `shares.paths` is directories.
+
+```jsonc
+"backup": {
+  "flatpak": "org.libretro.RetroArch", // anchor: the app's own flatpak data dir
+  "paths": ["config/retroarch/saves", "config/retroarch/playlists"],
+  "state": ["retroarch-share.json"]    // <id>-prefixed sidecars in ~/.tvbox/
+},
+"shares": {
+  "flatpak": "org.libretro.RetroArch",
+  "paths": ["config/retroarch/saves", "config/retroarch/states"],
+  "exclude": ["**/Cache/**", "**/Logs/**"]
+}
+```
+
+- **`backup`** is what the encrypted settings backup carries and a restore puts
+  back. Use it for what a person would be sad to lose and the box cannot
+  re-acquire: save files, playlists, a config the user tuned. Not caches, not
+  anything re-downloadable - the file goes to a phone over the LAN and back.
+- **`shares`** is what _another tvbox in the house_ may read, read-only, over its
+  own credential: an emulator's saves, so a game started in one room can be
+  continued in the other. It is off until someone turns it on in Settings, and a
+  box only ever pulls.
+- `state` names sidecar files in `~/.tvbox/` and they must start with `<id>-`.
+  That prefix is a boundary, not a convention: an app id is only constrained to
+  `[a-z0-9_-]`, so without it a manifest calling itself `config` could name the
+  box's own `config.json`. The prefix is not the only gate either - the shell
+  keeps a list of its own sidecars and refuses those names whatever the id is, so
+  do not try to reach one.
 
 ## The web UI
 
@@ -253,9 +334,14 @@ Declare what your app needs under `requires`:
   static binary the box fetches into `~/.tvbox/bin` and sha256-verifies. **The
   preferred way to ship a binary the baseline lacks** — installable from the UI,
   no sudo. See [Hosting a download-dep binary](#hosting-a-download-dep-binary).
+- **`requires.flatpak: ["org.libretro.RetroArch"]`** — a flathub app, installed
+  `--user` with no root, from the UI like a download dep. The box's own arch is
+  used and the install is retried, because an app plus its runtime is a large pull
+  that can time out. A missing one greys the tile rather than failing at launch.
 - **`requires.apt: ["foo"]`** — a Debian package. Needs root (`tvbox deps <id>`),
-  so it's a last resort. **`requires.aptRepo` is forbidden** (a third-party root
-  apt source is risky and avoidable — ship a `download` binary instead).
+  so it's a last resort, and a box that only ever took OTA updates cannot install
+  one at all. **`requires.aptRepo` is forbidden** (a third-party root apt source is
+  risky and avoidable — ship a `download` binary instead).
 
 ### Platform baseline — what every box already ships
 
