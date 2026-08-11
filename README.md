@@ -13,6 +13,21 @@ that every box fetches over HTTPS (HOME → "Get more apps", or Settings → Sto
 > with the index if it is ever hosted elsewhere (a box can be pointed at its own
 > via `store.registry` in `~/.tvbox/config.json`).
 
+## What is in it
+
+| App                            | Kind                                   | What it is                                                    |
+| ------------------------------ | -------------------------------------- | ------------------------------------------------------------- |
+| [files](apps/files/)           | package (own UI)                       | The box's own folders, USB sticks, a NAS share, and photos    |
+| [livetv](apps/livetv/)         | package (own UI + plugin)              | IPTV over Xtream Codes or M3U, with an XMLTV guide            |
+| [plex](apps/plex/)             | manifest + bridge, bundle from flatpak | The official Plex HTPC client, driven by the box's mpv        |
+| [jellyfin](apps/jellyfin.json) | manifest only (remote)                 | Your own Jellyfin server                                      |
+| [youtube](apps/youtube.json)   | manifest only (remote)                 | `youtube.com/tv`, with a smart-TV user agent                  |
+| [xcloud](apps/xcloud.json)     | manifest only (remote)                 | Xbox Cloud Gaming                                             |
+| [spotify](apps/spotify/)       | package (own UI + plugin)              | A Spotify Connect speaker, and optional account browsing      |
+| [retroarch](apps/retroarch/)   | package (own UI + plugin + native)     | A covers grid that starts the emulator on the game you picked |
+
+Versions live in each manifest; CI publishes whatever is on `main`.
+
 ## 📦 Writing an app → [AUTHORING.md](AUTHORING.md)
 
 The full guide: package layout, the manifest reference, the web UI (`@tvbox/app-sdk`),
@@ -41,12 +56,15 @@ official repo works. An app here MAY carry real power:
   supervisor, Live TV's IPTV data proxy.)
 - ✔ its own `web/` UI (`serve:"local"`), a `remote` site, or the legacy `static`
   root bundle; capability-scoped preload + bridges.
-- ✔ deps: `requires.download` (no-root static binary, installs from the UI) or
-  `requires.apt` (the one `tvbox deps` sudo step). Prefer `download`.
+- ✔ deps, in order of preference: `requires.download` (a no-root static binary,
+  sha256-pinned, installs from the UI), `requires.flatpak` (a flathub app,
+  `--user`, also from the UI), then `requires.apt` — the one step that asks for
+  sudo, and one an OTA-updated box cannot take at all.
 - ❌ `requires.aptRepo` — a third-party **root** apt source is risky and avoidable;
   ship binaries as `requires.download`. The one hard line CI keeps.
-- `type` is `webclient` only; `serve` is `local | remote | static` (no `builtin` —
-  apps are packages now, not launcher-compiled views).
+- `type` is `webclient` or `native` (a program that draws its own fullscreen
+  window); `serve` is `local | remote | static`. There is no `builtin` — apps are
+  packages, not launcher-compiled views.
 
 ## Submitting
 
@@ -89,6 +107,7 @@ apps/<id>/                package app: manifest.json + plugin.js + lib/ + pairin
 apps-src/<id>/            source for a package's web/ UI (Vite) - the only copy in git
 scripts/build-index.mjs   validator + index builder (no dependencies)
 scripts/stage-site.mjs    assembles _site/ from index.json: what CI publishes
+scripts/serve-store.mjs   serves this checkout as a registry (npm run store:serve)
 index.json                generated, gitignored - CI builds and serves it
 apps/<id>/web/            generated, gitignored - built from apps-src/<id>/
 package.json              build tooling (build:<id> per app UI)
