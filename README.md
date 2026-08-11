@@ -15,7 +15,7 @@ that every box fetches over HTTPS (HOME → "Get more apps", or Settings → Sto
 
 ## What is in it
 
-| App                            | Kind                                   | What it is                                                    |
+| id                             | Kind                                   | What it is                                                    |
 | ------------------------------ | -------------------------------------- | ------------------------------------------------------------- |
 | [files](apps/files/)           | package (own UI)                       | The box's own folders, USB sticks, a NAS share, and photos    |
 | [livetv](apps/livetv/)         | package (own UI + plugin)              | IPTV over Xtream Codes or M3U, with an XMLTV guide            |

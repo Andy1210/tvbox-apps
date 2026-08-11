@@ -47,8 +47,12 @@ its build output lands in `apps/<id>/web/`. See [The web UI](#the-web-ui). Only
 
 ## Manifest reference
 
-The **source of truth is the schema**, and CI validates every manifest here
-against it:
+The **schema defines the shape**, and CI here validates every manifest against
+it - then applies this registry's own rules on top, which are stricter (no
+`requires.aptRepo`, a `bridge` that must be in the package, a `runtime.native`
+flatpak that must also be a declared dep). A manifest can be schema-valid and
+still be refused here; `scripts/build-index.mjs` is where those rules live. The
+schema itself:
 [docs/app-manifest.schema.json](https://github.com/Andy1210/tvbox/blob/main/docs/app-manifest.schema.json)
 in the core repo, with the field-by-field prose next to it in
 [docs/app-manifest.md](https://github.com/Andy1210/tvbox/blob/main/docs/app-manifest.md).
@@ -115,13 +119,16 @@ be in `requires.flatpak`, so the tile greys out until it is installed rather tha
 failing at launch; CI checks that pairing.
 
 **`runtime.bridge`** is a renderer bridge **your package ships**, named as
-`"./<file>.js"` next to the manifest. It exists to emulate a foreign host API a
+`"./<file>.js"` next to the manifest - lowercase `[a-z0-9_-]`, no subdirectory,
+and the file has to be in the package (CI checks both). It exists to emulate a foreign host API a
 third-party client expects - Plex HTPC wants Qt's QWebChannel - which is one
 client's shape, so it belongs to that app and updates from the registry with it.
 The shell ships none of its own.
 
-**`capabilities`** (what the preload bridge exposes to the page):
-`nav` (always), `player` (shared mpv: play/stop/pip/onPlayer), `fetch`
+**`capabilities`** (what the preload bridge exposes to the page). Leave the field
+out and you get `["nav"]`; an explicit `[]` grants nothing at all, which is what a
+`native` app wants (it has no renderer of ours). The rest:
+`nav` (home/back/launch), `player` (shared mpv: play/stop/pip/onPlayer), `fetch`
 (origin-locked server-side fetch), `storage` (per-app key/value), `config`,
 `display` (claim an output mode for video the app plays itself), `input`,
 `system`, `shares` (this app's own folders, brought from a paired tvbox - what may
@@ -131,9 +138,10 @@ capabilities and nothing else, in the main window as well as a sandboxed one.
 
 ### What travels: `backup` and `shares`
 
-Two blocks name folders of the app's OWN, and neither is a runtime call: the box
+Two blocks name paths of the app's OWN, and neither is a runtime call: the box
 only ever acts on what the manifest declares, so an app cannot ask for a path
-later.
+later. `backup.paths` takes files as well as folders (RetroArch carries its
+`retroarch.cfg`); `shares.paths` is directories.
 
 ```jsonc
 "backup": {
@@ -159,7 +167,9 @@ later.
 - `state` names sidecar files in `~/.tvbox/` and they must start with `<id>-`.
   That prefix is a boundary, not a convention: an app id is only constrained to
   `[a-z0-9_-]`, so without it a manifest calling itself `config` could name the
-  box's own `config.json`.
+  box's own `config.json`. The prefix is not the only gate either - the shell
+  keeps a list of its own sidecars and refuses those names whatever the id is, so
+  do not try to reach one.
 
 ## The web UI
 
