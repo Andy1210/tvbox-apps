@@ -71,7 +71,7 @@ This is the working subset.
   "tagline": { "hu": "…", "en": "…" },
   "description": { "en": "…" },      // the store's detail view, under the tagline
   "changelog": [{ "version": "1.1.0", "notes": "What changed, for the person on the couch." }],
-  "screenshots": ["https://…"],      // up to 8 https URLs, shown in the detail view
+  "screenshots": ["https://…"],      // up to 8, shown in the detail view; host them in this repo
   "service": "myapp",                // optional — load apps/<id>/plugin.js at boot as this service
   "requires": { … },                 // optional — see Dependencies
   "pairing": [{ "kind": "roms", "label": { "en": "Upload games" } }], // phone actions; needs a service
