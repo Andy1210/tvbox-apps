@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n, useBackspace, FocusButton } from "@sdk";
 import { useSpotifyStore } from "./stores/spotify";
 import { Lyrics } from "./Lyrics";
-import { mmss, control } from "./api";
+import { mmss, control, playerState, type PlayerState, type Repeat } from "./api";
 
 // transport icons (inline SVG so they render regardless of font)
 const ICONS: Record<string, string> = {
@@ -11,6 +11,10 @@ const ICONS: Record<string, string> = {
   next: "M15 6v12h2V6h-2zM5 6v12l9-6-9-6z",
   play: "M8 5v14l11-7z",
   pause: "M6 5h4v14H6zm8 0h4v14h-4z",
+  shuffle:
+    "M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z",
+  repeat: "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z",
+  repeat_one: "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4zm-4-2V9h-1l-2 1v1h1.5v4H13z",
 };
 function TIcon({ name, big }: { name: string; big?: boolean }) {
   return (
@@ -24,20 +28,29 @@ function Ctrl({
   onEnter,
   big,
   sm,
+  on,
+  label,
   children,
 }: {
   fk: string;
   onEnter: () => void;
   big?: boolean;
   sm?: boolean;
+  on?: boolean; // a setting that is currently active (shuffle, repeat)
+  label?: string;
   children: React.ReactNode;
 }) {
   return (
     <FocusButton
       focusKey={fk}
       onEnter={onEnter}
+      label={label}
       className={[
-        "rounded-full flex items-center justify-center bg-white/10 text-white",
+        "rounded-full flex items-center justify-center",
+        // Shuffle and repeat are settings rather than commands, so they have a
+        // state to show. Green fill is the same "on" the app uses everywhere; the
+        // focus ring still overrides it, so the two never read as one thing.
+        on ? "bg-[#1DB954] text-[#06120b]" : "bg-white/10 text-white",
         big ? "w-[9vh] h-[9vh]" : sm ? "w-[5.5vh] h-[5.5vh]" : "w-[7vh] h-[7vh]",
       ].join(" ")}
     >
@@ -151,10 +164,84 @@ export function NowPlaying({
     const id = setTimeout(() => setCtrlErr(""), 8000);
     return () => clearTimeout(id);
   }, [ctrlErr]);
-  const doControl = (a: string) =>
-    void control(a).then((err) => {
-      if (err) setCtrlErr(/not registered|HTTP 403/i.test(err) ? t("spotify.notRegistered") : t("spotify.apiError", { error: err }));
+  // Shuffle and repeat are player-wide SETTINGS, and the cast metadata does not
+  // carry them - so they are read back from the Web API rather than assumed from
+  // what was last pressed. The phone can change either of them too, which is why
+  // this also re-reads when the track changes.
+  const [player, setPlayer] = useState<PlayerState | null>(null);
+  // Reads can overtake each other (a track change and a toggle fire one each), and
+  // the loser would put the older answer on screen. Only the newest is allowed to
+  // land.
+  const readSeq = useRef(0);
+  const refreshPlayer = () => {
+    if (!connected) return;
+    const seq = ++readSeq.current;
+    void playerState().then((p) => {
+      if (seq === readSeq.current) setPlayer(p);
     });
+  };
+  useEffect(refreshPlayer, [connected, state?.track_id]);
+  // A phone can change shuffle or repeat without the track changing, and then the
+  // buttons show the wrong thing and the next repeat press picks the wrong mode
+  // from it. There is no event for that, so this screen re-reads while it is the
+  // one on display. It only exists while it is, so the poll stops with it.
+  useEffect(() => {
+    if (!connected) return;
+    const id = setInterval(refreshPlayer, 20000);
+    return () => clearInterval(id);
+  }, [connected]);
+  const repeatNext: Record<Repeat, Repeat> = { off: "context", context: "track", track: "off" };
+  const repeat: Repeat = player?.repeat || "off";
+  // These act on the ACTIVE account's player, which on a box with several linked
+  // accounts is not necessarily this box: someone else's phone can be that
+  // account's active device. Showing its shuffle state here would be a claim
+  // about this room, and pressing the button would reach into another one - so
+  // the two settings appear only once the player really is this box.
+  // `active` as well as the name: a player that stopped can still carry the device
+  // it last played on, and settings shown for a player that is not running are a
+  // claim about nothing.
+  // The two names come from different places: the Web API's device list, and what
+  // librespot was told to call itself. Fold them the same way the box does server
+  // side, or a difference in case or a stray space hides the settings on the very
+  // box they belong to.
+  const sameDevice = (a: string, b: string) => !!a.trim() && a.trim().toLowerCase() === b.trim().toLowerCase();
+  const onThisBox = !!player?.ok && !!player.active && sameDevice(player.device || "", state?.device_name || "");
+
+  const doControl = (a: string, v?: boolean | string) =>
+    void control(a, v).then((err) => {
+      if (err)
+        setCtrlErr(
+          /not registered|HTTP 403/i.test(err) ? t("spotify.notRegistered") : t("spotify.apiError", { error: err }),
+        );
+      else refreshPlayer();
+    });
+
+  // A setting is shown as pressed straight away and confirmed a moment later:
+  // Spotify can still answer /me/player with the pre-toggle value right after
+  // accepting the write, and a button that flicks back looks broken. The delayed
+  // re-read is what corrects it if the write did not take after all.
+  const setSetting = (a: "shuffle" | "repeat", v: boolean | Repeat) => {
+    // Bumping the sequence is what makes the optimistic value stick: a read that
+    // was already in flight when the button was pressed carries the pre-toggle
+    // value, and without this it would land afterwards and turn the button back.
+    readSeq.current++;
+    setPlayer((p) => ({
+      ok: true,
+      connected: true,
+      device: p?.device,
+      active: p?.active ?? true,
+      is_playing: p?.is_playing,
+      shuffle: a === "shuffle" ? (v as boolean) : (p?.shuffle ?? false),
+      repeat: a === "repeat" ? (v as Repeat) : (p?.repeat ?? "off"),
+    }));
+    void control(a, v).then((err) => {
+      if (err)
+        setCtrlErr(
+          /not registered|HTTP 403/i.test(err) ? t("spotify.notRegistered") : t("spotify.apiError", { error: err }),
+        );
+      setTimeout(refreshPlayer, 700);
+    });
+  };
   const pos = state ? Math.min(state.position_ms + (playing ? Date.now() - at : 0), state.duration_ms || Infinity) : 0;
   const pct = state && state.duration_ms ? Math.min(100, (pos / state.duration_ms) * 100) : 0;
   const hasTrack = !!state?.track_id;
@@ -294,17 +381,49 @@ export function NowPlaying({
               </div>
               {connected ? (
                 <div className="flex items-center gap-[1.5vw] mt-[0.8vh]">
-                  <Ctrl fk="sp-prev" onEnter={() => control("prev")}>
+                  {onThisBox && (
+                    <Ctrl
+                      fk="sp-shuffle"
+                      sm
+                      on={!!player?.shuffle}
+                      label={t("spotify.shuffle")}
+                      onEnter={() => setSetting("shuffle", !player?.shuffle)}
+                    >
+                      <TIcon name="shuffle" />
+                    </Ctrl>
+                  )}
+                  <Ctrl fk="sp-prev" onEnter={() => doControl("prev")}>
                     <TIcon name="prev" />
                   </Ctrl>
-                  <Ctrl fk="sp-playpause" big onEnter={() => control("playpause")}>
+                  <Ctrl fk="sp-playpause" big onEnter={() => doControl("playpause")}>
                     <TIcon name={playing ? "pause" : "play"} big />
                   </Ctrl>
-                  <Ctrl fk="sp-next" onEnter={() => control("next")}>
+                  <Ctrl fk="sp-next" onEnter={() => doControl("next")}>
                     <TIcon name="next" />
                   </Ctrl>
+                  {/* One button, three states. The icon alone cannot carry them
+                      from across a room, so the state is written next to it:
+                      the icon says repeat, the word says what it repeats. */}
+                  {onThisBox && (
+                    <Ctrl
+                      fk="sp-repeat"
+                      sm
+                      on={repeat !== "off"}
+                      label={t("spotify.repeat")}
+                      onEnter={() => setSetting("repeat", repeatNext[repeat])}
+                    >
+                      <TIcon name={repeat === "track" ? "repeat_one" : "repeat"} />
+                    </Ctrl>
+                  )}
                 </div>
-              ) : (
+              ) : null}
+              {connected && onThisBox && (repeat !== "off" || player?.shuffle) && (
+                <div className="flex items-center gap-[1.2vw] text-[1.6vh] text-[#1DB954] mt-[0.2vh]">
+                  {player?.shuffle && <span>{t("spotify.shuffle")}</span>}
+                  {repeat !== "off" && <span>{t("spotify.repeat_" + repeat)}</span>}
+                </div>
+              )}
+              {!connected && (
                 <div className="flex items-center gap-[0.8vw] text-[1.8vh] text-fg-dim mt-[0.5vh]">
                   <span className={"w-[1.2vh] h-[1.2vh] rounded-full " + (playing ? "bg-[#1DB954]" : "bg-white/40")} />
                   {t("spotify.controlHint", { device })}

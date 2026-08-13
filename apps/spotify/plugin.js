@@ -25,6 +25,7 @@ const crypto = require("crypto");
 const { execFile } = require("child_process");
 const spotify = require("./lib/spotify"); // cast-only bridge: librespot events -> SSE state
 const spotifyApi = require("./lib/spotify_api"); // OPTIONAL Spotify Web API (account features)
+const { createAutoplay } = require("./lib/autoplay"); // what plays when a playlist runs out
 
 const SPOTIFY_HOOK = path.join(__dirname, "spotify_event_hook.sh"); // librespot --onevent target
 // The hook arrives over HTTP as plain bytes (installPackage writes 0644), but
@@ -536,6 +537,28 @@ module.exports = (host) => {
     return spotifyApi.play(body);
   }
 
+  // ---- autoplay ----
+  // Off unless the owner turned it on: it starts music nobody asked for, in a
+  // room that just went quiet. The flag lives in the raw spotify config section
+  // (the shell's sanitized publicConfig carries only the three fields it knows
+  // about, so this app serves its own through the routes below).
+  const autoplayEnabled = () => !!(host.config.rawSpotify() || {}).autoplay;
+  const autoplay = createAutoplay({
+    api: spotifyApi,
+    // spotifyApi.play, NOT playOnBox: autoplay must never ADOPT. Adoption
+    // restarts librespot signed into the active account, and the guard that
+    // normally protects a live cast (`spotify.getState().is_playing`) is false by
+    // construction here, because end_of_track is what sets it false. So a guest
+    // casting from an unlinked account, whose own playlist happened to end, would
+    // have their session torn down and the box signed into the owner's. With a
+    // plain play, a box no linked account can see answers `box_not_found` and
+    // autoplay simply stays quiet - which is the right answer to "somebody else
+    // is using this".
+    play: (body) => spotifyApi.play(body),
+    isEnabled: autoplayEnabled,
+    log: (m) => host.log(m),
+  });
+
   // ---- HTTP routes (registered below via host.registerRoutes) ----
   // Kept at the historical /tvbox/api/spotify/* paths: the OAuth redirect URI
   // (spotify_api.REDIRECT_URI) is registered verbatim in the user's Spotify
@@ -567,7 +590,12 @@ module.exports = (host) => {
       });
     },
     "POST /event": (req, res, ctx) => {
-      spotify.handleEvent(ctx.body || {});
+      const ev = ctx.body || {};
+      spotify.handleEvent(ev);
+      // The same events, raw: autoplay needs the event NAME (a context running out
+      // is an end_of_track with nothing after it), which the rendered SSE state
+      // does not carry.
+      autoplay.onEvent(String(ev.player_event || "").toLowerCase(), ev.track_id);
       host.json(res, { ok: true });
     }, // librespot --onevent
     "POST /device-name": (req, res, ctx) => {
@@ -607,16 +635,39 @@ module.exports = (host) => {
       host.json(res, { ok: true });
     },
     "POST /control": (req, res, ctx) => {
+      const b = ctx.body || {};
+      // Somebody pressed a transport button, so somebody is in the room. That is
+      // the signal autoplay's unattended bound resets on, and unlike recognising
+      // its own tracks by id it cannot be fooled.
+      autoplay.userPlayed();
       spotifyApi
-        .control(String((ctx.body || {}).action || ""))
+        .control(String(b.action || ""), b.state)
         .then((r) => host.json(res, r))
         .catch((e) => host.json(res, { ok: false, error: String(e.message || e) }));
     },
+    // Shuffle and repeat are player-wide settings the cast metadata does not
+    // carry, so the transport toggles read them from here.
+    "GET /player": (req, res) => {
+      spotifyApi
+        .playerState()
+        .then((s) => host.json(res, s))
+        .catch((e) => host.json(res, { connected: false, error: String(e.message || e) }));
+    },
     "POST /play": (req, res, ctx) => {
       const b = ctx.body || {};
-      playOnBox({ contextUri: b.contextUri, uris: b.uris })
+      autoplay.userPlayed(); // a play the user asked for is not a link in an autoplay chain
+      playOnBox({ contextUri: b.contextUri, uris: b.uris, offset: b.offset, collection: b.collection })
         .then((r) => host.json(res, r))
         .catch((e) => host.json(res, { ok: false, error: String(e.message || e) }));
+    },
+    // Autoplay on/off. The shell's publicConfig does not carry this app's own
+    // flags, so the app serves its own state rather than reading it from there.
+    "GET /autoplay": (req, res) => host.json(res, { enabled: autoplayEnabled() }),
+    "POST /autoplay": (req, res, ctx) => {
+      const on = !!(ctx.body || {}).enabled;
+      host.config.setSpotify({ autoplay: on });
+      if (!on) autoplay.stop();
+      host.json(res, { ok: true, enabled: on });
     },
     "GET /auth/status": (req, res) => {
       spotifyApi
@@ -626,10 +677,13 @@ module.exports = (host) => {
     },
     "GET /auth/start": (req, res) => host.json(res, startSpotifyAuth()),
     "GET /auth/callback": (req, res) => handleSpotifyCallback(req, res),
+    // { tracks, total, truncated }: `truncated` so a library past the paging
+    // bound can say so on screen. A list that simply ends cannot be told from a
+    // shorter library.
     "GET /liked": (req, res) => {
       spotifyApi
         .getLiked()
-        .then((tracks) => host.json(res, { tracks }))
+        .then((r) => host.json(res, r))
         .catch((e) => host.json(res, { error: String(e.message || e), tracks: [] }));
     },
     "GET /playlists": (req, res) => {
@@ -642,7 +696,7 @@ module.exports = (host) => {
       const id = new URL(req.url, host.base).searchParams.get("id") || "";
       spotifyApi
         .getPlaylistItems(id)
-        .then((tracks) => host.json(res, { tracks }))
+        .then((r) => host.json(res, r))
         .catch((e) => host.json(res, { error: String(e.message || e), tracks: [] }));
     },
     "GET /search": (req, res) => {
@@ -778,6 +832,7 @@ module.exports = (host) => {
     },
     stop() {
       if (host.widget) host.widget.clear();
+      autoplay.stop();
       stopLibrespot();
     },
   };

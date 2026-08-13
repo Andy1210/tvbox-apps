@@ -5,7 +5,15 @@ import { useSpotifyStore } from "./stores/spotify";
 import { SpotifyConfig } from "./SpotifyConfig";
 import { SpotifyConnect } from "./SpotifyConnect";
 import { SpotifyKeysGuide } from "./SpotifyKeysGuide";
-import { authStatus, switchAccount, removeAccount, setSpotifyEnabled, type AuthStatus } from "./api";
+import {
+  authStatus,
+  switchAccount,
+  removeAccount,
+  setSpotifyEnabled,
+  getAutoplay,
+  setAutoplay,
+  type AuthStatus,
+} from "./api";
 
 // In-app Spotify settings: the Connect device name (always) and the OPTIONAL Web
 // API account connection (API keys via phone pairing, then on-box OAuth). Renaming
@@ -24,8 +32,17 @@ export function SpotifySettings({ onBack }: { onBack: () => void }) {
   const hasKeys = !!config?.spotify?.hasCredentials;
 
   const refreshAuth = () => authStatus().then(setAuth);
+  const [autoplay, setAutoplayOn] = useState(false);
+  // Until the box has answered, the row shows neither state and cannot be pressed.
+  // It defaults to off, so an early press would send "turn it on" against a value
+  // nobody had read yet, and the answer landing afterwards would overwrite what
+  // the press just set.
+  const [autoplayBusy, setAutoplayBusy] = useState(true);
   useEffect(() => {
     refreshAuth();
+    getAutoplay()
+      .then(setAutoplayOn)
+      .finally(() => setAutoplayBusy(false));
   }, []);
   const spEnabled = config?.spotify?.enabled ?? false;
   const [toggling, setToggling] = useState(false);
@@ -179,18 +196,40 @@ export function SpotifySettings({ onBack }: { onBack: () => void }) {
           </>
         )}
         {hasKeys && auth && auth.connected && (
-          <FocusButton
-            focusKey="sp-accounts-row"
-            onEnter={() => setMode("accounts")}
-            className="px-[2.5vw] py-[2vh] rounded-[1.4vh] bg-white/5 flex items-center justify-between gap-[2vw] max-w-[66vw]"
-          >
-            <span className="text-[2.1vh] truncate">
-              <span className="text-[#1DB954]">●</span> {t("spotify.connectedAs", { user: auth.user || "Spotify" })}
-            </span>
-            <span className="text-[1.9vh] text-fg-dim shrink-0">
-              {t("spotify.accounts")} ({auth.accounts.length}) ›
-            </span>
-          </FocusButton>
+          <>
+            <FocusButton
+              focusKey="sp-accounts-row"
+              onEnter={() => setMode("accounts")}
+              className="px-[2.5vw] py-[2vh] rounded-[1.4vh] bg-white/5 flex items-center justify-between gap-[2vw] max-w-[66vw]"
+            >
+              <span className="text-[2.1vh] truncate">
+                <span className="text-[#1DB954]">●</span> {t("spotify.connectedAs", { user: auth.user || "Spotify" })}
+              </span>
+              <span className="text-[1.9vh] text-fg-dim shrink-0">
+                {t("spotify.accounts")} ({auth.accounts.length}) ›
+              </span>
+            </FocusButton>
+
+            {/* Autoplay. Off by default: it starts music nobody asked for, in a
+                room that just went quiet. Needs the account, which is why it
+                lives under it. */}
+            <FocusButton
+              focusKey="sp-autoplay-row"
+              onEnter={async () => {
+                if (autoplayBusy) return;
+                setAutoplayBusy(true);
+                setAutoplayOn(await setAutoplay(!autoplay));
+                setAutoplayBusy(false);
+              }}
+              className="mt-[1vh] px-[2.5vw] py-[2vh] rounded-[1.4vh] bg-white/5 flex items-center justify-between gap-[2vw] max-w-[66vw]"
+            >
+              <span className="text-[2.1vh] text-fg-dim shrink-0">{t("spotify.autoplay")}</span>
+              <span className={"text-[2.4vh] font-semibold " + (autoplay ? "text-[#1DB954]" : "text-fg-dim")}>
+                {autoplayBusy ? t("spotify.saving") : autoplay ? t("spotify.on") : t("spotify.off")}
+              </span>
+            </FocusButton>
+            <div className="text-[1.6vh] text-fg-dim/70 max-w-[66vw]">{t("spotify.autoplayHint")}</div>
+          </>
         )}
       </div>
     </FocusContext.Provider>
