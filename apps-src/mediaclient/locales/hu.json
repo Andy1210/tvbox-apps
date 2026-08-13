@@ -1,0 +1,11 @@
+{
+  "_meta": {
+    "name": "Magyar",
+    "tag": "hu-HU"
+  },
+  "app": {
+    "name": "Média",
+    "empty": "Még nincs beállítva szerver. Amint lesz, itt jelennek meg a filmjeid és sorozataid.",
+    "back": "Vissza a boxhoz"
+  }
+}
