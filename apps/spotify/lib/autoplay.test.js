@@ -29,12 +29,13 @@ function fakeApi(over) {
       calls.artistTopTracks++;
       return over.artistTopTracks ? over.artistTopTracks(a) : [track(a + "-1"), track(a + "-2"), track(a + "-3")];
     },
-    // The REAL playerState never throws: it catches its own errors and answers
+    // The REAL boxPlayerState never throws: it catches its own errors and answers
     // with `ok: false`. A fake that throws instead would let a fail-open guard
-    // pass its test, which is exactly what happened here once.
-    async playerState() {
+    // pass its test, which is exactly what happened here once. It answers about
+    // THE BOX, not about the active account's player.
+    async boxPlayerState() {
       calls.playerState++;
-      return over.playerState ? over.playerState() : { ok: true, connected: true, is_playing: false };
+      return over.playerState ? over.playerState() : { ok: true, box: true, is_playing: false };
     },
     ...over.extra,
   };
@@ -198,7 +199,7 @@ test("switched off, it stays silent", async () => {
 });
 
 test("something already playing means the silence was not an ending", async () => {
-  const { a, played } = watcher({ api: { playerState: () => ({ ok: true, connected: true, is_playing: true }) } });
+  const { a, played } = watcher({ api: { playerState: () => ({ ok: true, box: true, is_playing: true }) } });
   a.onEvent("playing", "t1");
   a.onEvent("end_of_track", "t1");
   await tick(30);
@@ -210,8 +211,20 @@ test("a player state we could not read is not permission to start music", async 
   // ok:false and NO is_playing. Read as "nothing is playing", it would push
   // autoplay's tracks over a session that never actually stopped.
   const { a, played } = watcher({
-    api: { playerState: () => ({ ok: false, connected: true, shuffle: false, repeat: "off", error: "HTTP 429" }) },
+    api: { playerState: () => ({ ok: false, box: false, is_playing: false, error: "HTTP 429" }) },
   });
+  a.onEvent("playing", "t1");
+  a.onEvent("end_of_track", "t1");
+  await tick(30);
+  assert.equal(played.length, 0);
+});
+
+test("a box no linked account is driving is not continued either", async () => {
+  // The guard reads the player of whichever account drives the box. When none
+  // does, a continuation could not be played there anyway, and the old shape
+  // (asking the ACTIVE account) would have answered "nothing is playing" about a
+  // completely different device.
+  const { a, played } = watcher({ api: { playerState: () => ({ ok: true, box: false, is_playing: false }) } });
   a.onEvent("playing", "t1");
   a.onEvent("end_of_track", "t1");
   await tick(30);

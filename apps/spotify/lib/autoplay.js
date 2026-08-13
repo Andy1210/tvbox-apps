@@ -171,11 +171,17 @@ function createAutoplay({ api, play, isEnabled, log, graceMs }) {
       if (chain >= MAX_CHAIN) return say("chain limit reached; stopping here");
       if (unattended >= MAX_UNATTENDED) return say("nothing has been asked for in a while; stopping here");
       // The events alone cannot say whether the silence is an ending, so ask the
-      // player - and require an ANSWER. `ok` false means we could not find out,
-      // which is not the same as "nothing is playing": treating it as such is how
-      // autoplay would push its own tracks over a session that never stopped.
-      const st = await api.playerState();
+      // player - and require an ANSWER about THE BOX. Three ways this must not
+      // proceed, and each was a way of starting music over somebody:
+      //   ok false     we could not find out, which is not "nothing is playing",
+      //   box false    no linked account is driving this box, so a continuation
+      //                could not reach it anyway,
+      //   is_playing   something is playing, so the silence was not an ending.
+      // Asking the ACTIVE account's player instead would answer about a different
+      // device entirely whenever the box is being driven by another linked one.
+      const st = await api.boxPlayerState();
       if (!st || !st.ok) return say("player state unknown; not continuing");
+      if (!st.box) return say("no linked account is driving this box; not continuing");
       if (st.is_playing) return;
       if (cancelled()) return say("called off before it started");
       const { uris, source } = await continuation(armedSeeds, api, state);

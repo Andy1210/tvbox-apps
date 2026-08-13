@@ -655,6 +655,43 @@ async function findBoxAccount() {
   }
   return null;
 }
+// What THE BOX is doing, which is a different question from what the active
+// account's player is doing, and the only one autoplay may act on.
+//
+// librespot is signed into one account at a time, so the box appears in exactly
+// that account's device list - which is what findBoxAccount resolves. Asking the
+// ACTIVE account instead reads a different player: on a box with two accounts
+// linked, a cast running under one of them is invisible to the other, and
+// "nothing is playing" would then be permission to start music over it.
+//
+// `ok` false means we could not find out. `box` false means no linked account is
+// driving this box, in which case a continuation could not be played there
+// either, so the two answers stay consistent.
+async function boxPlayerState() {
+  const unknown = { ok: false, box: false, is_playing: false };
+  if (!connected()) return { ...unknown, ok: true };
+  let found;
+  try {
+    found = await findBoxAccount();
+  } catch (e) {
+    return { ...unknown, error: String(e.message || e) };
+  }
+  if (!found) return { ok: true, box: false, is_playing: false };
+  try {
+    const p = await apiGet(found.account, "/me/player");
+    const device = ((p && p.device) || {}).name || "";
+    const want = spotifyBridge.deviceName().trim().toLowerCase();
+    return {
+      ok: true,
+      box: device.trim().toLowerCase() === want,
+      is_playing: !!(p && p.is_playing),
+      device,
+    };
+  } catch (e) {
+    return { ...unknown, error: String(e.message || e) };
+  }
+}
+
 // A fresh access token for the ACTIVE account (for handing the box's librespot
 // this account's session — the play path's "adopt" step in the Spotify plugin).
 function activeAccessToken() {
@@ -902,6 +939,7 @@ module.exports = {
   play,
   control,
   playerState,
+  boxPlayerState,
   recommendations,
   artistTopTracks,
   primaryArtistId,
