@@ -1,4 +1,10 @@
-import { FocusButton, useBackspace, useI18n } from "@sdk";
+import { useEffect } from "react";
+import { useBackspace } from "@sdk";
+import { Home } from "./Home";
+import { Library } from "./Library";
+import { Login } from "./Login";
+import { Message } from "./Message";
+import { useApp } from "./state";
 
 export interface MediaClientProps {
   /** Leave the app and return to the launcher. */
@@ -8,30 +14,41 @@ export interface MediaClientProps {
 /**
  * Root of the media client.
  *
- * Skeleton: it renders, takes focus, and leaves on Back. The player stage is
- * already here because the shell reveals mpv by making this page transparent,
- * and the node it makes transparent is named in the manifest
- * (`transparentSelector`) - so the id has to exist from the first build or the
- * reveal has nothing to act on.
+ * The player stage is a sibling of every screen rather than something the player
+ * mounts: the shell reveals mpv by making this page transparent down to the node
+ * the manifest names, so that node has to exist whether or not anything is
+ * playing.
  */
 export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
-  const { t } = useI18n();
+  const screen = useApp((s) => s.screen);
+  const boot = useApp((s) => s.boot);
+  const back = useApp((s) => s.back);
 
-  // Back leaves the app. The remote's Back arrives as any of several keys
-  // depending on how the shell synthesised it, which is what useBackspace knows.
-  useBackspace(onExit);
+  useEffect(() => {
+    void boot();
+  }, [boot]);
+
+  // Back walks the screens first and only leaves the app from the top, which is
+  // what the remote's Back means everywhere else on this box.
+  useBackspace(() => {
+    if (!back()) onExit();
+  });
 
   return (
     <div className="flex h-full flex-col">
-      {/* The film plays behind this element; it must not paint over it. */}
       <div id="player-stage" className="pointer-events-none absolute inset-0" />
-
-      <main className="relative flex flex-1 flex-col items-center justify-center gap-[3vh] px-[6vw]">
-        <h1 className="text-[4vh] font-semibold tracking-tight">{t("app.name")}</h1>
-        <p className="max-w-[60vw] text-center text-[2.2vh] text-fg-dim">{t("app.empty")}</p>
-        <FocusButton focusKey="exit" onEnter={onExit}>
-          {t("app.back")}
-        </FocusButton>
+      <main className="relative flex flex-1 flex-col overflow-hidden">
+        {screen.name === "boot" && <Message loading />}
+        {screen.name === "login" && <Login />}
+        {screen.name === "home" && <Home />}
+        {screen.name === "library" && (
+          // Keyed on the library so switching between two of them starts a fresh
+          // grid rather than showing the previous one's rows while it reloads.
+          <Library key={screen.libraryId} libraryId={screen.libraryId} title={screen.title} />
+        )}
+        {(screen.name === "item" || screen.name === "person" || screen.name === "search" || screen.name === "settings") && (
+          <Message text="…" />
+        )}
       </main>
     </div>
   );

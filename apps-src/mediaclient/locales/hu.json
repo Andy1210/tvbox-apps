@@ -7,5 +7,32 @@
     "name": "Média",
     "empty": "Még nincs beállítva szerver. Amint lesz, itt jelennek meg a filmjeid és sorozataid.",
     "back": "Vissza a boxhoz"
+  },
+  "common": {
+    "loading": "Betöltés…"
+  },
+  "login": {
+    "title": "Belépés a szerveredre",
+    "starting": "Kód kérése a fiókodtól…",
+    "instruction": "A telefonodon vagy a gépeden nyisd meg a(z) {url} címet, és írd be ezt a kódot:",
+    "waiting": "Ez a képernyő magától továbblép, amint beírtad.",
+    "expired": "A kód lejárt, mielőtt beírtad volna. Kérj újat, és próbáld meg ismét.",
+    "failed": "Nem sikerült elérni a fiókodat. Ellenőrizd, hogy a box a hálózaton van-e, aztán próbáld újra.",
+    "retry": "Új kód kérése"
+  },
+  "home": {
+    "continue": "Folytasd, ahol abbahagytad",
+    "recentIn": "Újdonságok itt: {library}",
+    "libraries": "Könyvtárak",
+    "empty": "Ezen a szerveren még nincs semmi."
+  },
+  "error": {
+    "unreachable": "A szerver nem érhető el. Lehet, hogy ki van kapcsolva, vagy a box nincs a hálózaton.",
+    "signedOut": "A szerver már nem fogadja el ezt a belépést. Lépj be újra a folytatáshoz.",
+    "noServer": "Ehhez a fiókhoz nem tartozik a box által elérhető szerver.",
+    "unknown": "Hiba történt a szerverrel való kommunikáció közben."
+  },
+  "library": {
+    "all": "Mind"
   }
 }
