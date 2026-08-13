@@ -1,3 +1,4 @@
+import { useI18n } from "@sdk";
 import type { Score } from "./backends/types";
 
 /**
@@ -13,6 +14,7 @@ import type { Score } from "./backends/types";
  * the actual screen.
  */
 export function Scores({ scores }: { scores: Score[] }): React.JSX.Element | null {
+  const { t } = useI18n();
   if (scores.length === 0) return null;
 
   // Critics before audience within a source, sources in a stable order, so the
@@ -30,16 +32,19 @@ export function Scores({ scores }: { scores: Score[] }): React.JSX.Element | nul
         <div key={`${s.source}-${s.kind}`} className="flex items-center gap-[0.5vw]">
           <Mark score={s} />
           <span className="text-[1.9vh] font-semibold tabular-nums">{s.value.toFixed(1)}</span>
-          <span className="text-[1.7vh] text-fg-dim">{label(s)}</span>
+          <span className="text-[1.7vh] text-fg-dim">{label(s, t)}</span>
         </div>
       ))}
     </div>
   );
 }
 
-function label(s: Score): string {
+function label(s: Score, t: (key: string, vars?: Record<string, string>) => string): string {
   const source = s.source === "rottentomatoes" ? "RT" : s.source === "themoviedb" ? "TMDB" : "IMDb";
-  return s.kind === "critic" ? source : `${source} · viewers`;
+  // "viewers" is a word on screen, so it belongs in the locale files rather than
+  // in a template here - a Hungarian television would otherwise read "IMDb ·
+  // viewers".
+  return s.kind === "critic" ? source : t("detail.audienceScore", { source });
 }
 
 function Mark({ score }: { score: Score }): React.JSX.Element {

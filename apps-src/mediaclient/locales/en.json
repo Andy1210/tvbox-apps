@@ -4,9 +4,7 @@
     "tag": "en-GB"
   },
   "app": {
-    "name": "Media",
-    "empty": "No server is set up yet. Once one is, your films and series show up here.",
-    "back": "Back to the box"
+    "name": "Media"
   },
   "common": {
     "loading": "Loading…"
@@ -50,7 +48,10 @@
     "extras": "Trailers and extras",
     "reviews": "Reviews",
     "moreReviews": "Show {n} more",
-    "fromStart": "From the start"
+    "fromStart": "From the start",
+    "audienceScore": "{source} · viewers",
+    "runtimeHm": "{h}h {m}m",
+    "runtimeM": "{m}m"
   },
   "person": {
     "films": "Films",
