@@ -3,6 +3,8 @@ import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-naviga
 import { useI18n } from "@sdk";
 import { Row } from "./Row";
 import { Message } from "./Message";
+import { artworkScale } from "./posters";
+import { useInitialFocus } from "./focus";
 import { classify, useApp } from "./state";
 import type { CreditSet, MediaItem } from "./backends/types";
 import { log } from "./redact";
@@ -26,6 +28,7 @@ export function Person({ personId, personName }: { personId: string; personName:
   const go = useApp((s) => s.go);
   const fail = useApp((s) => s.fail);
   const failure = useApp((s) => s.failure);
+  const [reload, setReload] = useState(0);
   const [credits, setCredits] = useState<CreditSet | null>(null);
 
   useEffect(() => {
@@ -45,14 +48,16 @@ export function Person({ personId, personName }: { personId: string; personName:
     return () => {
       live = false;
     };
-  }, [backend, personId, personName, fail]);
+  }, [backend, personId, personName, fail, reload]);
 
   const { ref, focusKey } = useFocusable({ focusKey: `person-${personId}`, saveLastFocusedChild: true });
+  const firstCredit = credits?.items.find((c) => c.kind === "movie") ?? credits?.items[0];
+  useInitialFocus(firstCredit ? `${firstCredit.kind === "movie" ? "films" : "series"}-${firstCredit.id}` : undefined, Boolean(credits));
 
-  if (failure) return <Message failure={failure} />;
+  if (failure) return <Message failure={failure} onRetry={() => setReload((n) => n + 1)} />;
   if (!credits) return <Message loading />;
 
-  const poster = (item: MediaItem): string | undefined => backend?.posterUrl(item, 300, 450);
+  const poster = (item: MediaItem): string | undefined => backend?.posterUrl(item, 300 * artworkScale(), 450 * artworkScale());
   const open = (item: MediaItem): void => go({ name: "item", itemId: item.id });
 
   const films = credits.items.filter((c) => c.kind === "movie");
@@ -73,7 +78,7 @@ export function Person({ personId, personName }: { personId: string; personName:
         <Row id="films" title={t("person.films")} items={films} posterUrl={poster} onSelect={open} />
         <Row id="series" title={t("person.series")} items={series} posterUrl={poster} onSelect={open} />
 
-        {credits.truncated && <p className="px-[4vw] text-[1.5vh] text-fg-dim/70">{t("person.partial")}</p>}
+        {credits.truncated && <p className="px-[4vw] text-[1.7vh] text-fg-dim">{t("person.partial")}</p>}
       </div>
     </FocusContext.Provider>
   );

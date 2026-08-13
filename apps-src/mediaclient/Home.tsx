@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useI18n } from "@sdk";
 import { Row } from "./Row";
 import { Message } from "./Message";
+import { artworkScale } from "./posters";
+import { useInitialFocus } from "./focus";
 import { classify, useApp } from "./state";
 import type { Library, MediaItem } from "./backends/types";
 import { log } from "./redact";
@@ -26,6 +28,7 @@ export function Home(): React.JSX.Element {
   const go = useApp((s) => s.go);
   const fail = useApp((s) => s.fail);
   const failure = useApp((s) => s.failure);
+  const [reload, setReload] = useState(0);
   const [data, setData] = useState<Loaded | null>(null);
 
   useEffect(() => {
@@ -61,12 +64,21 @@ export function Home(): React.JSX.Element {
     return () => {
       live = false;
     };
-  }, [backend, fail]);
+  }, [backend, fail, reload]);
 
-  const poster = (item: MediaItem): string | undefined => backend?.posterUrl(item, 300, 450);
+  // The first thing worth pressing: what you were watching, or a library when
+  // there is nothing to carry on with.
+  const firstKey = data?.onDeck.length
+    ? `ondeck-${data.onDeck[0].id}`
+    : data?.libraries.length
+      ? `libraries-lib:${data.libraries[0].id}`
+      : undefined;
+  useInitialFocus(firstKey, Boolean(data));
+
+  const poster = (item: MediaItem): string | undefined => backend?.posterUrl(item, 300 * artworkScale(), 450 * artworkScale());
   const open = (item: MediaItem): void => go({ name: "item", itemId: item.id });
 
-  if (failure) return <Message failure={failure} />;
+  if (failure) return <Message failure={failure} onRetry={() => setReload((n) => n + 1)} />;
   if (!data) return <Message loading />;
 
   const nothing = data.onDeck.length === 0 && data.recent.length === 0;

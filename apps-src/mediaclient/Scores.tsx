@@ -30,7 +30,7 @@ export function Scores({ scores }: { scores: Score[] }): React.JSX.Element | nul
         <div key={`${s.source}-${s.kind}`} className="flex items-center gap-[0.5vw]">
           <Mark score={s} />
           <span className="text-[1.9vh] font-semibold tabular-nums">{s.value.toFixed(1)}</span>
-          <span className="text-[1.4vh] text-fg-dim">{label(s)}</span>
+          <span className="text-[1.7vh] text-fg-dim">{label(s)}</span>
         </div>
       ))}
     </div>
@@ -66,7 +66,7 @@ function Mark({ score }: { score: Score }): React.JSX.Element {
 
   if (score.source === "imdb") {
     return (
-      <span className="rounded-[0.3vh] bg-[#f5c518] px-[0.5vw] py-[0.1vh] text-[1.3vh] font-bold text-black">
+      <span className="rounded-[0.3vh] bg-[#f5c518] px-[0.5vw] py-[0.1vh] text-[1.7vh] font-bold text-black">
         IMDb
       </span>
     );

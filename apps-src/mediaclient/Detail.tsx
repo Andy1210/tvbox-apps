@@ -3,10 +3,12 @@ import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-naviga
 import { FocusButton, useI18n } from "@sdk";
 import { Row } from "./Row";
 import { Message } from "./Message";
+import { artworkScale } from "./posters";
 import { CastRow } from "./CastRow";
 import { Scores } from "./Scores";
 import { Reviews } from "./Reviews";
 import { TitleArt } from "./TitleArt";
+import { useInitialFocus } from "./focus";
 import { usePlayer } from "./playback/player";
 import { classify, useApp } from "./state";
 import type { ItemDetail, MediaItem } from "./backends/types";
@@ -33,6 +35,7 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
   const go = useApp((s) => s.go);
   const fail = useApp((s) => s.fail);
   const failure = useApp((s) => s.failure);
+  const [reload, setReload] = useState(0);
   const [detail, setDetail] = useState<ItemDetail | null>(null);
   const [children, setChildren] = useState<MediaItem[]>([]);
 
@@ -64,14 +67,15 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
     return () => {
       live = false;
     };
-  }, [backend, itemId, fail]);
+  }, [backend, itemId, fail, reload]);
 
   const { ref, focusKey } = useFocusable({ focusKey: `detail-${itemId}`, saveLastFocusedChild: true });
+  useInitialFocus("detail-play", Boolean(detail));
 
-  if (failure) return <Message failure={failure} />;
+  if (failure) return <Message failure={failure} onRetry={() => setReload((n) => n + 1)} />;
   if (!detail) return <Message loading />;
 
-  const poster = (item: MediaItem): string | undefined => backend?.posterUrl(item, 300, 450);
+  const poster = (item: MediaItem): string | undefined => backend?.posterUrl(item, 300 * artworkScale(), 450 * artworkScale());
   const resumable = (detail.viewOffsetMs ?? 0) > 0;
 
   return (
@@ -86,7 +90,7 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
             {detail.year ? <span className="tabular-nums">{detail.year}</span> : null}
             {detail.durationMs ? <span className="tabular-nums">{runtime(detail.durationMs)}</span> : null}
             {detail.contentRating ? (
-              <span className="rounded-[0.4vh] border border-white/25 px-[0.6vw] py-[0.1vh]">
+              <span className="rounded-[0.4vh] border border-white/40 px-[0.6vw] py-[0.1vh]">
                 {detail.contentRating}
               </span>
             ) : null}
