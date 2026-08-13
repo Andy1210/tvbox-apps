@@ -4,9 +4,7 @@
     "tag": "hu-HU"
   },
   "app": {
-    "name": "Média",
-    "empty": "Még nincs beállítva szerver. Amint lesz, itt jelennek meg a filmjeid és sorozataid.",
-    "back": "Vissza a boxhoz"
+    "name": "Média"
   },
   "common": {
     "loading": "Betöltés…"
@@ -50,7 +48,10 @@
     "extras": "Előzetesek és extrák",
     "reviews": "Kritikák",
     "moreReviews": "Még {n} megjelenítése",
-    "fromStart": "Elölről"
+    "fromStart": "Elölről",
+    "audienceScore": "{source} · nézők",
+    "runtimeHm": "{h} ó {m} p",
+    "runtimeM": "{m} p"
   },
   "person": {
     "films": "Filmek",

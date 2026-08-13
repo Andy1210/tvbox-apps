@@ -14,12 +14,14 @@ import { classify, useApp } from "./state";
 import type { ItemDetail, MediaItem } from "./backends/types";
 import { log } from "./redact";
 
-function runtime(ms: number | undefined): string {
+/** Hours and minutes, with the unit letters coming from the locale - "2h 14m"
+ *  is not how a Hungarian television says it. */
+function runtime(ms: number | undefined, t: (key: string, vars?: Record<string, string>) => string): string {
   if (!ms) return "";
   const total = Math.round(ms / 60000);
   const h = Math.floor(total / 60);
   const m = total % 60;
-  return h ? `${h}h ${m}m` : `${m}m`;
+  return h ? t("detail.runtimeHm", { h: String(h), m: String(m) }) : t("detail.runtimeM", { m: String(m) });
 }
 
 /**
@@ -88,7 +90,7 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
 
           <div className="flex flex-wrap items-center gap-[1.4vw] text-[1.7vh] text-fg-dim">
             {detail.year ? <span className="tabular-nums">{detail.year}</span> : null}
-            {detail.durationMs ? <span className="tabular-nums">{runtime(detail.durationMs)}</span> : null}
+            {detail.durationMs ? <span className="tabular-nums">{runtime(detail.durationMs, t)}</span> : null}
             {detail.contentRating ? (
               <span className="rounded-[0.4vh] border border-white/40 px-[0.6vw] py-[0.1vh]">
                 {detail.contentRating}
