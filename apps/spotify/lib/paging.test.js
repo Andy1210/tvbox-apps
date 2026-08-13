@@ -16,6 +16,8 @@ const assert = require("node:assert");
 const https = require("https");
 const { EventEmitter } = require("events");
 
+const REAL_HOME = process.env.HOME;
+const REAL_REQUEST = https.request;
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-spotify-paging-"));
 process.env.HOME = HOME;
 fs.mkdirSync(path.join(HOME, ".tvbox"), { recursive: true });
@@ -58,6 +60,17 @@ https.request = (opts, cb) => {
 
 const api = require("./spotify_api");
 api.setConfig({ rawSpotify: () => ({ clientId: "id", clientSecret: "secret" }) });
+
+// Put back what this file took over. Node runs each test file in its own
+// process, so nothing else would notice today, but a stubbed core module and a
+// redirected HOME left behind are the kind of thing that only bites once
+// somebody adds a second file here.
+test.after(() => {
+  https.request = REAL_REQUEST;
+  fs.rmSync(HOME, { recursive: true, force: true });
+  if (REAL_HOME === undefined) delete process.env.HOME;
+  else process.env.HOME = REAL_HOME;
+});
 
 const TOKEN = { status: 200, body: JSON.stringify({ access_token: "at", expires_in: 3600 }) };
 

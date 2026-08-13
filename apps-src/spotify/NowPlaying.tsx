@@ -200,7 +200,12 @@ export function NowPlaying({
   // `active` as well as the name: a player that stopped can still carry the device
   // it last played on, and settings shown for a player that is not running are a
   // claim about nothing.
-  const onThisBox = !!player?.ok && !!player.active && !!player.device && player.device === (state?.device_name || "");
+  // The two names come from different places: the Web API's device list, and what
+  // librespot was told to call itself. Fold them the same way the box does server
+  // side, or a difference in case or a stray space hides the settings on the very
+  // box they belong to.
+  const sameDevice = (a: string, b: string) => !!a.trim() && a.trim().toLowerCase() === b.trim().toLowerCase();
+  const onThisBox = !!player?.ok && !!player.active && sameDevice(player.device || "", state?.device_name || "");
 
   const doControl = (a: string, v?: boolean | string) =>
     void control(a, v).then((err) => {
