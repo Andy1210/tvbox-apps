@@ -1,0 +1,30 @@
+{
+ "MediaContainer": {
+  "Metadata": [
+   {
+    "Marker": [
+     {
+      "endTimeOffset": 75000,
+      "startTimeOffset": 12000,
+      "type": "intro"
+     },
+     {
+      "endTimeOffset": 1500000,
+      "final": true,
+      "startTimeOffset": 1420000,
+      "type": "credits"
+     }
+    ],
+    "addedAt": 1609459200,
+    "duration": 1500000,
+    "grandparentTitle": "Example Series",
+    "index": 4,
+    "parentIndex": 2,
+    "ratingKey": "101",
+    "title": "The Second Part",
+    "type": "episode"
+   }
+  ],
+  "size": 1
+ }
+}
