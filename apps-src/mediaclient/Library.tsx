@@ -47,6 +47,11 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
 
   const scroller = useRef<HTMLDivElement>(null);
   const pending = useRef(new Set<number>());
+  // Pages the server has answered, short or not. Relying on the cells staying
+  // null instead means a page that comes back with fewer items than it claims -
+  // items removed mid-browse, a section refreshing - is requested again on every
+  // render, forever.
+  const answered = useRef(new Set<number>());
   const generation = useRef(0);
 
   // Row height in pixels: tiles are sized in vh, so this has to follow the
@@ -79,13 +84,14 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   // bucket list and the sorted grid do not agree on where accented initials go.
   const loadPage = useCallback(
     async (page: number) => {
-      if (!backend || pending.current.has(page)) return;
+      if (!backend || pending.current.has(page) || answered.current.has(page)) return;
       pending.current.add(page);
       const mine = generation.current;
       try {
         const q = { offset: page * PAGE, limit: PAGE, sort: "titleSort" as const };
         const res = letter ? await backend.letterPage(libraryId, letter, q) : await backend.libraryPage(libraryId, q);
         if (mine !== generation.current) return;
+        answered.current.add(page);
 
         setTotal((prev) => res.total ?? prev ?? res.items.length);
         setItems((prev) => {
@@ -111,6 +117,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   useEffect(() => {
     generation.current += 1;
     pending.current.clear();
+    answered.current.clear();
     setItems([]);
     setTotal(null);
     setScrollTop(0);
@@ -126,8 +133,12 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   // so a fast scroll does not queue the same request repeatedly.
   useEffect(() => {
     for (let r = firstRow; r < lastRow; r += 1) {
-      const page = Math.floor((r * COLUMNS) / PAGE);
-      if (items[r * COLUMNS] === undefined || items[r * COLUMNS] === null) void loadPage(page);
+      // Both ends of the row: a row that straddles a page boundary would
+      // otherwise only ever ask for the first of the two, and on the last row
+      // there is no following row to ask for the second.
+      const first = Math.floor((r * COLUMNS) / PAGE);
+      const last = Math.floor(((r + 1) * COLUMNS - 1) / PAGE);
+      for (let p = first; p <= last; p += 1) void loadPage(p);
     }
   }, [firstRow, lastRow, items, loadPage]);
 

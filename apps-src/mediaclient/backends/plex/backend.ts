@@ -331,6 +331,19 @@ export class PlexBackend implements MediaBackend {
     return { "X-Plex-Token": this.session.token };
   }
 
+  /**
+   * Turn a server-relative art path into a URL.
+   *
+   * Artwork arrives as a path like "/library/metadata/1/clearLogo/2". Handing
+   * that to fetch resolves it against the APP's origin - the box's own shell -
+   * which answers with its web page rather than a 404, so the failure is an
+   * image that will not decode rather than an error anyone can see.
+   */
+  artUrl(path: string): string {
+    if (/^https?:\/\//.test(path)) return path;
+    return buildUrl(this.base, path.replace(/^\//, ""));
+  }
+
   // ---- playback ---------------------------------------------------------
 
   /** Reads the same document the detail screen just fetched, not a second copy. */
@@ -366,6 +379,13 @@ export class PlexBackend implements MediaBackend {
       directStream: 1,
       fastSeek: 1,
       copyts: 1,
+      // Not optional, and its absence is not a default. Asking for a media
+      // decision while the server has auto-selected a subtitle for the item is
+      // refused outright - measured, seven of the first twelve films on this
+      // server, because a subtitle track is the ordinary case here. Naming a
+      // setting avoids it; "none" is the one that matches handing the player
+      // its own track choice.
+      subtitles: "none",
       session: opts.session,
       "X-Plex-Client-Profile-Name": CLIENT_PROFILE,
       "X-Plex-Client-Profile-Extra": PROFILE_EXTRA,

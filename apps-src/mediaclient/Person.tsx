@@ -4,7 +4,7 @@ import { useI18n } from "@sdk";
 import { Row } from "./Row";
 import { Message } from "./Message";
 import { artworkScale } from "./posters";
-import { useInitialFocus } from "./focus";
+import { useFocusFallback, useInitialFocus } from "./focus";
 import { classify, useApp } from "./state";
 import type { CreditSet, MediaItem } from "./backends/types";
 import { log } from "./redact";
@@ -52,7 +52,11 @@ export function Person({ personId, personName }: { personId: string; personName:
 
   const { ref, focusKey } = useFocusable({ focusKey: `person-${personId}`, saveLastFocusedChild: true });
   const firstCredit = credits?.items.find((c) => c.kind === "movie") ?? credits?.items[0];
-  useInitialFocus(firstCredit ? `${firstCredit.kind === "movie" ? "films" : "series"}-${firstCredit.id}` : undefined, Boolean(credits));
+  const firstCreditKey = firstCredit ? `${firstCredit.kind === "movie" ? "films" : "series"}-${firstCredit.id}` : undefined;
+  useInitialFocus(firstCreditKey, Boolean(credits));
+  // Focus is set once; without a fallback anything that unmounts the focused
+  // tile afterwards leaves the D-pad dead with only Back working.
+  useFocusFallback(firstCreditKey, (key) => key.startsWith("films-") || key.startsWith("series-"));
 
   if (failure) return <Message failure={failure} onRetry={() => setReload((n) => n + 1)} />;
   if (!credits) return <Message loading />;

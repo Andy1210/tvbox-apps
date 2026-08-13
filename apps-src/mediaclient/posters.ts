@@ -47,12 +47,19 @@ interface Entry {
 const cache = new Map<string, Entry>();
 const inflight = new Map<string, Promise<string | null>>();
 let clock = 0;
+// Bumped by clearImages so a fetch started under the previous session cannot
+// write its result into the cache the next one reads.
+let generation = 0;
 
 function evictIfNeeded(): void {
   if (cache.size <= MAX_ENTRIES) return;
   const victims = [...cache.entries()].sort((a, b) => a[1].used - b[1].used).slice(0, cache.size - MAX_ENTRIES);
-  for (const [key, entry] of victims) {
-    URL.revokeObjectURL(entry.objectUrl);
+  for (const [key] of victims) {
+    // Dropped, not revoked. The coldest entries are the ones that loaded first,
+    // which on a long screen are still on display - revoking one under an <img>
+    // that has not finished decoding makes it fail permanently, and a tile that
+    // has latched onto a broken image never recovers without a remount. The
+    // browser reclaims an unreferenced blob on its own.
     cache.delete(key);
   }
 }
@@ -71,11 +78,16 @@ export async function loadImage(url: string, headers: Record<string, string>): P
   const running = inflight.get(url);
   if (running) return running;
 
+  const mine = generation;
   const task = (async () => {
     try {
       const res = await fetch(url, { headers });
       if (!res.ok) return null;
       const blob = await res.blob();
+      // Signed out while this was in flight: the answer belongs to the previous
+      // account, and poster URLs repeat across sessions, so caching it would
+      // show one household member another one's artwork.
+      if (mine !== generation) return null;
       // Two requests for the same poster can finish together; keep the first.
       const existing = cache.get(url);
       if (existing) return existing.objectUrl;
@@ -98,6 +110,7 @@ export async function loadImage(url: string, headers: Record<string, string>): P
 /** Drop everything. Called when the session changes, so one account's artwork
  *  is not shown to the next. */
 export function clearImages(): void {
+  generation += 1;
   for (const entry of cache.values()) URL.revokeObjectURL(entry.objectUrl);
   cache.clear();
   inflight.clear();

@@ -249,6 +249,10 @@ export interface MediaBackend {
   posterUrl(item: MediaItem, w: number, h: number): string | undefined;
   /** Auth headers for fetching artwork. */
   imageHeaders(): Record<string, string>;
+  /** Absolutise a server-relative art path. Returns an absolute URL unchanged,
+   *  since some artwork is hosted by the metadata provider rather than by the
+   *  server. */
+  artUrl(path: string): string;
 
   // --- playback ---
   resolveStream(id: string, opts: { session: string; panel?: { width: number; height: number } | null }): Promise<StreamDecision>;
