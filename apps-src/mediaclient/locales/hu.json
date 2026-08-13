@@ -40,7 +40,10 @@
     "resume": "Folytatás",
     "seasons": "Évadok",
     "episodes": "Epizódok",
-    "cast": "Szereplők"
+    "cast": "Szereplők",
+    "extras": "Előzetesek és extrák",
+    "reviews": "Kritikák",
+    "moreReviews": "Még {n} megjelenítése"
   },
   "person": {
     "films": "Filmek",

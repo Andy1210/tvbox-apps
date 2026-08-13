@@ -40,7 +40,10 @@
     "resume": "Carry on",
     "seasons": "Seasons",
     "episodes": "Episodes",
-    "cast": "Cast"
+    "cast": "Cast",
+    "extras": "Trailers and extras",
+    "reviews": "Reviews",
+    "moreReviews": "Show {n} more"
   },
   "person": {
     "films": "Films",
