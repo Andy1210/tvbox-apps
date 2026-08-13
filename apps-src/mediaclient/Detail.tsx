@@ -4,6 +4,9 @@ import { FocusButton, useI18n } from "@sdk";
 import { Row } from "./Row";
 import { Message } from "./Message";
 import { CastRow } from "./CastRow";
+import { Scores } from "./Scores";
+import { Reviews } from "./Reviews";
+import { TitleArt } from "./TitleArt";
 import { classify, useApp } from "./state";
 import type { ItemDetail, MediaItem } from "./backends/types";
 import { log } from "./redact";
@@ -74,10 +77,9 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
     <FocusContext.Provider value={focusKey}>
       <div ref={ref} className="flex h-full flex-col gap-[2.4vh] overflow-y-auto py-[3vh]">
         <header className="flex flex-col gap-[1.2vh] px-[4vw]">
-          <h1 className="text-[3.4vh] leading-tight font-semibold tracking-tight">
-            {detail.seriesTitle ?? detail.title}
-          </h1>
+          <TitleArt title={detail.seriesTitle ?? detail.title} logo={detail.logo} />
           {detail.seriesTitle && <p className="text-[2vh] text-fg-dim">{detail.title}</p>}
+          {detail.tagline && <p className="text-[1.9vh] text-fg-dim italic">{detail.tagline}</p>}
 
           <div className="flex flex-wrap items-center gap-[1.4vw] text-[1.7vh] text-fg-dim">
             {detail.year ? <span className="tabular-nums">{detail.year}</span> : null}
@@ -87,8 +89,11 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
                 {detail.contentRating}
               </span>
             ) : null}
+            {detail.studio ? <span>{detail.studio}</span> : null}
             {detail.genres?.slice(0, 3).map((g) => <span key={g}>{g}</span>)}
           </div>
+
+          <Scores scores={detail.scores} />
 
           {detail.summary && <p className="max-w-[62vw] text-[2vh] leading-relaxed">{detail.summary}</p>}
 
@@ -123,6 +128,27 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
             onSelect={(role) => go({ name: "person", personId: role.id, personName: role.name })}
           />
         )}
+
+        {detail.extras.length > 0 && (
+          <Row
+            id={`extras-${itemId}`}
+            title={t("detail.extras")}
+            items={detail.extras.map((e) => ({
+              id: e.id,
+              kind: "movie" as const,
+              title: e.title,
+              thumb: e.thumb,
+              durationMs: e.durationMs,
+            }))}
+            posterUrl={poster}
+            onSelect={() => {
+              /* extras play through the same path as the film, once it lands */
+            }}
+            heightVh={16}
+          />
+        )}
+
+        <Reviews reviews={detail.reviews} title={t("detail.reviews")} />
       </div>
     </FocusContext.Provider>
   );
