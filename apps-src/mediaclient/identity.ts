@@ -46,7 +46,12 @@ export interface Identity {
   fresh: boolean;
 }
 
-let cached: Identity | null = null;
+// The in-flight promise, not the resolved value: two overlapping calls must not
+// both mint. They would race on two stores written at different speeds -
+// localStorage is synchronous while app storage is an IPC round trip - and could
+// leave the two halves disagreeing, which the next launch reads as "this came
+// from another box" and signs everyone out.
+let pending: Promise<Identity> | null = null;
 
 /** The box's hostname, or "" when the shell cannot be reached (dev, tests). */
 export async function boxHostname(): Promise<string> {
@@ -92,9 +97,12 @@ function writeWitness(value: string): boolean {
  *
  * `fresh: true` is the caller's signal to drop every stored credential.
  */
-export async function getIdentity(): Promise<Identity> {
-  if (cached) return cached;
+export function getIdentity(): Promise<Identity> {
+  if (!pending) pending = resolveIdentity();
+  return pending;
+}
 
+async function resolveIdentity(): Promise<Identity> {
   const [host, stored] = await Promise.all([boxHostname(), readJson<StoredIdentity>(KEY)]);
   const witness = readWitness();
 
@@ -105,8 +113,7 @@ export async function getIdentity(): Promise<Identity> {
       // diagnostic value is not blank forever.
       void writeJson(KEY, { ...stored, host });
     }
-    cached = { clientId: stored.clientId, host: stored.host || host, fresh: false };
-    return cached;
+    return { clientId: stored.clientId, host: stored.host || host, fresh: false };
   }
 
   if (stored?.clientId) {
@@ -130,13 +137,12 @@ export async function getIdentity(): Promise<Identity> {
     log.warn("identity could not be persisted; it will be re-minted next launch");
   }
 
-  cached = { clientId: identity.clientId, host, fresh: true };
-  return cached;
+  return { clientId: identity.clientId, host, fresh: true };
 }
 
 /** Test seam. */
 export function __resetIdentity(): void {
-  cached = null;
+  pending = null;
 }
 
 /**

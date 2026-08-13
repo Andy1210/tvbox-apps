@@ -23,6 +23,13 @@ export interface MediaItem {
   parentTitle?: string;
   /** Series title for an episode (its grandparent). */
   seriesTitle?: string;
+  /** The season this episode belongs to. */
+  parentId?: string;
+  /** The series an episode belongs to. Needed because an episode's own id opens
+   *  an episode, and a credit list wants the series. */
+  seriesId?: string;
+  /** The series' own poster, as opposed to the episode still. */
+  seriesThumb?: string;
   year?: number;
   /** Backend-relative art paths; resolve with `posterUrl` / `artUrl`. */
   thumb?: string;
@@ -66,13 +73,66 @@ export interface Role {
   thumb?: string;
 }
 
+/** A score from one source, with which way round its scale runs. */
+export interface Score {
+  /** "imdb", "rottentomatoes", "themoviedb", … derived from the server's icon. */
+  source: string;
+  /** "critic" or "audience". */
+  kind: "critic" | "audience";
+  /** 0-10 as the server reports it. */
+  value: number;
+  /** Rotten Tomatoes' verdict, when the icon carries one. */
+  sentiment?: "fresh" | "rotten" | "upright" | "spilled";
+}
+
+/** One published review. */
+export interface Review {
+  id: string;
+  author: string;
+  text: string;
+  source?: string;
+  link?: string;
+  sentiment?: "fresh" | "rotten";
+}
+
+/** A trailer, featurette or other clip attached to an item. */
+export interface Extra {
+  id: string;
+  title: string;
+  /** "trailer", "clip", "featurette", … as the server labels it. */
+  subtype: string;
+  durationMs?: number;
+  thumb?: string;
+}
+
+/** A chapter, with the still the server generated for it. */
+export interface Chapter {
+  index: number;
+  title?: string;
+  startMs: number;
+  endMs: number;
+  thumb?: string;
+}
+
 export interface ItemDetail extends MediaItem {
   roles: Role[];
   directors?: string[];
   writers?: string[];
   genres?: string[];
+  studio?: string;
+  tagline?: string;
   rating?: number;
   contentRating?: string;
+  /** Every score the server holds, not just the one it puts on the tile. */
+  scores: Score[];
+  reviews: Review[];
+  extras: Extra[];
+  chapters: Chapter[];
+  /** The film's own title artwork, when the server has it. Shown INSTEAD of the
+   *  title text, which is what it is for. */
+  logo?: string;
+  /** External ids, e.g. { imdb: "tt3165612" }. */
+  guids?: Record<string, string>;
 }
 
 export interface PersonRef {
@@ -177,6 +237,8 @@ export interface MediaBackend {
   letterPage(libraryId: string, letterKey: string, q: PageQuery): Promise<Page<MediaItem>>;
   item(id: string): Promise<ItemDetail>;
   children(id: string): Promise<MediaItem[]>;
+  /** Music heard in a film, when the server knows any. Empty is the normal case. */
+  soundtrack(id: string): Promise<MediaItem[]>;
   search(query: string): Promise<MediaItem[]>;
   personCredits(person: PersonRef): Promise<CreditSet>;
 

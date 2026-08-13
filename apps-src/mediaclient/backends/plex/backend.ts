@@ -19,13 +19,48 @@ import type {
 import { buildUrl, container, request, type PlexIdentityHeaders } from "./http";
 import { beginDeviceLogin, listHomeUsers, switchHomeUser } from "./auth";
 import { onDeckOrder, rollUpEpisodes, toDetail, toItem, toLibrary, toMarkers, type PlexDirectory, type PlexMetadata } from "./map";
+import { readJson, writeJson } from "../../storage";
 import { log } from "../../redact";
+
+/** Session ids this client minted, so an abandoned one can be stopped later. */
+const SESSIONS_KEY = "plex-sessions";
+
+/**
+ * The profile the server should decide against.
+ *
+ * Naming one is not optional: without it the transcode endpoints answer 400
+ * outright, because the server looks for a profile matching the client's
+ * platform and has none for ours. Naming a profile it does know sidesteps that
+ * without pretending to be another client - the product and device name we
+ * report stay our own, which is what the account's device list shows.
+ */
+const CLIENT_PROFILE = "Chrome";
+
+/**
+ * What this player can take. mpv on this hardware plays essentially anything, so
+ * the profile is wide on purpose: every codec the server would otherwise
+ * transcode is one it does not need to.
+ */
+const PROFILE_EXTRA = [
+  "add-direct-play-profile(type=videoProfile&container=*&videoCodec=*&audioCodec=*)",
+  "add-direct-play-profile(type=musicProfile&container=*&audioCodec=*)",
+].join("+");
 
 interface MetadataContainer {
   Metadata?: PlexMetadata[];
   Directory?: PlexDirectory[];
   totalSize?: number;
   size?: number;
+}
+
+/** The playable versions of an item, as the decision endpoint returns them. */
+interface PlexMedia {
+  Part?: {
+    key?: string;
+    /** What the server decided for this part: directplay | copy | transcode. */
+    decision?: string;
+    Stream?: { streamType?: number; decision?: string }[];
+  }[];
 }
 
 /** Plex's numeric library types, used by the server-wide filter. */
@@ -51,6 +86,18 @@ function encodeLetterKey(key: string): string {
     // Malformed escapes are not ours to repair; use the key as it arrived.
   }
   return encodeURIComponent(decoded);
+}
+
+/**
+ * Paging parameters.
+ *
+ * BOTH are required. A size on its own is silently ignored, and the server sends
+ * the whole collection instead - measured, asking for five history rows that way
+ * returns eighteen thousand of them and nine megabytes. There is no error to
+ * notice; it just arrives.
+ */
+function page(offset: number, limit: number): Record<string, number> {
+  return { "X-Plex-Container-Start": offset, "X-Plex-Container-Size": limit };
 }
 
 export class PlexBackend implements MediaBackend {
@@ -102,17 +149,13 @@ export class PlexBackend implements MediaBackend {
 
   async recentlyAdded(libraryId?: string): Promise<MediaItem[]> {
     const path = libraryId ? `library/sections/${libraryId}/recentlyAdded` : "library/recentlyAdded";
-    const c = container<MetadataContainer>(await this.req(path, { "X-Plex-Container-Size": 24 }));
+    const c = container<MetadataContainer>(await this.req(path, page(0, 24)));
     return (c.Metadata ?? []).map(toItem);
   }
 
   async libraryPage(libraryId: string, q: PageQuery): Promise<Page<MediaItem>> {
     const c = container<MetadataContainer>(
-      await this.req(`library/sections/${libraryId}/all`, {
-        sort: q.sort ?? "titleSort",
-        "X-Plex-Container-Start": q.offset,
-        "X-Plex-Container-Size": q.limit,
-      }),
+      await this.req(`library/sections/${libraryId}/all`, { sort: q.sort ?? "titleSort", ...page(q.offset, q.limit) }),
     );
     return { items: (c.Metadata ?? []).map(toItem), total: c.totalSize };
   }
@@ -133,19 +176,47 @@ export class PlexBackend implements MediaBackend {
    */
   async letterPage(libraryId: string, letterKey: string, q: PageQuery): Promise<Page<MediaItem>> {
     const c = container<MetadataContainer>(
-      await this.req(`library/sections/${libraryId}/firstCharacter/${encodeLetterKey(letterKey)}`, {
-        "X-Plex-Container-Start": q.offset,
-        "X-Plex-Container-Size": q.limit,
-      }),
+      await this.req(`library/sections/${libraryId}/firstCharacter/${encodeLetterKey(letterKey)}`, page(q.offset, q.limit)),
     );
     return { items: (c.Metadata ?? []).map(toItem), total: c.totalSize };
   }
 
+  /**
+   * One item, with everything the detail screen shows.
+   *
+   * All of it in a single request: scores, reviews, trailers, chapters and
+   * markers each have their own include flag, and asking separately turns
+   * opening a film into five round trips on a screen that is already waiting.
+   * The response is cached briefly so the player can read markers without
+   * fetching the same document again.
+   */
   async item(id: string): Promise<ItemDetail> {
-    const c = container<MetadataContainer>(await this.req(`library/metadata/${id}`, { includeMarkers: 1 }));
+    const m = await this.metadata(id);
+    return toDetail(m);
+  }
+
+  private metaCache = new Map<string, { at: number; value: PlexMetadata }>();
+
+  private async metadata(id: string): Promise<PlexMetadata> {
+    const hit = this.metaCache.get(id);
+    if (hit && Date.now() - hit.at < 30_000) return hit.value;
+
+    const c = container<MetadataContainer>(
+      await this.req(`library/metadata/${id}`, {
+        includeMarkers: 1,
+        includeChapters: 1,
+        includeReviews: 1,
+        includeExtras: 1,
+      }),
+    );
     const m = (c.Metadata ?? [])[0];
     if (!m) throw new Error(`no such item: ${id}`);
-    return toDetail(m);
+
+    // Bounded: this holds whole metadata documents, and a long browse would
+    // otherwise accumulate every item visited.
+    if (this.metaCache.size > 40) this.metaCache.clear();
+    this.metaCache.set(id, { at: Date.now(), value: m });
+    return m;
   }
 
   async children(id: string): Promise<MediaItem[]> {
@@ -153,8 +224,32 @@ export class PlexBackend implements MediaBackend {
     return (c.Metadata ?? []).map(toItem);
   }
 
+  /**
+   * Music heard in a film.
+   *
+   * Not something this server holds: it carries no track list for a film, and
+   * the related hubs it does return are similar films and other work by the
+   * cast. Answering with nothing is the honest result, and the screen simply
+   * shows no such section - which is also what happens on a server that gains
+   * the data later, without a code change here.
+   */
+  async soundtrack(): Promise<MediaItem[]> {
+    return [];
+  }
+
+  /**
+   * Search.
+   *
+   * No limit parameter: this endpoint ignores `limit` and the container size
+   * alike - measured, asking for one result and for a hundred both return the
+   * same forty-odd. Passing one would only document a cap that does not exist.
+   */
   async search(query: string): Promise<MediaItem[]> {
-    const c = container<MetadataContainer>(await this.req("search", { query, limit: 40 }));
+    const q = query.trim();
+    // An empty query is a 400 rather than an empty list, and an empty search box
+    // is an ordinary state.
+    if (!q) return [];
+    const c = container<MetadataContainer>(await this.req("search", { query: q }));
     return (c.Metadata ?? []).map(toItem);
   }
 
@@ -181,12 +276,7 @@ export class PlexBackend implements MediaBackend {
       let total: number | undefined;
       for (;;) {
         const c = container<MetadataContainer>(
-          await this.req("library/all", {
-            actor: person.id,
-            type: types,
-            "X-Plex-Container-Start": offset,
-            "X-Plex-Container-Size": PAGE,
-          }),
+          await this.req("library/all", { actor: person.id, type: types, ...page(offset, PAGE) }),
         );
         const batch = (c.Metadata ?? []).map(toItem);
         items.push(...batch);
@@ -243,14 +333,89 @@ export class PlexBackend implements MediaBackend {
 
   // ---- playback ---------------------------------------------------------
 
+  /** Reads the same document the detail screen just fetched, not a second copy. */
   async markers(id: string): Promise<Marker[]> {
-    const c = container<MetadataContainer>(await this.req(`library/metadata/${id}`, { includeMarkers: 1 }));
-    const m = (c.Metadata ?? [])[0];
-    return m ? toMarkers(m) : [];
+    return toMarkers(await this.metadata(id));
   }
 
-  async resolveStream(): Promise<StreamDecision> {
-    throw new Error("not implemented yet");
+  /**
+   * Decide how to play an item, and hand back a URL the box's player can take.
+   *
+   * The server does the deciding - that is what `hasMDE` asks for - and answers
+   * with `decision` on the chosen part: play the file as it is, repackage it, or
+   * transcode. `directPlay=1` in the request is a preference, not the answer;
+   * reading it back as one gets this exactly wrong.
+   *
+   * The screen resolution reported here is the PANEL's, not the window's. The UI
+   * runs at 1080p while a 4K panel is attached and the output mode only changes
+   * once video starts, so reporting what the window measures asks for a 1080p
+   * transcode of a 4K file - decided before anything could have switched.
+   */
+  async resolveStream(
+    id: string,
+    opts: { session: string; panel?: { width: number; height: number } | null },
+  ): Promise<StreamDecision> {
+    const screen = opts.panel ? `${opts.panel.width}x${opts.panel.height}` : undefined;
+    const common = {
+      hasMDE: 1,
+      path: `/library/metadata/${id}`,
+      mediaIndex: 0,
+      partIndex: 0,
+      protocol: "hls",
+      directPlay: 1,
+      directStream: 1,
+      fastSeek: 1,
+      copyts: 1,
+      session: opts.session,
+      "X-Plex-Client-Profile-Name": CLIENT_PROFILE,
+      "X-Plex-Client-Profile-Extra": PROFILE_EXTRA,
+      "X-Plex-Device-Screen-Resolution": screen,
+    };
+
+    await this.rememberSession(opts.session);
+
+    const body = await this.req<unknown>("video/:/transcode/universal/decision", common);
+    const c = container<MetadataContainer & { mdeDecisionCode?: number }>(body);
+    const md = (c.Metadata ?? [])[0] as (PlexMetadata & { Media?: PlexMedia[] }) | undefined;
+    const media = md?.Media?.[0];
+    const part = media?.Part?.[0];
+
+    const decision = part?.decision ?? "transcode";
+    const burned = (media?.Part?.[0]?.Stream ?? []).some((s) => s.streamType === 3 && s.decision === "burn");
+
+    if (decision === "directplay" && part?.key) {
+      // The part key is used exactly as given: it carries a timestamp segment
+      // between the id and the filename, and a reconstructed path without it is
+      // a 404. The token has to be in the URL here because the player is a
+      // separate process that cannot send headers.
+      return {
+        url: buildUrl(this.base, part.key.replace(/^\//, ""), { "X-Plex-Token": this.session.token }),
+        audio: "auto",
+        sub: burned ? "no" : "auto",
+        subtitlesBurnedIn: burned,
+        session: opts.session,
+        location: this.session.location,
+        transcoded: false,
+      };
+    }
+
+    // Anything the server would not play as-is goes through its transcoder. An
+    // unrecognised decision lands here too: treating an unknown answer as
+    // "transcode" plays the film, treating it as direct play does not.
+    return {
+      url: buildUrl(this.base, "video/:/transcode/universal/start.m3u8", {
+        ...common,
+        directPlay: 0,
+        offset: 0,
+        "X-Plex-Token": this.session.token,
+      }),
+      audio: "auto",
+      sub: burned ? "no" : "auto",
+      subtitlesBurnedIn: burned,
+      session: opts.session,
+      location: this.session.location,
+      transcoded: true,
+    };
   }
 
   async trickplay(): Promise<TrickplayIndex | null> {
@@ -263,32 +428,64 @@ export class PlexBackend implements MediaBackend {
 
   async endSession(session: string): Promise<void> {
     await this.req("video/:/transcode/universal/stop", { session }).catch((e) => log.warn("stop failed", e));
+    await this.forgetSession(session);
   }
 
   /**
    * Stop transcode sessions this client left behind.
    *
    * Needed because leaving the app produces no event the page can act on, and a
-   * hidden window can be killed outright - measured, an abandoned session does
-   * not expire on its own. So the release path is best-effort and this is the
-   * backstop, run at startup.
+   * hidden window can be killed outright - measured, an abandoned session stays
+   * open indefinitely and only an explicit stop clears it.
+   *
+   * Ownership cannot be read off the server. `/transcode/sessions` lists live
+   * sessions with no client field at all, and the id under which one appears in
+   * `/status/sessions` is the CLIENT identifier, not the transcode session -
+   * stopping with that answers 404 and leaves the session running. So the ids we
+   * mint are remembered locally and that list is what gets stopped here.
    */
   async reapOwnSessions(): Promise<number> {
+    const remembered = (await readJson<string[]>(SESSIONS_KEY)) ?? [];
+    if (remembered.length === 0) return 0;
+
+    let live = new Set<string>();
     try {
-      const c = container<{ Metadata?: { Session?: { id?: string }; Player?: { machineIdentifier?: string } }[] }>(
-        await this.req("transcode/sessions"),
-      );
-      const mine = (c.Metadata ?? []).filter((s) => s.Player?.machineIdentifier === this.id.clientId);
-      for (const s of mine) {
-        const sid = s.Session?.id;
-        if (sid) await this.endSession(sid);
-      }
-      if (mine.length) log.info(`reaped ${mine.length} orphaned session(s)`);
-      return mine.length;
+      const c = container<{ TranscodeSession?: { key?: string }[] }>(await this.req("transcode/sessions"));
+      live = new Set((c.TranscodeSession ?? []).map((s) => String(s.key ?? "").split("/").pop() ?? "").filter(Boolean));
     } catch (e) {
-      log.warn("could not reap sessions", e);
-      return 0;
+      // Without the list, stop everything remembered: a stop for a session that
+      // already ended is a harmless 404, an unreaped session is not.
+      log.warn("could not list sessions; stopping remembered ones blind", e);
+      live = new Set(remembered);
     }
+
+    let stopped = 0;
+    for (const id of remembered) {
+      if (!live.has(id)) continue;
+      await this.endSession(id);
+      stopped += 1;
+    }
+    await writeJson(SESSIONS_KEY, []);
+    if (stopped) log.info(`stopped ${stopped} session(s) left behind by an earlier run`);
+    return stopped;
+  }
+
+  /** Remember a session id so it can be stopped even if this window never gets
+   *  the chance to do it itself. */
+  private async rememberSession(id: string): Promise<void> {
+    const current = (await readJson<string[]>(SESSIONS_KEY)) ?? [];
+    if (current.includes(id)) return;
+    // Bounded: a runaway would otherwise grow this without limit, and the store
+    // is 256 KB for the whole app.
+    await writeJson(SESSIONS_KEY, [...current.slice(-8), id]);
+  }
+
+  private async forgetSession(id: string): Promise<void> {
+    const current = (await readJson<string[]>(SESSIONS_KEY)) ?? [];
+    await writeJson(
+      SESSIONS_KEY,
+      current.filter((s) => s !== id),
+    );
   }
 
   // ---- state ------------------------------------------------------------
@@ -301,13 +498,20 @@ export class PlexBackend implements MediaBackend {
    * and silently records nothing.
    */
   async reportProgress(id: string, positionMs: number, durationMs: number, state: PlaybackState): Promise<void> {
+    const duration = Math.max(0, Math.round(durationMs));
+    // Clamped to the duration, not just to zero. A player routinely reports a
+    // position a few milliseconds past the end of the container at the end of a
+    // file, and the server rejects that outright - which loses the very report
+    // that marks a film finished.
+    const time = duration > 0 ? Math.min(duration, Math.max(0, Math.round(positionMs))) : Math.max(0, Math.round(positionMs));
+
     await this.req(":/timeline", {
       ratingKey: id,
       key: `/library/metadata/${id}`,
       identifier: "com.plexapp.plugins.library",
       state,
-      time: Math.max(0, Math.round(positionMs)),
-      duration: Math.max(0, Math.round(durationMs)),
+      time,
+      duration,
     });
   }
 
@@ -321,10 +525,7 @@ export class PlexBackend implements MediaBackend {
 
   async history(limit: number): Promise<HistoryRow[]> {
     const c = container<{ Metadata?: (PlexMetadata & { viewedAt?: number; accountID?: number })[] }>(
-      await this.req("status/sessions/history/all", {
-        sort: "viewedAt:desc",
-        "X-Plex-Container-Size": limit,
-      }),
+      await this.req("status/sessions/history/all", { sort: "viewedAt:desc", ...page(0, limit) }),
     );
     return (c.Metadata ?? []).map((m) => ({
       itemId: String(m.ratingKey ?? ""),

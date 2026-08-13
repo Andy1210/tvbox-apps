@@ -5,7 +5,7 @@
 // on-deck list and the assistant's recommendations, so getting one wrong is a
 // data bug rather than a display bug.
 
-import type { ItemDetail, ItemKind, Library, MediaItem, Marker, Role } from "../types";
+import type { Chapter, Extra, ItemDetail, ItemKind, Library, MediaItem, Marker, Review, Role, Score } from "../types";
 
 export interface PlexMetadata {
   ratingKey?: string | number;
@@ -14,6 +14,17 @@ export interface PlexMetadata {
   title?: string;
   parentTitle?: string;
   grandparentTitle?: string;
+  parentRatingKey?: string | number;
+  grandparentRatingKey?: string | number;
+  studio?: string;
+  tagline?: string;
+  Image?: PlexImage[];
+  Rating?: PlexRating[];
+  Review?: PlexReview[];
+  Chapter?: PlexChapter[];
+  Guid?: { id?: string }[];
+  Extras?: { Metadata?: PlexMetadata[]; size?: number };
+  subtype?: string;
   year?: number;
   thumb?: string;
   parentThumb?: string;
@@ -54,6 +65,36 @@ export interface PlexMarker {
   final?: boolean;
 }
 
+export interface PlexImage {
+  type?: string;
+  url?: string;
+  alt?: string;
+}
+
+/** The scale a score runs on is carried in the icon name, not in a field. */
+export interface PlexRating {
+  image?: string;
+  value?: number;
+  type?: string;
+}
+
+export interface PlexReview {
+  id?: number | string;
+  tag?: string;
+  text?: string;
+  image?: string;
+  link?: string;
+  source?: string;
+}
+
+export interface PlexChapter {
+  index?: number;
+  tag?: string;
+  startTimeOffset?: number;
+  endTimeOffset?: number;
+  thumb?: string;
+}
+
 export interface PlexDirectory {
   key?: string;
   type?: string;
@@ -88,6 +129,9 @@ export function toItem(m: PlexMetadata): MediaItem {
     title: m.title ?? "",
     parentTitle: m.parentTitle,
     seriesTitle: m.grandparentTitle,
+    parentId: m.parentRatingKey !== undefined ? String(m.parentRatingKey) : undefined,
+    seriesId: m.grandparentRatingKey !== undefined ? String(m.grandparentRatingKey) : undefined,
+    seriesThumb: m.grandparentThumb,
     year: m.year,
     thumb,
     art: m.art,
@@ -116,15 +160,92 @@ export function toRole(t: PlexTag): Role {
   };
 }
 
+/**
+ * Which service a score came from, and which way its scale runs.
+ *
+ * Neither is a field: both are encoded in the icon reference, e.g.
+ * "rottentomatoes://image.rating.ripe". Reading the icon is the only way to tell
+ * an IMDb score from a Rotten Tomatoes one, or a fresh verdict from a rotten
+ * one - and showing a critic score under an audience label is worse than showing
+ * no score.
+ */
+export function toScore(r: PlexRating): Score | null {
+  if (typeof r.value !== "number") return null;
+  const image = r.image ?? "";
+  const source = image.split("://")[0] || "unknown";
+  const leaf = image.split(".").pop() ?? "";
+  const sentiment =
+    leaf === "ripe" || leaf === "fresh"
+      ? ("fresh" as const)
+      : leaf === "rotten"
+        ? ("rotten" as const)
+        : leaf === "upright"
+          ? ("upright" as const)
+          : leaf === "spilled"
+            ? ("spilled" as const)
+            : undefined;
+  return { source, kind: r.type === "critic" ? "critic" : "audience", value: r.value, sentiment };
+}
+
+export function toReview(r: PlexReview): Review | null {
+  if (!r.text || !r.tag) return null;
+  const leaf = (r.image ?? "").split(".").pop() ?? "";
+  return {
+    id: String(r.id ?? r.tag),
+    author: r.tag,
+    text: r.text,
+    source: r.source,
+    link: r.link,
+    sentiment: leaf === "fresh" ? "fresh" : leaf === "rotten" ? "rotten" : undefined,
+  };
+}
+
+export function toChapter(c: PlexChapter): Chapter {
+  return {
+    index: c.index ?? 0,
+    title: c.tag,
+    startMs: c.startTimeOffset ?? 0,
+    endMs: c.endTimeOffset ?? 0,
+    thumb: c.thumb,
+  };
+}
+
+export function toExtra(m: PlexMetadata): Extra {
+  return {
+    id: String(m.ratingKey ?? ""),
+    title: m.title ?? "",
+    // The server labels a trailer with `subtype`; `type` is always "clip".
+    subtype: m.subtype ?? m.type ?? "clip",
+    durationMs: m.duration,
+    thumb: m.thumb,
+  };
+}
+
 export function toDetail(m: PlexMetadata): ItemDetail {
+  const images = m.Image ?? [];
+  const logo = images.find((i) => i.type === "clearLogo")?.url;
+  const guids: Record<string, string> = {};
+  for (const g of m.Guid ?? []) {
+    const [scheme, value] = (g.id ?? "").split("://");
+    if (scheme && value) guids[scheme] = value;
+  }
+
   return {
     ...toItem(m),
     roles: (m.Role ?? []).map(toRole).filter((r) => r.id && r.name),
     directors: (m.Director ?? []).map((d) => d.tag ?? "").filter(Boolean),
     writers: (m.Writer ?? []).map((d) => d.tag ?? "").filter(Boolean),
     genres: (m.Genre ?? []).map((d) => d.tag ?? "").filter(Boolean),
+    studio: m.studio,
+    tagline: m.tagline,
     rating: m.rating,
     contentRating: m.contentRating,
+    scores: (m.Rating ?? []).map(toScore).filter((s): s is Score => s !== null),
+    reviews: (m.Review ?? []).map(toReview).filter((r): r is Review => r !== null),
+    extras: (m.Extras?.Metadata ?? []).map(toExtra).filter((e) => e.id),
+    chapters: (m.Chapter ?? []).map(toChapter).filter((c) => c.endMs > c.startMs),
+    logo,
+    guids: Object.keys(guids).length ? guids : undefined,
   };
 }
 
@@ -166,25 +287,31 @@ export function rollUpEpisodes(items: MediaItem[]): MediaItem[] {
   const out: MediaItem[] = [];
   const seenSeries = new Set<string>();
 
+  // Two passes so input order does not matter: every series listed in its own
+  // right is recorded before any episode is considered for promotion.
   for (const it of items) {
     if (it.kind !== "episode") {
-      if (it.kind === "show") seenSeries.add(it.title);
+      if (it.kind === "show") seenSeries.add(it.id);
       out.push(it);
     }
   }
   for (const it of items) {
     if (it.kind !== "episode") continue;
-    const series = it.seriesTitle;
-    if (!series || seenSeries.has(series)) continue;
-    seenSeries.add(series);
+    // The SERIES id, not the episode's. An episode id opens an episode page
+    // under a series title, and asking a server for an episode's children is an
+    // error rather than an empty list. Dedupe on it too - two distinct series
+    // can share a name, and titles would collapse them into one.
+    const seriesId = it.seriesId;
+    if (!seriesId || !it.seriesTitle || seenSeries.has(seriesId)) continue;
+    seenSeries.add(seriesId);
     out.push({
-      id: it.id,
+      id: seriesId,
       kind: "show",
-      title: series,
-      thumb: it.thumb,
-      year: it.year,
-      // The episode's own dates are not the series', and showing them would sort
-      // a series by one arbitrary episode of it.
+      title: it.seriesTitle,
+      // The series' own poster; an episode's thumb is a still from that episode.
+      thumb: it.seriesThumb,
+      // The episode's dates are not the series', and carrying them would sort a
+      // series by whichever episode happened to come back first.
     });
   }
   return out;
