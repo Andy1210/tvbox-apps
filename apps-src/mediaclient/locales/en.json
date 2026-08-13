@@ -43,7 +43,8 @@
     "cast": "Cast",
     "extras": "Trailers and extras",
     "reviews": "Reviews",
-    "moreReviews": "Show {n} more"
+    "moreReviews": "Show {n} more",
+    "fromStart": "From the start"
   },
   "person": {
     "films": "Films",
@@ -51,5 +52,13 @@
     "count": "{films} films · {series} series",
     "empty": "Nothing else with {name} is on this server.",
     "partial": "The server did not say how many there are, so this list may be short."
+  },
+  "player": {
+    "skipIntro": "Skip intro",
+    "skipCredits": "Skip credits",
+    "buffering": "Buffering…",
+    "converting": "Converting for this box",
+    "hint": "Left/Right: jump · OK: pause · Back: pause",
+    "hintPaused": "OK: carry on · Back: stop"
   }
 }

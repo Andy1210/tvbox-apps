@@ -7,6 +7,7 @@ import { CastRow } from "./CastRow";
 import { Scores } from "./Scores";
 import { Reviews } from "./Reviews";
 import { TitleArt } from "./TitleArt";
+import { usePlayer } from "./playback/player";
 import { classify, useApp } from "./state";
 import type { ItemDetail, MediaItem } from "./backends/types";
 import { log } from "./redact";
@@ -100,13 +101,20 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
           <div className="mt-[1vh] flex gap-[1.2vw]">
             <FocusButton
               focusKey="detail-play"
-              onEnter={() => {
-                /* playback lands in the next step */
-              }}
+              onEnter={() => backend && void usePlayer.getState().play(backend, detail)}
               className="rounded-[1vh] bg-white/15 px-[2.4vw] py-[1.4vh] text-[2.1vh]"
             >
               {resumable ? t("detail.resume") : t("detail.play")}
             </FocusButton>
+            {resumable && (
+              <FocusButton
+                focusKey="detail-restart"
+                onEnter={() => backend && void usePlayer.getState().play(backend, detail, { resume: false })}
+                className="rounded-[1vh] bg-white/10 px-[2vw] py-[1.4vh] text-[2.1vh]"
+              >
+                {t("detail.fromStart")}
+              </FocusButton>
+            )}
           </div>
         </header>
 
