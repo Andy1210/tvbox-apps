@@ -21,7 +21,7 @@ export function CastRow({
   title: string;
   onSelect: (role: Role) => void;
 }): React.JSX.Element {
-  const { ref, focusKey } = useFocusable({ focusKey: "cast", saveLastFocusedChild: true });
+  const { ref, focusKey } = useFocusable({ focusKey: "cast", trackChildren: true, saveLastFocusedChild: true });
   const scroller = useRef<HTMLDivElement>(null);
 
   const scrollTo = (el: HTMLElement): void => {

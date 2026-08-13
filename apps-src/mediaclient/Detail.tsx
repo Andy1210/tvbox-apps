@@ -155,9 +155,12 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
               durationMs: e.durationMs,
             }))}
             posterUrl={poster}
-            onSelect={() => {
-              /* extras play through the same path as the film, once it lands */
-            }}
+            onSelect={(extra) =>
+              // Trailers are ordinary items on the server, so they go through
+              // the same player. A tile that highlights, accepts OK and does
+              // nothing is worse than no tile.
+              backend && void usePlayer.getState().play(backend, extra, { resume: false })
+            }
             heightVh={16}
           />
         )}

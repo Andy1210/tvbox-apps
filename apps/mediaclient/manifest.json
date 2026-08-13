@@ -25,14 +25,19 @@
     "hu": "A saját Plex- vagy Jellyfin-szervereden lévő filmek és sorozatok nézése, a videót a box natívan játssza. Egyszeri belépés a TV-ről gépelés nélkül, és megjegyzi, hol tartottál minden filmben."
   },
   "requires": {
-    "bin": ["mpv"],
-    "apt": ["mpv"]
+    "bin": [
+      "mpv"
+    ]
   },
   "runtime": {
     "serve": "local",
     "entry": "index.html",
     "bridge": "./bridge.js",
     "transparentSelector": "#player-stage",
-    "capabilities": ["nav", "player", "storage"]
+    "capabilities": [
+      "nav",
+      "player",
+      "storage"
+    ]
   }
 }

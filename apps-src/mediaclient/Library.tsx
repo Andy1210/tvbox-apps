@@ -10,7 +10,10 @@ import type { MediaItem } from "./backends/types";
 import { log } from "./redact";
 
 const PAGE = 100;
-const COLUMNS = 6;
+// Chosen so a tile fills its column: at 26vh tall a 2:3 poster is 17.3vw-ish of
+// height, and six of them left a third of each cell empty, which reads as a
+// mistake rather than as spacing.
+const COLUMNS = 7;
 /** Rows kept mounted above and below the viewport. */
 const OVERSCAN = 2;
 
