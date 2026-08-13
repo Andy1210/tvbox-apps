@@ -31,7 +31,7 @@ export function Reviews({ reviews, title }: { reviews: Review[]; title: string }
             <Sentiment sentiment={r.sentiment} />
             <div className="flex flex-col gap-[0.3vh]">
               <p className="text-[1.9vh] leading-relaxed">{r.text}</p>
-              <p className="text-[1.5vh] text-fg-dim">
+              <p className="text-[1.7vh] text-fg-dim">
                 {r.author}
                 {r.source ? ` · ${r.source}` : ""}
               </p>

@@ -43,7 +43,7 @@ export function Row({ id, title, items, posterUrl, onSelect, heightVh }: RowProp
     <FocusContext.Provider value={focusKey}>
       <section ref={ref} className="flex flex-col gap-[1vh]">
         <h2 className="px-[4vw] text-[2vh] font-semibold tracking-tight">{title}</h2>
-        <div ref={scroller} className="no-scrollbar flex gap-[1.2vw] overflow-x-auto scroll-smooth px-[4vw]">
+        <div ref={scroller} className="no-scrollbar flex gap-[1.2vw] overflow-x-auto scroll-smooth px-[4vw] py-[9vh] -my-[5vh]">
           {items.map((item, i) => (
             <Tile
               key={item.id || `${id}-${i}`}

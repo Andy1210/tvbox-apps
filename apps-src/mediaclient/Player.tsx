@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
-import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
-import { FocusButton, isBackKey, useI18n } from "@sdk";
+import { FocusContext, getCurrentFocusKey, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
+import { FocusButton, useBackspace, useI18n } from "@sdk";
 import { usePlayer } from "./playback/player";
 
 /** Nudge sizes as a press is held. Held longer means further per press. */
@@ -69,16 +69,6 @@ export function Player(): React.JSX.Element | null {
       if (hideTimer.current) clearTimeout(hideTimer.current);
       if (p.state === "playing") hideTimer.current = setTimeout(() => usePlayer.getState().showOverlay(false), IDLE_HIDE_MS);
 
-      // Back pauses and keeps the frame. Stopping loses where you were, and on a
-      // television that is a much bigger deal than on a phone.
-      if (isBackKey(e)) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (p.state === "playing") p.togglePause();
-        else void p.stop();
-        return;
-      }
-
       switch (e.key) {
         case "ArrowLeft":
         case "ArrowRight": {
@@ -92,6 +82,12 @@ export function Player(): React.JSX.Element | null {
           break;
         }
         case "Enter":
+          // With the skip button up and focused, OK belongs to it - otherwise
+          // one press would both fire the button and toggle pause.
+          if (getCurrentFocusKey() === "skip") break;
+          e.preventDefault();
+          p.togglePause();
+          break;
         case "MediaPlayPause":
           e.preventDefault();
           p.togglePause();
@@ -123,12 +119,32 @@ export function Player(): React.JSX.Element | null {
     };
   }, [current]);
 
+  const marker = current ? usePlayer.getState().activeMarker() : null;
+  const skippable = Boolean(marker && (marker.type === "intro" || (marker.type === "credits" && !marker.final)));
+
+  // Back pauses and keeps the frame; stopping loses where you were, which
+  // matters more on a television than on a phone. Only a paused film stops.
+  //
+  // Through the SDK's stack rather than a listener of our own: it installs a
+  // single capture-phase handler at app start and stops propagation, so a raw
+  // listener registered later never sees the key at all - the film would keep
+  // playing while the overlay claimed Back would pause it.
+  useBackspace(() => {
+    const p = usePlayer.getState();
+    if (p.state === "playing") p.togglePause();
+    else void p.stop();
+  }, Boolean(current));
+
+  // The skip button is only reachable if something puts focus on it: Left and
+  // Right are taken by scrubbing and nothing else moves focus here.
+  useEffect(() => {
+    if (skippable) setFocus("skip");
+  }, [skippable]);
+
   if (!current) return null;
 
   const shown = seekTargetMs ?? positionMs;
   const pct = durationMs > 0 ? Math.min(100, (shown / durationMs) * 100) : 0;
-  const marker = usePlayer.getState().activeMarker();
-  const skippable = marker && (marker.type === "intro" || (marker.type === "credits" && !marker.final));
 
   return (
     <FocusContext.Provider value={focusKey}>
@@ -160,7 +176,7 @@ export function Player(): React.JSX.Element | null {
               </h2>
               {current.item.seriesTitle && <span className="text-[1.9vh] text-fg-dim">{current.item.title}</span>}
               {buffering && <span className="text-[1.7vh] text-fg-dim">{t("player.buffering")}</span>}
-              {current.decision.transcoded && <span className="text-[1.5vh] text-fg-dim">{t("player.converting")}</span>}
+              {current.decision.transcoded && <span className="text-[1.7vh] text-fg-dim">{t("player.converting")}</span>}
             </div>
 
             <div className="flex items-center gap-[1.2vw]">
@@ -191,7 +207,7 @@ export function Player(): React.JSX.Element | null {
               </span>
             </div>
 
-            <p className="text-[1.6vh] text-fg-dim">
+            <p className="text-[1.7vh] text-fg-dim">
               {t(state === "paused" ? "player.hintPaused" : "player.hint")}
             </p>
           </div>

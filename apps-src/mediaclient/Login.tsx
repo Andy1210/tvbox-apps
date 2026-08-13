@@ -3,6 +3,7 @@ import QRCode from "qrcode";
 import { FocusButton, useI18n } from "@sdk";
 import { beginDeviceLogin } from "./backends/plex/auth";
 import { deviceName, getIdentity } from "./identity";
+import { useInitialFocus } from "./focus";
 import { useApp } from "./state";
 import { log } from "./redact";
 
@@ -69,6 +70,10 @@ export function Login(): React.JSX.Element {
   }, [round, signIn]);
 
   const done = phase.name === "expired" || phase.name === "failed";
+  // The retry only exists once the code has died, and nothing else on this
+  // screen is pressable - so it has to be given focus the moment it appears, or
+  // the first screen a new box shows has a button that ignores the remote.
+  useInitialFocus("login-retry", done);
 
   return (
     <div className="flex h-full flex-col items-center justify-center gap-[3vh] px-[6vw]">

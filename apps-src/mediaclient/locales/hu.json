@@ -30,10 +30,14 @@
     "unreachable": "A szerver nem érhető el. Lehet, hogy ki van kapcsolva, vagy a box nincs a hálózaton.",
     "signedOut": "A szerver már nem fogadja el ezt a belépést. Lépj be újra a folytatáshoz.",
     "noServer": "Ehhez a fiókhoz nem tartozik a box által elérhető szerver.",
-    "unknown": "Hiba történt a szerverrel való kommunikáció közben."
+    "unknown": "Hiba történt a szerverrel való kommunikáció közben.",
+    "signInAgain": "Belépés újra",
+    "retry": "Újra"
   },
   "library": {
-    "all": "Mind"
+    "all": "Mind",
+    "empty": "Ez a könyvtár üres.",
+    "emptyLetter": "Ez alatt a betű alatt nincs semmi."
   },
   "detail": {
     "play": "Lejátszás",

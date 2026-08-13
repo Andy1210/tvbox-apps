@@ -30,10 +30,14 @@
     "unreachable": "The server cannot be reached. It may be switched off, or the box may be off the network.",
     "signedOut": "The server no longer accepts this sign-in. Sign in again to carry on.",
     "noServer": "This account has no server the box can reach.",
-    "unknown": "Something went wrong talking to the server."
+    "unknown": "Something went wrong talking to the server.",
+    "signInAgain": "Sign in again",
+    "retry": "Try again"
   },
   "library": {
-    "all": "All"
+    "all": "All",
+    "empty": "This library is empty.",
+    "emptyLetter": "Nothing under this letter."
   },
   "detail": {
     "play": "Play",

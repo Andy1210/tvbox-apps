@@ -57,6 +57,7 @@ export function Tile({
   const [broken, setBroken] = useState(false);
   const pct = progress(item);
   const watched = !pct && (item.viewCount ?? 0) > 0;
+  const showsTitleInPlace = (!src || broken) && item.title !== "";
 
   useEffect(() => {
     if (focused && el.current) onFocusedEl?.(el.current);
@@ -106,7 +107,7 @@ export function Tile({
         ) : (
           // A missing poster must not collapse the tile: the row's geometry is
           // what the D-pad navigates against.
-          <div className="flex h-full w-full items-center justify-center px-[0.6vh] text-center text-[1.5vh] text-fg-dim">
+          <div className="flex h-full w-full items-center justify-center px-[0.6vh] text-center text-[1.7vh] text-fg-dim">
             {item.title}
           </div>
         )}
@@ -126,15 +127,20 @@ export function Tile({
         )}
 
         {item.unwatchedCount ? (
-          <div className="absolute top-[0.6vh] left-[0.6vh] rounded-full bg-black/70 px-[0.8vh] py-[0.2vh] text-[1.4vh] tabular-nums">
+          <div className="absolute top-[0.6vh] left-[0.6vh] rounded-full bg-black/70 px-[0.8vh] py-[0.2vh] text-[1.7vh] tabular-nums">
             {item.unwatchedCount}
           </div>
         ) : null}
       </div>
 
-      <div className="truncate text-[1.6vh] text-fg-dim" title={label(item)}>
-        {label(item)}
-      </div>
+      {/* Skipped when the poster placeholder is already showing this title:
+          otherwise an art-less item prints its name twice, once inside the grey
+          box and once beneath it. */}
+      {!showsTitleInPlace && (
+        <div className="truncate text-[1.8vh]" title={label(item)}>
+          {label(item)}
+        </div>
+      )}
     </div>
   );
 }

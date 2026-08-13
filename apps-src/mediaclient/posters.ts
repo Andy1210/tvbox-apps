@@ -19,6 +19,25 @@ import { log } from "./redact";
 
 const MAX_ENTRIES = 240;
 
+/**
+ * How much bigger to ask for artwork than the CSS box it goes in.
+ *
+ * The page is laid out at 1080p while a 4K panel is attached, so a tile that
+ * measures 280 CSS pixels is drawn at 560 real ones. Asking for the CSS size
+ * gives a soft poster on every tile, which is the single thing that makes a
+ * media app look cheap next to the one it replaces. Clamped: past 2x the bytes
+ * cost more than the sharpness is worth on this hardware.
+ */
+export function artworkScale(): number {
+  try {
+    const panel = window.tvbox?.panel;
+    if (!panel?.height || !window.innerHeight) return 1;
+    return Math.min(2, Math.max(1, panel.height / window.innerHeight));
+  } catch {
+    return 1;
+  }
+}
+
 interface Entry {
   objectUrl: string;
   /** Bumped on every use so eviction can drop the coldest. */

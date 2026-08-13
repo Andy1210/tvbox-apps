@@ -3,6 +3,8 @@ import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-naviga
 import { FocusButton, useI18n } from "@sdk";
 import { Tile } from "./Tile";
 import { Message } from "./Message";
+import { artworkScale } from "./posters";
+import { useFocusFallback, useInitialFocus } from "./focus";
 import { classify, useApp } from "./state";
 import type { MediaItem } from "./backends/types";
 import { log } from "./redact";
@@ -127,30 +129,51 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   }, [firstRow, lastRow, items, loadPage]);
 
   const { ref: gridRef, focusKey } = useFocusable({ focusKey: `grid-${libraryId}`, saveLastFocusedChild: true });
-  const poster = (item: MediaItem): string | undefined => backend?.posterUrl(item, 300, 450);
+  const poster = (item: MediaItem): string | undefined => backend?.posterUrl(item, 300 * artworkScale(), 450 * artworkScale());
 
-  if (failure) return <Message failure={failure} />;
-  if (!total && items.length === 0) return <Message loading />;
+  // Nothing focuses itself, so the first tile has to be told to take it - and a
+  // press arriving after the grid was cleared for a letter change has to land
+  // somewhere rather than be discarded.
+  useInitialFocus("cell-0", total !== null && total > 0);
+  useFocusFallback("cell-0", (key) => key.startsWith("cell-") || key.startsWith("letter-"));
+
+  if (failure) return <Message failure={failure} onRetry={() => void loadPage(0)} />;
+  // `total === null` is "not asked yet"; a total of zero is an answer, and an
+  // empty library must say so rather than spin forever.
+  if (total === null && items.length === 0) return <Message loading />;
 
   const visible: React.JSX.Element[] = [];
   for (let r = firstRow; r < lastRow; r += 1) {
     for (let c = 0; c < COLUMNS; c += 1) {
       const i = r * COLUMNS + c;
+      if (total !== null && i >= total) continue;
       const item = items[i];
-      if (!item) continue;
       visible.push(
         <div
-          key={item.id}
+          key={item?.id ?? `cell-${i}`}
           className="absolute"
           style={{ top: r * rowHeight, left: `${(c * 100) / COLUMNS}%`, width: `${100 / COLUMNS}%` }}
         >
-          <Tile
-            item={item}
-            posterUrl={poster(item)}
-            focusKey={`cell-${i}`}
-            heightVh={26}
-            onEnter={() => go({ name: "item", itemId: item.id })}
-          />
+          {item ? (
+            <Tile
+              item={item}
+              posterUrl={poster(item)}
+              focusKey={`cell-${i}`}
+              heightVh={26}
+              onEnter={() => go({ name: "item", itemId: item.id })}
+            />
+          ) : (
+            // A cell whose page has not arrived still renders, and still takes
+            // focus. Without it the rows below the loaded window hold nothing
+            // focusable, and pressing Down does nothing at all until the fetch
+            // lands - a silent stall that looks like a dead remote.
+            <Tile
+              item={{ id: `pending-${i}`, kind: "movie", title: "" }}
+              focusKey={`cell-${i}`}
+              heightVh={26}
+              onEnter={() => {}}
+            />
+          )}
         </div>,
       );
     }
@@ -173,6 +196,11 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
             onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
             className="no-scrollbar relative flex-1 overflow-y-auto px-[3vw]"
           >
+            {total === 0 && (
+              <div className="flex h-full items-center justify-center text-[2.2vh] text-fg-dim">
+                {letter ? t("library.emptyLetter") : t("library.empty")}
+              </div>
+            )}
             {/* One tall spacer carries the scrollbar; only the visible rows are
                 mounted, because a library of several thousand posters is exactly
                 the kind of DOM this hardware cannot afford. */}
@@ -208,7 +236,7 @@ function LetterStrip({
         <FocusButton
           focusKey="letter-all"
           onEnter={() => onPick(null)}
-          className={`w-[3.4vw] rounded-[0.6vh] py-[0.4vh] text-center text-[1.5vh] ${active === null ? "bg-white/20" : ""}`}
+          className={`w-[3.4vw] rounded-[0.6vh] py-[0.4vh] text-center text-[1.7vh] ${active === null ? "bg-white/20" : ""}`}
         >
           {allLabel}
         </FocusButton>
