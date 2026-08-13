@@ -8,7 +8,7 @@ import { CastRow } from "./CastRow";
 import { Scores } from "./Scores";
 import { Reviews } from "./Reviews";
 import { TitleArt } from "./TitleArt";
-import { useInitialFocus } from "./focus";
+import { useFocusFallback, useInitialFocus } from "./focus";
 import { usePlayer } from "./playback/player";
 import { classify, useApp } from "./state";
 import type { ItemDetail, MediaItem } from "./backends/types";
@@ -73,6 +73,9 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
 
   const { ref, focusKey } = useFocusable({ focusKey: `detail-${itemId}`, saveLastFocusedChild: true });
   useInitialFocus("detail-play", Boolean(detail));
+  // Returning from playback unmounts the player, which held focus - without a
+  // fallback the detail page comes back with the D-pad dead.
+  useFocusFallback("detail-play", (key) => key.startsWith("detail-") || key.startsWith("cast-") || key.startsWith("children-") || key.startsWith("extras-") || key === "reviews-more");
 
   if (failure) return <Message failure={failure} onRetry={() => setReload((n) => n + 1)} />;
   if (!detail) return <Message loading />;

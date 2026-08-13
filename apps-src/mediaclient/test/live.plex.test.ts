@@ -210,7 +210,32 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     expect(sawChapter, "no chapters across eight films").toBe(true);
   }, 120_000);
 
-  it("resolves a stream the player can actually take", async () => {
+  it("resolves a stream for every film, not just the convenient one", async () => {
+    const b = backend();
+    const libs = await b.libraries();
+    const movies = libs.find((l) => l.kind === "movie")!;
+    // A sweep, not one item. Asking for a decision while the server has
+    // auto-selected a subtitle is refused, which is the ordinary case here - and
+    // resolving a single film hides it, because whether it happens depends on
+    // the film.
+    const page = await b.libraryPage(movies.id, { offset: 0, limit: 12, sort: "titleSort" });
+
+    const failures: string[] = [];
+    for (const item of page.items) {
+      const session = `test-${item.id}-${Date.now()}`;
+      try {
+        const decision = await b.resolveStream(item.id, { session, panel: { width: 3840, height: 2160 } });
+        expect(decision.url).toMatch(/^https?:\/\//);
+      } catch (e) {
+        failures.push(`${item.title}: ${(e as Error).message}`);
+      } finally {
+        await b.endSession(session).catch(() => {});
+      }
+    }
+    expect(failures).toEqual([]);
+  }, 180_000);
+
+  it("hands the player a URL that actually streams", async () => {
     const b = backend();
     const libs = await b.libraries();
     const movies = libs.find((l) => l.kind === "movie")!;
@@ -219,10 +244,9 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
 
     const decision = await b.resolveStream(page.items[0].id, { session, panel: { width: 3840, height: 2160 } });
     try {
-      expect(decision.url).toMatch(/^https?:\/\//);
-      // The URL has to be fetchable: a direct-play part answers 401 without the
-      // token, and the transcoder answers 400 when it cannot find a profile for
-      // this client - both of which look like a working URL until it is used.
+      // A direct-play part answers 401 without the token and the transcoder
+      // answers 400 when it cannot find a profile - both look like a working URL
+      // until something tries to use it.
       const res = await fetch(decision.url, { headers: { Range: "bytes=0-1023" } });
       expect([200, 206]).toContain(res.status);
     } finally {

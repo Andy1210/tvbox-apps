@@ -61,22 +61,29 @@ function Face({
   const backend = useApp((s) => s.backend);
   const el = useRef<HTMLDivElement | null>(null);
   const [src, setSrc] = useState<string | null>(null);
+  const [broken, setBroken] = useState(false);
 
   useEffect(() => {
     if (focused && el.current) onFocusedEl(el.current);
   }, [focused, onFocusedEl]);
 
+  // Portraits come from the metadata provider, not the media server, and that
+  // host refuses a credentialed cross-origin request outright - it answers the
+  // preflight with 403 and sends no allow-origin header on the plain request
+  // either. Fetching them the way posters are fetched leaves every face blank,
+  // which is the whole point of this row. An <img> is not CORS-gated, so an
+  // absolute URL is simply linked; only a path on the server itself needs the
+  // token, and that goes through the loader.
+  const absolute = Boolean(role.thumb && /^https?:\/\//.test(role.thumb));
+
   useEffect(() => {
-    if (!role.thumb || !backend) return;
+    if (!role.thumb || absolute || !backend) return;
     let live = true;
-    // Cast portraits are served by the metadata provider rather than the media
-    // server, but they go through the same loader so the token is never in
-    // markup for the cases where the server does host them.
     void loadImage(role.thumb, backend.imageHeaders()).then((url) => live && url && setSrc(url));
     return () => {
       live = false;
     };
-  }, [role.thumb, backend]);
+  }, [role.thumb, absolute, backend]);
 
   const initials = role.name
     .split(/\s+/)
@@ -100,8 +107,14 @@ function Face({
           focused ? "ring-[0.35vh] ring-white" : "",
         ].join(" ")}
       >
-        {src ? (
-          <img src={src} alt="" decoding="async" className="h-full w-full object-cover" />
+        {!broken && (absolute || src) ? (
+          <img
+            src={absolute ? role.thumb : (src as string)}
+            alt=""
+            decoding="async"
+            onError={() => setBroken(true)}
+            className="h-full w-full object-cover"
+          />
         ) : (
           <span className="text-[2.6vh] text-fg-dim">{initials}</span>
         )}

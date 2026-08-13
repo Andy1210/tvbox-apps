@@ -3,7 +3,7 @@ import { FocusButton, useI18n } from "@sdk";
 import { Row } from "./Row";
 import { Message } from "./Message";
 import { artworkScale } from "./posters";
-import { useInitialFocus } from "./focus";
+import { useFocusFallback, useInitialFocus } from "./focus";
 import { classify, useApp } from "./state";
 import type { Library, MediaItem } from "./backends/types";
 import { log } from "./redact";
@@ -74,6 +74,9 @@ export function Home(): React.JSX.Element {
       ? `libraries-lib:${data.libraries[0].id}`
       : undefined;
   useInitialFocus(firstKey, Boolean(data));
+  // Focus is set once; without a fallback anything that unmounts the focused
+  // tile afterwards leaves the D-pad dead with only Back working.
+  useFocusFallback(firstKey, (key) => key.startsWith("ondeck-") || key.startsWith("libraries-") || key.startsWith("recent-") || key.startsWith("nav-"));
 
   const poster = (item: MediaItem): string | undefined => backend?.posterUrl(item, 300 * artworkScale(), 450 * artworkScale());
   const open = (item: MediaItem): void => go({ name: "item", itemId: item.id });

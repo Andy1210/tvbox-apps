@@ -39,8 +39,13 @@ export function Scores({ scores }: { scores: Score[] }): React.JSX.Element | nul
   );
 }
 
+const NAMES: Record<string, string> = { rottentomatoes: "RT", themoviedb: "TMDB", imdb: "IMDb" };
+
 function label(s: Score, t: (key: string, vars?: Record<string, string>) => string): string {
-  const source = s.source === "rottentomatoes" ? "RT" : s.source === "themoviedb" ? "TMDB" : "IMDb";
+  // An unknown source is printed as itself. Falling through to "IMDb" would put
+  // one service's name on another's number, which is worse than showing nothing
+  // - the whole reason this component reads the icon rather than guessing.
+  const source = NAMES[s.source] ?? s.source;
   // "viewers" is a word on screen, so it belongs in the locale files rather than
   // in a template here - a Hungarian television would otherwise read "IMDb ·
   // viewers".
@@ -52,8 +57,22 @@ function Mark({ score }: { score: Score }): React.JSX.Element {
 
   if (score.source === "rottentomatoes") {
     // Fresh and rotten are not decoration - a 6.0 that is "rotten" and a 6.0
-    // that is "fresh" mean different things on that scale.
+    // that is "fresh" mean different things on that scale. The audience scale
+    // has its own pair of marks, so a critic score and an audience score do not
+    // draw the same glyph.
+    const audience = score.kind === "audience";
     const rotten = score.sentiment === "rotten" || score.sentiment === "spilled";
+    if (audience) {
+      return (
+        <svg viewBox="0 0 24 24" className={size} aria-hidden="true">
+          {rotten ? (
+            <path d="M4 14h16l-2 6H6z M6 14l2-6h8l2 6" fill="#4a9b3f" opacity="0.9" />
+          ) : (
+            <path d="M4 13h16l-2 7H6z M7 13c0-4 2-7 5-7s5 3 5 7" fill="#f5c518" />
+          )}
+        </svg>
+      );
+    }
     return (
       <svg viewBox="0 0 24 24" className={size} aria-hidden="true">
         {rotten ? (

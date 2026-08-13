@@ -35,6 +35,7 @@ export interface MessageProps {
 export function Message({ loading, text, failure, actions, onRetry }: MessageProps): React.JSX.Element {
   const { t } = useI18n();
   const signOut = useApp((s) => s.signOut);
+  const clearFailure = useApp((s) => s.fail);
 
   const body = failure
     ? t(
@@ -52,7 +53,21 @@ export function Message({ loading, text, failure, actions, onRetry }: MessagePro
     ...(failure?.kind === "signed-out"
       ? [{ key: "msg-signin", label: t("error.signInAgain"), onEnter: () => void signOut() }]
       : []),
-    ...(onRetry && failure?.kind !== "signed-out" ? [{ key: "msg-retry", label: t("error.retry"), onEnter: onRetry }] : []),
+    ...(onRetry && failure?.kind !== "signed-out"
+      ? [
+          {
+            key: "msg-retry",
+            label: t("error.retry"),
+            // Clearing the failure is the half that was missing: the refetch
+            // would succeed and this screen would keep rendering, because the
+            // failure is app-wide state and only navigation used to clear it.
+            onEnter: () => {
+              clearFailure(null);
+              onRetry();
+            },
+          },
+        ]
+      : []),
     ...(actions ?? []),
   ];
 

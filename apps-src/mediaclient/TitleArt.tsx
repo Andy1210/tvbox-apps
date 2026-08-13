@@ -23,7 +23,7 @@ export function TitleArt({ title, logo }: { title: string; logo?: string }): Rea
     setFailed(false);
     if (!logo || !backend) return;
     let live = true;
-    void loadImage(logo, backend.imageHeaders()).then((url) => {
+    void loadImage(backend.artUrl(logo), backend.imageHeaders()).then((url) => {
       if (!live) return;
       if (url) setSrc(url);
       else setFailed(true);
@@ -42,6 +42,7 @@ export function TitleArt({ title, logo }: { title: string; logo?: string }): Rea
         // Bounded by height rather than width: these vary from a compact
         // monogram to a long wordmark, and constraining the width squashes the
         // short ones into a stamp.
+        onError={() => setFailed(true)}
         className="max-h-[12vh] max-w-[52vw] self-start object-contain"
       />
     );
