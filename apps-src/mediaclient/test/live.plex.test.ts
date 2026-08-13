@@ -156,14 +156,79 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     expect(Array.isArray(results)).toBe(true);
   });
 
-  it("reads history rows", async () => {
+  it("reads history rows, and only as many as asked for", async () => {
     const rows = await backend().history(5);
-    expect(Array.isArray(rows)).toBe(true);
+
+    // The bound is the assertion that matters. A container size on its own is
+    // ignored by this server, and the whole history arrives instead - eighteen
+    // thousand rows and nine megabytes on this one, with no error to notice.
+    expect(rows.length).toBeLessThanOrEqual(5);
     if (rows.length) {
       expect(rows[0].itemId).not.toBe("");
       expect(typeof rows[0].viewedAt).toBe("number");
     }
   });
+
+  it("caps recently-added rather than fetching the whole library", async () => {
+    const items = await backend().recentlyAdded();
+    expect(items.length).toBeLessThanOrEqual(24);
+  });
+
+  it("returns nothing for an empty search instead of failing", async () => {
+    // An empty search box is an ordinary state; this endpoint answers a blank
+    // query with a refusal rather than an empty list.
+    await expect(backend().search("   ")).resolves.toEqual([]);
+  });
+
+  it("reads the scores, reviews, trailers and chapters a detail screen shows", async () => {
+    const b = backend();
+    const libs = await b.libraries();
+    const movies = libs.find((l) => l.kind === "movie")!;
+    const page = await b.libraryPage(movies.id, { offset: 0, limit: 8, sort: "titleSort" });
+
+    let sawScore = false;
+    let sawReview = false;
+    let sawExtra = false;
+    let sawChapter = false;
+    for (const item of page.items) {
+      const d = await b.item(item.id);
+      sawScore ||= d.scores.length > 0;
+      sawReview ||= d.reviews.length > 0;
+      sawExtra ||= d.extras.length > 0;
+      sawChapter ||= d.chapters.length > 0;
+      for (const s of d.scores) {
+        expect(s.value).toBeGreaterThan(0);
+        expect(["critic", "audience"]).toContain(s.kind);
+        // The source is only knowable from the icon reference, so a blank one
+        // means the mapping stopped working.
+        expect(s.source).not.toBe("unknown");
+      }
+    }
+    expect(sawScore, "no scores across eight films").toBe(true);
+    expect(sawReview, "no reviews across eight films").toBe(true);
+    expect(sawExtra, "no trailers across eight films").toBe(true);
+    expect(sawChapter, "no chapters across eight films").toBe(true);
+  }, 120_000);
+
+  it("resolves a stream the player can actually take", async () => {
+    const b = backend();
+    const libs = await b.libraries();
+    const movies = libs.find((l) => l.kind === "movie")!;
+    const page = await b.libraryPage(movies.id, { offset: 0, limit: 1, sort: "titleSort" });
+    const session = `test-${Date.now()}`;
+
+    const decision = await b.resolveStream(page.items[0].id, { session, panel: { width: 3840, height: 2160 } });
+    try {
+      expect(decision.url).toMatch(/^https?:\/\//);
+      // The URL has to be fetchable: a direct-play part answers 401 without the
+      // token, and the transcoder answers 400 when it cannot find a profile for
+      // this client - both of which look like a working URL until it is used.
+      const res = await fetch(decision.url, { headers: { Range: "bytes=0-1023" } });
+      expect([200, 206]).toContain(res.status);
+    } finally {
+      await b.endSession(session);
+    }
+  }, 60_000);
 
   it("reports progress without disturbing what is stored", async () => {
     const b = backend();

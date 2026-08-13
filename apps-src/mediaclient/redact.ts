@@ -30,21 +30,59 @@ const SECRET_PARAMS = [
 
 const SECRET_HEADERS = ["x-plex-token", "authorization", "x-emby-token"];
 
-/**
- * Replace the value of every secret-bearing query parameter in a string, leaving
- * everything else readable. Works on bare URLs and on prose containing one.
- */
-export function redact(input: unknown): string {
-  let s = typeof input === "string" ? input : String(input);
+/** Strip secret query-parameter values out of a string, leaving the rest legible. */
+function scrub(s: string): string {
+  let out = s;
   for (const p of SECRET_PARAMS) {
-    // Both orderings of the separator, and both & and ; as terminators, because
-    // this runs on strings that were already concatenated by someone else.
-    s = s.replace(new RegExp(`([?&;]${p}=)[^&;\\s"']*`, "gi"), "$1<redacted>");
+    // Both & and ; as terminators, because this runs on strings someone else
+    // already concatenated.
+    out = out.replace(new RegExp(`([?&;]${p}=)[^&;\\s"']*`, "gi"), "$1<redacted>");
   }
-  return s;
+  return out;
 }
 
-/** Same, for a header bag about to be logged. */
+/**
+ * Redact whatever is about to be logged.
+ *
+ * Non-strings are NOT flattened to a string first. Doing that turns an object
+ * into "[object Object]" and an Error into its message alone - which throws away
+ * the stack, and for this app's own error type also the status and URL it exists
+ * to carry. The point of a log line is to be readable afterwards.
+ */
+export function redact(input: unknown): unknown {
+  if (typeof input === "string") return scrub(input);
+  if (input instanceof Error) {
+    // Copy rather than mutate: the caller may still be handling this error.
+    const copy = new Error(scrub(input.message));
+    copy.name = input.name;
+    copy.stack = input.stack ? scrub(input.stack) : undefined;
+    for (const [k, v] of Object.entries(input)) {
+      (copy as unknown as Record<string, unknown>)[k] = typeof v === "string" ? scrub(v) : v;
+    }
+    return copy;
+  }
+  if (input && typeof input === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+      out[k] = typeof v === "string" ? scrub(v) : v;
+    }
+    return out;
+  }
+  return input;
+}
+
+/** The string form, for the cases that really do want one. */
+export function redactString(input: unknown): string {
+  const r = redact(input);
+  return typeof r === "string" ? r : String(r);
+}
+
+/**
+ * A header bag with its credentials removed.
+ *
+ * Separate from `redact` because a header's secret is its whole value, not a
+ * query parameter inside it - the general form cannot see it.
+ */
 export function redactHeaders(h: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(h)) {

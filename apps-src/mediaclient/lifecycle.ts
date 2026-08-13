@@ -77,14 +77,22 @@ function resume(): void {
   }
 }
 
-/** Wire the page lifecycle events. Idempotent; safe to call once from main. */
+let installed = false;
+
+/** Wire the page lifecycle events. Idempotent - a second call would otherwise
+ *  double every release. */
 export function installLifecycle(): void {
-  if (typeof document === "undefined") return;
+  if (installed || typeof document === "undefined") return;
+  installed = true;
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") release("hidden");
     else resume();
   });
   window.addEventListener("pagehide", () => release("pagehide"));
+  // pagehide has a counterpart, and without handling it a teardown that skipped
+  // visibilitychange would leave the released flag latched - suppressing every
+  // later release for the life of the page.
+  window.addEventListener("pageshow", () => resume());
 }
 
 /** Test seam: drive the transitions without dispatching real events. */
@@ -95,6 +103,7 @@ export const __lifecycle = {
     releasers.clear();
     resumers.clear();
     releasedFor = null;
+    installed = false;
   },
   get released(): ReleaseReason | null {
     return releasedFor;
