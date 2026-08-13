@@ -7,6 +7,8 @@ import { Login } from "./Login";
 import { Message } from "./Message";
 import { Person } from "./Person";
 import { Player } from "./Player";
+import { Search } from "./Search";
+import { Settings } from "./Settings";
 import { usePlayer } from "./playback/player";
 import { useApp } from "./state";
 
@@ -67,7 +69,8 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
         {screen.name === "person" && (
           <Person key={screen.personId} personId={screen.personId} personName={screen.personName} />
         )}
-        {(screen.name === "search" || screen.name === "settings") && <Message text="…" />}
+        {screen.name === "search" && <Search />}
+        {screen.name === "settings" && <Settings />}
       </main>
     </div>
   );

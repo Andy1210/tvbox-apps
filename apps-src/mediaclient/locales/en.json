@@ -24,7 +24,9 @@
     "continue": "Carry on watching",
     "recentIn": "Recently added to {library}",
     "libraries": "Libraries",
-    "empty": "This server has nothing in it yet."
+    "empty": "This server has nothing in it yet.",
+    "search": "Search",
+    "settings": "Settings"
   },
   "error": {
     "unreachable": "The server cannot be reached. It may be switched off, or the box may be off the network.",
@@ -64,5 +66,21 @@
     "converting": "Converting for this box",
     "hint": "Left/Right: jump · OK: pause · Back: pause",
     "hintPaused": "OK: carry on · Back: stop"
+  },
+  "search": {
+    "title": "Search",
+    "placeholder": "Type a title",
+    "nothing": "Nothing found for \"{query}\".",
+    "episodes": "Episodes"
+  },
+  "settings": {
+    "title": "Settings",
+    "server": "Server",
+    "connection": "Connection",
+    "local": "On this network",
+    "remote": "Remote (the server limits quality)",
+    "profile": "Profile",
+    "owner": "Account owner",
+    "signOut": "Sign out"
   }
 }

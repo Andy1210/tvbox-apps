@@ -24,7 +24,9 @@
     "continue": "Folytasd, ahol abbahagytad",
     "recentIn": "Újdonságok itt: {library}",
     "libraries": "Könyvtárak",
-    "empty": "Ezen a szerveren még nincs semmi."
+    "empty": "Ezen a szerveren még nincs semmi.",
+    "search": "Keresés",
+    "settings": "Beállítások"
   },
   "error": {
     "unreachable": "A szerver nem érhető el. Lehet, hogy ki van kapcsolva, vagy a box nincs a hálózaton.",
@@ -64,5 +66,21 @@
     "converting": "Átalakítás ehhez a boxhoz",
     "hint": "Balra/Jobbra: ugrás · OK: szünet · Vissza: szünet",
     "hintPaused": "OK: folytatás · Vissza: leállítás"
+  },
+  "search": {
+    "title": "Keresés",
+    "placeholder": "Írj be egy címet",
+    "nothing": "Nincs találat erre: „{query}\".",
+    "episodes": "Epizódok"
+  },
+  "settings": {
+    "title": "Beállítások",
+    "server": "Szerver",
+    "connection": "Kapcsolat",
+    "local": "Ezen a hálózaton",
+    "remote": "Távoli (a szerver korlátozza a minőséget)",
+    "profile": "Profil",
+    "owner": "A fiók tulajdonosa",
+    "signOut": "Kijelentkezés"
   }
 }

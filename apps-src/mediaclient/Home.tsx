@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useI18n } from "@sdk";
+import { FocusButton, useI18n } from "@sdk";
 import { Row } from "./Row";
 import { Message } from "./Message";
 import { artworkScale } from "./posters";
@@ -84,7 +84,28 @@ export function Home(): React.JSX.Element {
   const nothing = data.onDeck.length === 0 && data.recent.length === 0;
 
   return (
-    <div className="flex h-full flex-col gap-[3vh] overflow-y-auto py-[4vh]">
+    <div className="flex h-full flex-col gap-[3vh] overflow-y-auto py-[3vh]">
+      {/* The only route to search and settings. Without it a library of
+          thousands is navigable by the A-Z strip alone, and a rejected token
+          leaves the app with no way to sign in again. */}
+      <header className="flex items-center gap-[1.2vw] px-[4vw]">
+        <h1 className="mr-auto text-[2.6vh] font-semibold tracking-tight">{t("app.name")}</h1>
+        <FocusButton
+          focusKey="nav-search"
+          onEnter={() => go({ name: "search" })}
+          className="rounded-[1vh] bg-white/10 px-[1.8vw] py-[1vh] text-[1.9vh]"
+        >
+          {t("home.search")}
+        </FocusButton>
+        <FocusButton
+          focusKey="nav-settings"
+          onEnter={() => go({ name: "settings" })}
+          className="rounded-[1vh] bg-white/10 px-[1.8vw] py-[1vh] text-[1.9vh]"
+        >
+          {t("home.settings")}
+        </FocusButton>
+      </header>
+
       {nothing && <Message text={t("home.empty")} />}
 
       <Row
@@ -96,17 +117,8 @@ export function Home(): React.JSX.Element {
         heightVh={24}
       />
 
-      {data.recent.map(({ library, items }) => (
-        <Row
-          key={library.id}
-          id={`recent-${library.id}`}
-          title={t("home.recentIn", { library: library.title })}
-          items={items}
-          posterUrl={poster}
-          onSelect={open}
-        />
-      ))}
-
+      {/* Above the recents, not below them: reaching a library was otherwise one
+          press per "recently added" row, on tiles that are only grey boxes. */}
       {data.libraries.length > 0 && (
         <Row
           id="libraries"
@@ -118,9 +130,20 @@ export function Home(): React.JSX.Element {
             const library = data.libraries.find((l) => l.id === id);
             if (library) go({ name: "library", libraryId: library.id, title: library.title });
           }}
-          heightVh={14}
+          heightVh={12}
         />
       )}
+
+      {data.recent.map(({ library, items }) => (
+        <Row
+          key={library.id}
+          id={`recent-${library.id}`}
+          title={t("home.recentIn", { library: library.title })}
+          items={items}
+          posterUrl={poster}
+          onSelect={open}
+        />
+      ))}
     </div>
   );
 }
