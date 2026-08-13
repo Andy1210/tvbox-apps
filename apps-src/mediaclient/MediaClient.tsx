@@ -1,9 +1,11 @@
 import { useEffect } from "react";
 import { useBackspace } from "@sdk";
+import { Detail } from "./Detail";
 import { Home } from "./Home";
 import { Library } from "./Library";
 import { Login } from "./Login";
 import { Message } from "./Message";
+import { Person } from "./Person";
 import { useApp } from "./state";
 
 export interface MediaClientProps {
@@ -46,9 +48,11 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
           // grid rather than showing the previous one's rows while it reloads.
           <Library key={screen.libraryId} libraryId={screen.libraryId} title={screen.title} />
         )}
-        {(screen.name === "item" || screen.name === "person" || screen.name === "search" || screen.name === "settings") && (
-          <Message text="…" />
+        {screen.name === "item" && <Detail key={screen.itemId} itemId={screen.itemId} />}
+        {screen.name === "person" && (
+          <Person key={screen.personId} personId={screen.personId} personName={screen.personName} />
         )}
+        {(screen.name === "search" || screen.name === "settings") && <Message text="…" />}
       </main>
     </div>
   );

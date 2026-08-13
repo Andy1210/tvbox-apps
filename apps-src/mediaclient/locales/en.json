@@ -34,5 +34,19 @@
   },
   "library": {
     "all": "All"
+  },
+  "detail": {
+    "play": "Play",
+    "resume": "Carry on",
+    "seasons": "Seasons",
+    "episodes": "Episodes",
+    "cast": "Cast"
+  },
+  "person": {
+    "films": "Films",
+    "series": "Series",
+    "count": "{films} films · {series} series",
+    "empty": "Nothing else with {name} is on this server.",
+    "partial": "The server did not say how many there are, so this list may be short."
   }
 }
