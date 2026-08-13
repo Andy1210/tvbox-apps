@@ -302,12 +302,11 @@ async function apiWrite(acc, method, p, payload) {
   const { status, body: resp } = await request(method, API + p, headers, body);
   return { ok: status >= 200 && status < 300, status, body: resp };
 }
-// Active-account convenience wrappers (browse/search/status stay on the active one).
+// Browsing, searching and the account's own identity are questions ABOUT the
+// active account, so they read as it. Anything that acts on the box says which
+// account to act as instead, because the box is not always the active one's.
 function userGet(p) {
   return apiGet(activeAccount(), p);
-}
-function userWrite(method, p, payload) {
-  return apiWrite(activeAccount(), method, p, payload);
 }
 
 // ---- status ----
@@ -477,6 +476,12 @@ function cacheKey(acc, kind, id) {
   return ((acc && acc.id) || "") + "|" + kind + "|" + (id || "");
 }
 function cacheStore(key, entry) {
+  // A read that was already running when its account was removed would otherwise
+  // put that account's library back after dropCaches had cleared it, and it would
+  // sit there until eviction. The key carries the account, so the check is here
+  // rather than at every call site.
+  const accId = key.split("|")[0];
+  if (accId && !accounts.list.some((x) => x.id === accId)) return;
   listCache.delete(key); // re-insert, so a refreshed entry counts as the newest
   listCache.set(key, entry);
   while (listCache.size > LIST_CACHE_MAX) listCache.delete(listCache.keys().next().value);
@@ -765,12 +770,19 @@ async function play({ contextUri, uris, offset, collection, keepActive }) {
 // the live player so one button works for both states.
 const REPEAT_STATES = ["off", "context", "track"];
 
-async function control(action, state) {
+// `accId` names the account to act on, defaulting to the active one. Autoplay
+// needs it: it starts playback under whichever account drives the box without
+// making that one active, so a command sent as the active account would reach a
+// different player entirely - and a pause that lands on the wrong player leaves
+// the music it was meant to stop playing.
+async function control(action, state, accId) {
   if (!connected()) return { ok: false, error: "not connected" };
+  const acc = accountById(accId);
+  const write = (m, p, payload) => apiWrite(acc, m, p, payload);
   if (action === "playpause") {
     let playing = false;
     try {
-      const p = await userGet("/me/player");
+      const p = await apiGet(acc, "/me/player");
       playing = !!(p && p.is_playing);
     } catch (e) {}
     action = playing ? "pause" : "play";
@@ -780,12 +792,12 @@ async function control(action, state) {
   // which is why the UI reads them back from playerState() instead of assuming.
   if (action === "shuffle") {
     const on = state === true || state === "true";
-    const res = await userWrite("PUT", "/me/player/shuffle?state=" + (on ? "true" : "false"));
+    const res = await write("PUT", "/me/player/shuffle?state=" + (on ? "true" : "false"));
     return { ok: res.ok, error: res.ok ? "" : "HTTP " + res.status };
   }
   if (action === "repeat") {
     const s = REPEAT_STATES.includes(state) ? state : "off";
-    const res = await userWrite("PUT", "/me/player/repeat?state=" + s);
+    const res = await write("PUT", "/me/player/repeat?state=" + s);
     return { ok: res.ok, error: res.ok ? "" : "HTTP " + res.status };
   }
   const routes = {
@@ -796,7 +808,7 @@ async function control(action, state) {
   };
   const r = routes[action];
   if (!r) return { ok: false, error: "bad action" };
-  const res = await userWrite(r[0], r[1]);
+  const res = await write(r[0], r[1]);
   return { ok: res.ok, error: res.ok ? "" : "HTTP " + res.status };
 }
 

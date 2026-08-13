@@ -309,9 +309,10 @@ test("a pause that lands while the play request is out stops the music again", a
   const controls = [];
   let a;
   const api = fakeApi({
+    playerState: () => ({ ok: true, box: true, is_playing: false, accountId: "bob" }),
     extra: {
-      async control(action) {
-        controls.push(action);
+      async control(action, state, accId) {
+        controls.push([action, accId]);
         return { ok: true };
       },
     },
@@ -331,7 +332,10 @@ test("a pause that lands while the play request is out stops the music again", a
   a.onEvent("end_of_track", "t1");
   await tick(40);
   assert.equal(played.length, 1, "the request had already gone");
-  assert.deepEqual(controls, ["pause"], "so what it started is stopped again");
+  // The account matters as much as the action: the play went out under the box's
+  // account without making it active, so a pause as the active one would reach a
+  // different player and leave this music running.
+  assert.deepEqual(controls, [["pause", "bob"]]);
 });
 
 test("the continuation is chosen for the account that will play it", async () => {

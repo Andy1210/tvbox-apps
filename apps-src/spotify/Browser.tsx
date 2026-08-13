@@ -9,6 +9,7 @@ import {
   play,
   control,
   mmss,
+  URIS_MAX,
   type Track,
   type Playlist,
   type ListResult,
@@ -341,7 +342,7 @@ export function Browser({ onBack, onPlayed }: { onBack: () => void; onPlayed: ()
                   playAndGo({
                     collection: true,
                     offset: posOf(liked.items, i),
-                    uris: liked.items.slice(i).map((x) => x.uri),
+                    uris: liked.items.slice(i, i + URIS_MAX).map((x) => x.uri),
                   })
                 }
               />
@@ -405,7 +406,7 @@ export function Browser({ onBack, onPlayed }: { onBack: () => void; onPlayed: ()
                     playAndGo({
                       contextUri: openPl.uri,
                       offset: posOf(plTracks.items, i),
-                      uris: plTracks.items.slice(i).map((x) => x.uri),
+                      uris: plTracks.items.slice(i, i + URIS_MAX).map((x) => x.uri),
                     })
                   }
                 />
@@ -427,7 +428,7 @@ export function Browser({ onBack, onPlayed }: { onBack: () => void; onPlayed: ()
                   title={tr.name}
                   sub={tr.artists}
                   right={mmss(tr.duration_ms)}
-                  onEnter={() => playAndGo({ uris: results.tracks.slice(i).map((x) => x.uri) })}
+                  onEnter={() => playAndGo({ uris: results.tracks.slice(i, i + URIS_MAX).map((x) => x.uri) })}
                 />
               ))}
             {results &&

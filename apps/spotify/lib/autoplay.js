@@ -208,7 +208,9 @@ function createAutoplay({ api, play, isEnabled, log, graceMs }) {
         if (cancelled()) {
           say("called off while starting; stopping it again");
           try {
-            await api.control("pause");
+            // The same account the play went out as. A pause sent as the active
+            // one would reach a different player and leave this music running.
+            await api.control("pause", undefined, st.accountId);
           } catch (e) {
             /* nothing more to try */
           }

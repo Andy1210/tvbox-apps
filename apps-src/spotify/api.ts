@@ -235,6 +235,12 @@ export async function setAutoplay(enabled: boolean): Promise<boolean> {
   }
 }
 
+// How many track uris the fallback is worth sending. The box caps what it
+// forwards to Spotify at the same number, so anything beyond this is a larger
+// request between two processes on the same machine for nothing: a thousand-track
+// playlist would serialise its whole tail on every press.
+export const URIS_MAX = 100;
+
 // `offset` is the position WITHIN the context, and `collection` asks the box to
 // play Liked Songs as a context of its own. Both exist so a track picked from a
 // long list starts the real playlist at that track, instead of a flat copy of it:
