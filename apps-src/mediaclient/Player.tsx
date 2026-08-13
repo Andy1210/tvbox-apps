@@ -1,0 +1,202 @@
+import { useEffect, useRef } from "react";
+import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
+import { FocusButton, isBackKey, useI18n } from "@sdk";
+import { usePlayer } from "./playback/player";
+
+/** Nudge sizes as a press is held. Held longer means further per press. */
+const STEPS_MS = [10_000, 30_000, 60_000];
+/** The overlay hides itself this long after the last press. */
+const IDLE_HIDE_MS = 4_000;
+
+function clock(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const mm = h ? String(m).padStart(2, "0") : String(m);
+  return `${h ? `${h}:` : ""}${mm}:${String(s).padStart(2, "0")}`;
+}
+
+/**
+ * What is on screen while something plays.
+ *
+ * The video is behind this page, so everything here is drawn over it and the
+ * page itself is transparent. Which means the overlay has to get out of the way:
+ * it hides after a few seconds of no input, and any press brings it back.
+ *
+ * Left and Right scrub rather than move focus. On a remote there is no other
+ * gesture for it, and a scrub bar you have to focus first is a scrub bar nobody
+ * uses.
+ */
+export function Player(): React.JSX.Element | null {
+  const { t } = useI18n();
+  const current = usePlayer((s) => s.current);
+  const state = usePlayer((s) => s.state);
+  const positionMs = usePlayer((s) => s.positionMs);
+  const seekTargetMs = usePlayer((s) => s.seekTargetMs);
+  const durationMs = usePlayer((s) => s.durationMs);
+  const buffering = usePlayer((s) => s.buffering);
+  const overlay = usePlayer((s) => s.overlay);
+
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const held = useRef({ dir: 0, count: 0 });
+
+  const { ref, focusKey } = useFocusable({ focusKey: "player", saveLastFocusedChild: true, isFocusBoundary: true });
+
+  // Any input shows the overlay and restarts the countdown. Pausing keeps it up:
+  // a paused film with nothing on screen looks like a frozen box.
+  useEffect(() => {
+    if (!current) return;
+    const bump = (): void => {
+      usePlayer.getState().showOverlay(true);
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+      if (usePlayer.getState().state === "playing") {
+        hideTimer.current = setTimeout(() => usePlayer.getState().showOverlay(false), IDLE_HIDE_MS);
+      }
+    };
+    bump();
+    return () => {
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+    };
+  }, [current, state, positionMs === 0]);
+
+  useEffect(() => {
+    if (!current) return;
+
+    const onKey = (e: KeyboardEvent): void => {
+      const p = usePlayer.getState();
+      p.showOverlay(true);
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+      if (p.state === "playing") hideTimer.current = setTimeout(() => usePlayer.getState().showOverlay(false), IDLE_HIDE_MS);
+
+      // Back pauses and keeps the frame. Stopping loses where you were, and on a
+      // television that is a much bigger deal than on a phone.
+      if (isBackKey(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (p.state === "playing") p.togglePause();
+        else void p.stop();
+        return;
+      }
+
+      switch (e.key) {
+        case "ArrowLeft":
+        case "ArrowRight": {
+          e.preventDefault();
+          e.stopPropagation();
+          const dir = e.key === "ArrowRight" ? 1 : -1;
+          if (held.current.dir === dir) held.current.count += 1;
+          else held.current = { dir, count: 0 };
+          const step = STEPS_MS[Math.min(held.current.count >> 2, STEPS_MS.length - 1)];
+          p.seekBy(dir * step);
+          break;
+        }
+        case "Enter":
+        case "MediaPlayPause":
+          e.preventDefault();
+          p.togglePause();
+          break;
+        case "MediaStop":
+          e.preventDefault();
+          void p.stop();
+          break;
+        case "MediaTrackNext":
+          p.seekBy(60_000);
+          break;
+        case "MediaTrackPrevious":
+          p.seekBy(-60_000);
+          break;
+      }
+    };
+
+    const onKeyUp = (): void => {
+      held.current = { dir: 0, count: 0 };
+    };
+
+    // Capture phase: these keys must not reach spatial navigation, or Left and
+    // Right would move focus instead of scrubbing.
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("keyup", onKeyUp, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+    };
+  }, [current]);
+
+  if (!current) return null;
+
+  const shown = seekTargetMs ?? positionMs;
+  const pct = durationMs > 0 ? Math.min(100, (shown / durationMs) * 100) : 0;
+  const marker = usePlayer.getState().activeMarker();
+  const skippable = marker && (marker.type === "intro" || (marker.type === "credits" && !marker.final));
+
+  return (
+    <FocusContext.Provider value={focusKey}>
+      <div
+        ref={ref}
+        className={`absolute inset-0 flex flex-col justify-end transition-opacity duration-200 ${
+          overlay ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+      >
+        {skippable && (
+          <div className="absolute right-[4vw] bottom-[26vh]">
+            <FocusButton
+              focusKey="skip"
+              onEnter={() => usePlayer.getState().skipMarker()}
+              className="rounded-[1vh] bg-white/90 px-[2vw] py-[1.2vh] text-[2vh] font-semibold text-black"
+            >
+              {t(marker!.type === "intro" ? "player.skipIntro" : "player.skipCredits")}
+            </FocusButton>
+          </div>
+        )}
+
+        {/* A gradient rather than a panel: the film keeps showing through, which
+            is what makes the overlay feel like it belongs to the picture. */}
+        <div className="bg-gradient-to-t from-black/85 to-transparent px-[4vw] pt-[8vh] pb-[4vh]">
+          <div className="flex flex-col gap-[1.4vh]">
+            <div className="flex items-baseline gap-[1.2vw]">
+              <h2 className="text-[2.6vh] font-semibold tracking-tight">
+                {current.item.seriesTitle ?? current.item.title}
+              </h2>
+              {current.item.seriesTitle && <span className="text-[1.9vh] text-fg-dim">{current.item.title}</span>}
+              {buffering && <span className="text-[1.7vh] text-fg-dim">{t("player.buffering")}</span>}
+              {current.decision.transcoded && <span className="text-[1.5vh] text-fg-dim">{t("player.converting")}</span>}
+            </div>
+
+            <div className="flex items-center gap-[1.2vw]">
+              <span className="w-[9vw] text-[1.9vh] tabular-nums">{clock(shown)}</span>
+
+              <div className="relative h-[0.7vh] flex-1 rounded-full bg-white/25">
+                {/* Markers sit on the bar so the shape of the episode is visible
+                    before you get there. */}
+                {current.markers.map((m) => (
+                  <div
+                    key={`${m.type}-${m.startMs}`}
+                    className="absolute top-0 h-full bg-white/35"
+                    style={{
+                      left: `${durationMs ? (m.startMs / durationMs) * 100 : 0}%`,
+                      width: `${durationMs ? ((m.endMs - m.startMs) / durationMs) * 100 : 0}%`,
+                    }}
+                  />
+                ))}
+                <div className="absolute top-0 left-0 h-full rounded-full bg-white" style={{ width: `${pct}%` }} />
+                <div
+                  className="absolute top-1/2 h-[2vh] w-[2vh] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_1.5vh_rgba(0,0,0,0.6)]"
+                  style={{ left: `${pct}%` }}
+                />
+              </div>
+
+              <span className="w-[9vw] text-right text-[1.9vh] text-fg-dim tabular-nums">
+                −{clock(Math.max(0, durationMs - shown))}
+              </span>
+            </div>
+
+            <p className="text-[1.6vh] text-fg-dim">
+              {t(state === "paused" ? "player.hintPaused" : "player.hint")}
+            </p>
+          </div>
+        </div>
+      </div>
+    </FocusContext.Provider>
+  );
+}

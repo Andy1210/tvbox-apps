@@ -43,7 +43,8 @@
     "cast": "Szereplők",
     "extras": "Előzetesek és extrák",
     "reviews": "Kritikák",
-    "moreReviews": "Még {n} megjelenítése"
+    "moreReviews": "Még {n} megjelenítése",
+    "fromStart": "Elölről"
   },
   "person": {
     "films": "Filmek",
@@ -51,5 +52,13 @@
     "count": "{films} film · {series} sorozat",
     "empty": "Ezen a szerveren nincs más {name} közreműködésével.",
     "partial": "A szerver nem árulta el, hány találat van, így ez a lista hiányos lehet."
+  },
+  "player": {
+    "skipIntro": "Főcím átugrása",
+    "skipCredits": "Stáblista átugrása",
+    "buffering": "Pufferelés…",
+    "converting": "Átalakítás ehhez a boxhoz",
+    "hint": "Balra/Jobbra: ugrás · OK: szünet · Vissza: szünet",
+    "hintPaused": "OK: folytatás · Vissza: leállítás"
   }
 }
