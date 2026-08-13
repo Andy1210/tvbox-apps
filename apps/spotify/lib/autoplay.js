@@ -59,13 +59,13 @@ function interleave(lists) {
 // Build the uris to play next from what was just played. `deps` is the Web API
 // surface (injected so this is testable without one), `state` carries the probe
 // verdict across calls.
-async function continuation(seedTrackIds, deps, state) {
+async function continuation(seedTrackIds, deps, state, accId) {
   const seeds = uniq(seedTrackIds).slice(-SEEDS_MAX);
   if (!seeds.length) return { uris: [], source: "none" };
 
   if (state.recommendations !== "no") {
     try {
-      const tracks = await deps.recommendations(seeds, WANT);
+      const tracks = await deps.recommendations(seeds, WANT, accId);
       state.recommendations = "yes";
       const uris = uniq((tracks || []).map((t) => t && t.uri));
       if (uris.length) return { uris, source: "recommendations" };
@@ -83,7 +83,7 @@ async function continuation(seedTrackIds, deps, state) {
   for (const id of seeds) {
     let a = "";
     try {
-      a = await deps.primaryArtistId(id);
+      a = await deps.primaryArtistId(id, accId);
     } catch (e) {
       a = "";
     }
@@ -95,7 +95,7 @@ async function continuation(seedTrackIds, deps, state) {
   for (const a of artistIds) {
     let tracks = [];
     try {
-      tracks = await deps.artistTopTracks(a);
+      tracks = await deps.artistTopTracks(a, accId);
     } catch (e) {
       continue; // one artist failing must not lose the others
     }
@@ -184,7 +184,7 @@ function createAutoplay({ api, play, isEnabled, log, graceMs }) {
       if (!st.box) return say("no linked account is driving this box; not continuing");
       if (st.is_playing) return;
       if (cancelled()) return say("called off before it started");
-      const { uris, source } = await continuation(armedSeeds, api, state);
+      const { uris, source } = await continuation(armedSeeds, api, state, st.accountId);
       if (!uris.length) return say("nothing to continue with");
       if (cancelled()) return say("called off before it started");
       // Claimed BEFORE the request: librespot can report the first track playing

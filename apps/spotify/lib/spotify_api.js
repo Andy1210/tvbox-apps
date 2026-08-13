@@ -686,6 +686,9 @@ async function boxPlayerState() {
       box: device.trim().toLowerCase() === want,
       is_playing: !!(p && p.is_playing),
       device,
+      // Whose box this is, so a continuation is chosen for the country that will
+      // actually play it rather than for whoever happens to be the active account.
+      accountId: found.account.id,
     };
   } catch (e) {
     return { ...unknown, error: String(e.message || e) };
@@ -861,6 +864,16 @@ async function artistImageForTrack(trackId) {
 }
 
 // ---- catalog reads, for the autoplay continuation ----
+// Every one of these takes the account to read AS, defaulting to the active one.
+// That parameter is not decoration: autoplay plays with `keepActive`, so the
+// account driving the box is deliberately not made the active one, and a catalog
+// read for the wrong account is answered for the wrong COUNTRY. On a box with two
+// accounts in two countries that produces recommendations the account actually
+// playing cannot play.
+function accountById(id) {
+  return (id && accounts.list.find((x) => x.id === id)) || activeAccount();
+}
+
 // The market a catalog request is answered for. Top tracks REQUIRE one, and the
 // account's own country is the honest answer; `from_token` is the fallback for an
 // account that does not expose it.
@@ -868,13 +881,14 @@ async function artistImageForTrack(trackId) {
 // two accounts in two countries, and the wrong market answers with a catalog the
 // listener cannot play.
 let marketCache = new Map(); // accId -> market
-async function market() {
-  const id = (activeAccount() || {}).id || "";
+async function market(accId) {
+  const acc = accountById(accId);
+  const id = (acc || {}).id || "";
   const hit = marketCache.get(id);
   if (hit) return hit;
   let m = "from_token";
   try {
-    m = String((await userGet("/me")).country || "") || "from_token";
+    m = String((await apiGet(acc, "/me")).country || "") || "from_token";
   } catch (e) {
     m = "from_token";
   }
@@ -888,20 +902,22 @@ async function market() {
 // `market` matters beyond playability: without it Spotify may hand back a track
 // id that gets relinked to a different one on playback, and autoplay recognises
 // its own tracks by id to know it is still the thing playing.
-async function recommendations(seedTrackIds, limit) {
+async function recommendations(seedTrackIds, limit, accId) {
   const seeds = (seedTrackIds || []).filter(Boolean).slice(0, 5);
   if (!seeds.length) return [];
   const n = Math.max(1, Math.min(100, limit || 30));
-  const d = await userGet(
-    `/recommendations?limit=${n}&market=${encodeURIComponent(await market())}&seed_tracks=${encodeURIComponent(seeds.join(","))}`,
+  const d = await apiGet(
+    accountById(accId),
+    `/recommendations?limit=${n}&market=${encodeURIComponent(await market(accId))}&seed_tracks=${encodeURIComponent(seeds.join(","))}`,
   );
   return (d.tracks || []).map(trackOf).filter((t) => t && t.uri);
 }
 
-async function artistTopTracks(artistId) {
+async function artistTopTracks(artistId, accId) {
   if (!artistId) return [];
-  const d = await userGet(
-    `/artists/${encodeURIComponent(artistId)}/top-tracks?market=${encodeURIComponent(await market())}`,
+  const d = await apiGet(
+    accountById(accId),
+    `/artists/${encodeURIComponent(artistId)}/top-tracks?market=${encodeURIComponent(await market(accId))}`,
   );
   return (d.tracks || []).map(trackOf).filter((t) => t && t.uri);
 }
@@ -909,13 +925,16 @@ async function artistTopTracks(artistId) {
 // The primary artist of a track, which is what an artist-based continuation is
 // seeded from. Shares artistImageForTrack's shape but not its cache: that one
 // stores an image url, this one an artist id.
+// Keyed by track alone, because which artist a track is by does not depend on who
+// is asking - unlike the market-sensitive reads above.
 const trackArtistCache = new Map(); // trackId -> artistId ("" = looked up, none)
-async function primaryArtistId(trackId) {
+async function primaryArtistId(trackId, accId) {
   if (!connected() || !trackId) return "";
   if (trackArtistCache.has(trackId)) return trackArtistCache.get(trackId);
   let id = "";
   try {
-    id = (((await userGet("/tracks/" + encodeURIComponent(trackId))).artists || [])[0] || {}).id || "";
+    id =
+      (((await apiGet(accountById(accId), "/tracks/" + encodeURIComponent(trackId))).artists || [])[0] || {}).id || "";
   } catch (e) {
     id = "";
   }

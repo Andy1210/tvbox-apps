@@ -16,18 +16,22 @@ function fakeApi(over) {
   const calls = { recommendations: 0, artistTopTracks: 0, primaryArtistId: 0, playerState: 0 };
   return {
     calls,
-    async recommendations(seeds, limit) {
+    // Every argument is forwarded, including the account the read is for. A fake
+    // that quietly drops one cannot tell whether the code passes it.
+    async recommendations(seeds, limit, accId) {
       calls.recommendations++;
-      if (over.recommendations) return over.recommendations(seeds, limit);
+      if (over.recommendations) return over.recommendations(seeds, limit, accId);
       return [track("r1"), track("r2")];
     },
-    async primaryArtistId(id) {
+    async primaryArtistId(id, accId) {
       calls.primaryArtistId++;
-      return over.primaryArtistId ? over.primaryArtistId(id) : "art-" + id;
+      return over.primaryArtistId ? over.primaryArtistId(id, accId) : "art-" + id;
     },
-    async artistTopTracks(a) {
+    async artistTopTracks(a, accId) {
       calls.artistTopTracks++;
-      return over.artistTopTracks ? over.artistTopTracks(a) : [track(a + "-1"), track(a + "-2"), track(a + "-3")];
+      return over.artistTopTracks
+        ? over.artistTopTracks(a, accId)
+        : [track(a + "-1"), track(a + "-2"), track(a + "-3")];
     },
     // The REAL boxPlayerState never throws: it catches its own errors and answers
     // with `ok: false`. A fake that throws instead would let a fail-open guard
@@ -328,6 +332,27 @@ test("a pause that lands while the play request is out stops the music again", a
   await tick(40);
   assert.equal(played.length, 1, "the request had already gone");
   assert.deepEqual(controls, ["pause"], "so what it started is stopped again");
+});
+
+test("the continuation is chosen for the account that will play it", async () => {
+  // autoplay plays with keepActive, so the account driving the box is
+  // deliberately not made the active one. A catalog read for the wrong account is
+  // answered for the wrong COUNTRY, which on a box with two accounts in two
+  // countries returns tracks the one actually playing cannot play.
+  const asked = [];
+  const { a } = watcher({
+    api: {
+      playerState: () => ({ ok: true, box: true, is_playing: false, accountId: "bob" }),
+      recommendations: (seeds, limit, accId) => {
+        asked.push(accId);
+        return [track("x")];
+      },
+    },
+  });
+  a.onEvent("playing", "t1");
+  a.onEvent("end_of_track", "t1");
+  await tick(30);
+  assert.deepEqual(asked, ["bob"], "the box's account, not whichever one is active");
 });
 
 test("a continuation never changes which account the box's screens show", async () => {
