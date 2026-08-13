@@ -1,0 +1,55 @@
+{
+ "MediaContainer": {
+  "Metadata": [
+   {
+    "Director": [
+     {
+      "id": 601,
+      "tag": "A Director"
+     }
+    ],
+    "Genre": [
+     {
+      "id": 701,
+      "tag": "Drama"
+     }
+    ],
+    "Role": [
+     {
+      "filter": "actor=501",
+      "id": 501,
+      "role": "Lead",
+      "tag": "First Performer",
+      "tagKey": "aaaaaaaaaaaaaaaaaaaaaaaa",
+      "thumb": "https://metadata-static.plex.tv/0/people/0000.jpg"
+     },
+     {
+      "filter": "actor=502",
+      "id": 502,
+      "role": "Support",
+      "tag": "Second Performer",
+      "tagKey": "bbbbbbbbbbbbbbbbbbbbbbbb"
+     },
+     {
+      "filter": "actor=503",
+      "id": 503,
+      "role": "Support",
+      "tag": "Third Performer",
+      "tagKey": "cccccccccccccccccccccccc"
+     }
+    ],
+    "addedAt": 1609459200,
+    "art": "/library/metadata/106/art/1",
+    "contentRating": "12",
+    "duration": 7200000,
+    "ratingKey": "106",
+    "summary": "A synthetic summary used only to exercise the mapper.",
+    "thumb": "/library/metadata/106/thumb/1",
+    "title": "Example Film",
+    "type": "movie",
+    "year": 2011
+   }
+  ],
+  "size": 1
+ }
+}
