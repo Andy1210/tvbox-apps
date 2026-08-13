@@ -65,9 +65,16 @@ jobs:
       # apps/<id>/web/, which is where build-index.mjs then finds it - so the
       # index always describes what this run produced, never a stale commit.
       - name: typecheck app sources
-        run: for app in files livetv retroarch spotify; do npm run typecheck:$app; done
+        run: for app in files livetv mediaclient retroarch spotify; do npm run typecheck:$app; done
+
+      # Before the bundles are produced and hashed: a failing component test
+      # should stop the run rather than let it publish an index describing a UI
+      # that does not work.
+      - name: app UI tests
+        run: npm test
+
       - name: build app UIs
-        run: for app in files livetv retroarch spotify; do npm run build:$app; done
+        run: for app in files livetv mediaclient retroarch spotify; do npm run build:$app; done
 
       - name: trust rules + build index
         run: node scripts/build-index.mjs

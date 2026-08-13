@@ -1,0 +1,38 @@
+{
+  "id": "mediaclient",
+  "manifestVersion": 1,
+  "name": {
+    "hu": "Média",
+    "en": "Media"
+  },
+  "version": "0.1.0",
+  "changelog": [
+    {
+      "version": "0.1.0",
+      "notes": "First build of the box's own app for a Plex or Jellyfin server at home. It opens and comes back to the box with Back - there is nothing to watch with it yet."
+    }
+  ],
+  "type": "webclient",
+  "status": "ready",
+  "accent": "#cc7b19",
+  "icon": "<svg viewBox='0 0 24 24' fill='none' stroke='#cc7b19' stroke-width='2'><rect x='2.5' y='4' width='19' height='16' rx='2.5'/><path d='M10 9.5v5l4.5-2.5z' stroke-linejoin='round'/></svg>",
+  "tagline": {
+    "hu": "A saját médiaszervered",
+    "en": "Your own media server"
+  },
+  "description": {
+    "en": "Watch the films and series on your own Plex or Jellyfin server, with the box playing the video natively. Sign in once from the TV without typing, and it remembers where every film got to.",
+    "hu": "A saját Plex- vagy Jellyfin-szervereden lévő filmek és sorozatok nézése, a videót a box natívan játssza. Egyszeri belépés a TV-ről gépelés nélkül, és megjegyzi, hol tartottál minden filmben."
+  },
+  "requires": {
+    "bin": ["mpv"],
+    "apt": ["mpv"]
+  },
+  "runtime": {
+    "serve": "local",
+    "entry": "index.html",
+    "bridge": "./bridge.js",
+    "transparentSelector": "#player-stage",
+    "capabilities": ["nav", "player", "storage"]
+  }
+}
