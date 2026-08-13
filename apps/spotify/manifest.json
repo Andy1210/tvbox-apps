@@ -2,8 +2,12 @@
   "id": "spotify",
   "manifestVersion": 1,
   "name": "Spotify",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "changelog": [
+    {
+      "version": "1.1.0",
+      "notes": "Big playlists open quickly and stay usable: jump anywhere in the list including straight to the end, search inside it, and sort by title or artist. Track numbers show where you are. Shuffle and repeat buttons on the player, and shuffle-all on a playlist. Picking a track now plays the playlist from there, so what comes next follows the playlist. Liked Songs is no longer cut off at 200. Optional autoplay keeps similar music going when a playlist ends, and stops on its own."
+    },
     {
       "version": "1.0.4",
       "notes": "Lyrics found for many more songs; plain lyrics scroll with the D-pad; the dim layer and layout fixed; clear message when the Spotify app needs your account added on the developer dashboard."

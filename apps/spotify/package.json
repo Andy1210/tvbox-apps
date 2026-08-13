@@ -1,0 +1,6 @@
+{
+  "name": "tvbox-app-spotify",
+  "private": true,
+  "type": "commonjs",
+  "description": "Host-side plugin for the tvbox Spotify app. CommonJS: the shell loads plugin.js with require(), and this states that explicitly so the files are read the same way in the repo as they are on a box."
+}
