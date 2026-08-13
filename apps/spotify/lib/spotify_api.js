@@ -386,18 +386,25 @@ async function pagedAll(acc, pathFor, itemsOf) {
   const known = Number.isFinite(reported) && reported >= 0;
 
   // Without a `total` there is nothing to fan out over, and assuming the first
-  // page is the whole collection would truncate it silently. A full first page
-  // means there is more, so read on one page at a time until a short one ends it.
+  // page is the whole collection would truncate it silently. A full page means
+  // there is more, so read on one at a time until a short one ends it.
+  //
+  // `truncated` is reported rather than worked out from the total afterwards.
+  // Here the two are not the same thing: the loop stops AT the bound, so the
+  // total it returns is exactly MAX_ITEMS, and a caller comparing the two would
+  // conclude nothing was cut - which is the silent short list this whole function
+  // is written to avoid.
   if (!known) {
     const pages = [{ offset: 0, items: firstItems }];
     let offset = firstItems.length;
-    while (firstItems.length === PAGE && offset < MAX_ITEMS) {
+    let full = firstItems.length === PAGE; // a full page means there is more after it
+    while (full && offset < MAX_ITEMS) {
       const items = itemsOf(await apiGet(acc, pathFor(offset, PAGE))) || [];
       pages.push({ offset, items });
       offset += items.length;
-      if (items.length < PAGE) break;
+      full = items.length === PAGE;
     }
-    return { pages, total: offset };
+    return { pages, total: offset, truncated: full };
   }
 
   const total = Math.min(reported, MAX_ITEMS);
@@ -424,7 +431,14 @@ async function pagedAll(acc, pathFor, itemsOf) {
   };
   await Promise.all(Array.from({ length: Math.min(PAGE_CONCURRENCY, offsets.length) }, worker));
   const pages = [{ offset: 0, items: firstItems }, ...slots.map((s) => s || { offset: 0, items: [] })];
-  return { pages, total: reported };
+  // Every window is worked out before the first one is asked for, so a page that
+  // comes back shorter than it was asked for leaves entries that nobody requests.
+  // Positions survive that (each row's comes from the offset it was read at), but
+  // the list does not, and a list that cannot be told is short is the thing this
+  // whole function is written to avoid. So compare what arrived against what was
+  // promised, and say when they differ.
+  const collected = pages.reduce((n, p) => n + p.items.length, 0);
+  return { pages, total: reported, truncated: reported > MAX_ITEMS || collected < total };
 }
 
 // Flatten paged results into tracks, each carrying `pos`, its true position in the
@@ -496,16 +510,12 @@ async function getLiked() {
   const hit = listCache.get(key);
   if (hit && Date.now() - hit.at < LIST_TTL_MS) return hit.value;
   return once(key, async () => {
-    const { pages, total } = await pagedAll(
+    const { pages, total, truncated } = await pagedAll(
       acc,
       (o, l) => `/me/tracks?limit=${l}&offset=${o}`,
       (d) => d.items,
     );
-    const value = {
-      tracks: tracksWithPositions(pages, (e) => e && e.track),
-      total,
-      truncated: total > MAX_ITEMS,
-    };
+    const value = { tracks: tracksWithPositions(pages, (e) => e && e.track), total, truncated };
     cacheStore(key, { at: Date.now(), value });
     return value;
   });
@@ -588,16 +598,12 @@ async function getPlaylistItems(id) {
       }
       if (snapshotFailed && Date.now() - hit.at < PLAYLIST_MAX_AGE_MS) return hit.value;
     }
-    const { pages, total } = await pagedAll(
+    const { pages, total, truncated } = await pagedAll(
       acc,
       (o, l) => `/playlists/${pid}/items?limit=${l}&offset=${o}&fields=${encodeURIComponent(PL_FIELDS)}`,
       (d) => d.items,
     );
-    const value = {
-      tracks: tracksWithPositions(pages, (e) => e && e.item),
-      total,
-      truncated: total > MAX_ITEMS,
-    };
+    const value = { tracks: tracksWithPositions(pages, (e) => e && e.item), total, truncated };
     cacheStore(key, { at: Date.now(), snapshot, value });
     return value;
   });

@@ -285,6 +285,38 @@ test("a pause during the build calls it off too", async () => {
   assert.equal(played.length, 0);
 });
 
+test("a pause that lands while the play request is out stops the music again", async () => {
+  // The request cannot be recalled once it is in flight, so the only honest
+  // answer is to stop what it started.
+  const played = [];
+  const controls = [];
+  let a;
+  const api = fakeApi({
+    extra: {
+      async control(action) {
+        controls.push(action);
+        return { ok: true };
+      },
+    },
+  });
+  a = createAutoplay({
+    api,
+    play: async (b) => {
+      played.push(b);
+      a.onEvent("paused", "t1"); // the listener presses pause while this is out
+      return { ok: true };
+    },
+    isEnabled: () => true,
+    log: () => {},
+    graceMs: 5,
+  });
+  a.onEvent("playing", "t1");
+  a.onEvent("end_of_track", "t1");
+  await tick(40);
+  assert.equal(played.length, 1, "the request had already gone");
+  assert.deepEqual(controls, ["pause"], "so what it started is stopped again");
+});
+
 test("a continuation never changes which account the box's screens show", async () => {
   const { a, played } = watcher();
   a.onEvent("playing", "t1");

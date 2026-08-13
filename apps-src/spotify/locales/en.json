@@ -79,8 +79,8 @@
     "shuffleAll": "Shuffle all",
     "shuffle": "Shuffle",
     "repeat": "Repeat",
-    "truncated": "This list is longer than the box can load, so only the beginning is shown.",
-    "autoplayHint": "When a playlist ends, keeps going with similar music. It stops on its own after about ninety tracks.",
+    "truncated": "The box could not load all of this list, only what you see here.",
+    "autoplayHint": "When a playlist ends, autoplay keeps going with similar music. It stops on its own after about ninety tracks.",
     "autoplay": "Autoplay",
     "loadingLiked": "Loading Liked Songs…",
     "loadingPlaylists": "Loading playlists…",
@@ -89,8 +89,8 @@
     "noSearchMatch": "Nothing found",
     "rateLimited": "Spotify is getting too many requests right now. Wait a few seconds and try again.",
     "shuffleFailed": "Playback started, but shuffle could not be turned on.",
-    "repeat_context": "Repeat list",
-    "repeat_track": "Repeat track",
+    "repeat_context": "Repeat all",
+    "repeat_track": "Repeat one",
     "quoted": "“{text}”"
   }
 }

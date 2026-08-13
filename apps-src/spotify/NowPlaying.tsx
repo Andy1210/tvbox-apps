@@ -14,8 +14,7 @@ const ICONS: Record<string, string> = {
   shuffle:
     "M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z",
   repeat: "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z",
-  repeat_one:
-    "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4zm-4-2V9h-1l-2 1v1h1.5v4H13z",
+  repeat_one: "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4zm-4-2V9h-1l-2 1v1h1.5v4H13z",
 };
 function TIcon({ name, big }: { name: string; big?: boolean }) {
   return (
@@ -182,6 +181,15 @@ export function NowPlaying({
     });
   };
   useEffect(refreshPlayer, [connected, state?.track_id]);
+  // A phone can change shuffle or repeat without the track changing, and then the
+  // buttons show the wrong thing and the next repeat press picks the wrong mode
+  // from it. There is no event for that, so this screen re-reads while it is the
+  // one on display. It only exists while it is, so the poll stops with it.
+  useEffect(() => {
+    if (!connected) return;
+    const id = setInterval(refreshPlayer, 20000);
+    return () => clearInterval(id);
+  }, [connected]);
   const repeatNext: Record<Repeat, Repeat> = { off: "context", context: "track", track: "off" };
   const repeat: Repeat = player?.repeat || "off";
   // These act on the ACTIVE account's player, which on a box with several linked
@@ -189,7 +197,10 @@ export function NowPlaying({
   // account's active device. Showing its shuffle state here would be a claim
   // about this room, and pressing the button would reach into another one - so
   // the two settings appear only once the player really is this box.
-  const onThisBox = !!player?.ok && !!player.device && player.device === (state?.device_name || "");
+  // `active` as well as the name: a player that stopped can still carry the device
+  // it last played on, and settings shown for a player that is not running are a
+  // claim about nothing.
+  const onThisBox = !!player?.ok && !!player.active && !!player.device && player.device === (state?.device_name || "");
 
   const doControl = (a: string, v?: boolean | string) =>
     void control(a, v).then((err) => {

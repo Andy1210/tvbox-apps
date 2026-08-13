@@ -195,6 +195,19 @@ function createAutoplay({ api, play, isEnabled, log, graceMs }) {
         throw e;
       }
       if (r && r.ok) {
+        // The request itself cannot be called off once it is in flight, so the
+        // check happens on the other side of it: if a pause or a settings change
+        // landed while it was out, stop what it just started rather than leaving
+        // music playing that somebody had already said no to.
+        if (cancelled()) {
+          say("called off while starting; stopping it again");
+          try {
+            await api.control("pause");
+          } catch (e) {
+            /* nothing more to try */
+          }
+          return;
+        }
         chain++;
         unattended++;
         say(`continued from ${source} with ${uris.length} tracks`);

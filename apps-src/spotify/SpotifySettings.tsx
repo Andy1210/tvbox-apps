@@ -33,10 +33,16 @@ export function SpotifySettings({ onBack }: { onBack: () => void }) {
 
   const refreshAuth = () => authStatus().then(setAuth);
   const [autoplay, setAutoplayOn] = useState(false);
-  const [autoplayBusy, setAutoplayBusy] = useState(false);
+  // Until the box has answered, the row shows neither state and cannot be pressed.
+  // It defaults to off, so an early press would send "turn it on" against a value
+  // nobody had read yet, and the answer landing afterwards would overwrite what
+  // the press just set.
+  const [autoplayBusy, setAutoplayBusy] = useState(true);
   useEffect(() => {
     refreshAuth();
-    getAutoplay().then(setAutoplayOn);
+    getAutoplay()
+      .then(setAutoplayOn)
+      .finally(() => setAutoplayBusy(false));
   }, []);
   const spEnabled = config?.spotify?.enabled ?? false;
   const [toggling, setToggling] = useState(false);
