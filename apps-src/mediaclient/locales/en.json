@@ -7,5 +7,32 @@
     "name": "Media",
     "empty": "No server is set up yet. Once one is, your films and series show up here.",
     "back": "Back to the box"
+  },
+  "common": {
+    "loading": "Loading…"
+  },
+  "login": {
+    "title": "Sign in to your server",
+    "starting": "Asking your account for a code…",
+    "instruction": "On your phone or computer, open {url} and enter this code:",
+    "waiting": "This screen carries on by itself once you have entered it.",
+    "expired": "The code ran out before it was entered. Ask for a new one and try again.",
+    "failed": "Your account could not be reached. Check the box is online, then try again.",
+    "retry": "Get a new code"
+  },
+  "home": {
+    "continue": "Carry on watching",
+    "recentIn": "Recently added to {library}",
+    "libraries": "Libraries",
+    "empty": "This server has nothing in it yet."
+  },
+  "error": {
+    "unreachable": "The server cannot be reached. It may be switched off, or the box may be off the network.",
+    "signedOut": "The server no longer accepts this sign-in. Sign in again to carry on.",
+    "noServer": "This account has no server the box can reach.",
+    "unknown": "Something went wrong talking to the server."
+  },
+  "library": {
+    "all": "All"
   }
 }
