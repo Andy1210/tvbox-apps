@@ -34,5 +34,19 @@
   },
   "library": {
     "all": "Mind"
+  },
+  "detail": {
+    "play": "Lejátszás",
+    "resume": "Folytatás",
+    "seasons": "Évadok",
+    "episodes": "Epizódok",
+    "cast": "Szereplők"
+  },
+  "person": {
+    "films": "Filmek",
+    "series": "Sorozatok",
+    "count": "{films} film · {series} sorozat",
+    "empty": "Ezen a szerveren nincs más {name} közreműködésével.",
+    "partial": "A szerver nem árulta el, hány találat van, így ez a lista hiányos lehet."
   }
 }
