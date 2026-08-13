@@ -106,6 +106,7 @@ function removeAccount(id) {
   accounts.list = accounts.list.filter((x) => x.id !== id);
   if (accounts.active === id) accounts.active = (accounts.list[0] && accounts.list[0].id) || "";
   tokCache.delete(id);
+  dropCaches(id); // its library must not outlive the account it belongs to
   saveAccounts();
   if (!accounts.list.length) {
     try {
@@ -115,15 +116,24 @@ function removeAccount(id) {
 }
 
 // ---- http ----
+// One pool of kept-alive connections for every call in this file. A library is
+// read a page at a time, so without this each page paid its own TLS handshake to
+// api.spotify.com, and on a large playlist those handshakes were most of the wait
+// before anything could be drawn. maxSockets bounds it to the paging concurrency.
+// `timeout` retires an idle pooled socket rather than handing out one the far end
+// has already closed: reusing that fails the request with ECONNRESET, and a page
+// that fails fails the whole read (see pagedAll).
+const agent = new https.Agent({ keepAlive: true, keepAliveMsecs: 15000, maxSockets: 8, timeout: 20000 });
+
 function request(method, url, headers, body) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     const req = https.request(
-      { method, hostname: u.hostname, path: u.pathname + u.search, headers: headers || {} },
+      { method, hostname: u.hostname, path: u.pathname + u.search, headers: headers || {}, agent },
       (res) => {
         let data = "";
         res.on("data", (c) => (data += c));
-        res.on("end", () => resolve({ status: res.statusCode, body: data }));
+        res.on("end", () => resolve({ status: res.statusCode, body: data, headers: res.headers || {} }));
       },
     );
     req.on("error", reject);
@@ -243,12 +253,43 @@ async function refreshToken(acc) {
   tokCache.set(acc.id, { token: j.access_token, exp: Date.now() + (j.expires_in || 3600) * 1000 - 60000 });
   return j.access_token;
 }
+// Pages now go out several at a time (pagedAll below), which meets Spotify's rate
+// limit more readily than one at a time did - and 429 is the one status where the
+// server says exactly how long to wait. A long Retry-After is NOT slept through:
+// the caller is a screen waiting to draw, so a wait that long is reported as the
+// error it is instead of looking like a hang.
+const RETRY_MAX = 2;
+const RETRY_MAX_WAIT_S = 10;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function apiGet(acc, p) {
-  const token = await tokenFor(acc);
-  const { status, body } = await request("GET", API + p, { Authorization: "Bearer " + token });
-  if (status === 204 || !body) return {};
-  if (status >= 400) throw new Error("HTTP " + status + " " + body.slice(0, 120));
-  return JSON.parse(body);
+  for (let attempt = 0; ; attempt++) {
+    const token = await tokenFor(acc);
+    let status, body, headers;
+    try {
+      ({ status, body, headers } = await request("GET", API + p, { Authorization: "Bearer " + token }));
+    } catch (e) {
+      // A pooled connection the far end has already closed fails here rather than
+      // answering, and a page that fails fails the whole read (see pagedAll). One
+      // retry costs a request and turns that into nothing at all.
+      if (attempt < RETRY_MAX && /ECONNRESET|socket hang up|EPIPE/i.test(String(e.message || e))) continue;
+      throw e;
+    }
+    if (status === 429 && attempt < RETRY_MAX) {
+      const after = Number((headers || {})["retry-after"]) || 1;
+      if (after <= RETRY_MAX_WAIT_S) {
+        await sleep(after * 1000);
+        continue;
+      }
+    }
+    // The error check comes FIRST. An error response is not required to carry a
+    // body, and reading "no body" as "no content" turns a refused request into an
+    // empty answer: a rate-limited page would read as a page with nothing on it,
+    // and a paged read would come back short while reporting success.
+    if (status >= 400) throw new Error("HTTP " + status + (body ? " " + body.slice(0, 120) : ""));
+    if (status === 204 || !body) return {};
+    return JSON.parse(body);
+  }
 }
 async function apiWrite(acc, method, p, payload) {
   const token = await tokenFor(acc);
@@ -261,12 +302,11 @@ async function apiWrite(acc, method, p, payload) {
   const { status, body: resp } = await request(method, API + p, headers, body);
   return { ok: status >= 200 && status < 300, status, body: resp };
 }
-// Active-account convenience wrappers (browse/search/status stay on the active one).
+// Browsing, searching and the account's own identity are questions ABOUT the
+// active account, so they read as it. Anything that acts on the box says which
+// account to act as instead, because the box is not always the active one's.
 function userGet(p) {
   return apiGet(activeAccount(), p);
-}
-function userWrite(method, p, payload) {
-  return apiWrite(activeAccount(), method, p, payload);
 }
 
 // ---- status ----
@@ -317,32 +357,191 @@ function trackOf(t) {
     image_url: ((t.album || {}).images || []).slice(-2)[0]?.url || ((t.album || {}).images || [])[0]?.url || "",
   };
 }
-async function getLiked(limit) {
-  const out = [];
-  let offset = 0;
-  const cap = limit || 200;
-  while (out.length < cap) {
-    const d = await userGet(`/me/tracks?limit=50&offset=${offset}`);
-    const items = d.items || [];
-    if (!items.length) break;
-    for (const it of items) {
-      const t = trackOf(it.track);
-      if (t && t.uri) out.push(t);
+// ---- paging ----
+// Read every page of a paged collection. The first page carries `total`, so the
+// rest go out CONCURRENTLY: sequential paging costs one round trip to
+// api.spotify.com per 50 items, so a thousand-track playlist cannot be drawn
+// until twenty of them have completed one after another.
+//
+// A page that fails fails the whole read, deliberately. The alternative is a list
+// that is silently short - and a list the user cannot tell is short is worse than
+// an error they can retry.
+//
+// Each page is returned WITH the offset it was asked for, because a row's index in
+// the assembled list is not its position in the playlist: an entry Spotify cannot
+// resolve to a track (a removed or region-blocked one) is dropped here but still
+// occupies a position there, and `offset.position` is what playback is told.
+const PAGE = 50;
+const PAGE_CONCURRENCY = 6;
+// A bound rather than a limit anyone should hit: it exists so a pathological
+// account cannot page forever. When it bites, `truncated` says so, because a list
+// that just ends cannot be told from a shorter library.
+const MAX_ITEMS = 10000;
+
+async function pagedAll(acc, pathFor, itemsOf) {
+  const first = await apiGet(acc, pathFor(0, PAGE));
+  const firstItems = itemsOf(first) || [];
+  const reported = Number(first.total);
+  const known = Number.isFinite(reported) && reported >= 0;
+
+  // Without a `total` there is nothing to fan out over, and assuming the first
+  // page is the whole collection would truncate it silently. A full page means
+  // there is more, so read on one at a time until a short one ends it.
+  //
+  // `truncated` is reported rather than worked out from the total afterwards.
+  // Here the two are not the same thing: the loop stops AT the bound, so the
+  // total it returns is exactly MAX_ITEMS, and a caller comparing the two would
+  // conclude nothing was cut - which is the silent short list this whole function
+  // is written to avoid.
+  if (!known) {
+    const pages = [{ offset: 0, items: firstItems }];
+    let offset = firstItems.length;
+    let full = firstItems.length === PAGE; // a full page means there is more after it
+    while (full && offset < MAX_ITEMS) {
+      const items = itemsOf(await apiGet(acc, pathFor(offset, PAGE))) || [];
+      pages.push({ offset, items });
+      offset += items.length;
+      full = items.length === PAGE;
     }
-    offset += items.length;
-    if (offset >= (d.total || offset)) break;
+    return { pages, total: offset, truncated: full };
   }
-  return out;
+
+  const total = Math.min(reported, MAX_ITEMS);
+  const offsets = [];
+  for (let o = firstItems.length; o < total; o += PAGE) offsets.push(o);
+  // Each worker writes its own slot, so the pages end up in list order however
+  // the requests interleave. `failed` stops the others as soon as one page is
+  // lost: the read is finished either way, and the usual reason a page fails is
+  // a rate limit that the remaining requests would only feed.
+  const slots = new Array(offsets.length).fill(null);
+  let next = 0;
+  let failed = false;
+  const worker = async () => {
+    for (;;) {
+      const k = next++;
+      if (k >= offsets.length || failed) return;
+      try {
+        slots[k] = { offset: offsets[k], items: itemsOf(await apiGet(acc, pathFor(offsets[k], PAGE))) || [] };
+      } catch (e) {
+        failed = true;
+        throw e;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(PAGE_CONCURRENCY, offsets.length) }, worker));
+  const pages = [{ offset: 0, items: firstItems }, ...slots.map((s) => s || { offset: 0, items: [] })];
+  // Every window is worked out before the first one is asked for, so a page that
+  // comes back shorter than it was asked for leaves entries that nobody requests.
+  // Positions survive that (each row's comes from the offset it was read at), but
+  // the list does not, and a list that cannot be told is short is the thing this
+  // whole function is written to avoid. So compare what arrived against what was
+  // promised, and say when they differ.
+  const collected = pages.reduce((n, p) => n + p.items.length, 0);
+  return { pages, total: reported, truncated: reported > MAX_ITEMS || collected < total };
+}
+
+// Flatten paged results into tracks, each carrying `pos`, its true position in the
+// collection. `pick` pulls the track object out of one entry (the key differs per
+// endpoint: `track` for Liked Songs, `item` for a playlist).
+function tracksWithPositions(pages, pick) {
+  const tracks = [];
+  for (const page of pages) {
+    page.items.forEach((entry, k) => {
+      const t = trackOf(pick(entry));
+      if (t && t.uri) tracks.push({ ...t, pos: page.offset + k });
+    });
+  }
+  return tracks;
+}
+
+// ---- caches ----
+// Keyed by ACCOUNT as well as by id: playlist ids are global but access is not,
+// and Liked Songs is per-account outright, so a cache shared across a family
+// box's linked accounts would answer with the wrong person's library.
+const listCache = new Map(); // "<accId>|<kind>|<id>" -> { at, snapshot, value }
+const LIST_TTL_MS = 300000; // how long a list is served without asking Spotify at all
+const PLAYLIST_FRESH_MS = 60000; // ... and how long before even the snapshot check is skipped
+// The ceiling on serving a playlist whose snapshot check keeps failing. Without
+// it, a check that never succeeds means an entry that is never re-read: the
+// playlist can be edited, or deleted, and the box would go on showing what it
+// last saw for as long as it is up.
+const PLAYLIST_MAX_AGE_MS = 1800000;
+// A cap, because these entries are whole track arrays (up to MAX_ITEMS each) held
+// in the shell's main process for as long as the box is up, and a snapshot match
+// refreshes an entry's age rather than expiring it. Map iterates in insertion
+// order, so the oldest key is the first one.
+const LIST_CACHE_MAX = 24;
+
+function cacheKey(acc, kind, id) {
+  return ((acc && acc.id) || "") + "|" + kind + "|" + (id || "");
+}
+function cacheStore(key, entry) {
+  // A read that was already running when its account was removed would otherwise
+  // put that account's library back after dropCaches had cleared it, and it would
+  // sit there until eviction. The key carries the account, so the check is here
+  // rather than at every call site.
+  const accId = key.split("|")[0];
+  if (accId && !accounts.list.some((x) => x.id === accId)) return;
+  listCache.delete(key); // re-insert, so a refreshed entry counts as the newest
+  listCache.set(key, entry);
+  while (listCache.size > LIST_CACHE_MAX) listCache.delete(listCache.keys().next().value);
+}
+function dropCaches(accId) {
+  if (!accId) {
+    marketCache.clear();
+    return listCache.clear();
+  }
+  marketCache.delete(accId);
+  for (const k of [...listCache.keys()]) if (k.startsWith(accId + "|")) listCache.delete(k);
+}
+
+// One paging run per collection, however many screens ask at once. Without this,
+// N concurrent requests for the same playlist each start their own run - and each
+// run is up to 200 requests against the same rate limit.
+const inflight = new Map(); // cache key -> Promise
+function once(key, run) {
+  const pending = inflight.get(key);
+  if (pending) return pending;
+  const p = run().finally(() => inflight.delete(key));
+  inflight.set(key, p);
+  return p;
+}
+
+// The whole library, not a first slice of it: the length is no longer what costs,
+// because the UI mounts a window of rows rather than all of them.
+async function getLiked() {
+  const acc = activeAccount();
+  const key = cacheKey(acc, "liked", "");
+  const hit = listCache.get(key);
+  if (hit && Date.now() - hit.at < LIST_TTL_MS) return hit.value;
+  return once(key, async () => {
+    const { pages, total, truncated } = await pagedAll(
+      acc,
+      (o, l) => `/me/tracks?limit=${l}&offset=${o}`,
+      (d) => d.items,
+    );
+    const value = { tracks: tracksWithPositions(pages, (e) => e && e.track), total, truncated };
+    cacheStore(key, { at: Date.now(), value });
+    return value;
+  });
 }
 async function getPlaylists() {
+  const acc = activeAccount();
+  const key = cacheKey(acc, "playlists", "");
+  const hit = listCache.get(key);
+  if (hit && Date.now() - hit.at < LIST_TTL_MS) return hit.value;
+  return once(key, () => readPlaylists(acc, key));
+}
+async function readPlaylists(acc, key) {
   const out = [];
-  let offset = 0;
-  const meId = (activeAccount() || {}).id || "";
-  for (;;) {
-    const d = await userGet(`/me/playlists?limit=50&offset=${offset}`);
-    const items = d.items || [];
-    if (!items.length) break;
-    for (const p of items) {
+  const meId = (acc || {}).id || "";
+  const { pages } = await pagedAll(
+    acc,
+    (o, l) => `/me/playlists?limit=${l}&offset=${o}`,
+    (d) => d.items,
+  );
+  for (const page of pages) {
+    for (const p of page.items) {
       if (!p || !p.id) continue;
       const owner = p.owner || {};
       out.push({
@@ -362,29 +561,57 @@ async function getPlaylists() {
         image_url: (p.images || [])[0]?.url || "",
       });
     }
-    offset += items.length;
-    if (offset >= (d.total || offset)) break;
   }
+  cacheStore(key, { at: Date.now(), value: out });
   return out;
 }
 // 2026: GET /playlists/{id}/items (was /tracks). Owned/collaborated only; others
 // come back empty. The track is under items[].item (was items[].track).
+//
+// `snapshot_id` is what makes re-entering a playlist free: it changes whenever the
+// playlist is edited, so one small request decides whether the pages we already
+// have are still the playlist - instead of paging the whole thing again to find
+// out that nothing changed.
+const PL_FIELDS = "total,items(item(uri,name,duration_ms,artists(name),album(name,images)))";
 async function getPlaylistItems(id) {
-  const out = [];
-  let offset = 0;
-  const fields = "total,items(item(uri,name,duration_ms,artists(name),album(name,images)))";
-  for (;;) {
-    const d = await userGet(`/playlists/${id}/items?limit=50&offset=${offset}&fields=${encodeURIComponent(fields)}`);
-    const items = d.items || [];
-    if (!items.length) break;
-    for (const it of items) {
-      const t = trackOf(it.item);
-      if (t && t.uri) out.push(t);
+  const acc = activeAccount();
+  const pid = encodeURIComponent(String(id || ""));
+  const key = cacheKey(acc, "playlist", pid);
+  const hit = listCache.get(key);
+  if (hit && Date.now() - hit.at < PLAYLIST_FRESH_MS) return hit.value;
+  return once(key, async () => {
+    let snapshot = "";
+    let snapshotFailed = false;
+    try {
+      snapshot = String((await apiGet(acc, `/playlists/${pid}?fields=snapshot_id`)).snapshot_id || "");
+    } catch (e) {
+      snapshotFailed = true;
     }
-    offset += items.length;
-    if (offset >= (d.total || offset)) break;
-  }
-  return out;
+    // A cheap check that failed must not escalate into the expensive read. That
+    // is a feedback loop: the check fails when the account is being rate-limited,
+    // and re-paging the whole playlist is what produces more of it. What we have
+    // is served instead, up to PLAYLIST_MAX_AGE_MS, and its age is NOT reset -
+    // otherwise a check that always fails would keep the entry young forever and
+    // it could never be re-read or evicted.
+    //
+    // An empty snapshot is not a match either: two reads that both failed to
+    // learn one would agree with each other and pin the entry the same way.
+    if (hit) {
+      if (snapshot && snapshot === hit.snapshot) {
+        cacheStore(key, { ...hit, at: Date.now() }); // confirmed current, so it is the newest
+        return hit.value;
+      }
+      if (snapshotFailed && Date.now() - hit.at < PLAYLIST_MAX_AGE_MS) return hit.value;
+    }
+    const { pages, total, truncated } = await pagedAll(
+      acc,
+      (o, l) => `/playlists/${pid}/items?limit=${l}&offset=${o}&fields=${encodeURIComponent(PL_FIELDS)}`,
+      (d) => d.items,
+    );
+    const value = { tracks: tracksWithPositions(pages, (e) => e && e.item), total, truncated };
+    cacheStore(key, { at: Date.now(), snapshot, value });
+    return value;
+  });
 }
 async function search(q) {
   if (!q) return { tracks: [], playlists: [] };
@@ -433,6 +660,46 @@ async function findBoxAccount() {
   }
   return null;
 }
+// What THE BOX is doing, which is a different question from what the active
+// account's player is doing, and the only one autoplay may act on.
+//
+// librespot is signed into one account at a time, so the box appears in exactly
+// that account's device list - which is what findBoxAccount resolves. Asking the
+// ACTIVE account instead reads a different player: on a box with two accounts
+// linked, a cast running under one of them is invisible to the other, and
+// "nothing is playing" would then be permission to start music over it.
+//
+// `ok` false means we could not find out. `box` false means no linked account is
+// driving this box, in which case a continuation could not be played there
+// either, so the two answers stay consistent.
+async function boxPlayerState() {
+  const unknown = { ok: false, box: false, is_playing: false };
+  if (!connected()) return { ...unknown, ok: true };
+  let found;
+  try {
+    found = await findBoxAccount();
+  } catch (e) {
+    return { ...unknown, error: String(e.message || e) };
+  }
+  if (!found) return { ok: true, box: false, is_playing: false };
+  try {
+    const p = await apiGet(found.account, "/me/player");
+    const device = ((p && p.device) || {}).name || "";
+    const want = spotifyBridge.deviceName().trim().toLowerCase();
+    return {
+      ok: true,
+      box: device.trim().toLowerCase() === want,
+      is_playing: !!(p && p.is_playing),
+      device,
+      // Whose box this is, so a continuation is chosen for the country that will
+      // actually play it rather than for whoever happens to be the active account.
+      accountId: found.account.id,
+    };
+  } catch (e) {
+    return { ...unknown, error: String(e.message || e) };
+  }
+}
+
 // A fresh access token for the ACTIVE account (for handing the box's librespot
 // this account's session — the play path's "adopt" step in the Spotify plugin).
 function activeAccessToken() {
@@ -443,40 +710,95 @@ function activeAccessToken() {
 // active to it so the transport controls target the same session. If no linked
 // account can see the box, report it — the caller (plugin) may then adopt the
 // box into the active account and retry.
-async function play({ contextUri, uris }) {
+// Spotify refuses a very large `uris` array, and a flat copy of a playlist is not
+// the playlist anyway: `next` runs off the end of the copy, and shuffle and repeat
+// only ever see the tracks that were copied. So anything with a context of its own
+// plays as `context_uri` + `offset`, and `uris` is what is left for a selection
+// that has no context.
+const URIS_MAX = 100;
+
+// Liked Songs does have a context, but an undocumented one, so the caller sends
+// the track uris as well and we fall back to them if it is refused.
+function collectionUri(acc) {
+  const id = (acc && acc.id) || "";
+  return id && id !== "legacy" && id.indexOf("acc-") !== 0 ? `spotify:user:${id}:collection` : "";
+}
+
+async function play({ contextUri, uris, offset, collection, keepActive }) {
   if (!connected()) return { ok: false, error: "not connected" };
-  const payload = contextUri ? { context_uri: contextUri } : { uris: uris || [] };
   const found = await findBoxAccount();
   if (!found) return { ok: false, error: "box_not_found" };
   const { account: target, devId } = found;
   const q = `?device_id=${devId}`;
-  let r = await apiWrite(target, "PUT", "/me/player/play" + q, payload);
-  if (!r.ok && r.status === 404) {
-    // device idle — wake it by transferring playback there, then retry once
-    try {
-      await apiWrite(target, "PUT", "/me/player", { device_ids: [devId], play: false });
-    } catch (e) {}
-    r = await apiWrite(target, "PUT", "/me/player/play" + q, payload);
+  const pos = Number(offset) > 0 ? Math.floor(Number(offset)) : 0;
+  // The collection uri has to name the account that actually owns the box's
+  // session, which is not necessarily the active one.
+  const ctx = contextUri || (collection ? collectionUri(target) : "");
+
+  const attempt = async (payload) => {
+    let r = await apiWrite(target, "PUT", "/me/player/play" + q, payload);
+    if (!r.ok && r.status === 404) {
+      // device idle - wake it by transferring playback there, then retry once
+      try {
+        await apiWrite(target, "PUT", "/me/player", { device_ids: [devId], play: false });
+      } catch (e) {}
+      r = await apiWrite(target, "PUT", "/me/player/play" + q, payload);
+    }
+    return r;
+  };
+
+  let r = ctx ? await attempt({ context_uri: ctx, ...(pos > 0 ? { offset: { position: pos } } : {}) }) : null;
+  if ((!r || !r.ok) && (uris || []).length) {
+    if (r) console.warn("[spotify-api] context play refused (" + r.status + "); falling back to track uris");
+    r = await attempt({ uris: (uris || []).slice(0, URIS_MAX) });
   }
-  if (r.ok && target.id !== accounts.active) {
+  if (!r) return { ok: false, error: "nothing to play" };
+  // Controls follow the playing account - but only when a person asked for this
+  // playback. `keepActive` is for a play that starts on its own (autoplay):
+  // switching the household's active account from a background timer would
+  // silently change whose library the TV browses, with nothing on screen having
+  // happened.
+  if (r.ok && !keepActive && target.id !== accounts.active) {
     accounts.active = target.id;
     saveAccounts();
-  } // controls follow the playing account
+  }
   return { ok: r.ok, error: r.ok ? "" : "HTTP " + r.status + " " + (r.body || "").slice(0, 80) };
 }
 
 // Transport controls for the box (the connected account controls /me/player; the
 // box became the active device when we started playback there). playpause checks
 // the live player so one button works for both states.
-async function control(action) {
+const REPEAT_STATES = ["off", "context", "track"];
+
+// `accId` names the account to act on, defaulting to the active one. Autoplay
+// needs it: it starts playback under whichever account drives the box without
+// making that one active, so a command sent as the active account would reach a
+// different player entirely - and a pause that lands on the wrong player leaves
+// the music it was meant to stop playing.
+async function control(action, state, accId) {
   if (!connected()) return { ok: false, error: "not connected" };
+  const acc = accountById(accId);
+  const write = (m, p, payload) => apiWrite(acc, m, p, payload);
   if (action === "playpause") {
     let playing = false;
     try {
-      const p = await userGet("/me/player");
+      const p = await apiGet(acc, "/me/player");
       playing = !!(p && p.is_playing);
     } catch (e) {}
     action = playing ? "pause" : "play";
+  }
+  // Shuffle and repeat carry a value, so they are not in the table below. Both are
+  // player-wide settings rather than one-shot commands: they persist until changed,
+  // which is why the UI reads them back from playerState() instead of assuming.
+  if (action === "shuffle") {
+    const on = state === true || state === "true";
+    const res = await write("PUT", "/me/player/shuffle?state=" + (on ? "true" : "false"));
+    return { ok: res.ok, error: res.ok ? "" : "HTTP " + res.status };
+  }
+  if (action === "repeat") {
+    const s = REPEAT_STATES.includes(state) ? state : "off";
+    const res = await write("PUT", "/me/player/repeat?state=" + s);
+    return { ok: res.ok, error: res.ok ? "" : "HTTP " + res.status };
   }
   const routes = {
     play: ["PUT", "/me/player/play"],
@@ -486,8 +808,43 @@ async function control(action) {
   };
   const r = routes[action];
   if (!r) return { ok: false, error: "bad action" };
-  const res = await userWrite(r[0], r[1]);
+  const res = await write(r[0], r[1]);
   return { ok: res.ok, error: res.ok ? "" : "HTTP " + res.status };
+}
+
+// What the shuffle and repeat toggles must reflect. librespot's cast metadata (the
+// SSE state that drives now-playing) carries neither, so they come from the Web
+// API - and only from there, which is also why a toggle press re-reads rather than
+// trusting what it just sent. `/me/player` answers 204 with nothing active, and
+// apiGet turns that into {}: no player is not an error, it is "off".
+// `ok` says whether the answer is one: this never throws, so without it a caller
+// cannot tell "nothing is playing" from "we could not find out". That difference
+// decides whether autoplay may start music, and defaulting it to "nothing is
+// playing" would have it push its own tracks over somebody's live session.
+async function playerState() {
+  const unknown = {
+    ok: false,
+    connected: connected(),
+    active: false,
+    is_playing: false,
+    shuffle: false,
+    repeat: "off",
+  };
+  if (!connected()) return { ...unknown, ok: true };
+  try {
+    const p = await userGet("/me/player");
+    return {
+      ok: true,
+      connected: true,
+      active: !!(p && p.item),
+      is_playing: !!(p && p.is_playing),
+      shuffle: !!(p && p.shuffle_state),
+      repeat: REPEAT_STATES.includes(p && p.repeat_state) ? p.repeat_state : "off",
+      device: ((p && p.device) || {}).name || "",
+    };
+  } catch (e) {
+    return { ...unknown, error: String(e.message || e) };
+  }
 }
 
 // ---- artist image (now-playing background) ----
@@ -518,6 +875,85 @@ async function artistImageForTrack(trackId) {
   return url;
 }
 
+// ---- catalog reads, for the autoplay continuation ----
+// Every one of these takes the account to read AS, defaulting to the active one.
+// That parameter is not decoration: autoplay plays with `keepActive`, so the
+// account driving the box is deliberately not made the active one, and a catalog
+// read for the wrong account is answered for the wrong COUNTRY. On a box with two
+// accounts in two countries that produces recommendations the account actually
+// playing cannot play.
+function accountById(id) {
+  return (id && accounts.list.find((x) => x.id === id)) || activeAccount();
+}
+
+// The market a catalog request is answered for. Top tracks REQUIRE one, and the
+// account's own country is the honest answer; `from_token` is the fallback for an
+// account that does not expose it.
+// Per account, for the same reason the library caches are: a family box can have
+// two accounts in two countries, and the wrong market answers with a catalog the
+// listener cannot play.
+let marketCache = new Map(); // accId -> market
+async function market(accId) {
+  const acc = accountById(accId);
+  const id = (acc || {}).id || "";
+  const hit = marketCache.get(id);
+  if (hit) return hit;
+  let m = "from_token";
+  try {
+    m = String((await apiGet(acc, "/me")).country || "") || "from_token";
+  } catch (e) {
+    m = "from_token";
+  }
+  marketCache.set(id, m);
+  return m;
+}
+
+// Spotify deprecated /recommendations for apps registered after 2024-11-27, so
+// whether this one may call it is a property of the app's registration rather than
+// of the request. The caller probes once and remembers - see lib/autoplay.js.
+// `market` matters beyond playability: without it Spotify may hand back a track
+// id that gets relinked to a different one on playback, and autoplay recognises
+// its own tracks by id to know it is still the thing playing.
+async function recommendations(seedTrackIds, limit, accId) {
+  const seeds = (seedTrackIds || []).filter(Boolean).slice(0, 5);
+  if (!seeds.length) return [];
+  const n = Math.max(1, Math.min(100, limit || 30));
+  const d = await apiGet(
+    accountById(accId),
+    `/recommendations?limit=${n}&market=${encodeURIComponent(await market(accId))}&seed_tracks=${encodeURIComponent(seeds.join(","))}`,
+  );
+  return (d.tracks || []).map(trackOf).filter((t) => t && t.uri);
+}
+
+async function artistTopTracks(artistId, accId) {
+  if (!artistId) return [];
+  const d = await apiGet(
+    accountById(accId),
+    `/artists/${encodeURIComponent(artistId)}/top-tracks?market=${encodeURIComponent(await market(accId))}`,
+  );
+  return (d.tracks || []).map(trackOf).filter((t) => t && t.uri);
+}
+
+// The primary artist of a track, which is what an artist-based continuation is
+// seeded from. Shares artistImageForTrack's shape but not its cache: that one
+// stores an image url, this one an artist id.
+// Keyed by track alone, because which artist a track is by does not depend on who
+// is asking - unlike the market-sensitive reads above.
+const trackArtistCache = new Map(); // trackId -> artistId ("" = looked up, none)
+async function primaryArtistId(trackId, accId) {
+  if (!connected() || !trackId) return "";
+  if (trackArtistCache.has(trackId)) return trackArtistCache.get(trackId);
+  let id = "";
+  try {
+    id =
+      (((await apiGet(accountById(accId), "/tracks/" + encodeURIComponent(trackId))).artists || [])[0] || {}).id || "";
+  } catch (e) {
+    id = "";
+  }
+  trackArtistCache.set(trackId, id);
+  return id;
+}
+
 module.exports = {
   setConfig,
   REDIRECT_URI,
@@ -533,6 +969,11 @@ module.exports = {
   search,
   play,
   control,
+  playerState,
+  boxPlayerState,
+  recommendations,
+  artistTopTracks,
+  primaryArtistId,
   artistImageForTrack,
   listAccounts,
   switchAccount,
