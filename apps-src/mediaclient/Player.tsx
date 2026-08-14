@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { FocusContext, getCurrentFocusKey, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
-import { FocusButton, useBackspace, useI18n } from "@sdk";
+import { FocusButton, useBackspace, useFocusableItem, useI18n } from "@sdk";
 import { useApp } from "./state";
 import { TrackMenu, type Choice } from "./TrackMenu";
 import type { Track } from "./backends/types";
 import { usePlayer } from "./playback/player";
+import { ScrubPreview } from "./ScrubPreview";
 
 /** Nudge sizes as a press is held. Held longer means further per press. */
 const STEPS_MS = [10_000, 30_000, 60_000];
@@ -27,9 +28,14 @@ function clock(ms: number): string {
  * page itself is transparent. Which means the overlay has to get out of the way:
  * it hides after a few seconds of no input, and any press brings it back.
  *
- * Left and Right scrub rather than move focus. On a remote there is no other
- * gesture for it, and a scrub bar you have to focus first is a scrub bar nobody
- * uses.
+ * Two rows, and which one has focus decides what the arrows do. On the bar,
+ * Left and Right move a cursor and OK goes where it points - the film keeps
+ * playing meanwhile, because each seek costs a transcode segment and a rebuffer,
+ * so hunting for a scene used to mean paying for a dozen to arrive at one. On
+ * the row of buttons under it, the arrows belong to spatial navigation.
+ *
+ * The bar has focus by default, so the common case - find a place, press OK -
+ * costs nothing extra, and the buttons are one press down.
  */
 export function Player(): React.JSX.Element | null {
   const { t, locale } = useI18n();
@@ -41,8 +47,13 @@ export function Player(): React.JSX.Element | null {
   const durationMs = usePlayer((s) => s.durationMs);
   const buffering = usePlayer((s) => s.buffering);
   const overlay = usePlayer((s) => s.overlay);
+  const scrubMs = usePlayer((s) => s.scrubMs);
 
-  const [menu, setMenu] = useState(false);
+  const [menu, setMenu] = useState<null | "version" | "audio" | "subtitles" | "quality">(null);
+  // Which language the subtitle search asks for. Seeded from the interface, but
+  // changeable: a film often has only an English subtitle, and someone may want
+  // that one on purpose.
+  const [searchLang, setSearchLang] = useState((locale ?? "en").slice(0, 2));
   const [searchState, setSearchState] = useState<"idle" | "searching" | "unavailable" | "none">("idle");
   const [foundSubs, setFoundSubs] = useState<Track[]>([]);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -76,6 +87,11 @@ export function Player(): React.JSX.Element | null {
 
     const onKey = (e: KeyboardEvent): void => {
       const p = usePlayer.getState();
+      // Which row owns the arrows. On the bar they move the cursor; on the
+      // button row they have to reach the next button, so this handler - which
+      // runs ahead of spatial navigation and stops propagation - must keep its
+      // hands off them there.
+      const onBar = getCurrentFocusKey() === "scrub" || !getCurrentFocusKey();
       p.showOverlay(true);
       if (hideTimer.current) clearTimeout(hideTimer.current);
       if (p.state === "playing") hideTimer.current = setTimeout(() => usePlayer.getState().showOverlay(false), IDLE_HIDE_MS);
@@ -83,21 +99,29 @@ export function Player(): React.JSX.Element | null {
       switch (e.key) {
         case "ArrowLeft":
         case "ArrowRight": {
+          if (!onBar) break;
           e.preventDefault();
           e.stopPropagation();
           const dir = e.key === "ArrowRight" ? 1 : -1;
           if (held.current.dir === dir) held.current.count += 1;
           else held.current = { dir, count: 0 };
           const step = STEPS_MS[Math.min(held.current.count >> 2, STEPS_MS.length - 1)];
-          p.seekBy(dir * step);
+          // The cursor moves; the film does not. Each seek costs a fresh
+          // transcode segment and a rebuffer, so finding a scene by eye used to
+          // mean paying for a dozen of them to arrive at one.
+          p.scrubBy(dir * step);
           break;
         }
         case "Enter":
-          // With the skip button up and focused, OK belongs to it - otherwise
-          // one press would both fire the button and toggle pause.
-          if (getCurrentFocusKey() === "skip") break;
+          // With a button up and focused, OK belongs to it - otherwise one press
+          // would both fire the button and toggle pause.
+          if (!onBar) break;
           e.preventDefault();
-          p.togglePause();
+          // Committing comes first: while the cursor is out, OK is the only way
+          // to go where it is pointing, and pausing there would be an odd
+          // answer to a press that was aiming at a scene.
+          if (p.scrubMs !== null) p.commitScrub();
+          else p.togglePause();
           break;
         case "MediaPlayPause":
           e.preventDefault();
@@ -108,22 +132,13 @@ export function Player(): React.JSX.Element | null {
           void p.stop();
           break;
         case "MediaTrackNext":
-          p.seekBy(60_000);
+          p.scrubBy(60_000);
           break;
         case "MediaTrackPrevious":
-          p.seekBy(-60_000);
+          p.scrubBy(-60_000);
           break;
-        case "ArrowDown":
-          // Down is free here: nothing else on the overlay moves focus
-          // vertically, and a track menu behind a long press or a coloured
-          // button is a track menu nobody finds. Only when there is something to
-          // show - otherwise the press opens a state that renders nothing, and
-          // the next Back closes it instead of pausing.
-          if (!p.current?.detail) break;
-          e.preventDefault();
-          e.stopPropagation();
-          setMenu(true);
-          break;
+        // Up and Down are left alone: they are what moves between the bar and
+        // the row of buttons under it, and that is spatial navigation's job.
       }
     };
 
@@ -155,13 +170,32 @@ export function Player(): React.JSX.Element | null {
     // Back closes the menu first: it is a layer over the film, and leaving it
     // open while the film pauses underneath would be two things at once.
     if (menu) {
-      setMenu(false);
+      setMenu(null);
       return;
     }
     const p = usePlayer.getState();
+    // Then the scrub cursor: it is a question that has not been answered yet,
+    // and Back is how a question is withdrawn. Pausing here instead would leave
+    // the cursor on screen pointing at a place the film never went.
+    if (p.scrubMs !== null) {
+      p.cancelScrub();
+      return;
+    }
     if (p.state === "playing") p.togglePause();
     else void p.stop();
   }, Boolean(current));
+
+  // The bar takes focus as the film starts, and takes it back whenever the
+  // overlay returns. Without an origin, spatial navigation discards every press
+  // - and the arrows would then not even reach the buttons under it.
+  useEffect(() => {
+    if (!current || menu) return;
+    const id = setTimeout(() => {
+      const key = getCurrentFocusKey();
+      if (!key || key === "skip") setFocus("scrub");
+    }, 0);
+    return () => clearTimeout(id);
+  }, [current, menu, overlay]);
 
   // The skip button is only reachable if something puts focus on it: Left and
   // Right are taken by scrubbing and nothing else moves focus here.
@@ -181,10 +215,11 @@ export function Player(): React.JSX.Element | null {
       if (searchState === "searching") return; // one at a time
       setSearchState("searching");
       try {
-        // The interface language, not a fixed one: someone watching in English
-        // is not helped by Hungarian subtitles, and the button never said which
-        // language it would look for.
-        const found = await backend!.searchSubtitles(current.item.id, (locale ?? "en").slice(0, 2));
+        // Whatever the language buttons say. Seeded from the interface language,
+        // because that is the right guess, but never more than a guess: a title
+        // may only have a subtitle in one language, and that one is worth
+        // finding.
+        const found = await backend!.searchSubtitles(current.item.id, searchLang);
         setFoundSubs(found);
         setSearchState(found.length ? "idle" : "none");
       } catch {
@@ -214,7 +249,16 @@ export function Player(): React.JSX.Element | null {
         versions={current.detail.versions}
         current={current.choice as Choice}
         onChoose={(next) => void usePlayer.getState().changeTracks(next)}
-        onClose={() => setMenu(false)}
+        initial={menu}
+        onClose={() => setMenu(null)}
+        searchLanguage={searchLang}
+        onSearchLanguage={(code) => {
+          setSearchLang(code);
+          // The results on screen were for the old language; leaving them under
+          // a new label would offer a Hungarian file as an English one.
+          setFoundSubs([]);
+          setSearchState("idle");
+        }}
         onSearchSubtitles={backend ? () => void searchSubtitles() : undefined}
         found={foundSubs}
         onDownloadSubtitle={(track) => void downloadSubtitle(track)}
@@ -223,8 +267,12 @@ export function Player(): React.JSX.Element | null {
     );
   }
 
-  const shown = seekTargetMs ?? positionMs;
+  const shown = scrubMs ?? seekTargetMs ?? positionMs;
   const pct = durationMs > 0 ? Math.min(100, (shown / durationMs) * 100) : 0;
+  // Where the film actually is, kept visible while the cursor is away from it -
+  // otherwise there is no way to tell how far you have wandered, or to get back.
+  const playedPct = durationMs > 0 ? Math.min(100, ((seekTargetMs ?? positionMs) / durationMs) * 100) : 0;
+  const partId = current.detail?.versions[current.choice.version]?.partId;
 
   return (
     <FocusContext.Provider value={focusKey}>
@@ -235,7 +283,7 @@ export function Player(): React.JSX.Element | null {
         }`}
       >
         {skippable && (
-          <div className="absolute right-[4vw] bottom-[26vh]">
+          <div className="absolute right-[4vw] bottom-[34vh]">
             <FocusButton
               focusKey="skip"
               onEnter={() => usePlayer.getState().skipMarker()}
@@ -259,40 +307,158 @@ export function Player(): React.JSX.Element | null {
               {current.decision.transcoded && <span className="text-[1.7vh] text-fg-dim">{t("player.converting")}</span>}
             </div>
 
-            <div className="flex items-center gap-[1.2vw]">
-              <span className="w-[9vw] text-[1.9vh] tabular-nums">{clock(shown)}</span>
+            <ScrubBar
+              shown={shown}
+              pct={pct}
+              playedPct={playedPct}
+              durationMs={durationMs}
+              markers={current.markers}
+              scrubbing={scrubMs !== null}
+              partId={partId}
+            />
 
-              <div className="relative h-[0.7vh] flex-1 rounded-full bg-white/25">
-                {/* Markers sit on the bar so the shape of the episode is visible
-                    before you get there. */}
-                {current.markers.map((m) => (
-                  <div
-                    key={`${m.type}-${m.startMs}`}
-                    className="absolute top-0 h-full bg-white/35"
-                    style={{
-                      left: `${durationMs ? (m.startMs / durationMs) * 100 : 0}%`,
-                      width: `${durationMs ? ((m.endMs - m.startMs) / durationMs) * 100 : 0}%`,
-                    }}
-                  />
-                ))}
-                <div className="absolute top-0 left-0 h-full rounded-full bg-white" style={{ width: `${pct}%` }} />
-                <div
-                  className="absolute top-1/2 h-[2vh] w-[2vh] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_1.5vh_rgba(0,0,0,0.6)]"
-                  style={{ left: `${pct}%` }}
-                />
-              </div>
-
-              <span className="w-[9vw] text-right text-[1.9vh] text-fg-dim tabular-nums">
-                −{clock(Math.max(0, durationMs - shown))}
-              </span>
-            </div>
-
-            <p className="text-[1.7vh] text-fg-dim">
-              {t(state === "paused" ? "player.hintPaused" : "player.hint")}
-            </p>
+            <ButtonRow
+              paused={state === "paused"}
+              canChooseTracks={Boolean(current.detail)}
+              onPlayPause={() => usePlayer.getState().togglePause()}
+              onTracks={() => setMenu("audio")}
+              onQuality={() => setMenu("quality")}
+            />
           </div>
         </div>
       </div>
     </FocusContext.Provider>
+  );
+}
+
+/**
+ * The bar, the cursor, and the frame the cursor is on.
+ *
+ * Focusable in its own right so that arrows can mean two different things on
+ * two rows without a mode nobody can see: what has focus says which.
+ */
+function ScrubBar({
+  shown,
+  pct,
+  playedPct,
+  durationMs,
+  markers,
+  scrubbing,
+  partId,
+}: {
+  shown: number;
+  pct: number;
+  playedPct: number;
+  durationMs: number;
+  markers: { type: string; startMs: number; endMs: number }[];
+  scrubbing: boolean;
+  partId?: string;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  // No scroll options: the overlay does not scroll, and asking the browser to
+  // bring this into view drags the transparent page under the video.
+  const { ref, focused } = useFocusableItem({ focusKey: "scrub" });
+
+  return (
+    <div ref={ref} className="flex flex-col gap-[1vh]">
+      {/* The frame rides above the cursor and only exists while scrubbing: a
+          preview pinned over a film nobody is scrubbing is just a smaller
+          picture in front of a bigger one. */}
+      <div className="relative h-[16vh]">
+        {scrubbing && (
+          <div
+            className="absolute bottom-0 -translate-x-1/2"
+            // Clamped, or the frame hangs off the screen at either end and the
+            // one place it matters most - the last minutes - is unreadable.
+            style={{ left: `clamp(14vh, ${pct}%, calc(100% - 14vh))` }}
+          >
+            <ScrubPreview partId={partId} timeMs={shown} widthVh={26} />
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center gap-[1.2vw]">
+        <span className="w-[9vw] text-[1.9vh] tabular-nums">{clock(shown)}</span>
+
+        <div
+          className={`relative h-[0.7vh] flex-1 rounded-full bg-white/25 transition-all ${
+            focused ? "h-[1.1vh] ring-[0.3vh] ring-white/70" : ""
+          }`}
+        >
+          {/* Markers sit on the bar so the shape of the episode is visible
+              before you get there. */}
+          {markers.map((m) => (
+            <div
+              key={`${m.type}-${m.startMs}`}
+              className="absolute top-0 h-full bg-white/35"
+              style={{
+                left: `${durationMs ? (m.startMs / durationMs) * 100 : 0}%`,
+                width: `${durationMs ? ((m.endMs - m.startMs) / durationMs) * 100 : 0}%`,
+              }}
+            />
+          ))}
+          <div className="absolute top-0 left-0 h-full rounded-full bg-white" style={{ width: `${playedPct}%` }} />
+          {/* While scrubbing there are two marks: where the film is, and where
+              the cursor points. Without the first one there is no way back. */}
+          {scrubbing && (
+            <div
+              className="absolute top-1/2 h-[1.2vh] w-[1.2vh] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/50"
+              style={{ left: `${playedPct}%` }}
+            />
+          )}
+          <div
+            className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-[0_0_1.5vh_rgba(0,0,0,0.6)] ${
+              scrubbing ? "h-[2.6vh] w-[2.6vh] bg-accent" : "h-[2vh] w-[2vh] bg-white"
+            }`}
+            style={{ left: `${pct}%` }}
+          />
+        </div>
+
+        <span className="w-[9vw] text-right text-[1.9vh] text-fg-dim tabular-nums">
+          -{clock(Math.max(0, durationMs - shown))}
+        </span>
+      </div>
+
+      <p className="text-[1.7vh] text-fg-dim">{t(scrubbing ? "player.hintScrub" : "player.hint")}</p>
+    </div>
+  );
+}
+
+/** What the Plex client puts under the bar: the things that are not the bar. */
+function ButtonRow({
+  paused,
+  canChooseTracks,
+  onPlayPause,
+  onTracks,
+  onQuality,
+}: {
+  paused: boolean;
+  canChooseTracks: boolean;
+  onPlayPause: () => void;
+  onTracks: () => void;
+  onQuality: () => void;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  const cls = "rounded-[1vh] bg-white/12 px-[2vw] py-[1.2vh] text-[2vh]";
+
+  return (
+    <div className="flex items-center gap-[1vw]">
+      <FocusButton focusKey="pb-playpause" onEnter={onPlayPause} className={cls}>
+        {t(paused ? "player.play" : "player.pause")}
+      </FocusButton>
+      {/* Only when there is something to choose between. A button that opens a
+          panel with nothing in it is worse than no button - and the panel is
+          what Back would then close instead of pausing. */}
+      {canChooseTracks && (
+        <>
+          <FocusButton focusKey="pb-tracks" onEnter={onTracks} className={cls}>
+            {t("player.tracks")}
+          </FocusButton>
+          <FocusButton focusKey="pb-quality" onEnter={onQuality} className={cls}>
+            {t("player.quality")}
+          </FocusButton>
+        </>
+      )}
+    </div>
   );
 }

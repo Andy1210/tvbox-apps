@@ -15,8 +15,6 @@ export interface TileProps {
   /** Called with this tile's element when it takes focus, so the container can
    *  scroll it into view on its own terms rather than the browser's. */
   onFocusedEl?: (el: HTMLElement) => void;
-  /** The container scrolls BOTH axes itself, so the browser must not also. */
-  ownsScroll?: boolean;
 }
 
 /** How far through the item, 0-1, or null when it was never started. */
@@ -49,18 +47,12 @@ export function Tile({
   onEnter,
   heightVh = 26,
   onFocusedEl,
-  ownsScroll,
 }: TileProps): React.JSX.Element {
-  // scrollIntoView unless the container scrolls both axes itself. A row uses
-  // onFocusedEl for the horizontal axis only and still needs the browser for the
-  // vertical one; the grid does both, and letting the browser join in there
-  // changes scrollTop mid-navigation, re-renders the virtualised window, and
-  // moves the tiles out from under the measurement the D-pad is resolving
-  // against - the highlight then jumps two rows instead of one.
-  const { ref, focused } = useFocusableItem(
-    { focusKey, onEnterPress: onEnter },
-    ownsScroll ? undefined : { block: "nearest" },
-  );
+  // scrollIntoView scrolls BOTH axes - `inline` defaults to "nearest" - so a
+  // row gets its vertical scrolling from here and then supersedes the horizontal
+  // half with its own scrollTo, which gives the focused tile some run-up. That
+  // ordering holds only because this hook runs before the effect below.
+  const { ref, focused } = useFocusableItem({ focusKey, onEnterPress: onEnter }, { block: "nearest" });
   const el = useRef<HTMLDivElement | null>(null);
   const backend = useApp((s) => s.backend);
   const [src, setSrc] = useState<string | null>(null);
@@ -96,8 +88,13 @@ export function Tile({
         ref(node);
       }}
       onClick={onEnter}
-      // No scale on focus. The ring says which tile is chosen on its own, and
-      // growing the element changes the rectangle the D-pad navigates against.
+      // No scale on focus, and this is load-bearing rather than taste. Spatial
+      // navigation filters "below me" candidates with `sibling.top >=
+      // current.bottom`, measured with getBoundingClientRect - which reports the
+      // TRANSFORMED box. A tile is 29.5vh in a 30vh row, so growing it 6% put
+      // its bottom 4px past the next row's top and removed that row from the
+      // candidate set: Down skipped to the row after it, and the last row of a
+      // library could not be reached at all.
       className="flex shrink-0 flex-col gap-[0.8vh]"
       style={{ width: `${heightVh * (2 / 3)}vh` }}
     >

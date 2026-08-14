@@ -64,7 +64,13 @@
     "buffering": "Pufferelés…",
     "converting": "Átalakítás ehhez a boxhoz",
     "hint": "Balra/Jobbra: ugrás · OK: szünet · Le: hang és felirat · Vissza: szünet",
-    "hintPaused": "OK: folytatás · Le: hang és felirat · Vissza: leállítás"
+    "hintScrub": "OK: ugrás ide · Vissza: mégsem",
+    "play": "Lejátszás",
+    "pause": "Szünet",
+    "tracks": "Hang és felirat",
+    "quality": "Minőség",
+    "qualityOriginal": "Eredeti",
+    "qualityHint": "Kisebb érték gyengébb hálózaton, de a szerver átkódol"
   },
   "search": {
     "title": "Keresés",

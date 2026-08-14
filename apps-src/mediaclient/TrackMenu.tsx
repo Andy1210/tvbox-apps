@@ -4,7 +4,29 @@ import { FocusButton, useI18n } from "@sdk";
 import { useFocusFallback, useInitialFocus } from "./focus";
 import type { MediaVersion, Track } from "./backends/types";
 
-export type Choice = { version: number; audio?: number; subtitle?: number | "none" };
+export type Choice = { version: number; audio?: number; subtitle?: number | "none"; maxBitrateKbps?: number };
+
+/**
+ * What the quality column offers.
+ *
+ * Named by bandwidth rather than "high/medium/low", because the number is the
+ * thing someone can actually reason about against their own connection - and
+ * because "high" would have to mean something different for a 4K remux than for
+ * a 720p file. Original is first and is the default: it is the only entry that
+ * can avoid a conversion entirely.
+ */
+/** Offered to the subtitle search. Kept short: a wall of codes is not a menu. */
+export const SEARCH_LANGUAGES = ["hu", "en", "de"];
+
+export const QUALITIES: { key: string; kbps?: number }[] = [
+  { key: "original" },
+  { key: "20 Mbps", kbps: 20_000 },
+  { key: "12 Mbps", kbps: 12_000 },
+  { key: "8 Mbps", kbps: 8_000 },
+  { key: "4 Mbps", kbps: 4_000 },
+  { key: "2 Mbps", kbps: 2_000 },
+  { key: "720 kbps", kbps: 720 },
+];
 
 export interface TrackMenuProps {
   versions: MediaVersion[];
@@ -18,6 +40,11 @@ export interface TrackMenuProps {
   /** Fetch one onto the item. */
   onDownloadSubtitle?: (t: Track) => void;
   searchState?: "idle" | "searching" | "unavailable" | "none";
+  /** Which language the search should ask for, and how to change it. */
+  searchLanguage?: string;
+  onSearchLanguage?: (code: string) => void;
+  /** Which column takes focus. The overlay has a button per column. */
+  initial?: "version" | "audio" | "subtitles" | "quality";
 }
 
 /**
@@ -42,6 +69,9 @@ export function TrackMenu({
   found,
   onDownloadSubtitle,
   searchState = "idle",
+  searchLanguage = "hu",
+  onSearchLanguage,
+  initial = "version",
 }: TrackMenuProps): React.JSX.Element {
   const { t } = useI18n();
   const [choice, setChoice] = useState<Choice>(current);
@@ -55,12 +85,33 @@ export function TrackMenu({
   // the library with no origin and every later press is discarded - and a file
   // with no audio track is not hypothetical. "Off" is unconditional, so it is
   // always a valid floor.
+  // The column the overlay's button asked for, falling back to the first key
+  // that will actually EXIST. Focusing one that does not leaves the library with
+  // no origin and every later press is discarded - and a file with no audio
+  // track is not hypothetical. "Off" is unconditional, so it is always a valid
+  // floor, and the quality column is always rendered.
   const firstKey =
-    versions.length > 1 ? `ver-${choice.version}` : audio.length ? `aud-${audio[0].ordinal}` : "sub-off";
+    initial === "quality"
+      ? `q-${QUALITIES.findIndex((q) => q.kbps === choice.maxBitrateKbps) >= 0 ? QUALITIES.findIndex((q) => q.kbps === choice.maxBitrateKbps) : 0}`
+      : initial === "subtitles"
+        ? "sub-off"
+        : initial === "audio" && audio.length
+          ? `aud-${audio[0].ordinal}`
+          : versions.length > 1
+            ? `ver-${choice.version}`
+            : audio.length
+              ? `aud-${audio[0].ordinal}`
+              : "sub-off";
   useInitialFocus(firstKey, true);
   useFocusFallback(
     firstKey,
-    (k) => k.startsWith("ver-") || k.startsWith("aud-") || k.startsWith("sub-") || k === "tracks-close",
+    (k) =>
+      k.startsWith("ver-") ||
+      k.startsWith("aud-") ||
+      k.startsWith("sub-") ||
+      k.startsWith("q-") ||
+      k.startsWith("lang-") ||
+      k === "tracks-close",
   );
 
   const apply = (next: Choice): void => {
@@ -129,6 +180,26 @@ export function TrackMenu({
                 {/* Above the tracks, not below them. A film with fifteen
                     embedded subtitles would otherwise bury it past the fold of a
                     scrolling column. */}
+                {/* Which language, before looking. A film often has only an
+                    English subtitle available, and someone may want that one on
+                    purpose - the button used to decide for them, silently, from
+                    the interface language. */}
+                {onSearchLanguage && (
+                  <div className="flex flex-wrap gap-[0.6vw] pb-[0.6vh]">
+                    {SEARCH_LANGUAGES.map((code) => (
+                      <FocusButton
+                        key={code}
+                        focusKey={`lang-${code}`}
+                        onEnter={() => onSearchLanguage(code)}
+                        className={`rounded-[0.7vh] px-[1.1vw] py-[0.6vh] text-[1.8vh] uppercase ${
+                          code === searchLanguage ? "bg-white text-black" : "bg-white/10"
+                        }`}
+                      >
+                        {code}
+                      </FocusButton>
+                    ))}
+                  </div>
+                )}
                 <Option
                   focusKey="sub-search"
                   active={false}
@@ -151,6 +222,22 @@ export function TrackMenu({
                 ))}
               </>
             )}
+          </Column>
+
+          <Column title={t("player.quality")}>
+            {QUALITIES.map((q, i) => (
+              <Option
+                key={q.key}
+                focusKey={`q-${i}`}
+                active={choice.maxBitrateKbps === q.kbps}
+                label={q.kbps ? q.key : t("player.qualityOriginal")}
+                hint={i === 0 ? t("player.qualityHint") : undefined}
+                // A ceiling is baked into the stream when it is built, so this
+                // restarts playback where it stands rather than adjusting
+                // anything that is already running.
+                onEnter={() => apply({ ...choice, maxBitrateKbps: q.kbps })}
+              />
+            ))}
           </Column>
           </div>
 
