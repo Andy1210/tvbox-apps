@@ -125,6 +125,9 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
 
   const poster = (item: MediaItem): string | undefined =>
     backend?.posterUrl(item, 300 * artworkScale(), 450 * artworkScale());
+  /** 16:9, to match the tile an extra is drawn in. */
+  const wide = (item: MediaItem): string | undefined =>
+    backend?.posterUrl(item, 400 * artworkScale(), 225 * artworkScale());
   const resumable = (detail.viewOffsetMs ?? 0) > 0;
 
   return (
@@ -205,14 +208,15 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
                   key={v.index}
                   focusKey={`detail-version-${v.index}`}
                   onEnter={() => setVersion(v.index)}
-                  // A ring, not a fill: a focused button turns white, so a white
-                  // "selected" background is invisible on the very chip someone
-                  // is standing on - the state would only be visible from a
-                  // distance, which is the opposite of useful.
-                  className={`rounded-[0.8vh] px-[1.4vw] py-[0.8vh] text-[1.8vh] ${
-                    v.index === version ? "bg-white/15 ring-[0.3vh] ring-white" : "bg-white/8"
-                  }`}
+                  // A check, not a ring and not a fill. A white ring is what
+                  // focus looks like on every poster in this app, so a ringed
+                  // chip reads as the focused one from across a room; and the
+                  // fill is what focus looks like on every button, so it cannot
+                  // mean "chosen" either. A mark inside the chip is the only
+                  // thing left that survives the chip turning solid white.
+                  className="rounded-[0.8vh] bg-white/8 px-[1.4vw] py-[0.8vh] text-[1.8vh]"
                 >
+                  <span className="inline-block w-[1.4vw] shrink-0 text-center">{v.index === version ? "✓" : ""}</span>
                   {v.parts > 1
                     ? `${v.label} · ${t("tracks.part", { n: String(v.partIndex + 1), of: String(v.parts) })}`
                     : v.label}
@@ -245,6 +249,12 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
           <Row
             id={`extras-${itemId}`}
             title={t("detail.extras")}
+            // 16:9 and three caption lines: these are clips whose artwork is a
+            // frame and whose names are sentences, so a poster-shaped tile cut
+            // "Official Trailer 2" and "Behind the Scenes" to the same words.
+            heightVh={16}
+            aspect={16 / 9}
+            captionLines={3}
             items={detail.extras.map((e) => ({
               id: e.id,
               kind: "movie" as const,
@@ -252,14 +262,13 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
               thumb: e.thumb,
               durationMs: e.durationMs,
             }))}
-            posterUrl={poster}
+            posterUrl={wide}
             onSelect={(extra) =>
               // Trailers are ordinary items on the server, so they go through
               // the same player. A tile that highlights, accepts OK and does
               // nothing is worse than no tile.
               backend && void usePlayer.getState().play(backend, extra, { resume: false })
             }
-            heightVh={16}
           />
         )}
 
