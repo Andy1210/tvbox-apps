@@ -293,6 +293,34 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     }
   });
 
+  it("serves backdrop art and theme music where it has them", async () => {
+    // Both are why a season screen stops looking like a database: the server
+    // holds art for 243 of this account's 256 series and a theme for 151.
+    const b = backend();
+    const shows = await b.libraryPage((await b.libraries()).find((l) => l.kind === "show")!.id, {
+      offset: 0,
+      limit: 40,
+    });
+
+    const withArt = shows.items.filter((i) => i.art);
+    expect(withArt.length).toBeGreaterThan(shows.items.length / 2);
+    const art = b.backdropUrl(withArt[0], 1280, 720)!;
+    // Same rule as every other image: the credential is a header, never a URL.
+    expect(art).not.toContain(TOKEN!);
+    const artRes = await fetch(art, { headers: b.imageHeaders() });
+    expect(artRes.status).toBe(200);
+    expect(artRes.headers.get("content-type")).toMatch(/^image\//);
+
+    const withTheme = shows.items.filter((i) => i.theme);
+    if (withTheme.length) {
+      const theme = b.themeUrl(withTheme[0])!;
+      expect(theme).not.toContain(TOKEN!);
+      const res = await fetch(theme, { headers: b.imageHeaders() });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toMatch(/^audio\//);
+    }
+  });
+
   it("reads markers for an episode that has them", async () => {
     const b = backend();
     const libs = await b.libraries();

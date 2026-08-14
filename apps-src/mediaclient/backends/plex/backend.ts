@@ -569,6 +569,29 @@ export class PlexBackend implements MediaBackend {
     });
   }
 
+  backdropUrl(item: MediaItem, w: number, h: number): string | undefined {
+    if (!item.art) return undefined;
+    return buildUrl(this.base, "photo/:/transcode", {
+      width: Math.round(w),
+      height: Math.round(h),
+      minSize: 1,
+      upscale: 1,
+      url: item.art,
+    });
+  }
+
+  /**
+   * A series' theme music.
+   *
+   * The server holds it for about six series in ten here. It is fetched with
+   * the credential as a header like everything else, which is why the caller
+   * has to turn it into a blob rather than hand the URL to an <audio> element.
+   */
+  themeUrl(item: MediaItem): string | undefined {
+    if (!item.theme) return undefined;
+    return buildUrl(this.base, item.theme.replace(/^\//, ""));
+  }
+
   imageHeaders(): Record<string, string> {
     return { "X-Plex-Token": this.session.token };
   }
