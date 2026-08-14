@@ -7,7 +7,7 @@ import { artworkScale } from "./posters";
 import { useFocusFallback, useInitialFocus } from "./focus";
 import { usePlayer } from "./playback/player";
 import { usePrefs } from "./prefs";
-import { Backdrop } from "./Backdrop";
+import { Hero } from "./Hero";
 import { classify, useApp } from "./state";
 import type { Library, MediaItem } from "./backends/types";
 import { log } from "./redact";
@@ -131,8 +131,9 @@ export function Home(): React.JSX.Element {
 
   return (
     <>
-      <Backdrop item={under} />
-      <div className="relative z-10 flex h-full flex-col gap-[3vh] overflow-y-auto py-[3vh] scroll-pt-[16vh] scroll-pb-[12vh]">
+      {/* Above the rows and inside the scroller, so it slides away as someone
+          goes down rather than eating the top of every screenful. */}
+      <div className="relative z-10 flex h-full flex-col gap-[3vh] overflow-y-auto pb-[3vh] scroll-pt-[16vh] scroll-pb-[12vh]">
         {/* One rail at the top holding the libraries AND the two actions.
           Separately, the actions sat far right in a header while the first tile
           sat far left, and spatial navigation resolves Up by geometry - so
@@ -149,6 +150,11 @@ export function Home(): React.JSX.Element {
           onSearch={() => go({ name: "search" })}
           onSettings={() => go({ name: "settings" })}
         />
+
+        {/* Under the rail and above the rows: what the cursor is on, in full.
+            Inside the scroller, so it slides away as someone goes down rather
+            than taking the top of every screenful. */}
+        <Hero item={under} />
 
         {nothing && <Message text={t("home.empty")} />}
 
