@@ -65,11 +65,16 @@ export function sane(v: Partial<Prefs>): Prefs {
     // missing any row added since, and one from a newer build may name a row
     // this code has never heard of. Known ids in their stored order first, then
     // whatever is new, so a row can be added without anyone losing their order.
+    // Deduped as well as filtered: a repeated id renders the row twice, and two
+    // rows then claim the same spatial-navigation key - which is the failure
+    // this app has already shipped and fixed twice.
     homeRows: [
-      ...(Array.isArray(v.homeRows) ? v.homeRows.filter((r) => ROW_IDS.includes(r)) : []),
-      ...ROW_IDS.filter((r) => !(Array.isArray(v.homeRows) ? v.homeRows : []).includes(r)),
+      ...new Set([
+        ...(Array.isArray(v.homeRows) ? v.homeRows.filter((r) => ROW_IDS.includes(r)) : []),
+        ...ROW_IDS.filter((r) => !(Array.isArray(v.homeRows) ? v.homeRows : []).includes(r)),
+      ]),
     ],
-    hiddenRows: Array.isArray(v.hiddenRows) ? v.hiddenRows.filter((r) => ROW_IDS.includes(r)) : [],
+    hiddenRows: [...new Set(Array.isArray(v.hiddenRows) ? v.hiddenRows.filter((r) => ROW_IDS.includes(r)) : [])],
   };
 }
 

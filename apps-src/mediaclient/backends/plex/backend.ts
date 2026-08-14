@@ -62,6 +62,8 @@ const FILTER_KEY = /^[A-Za-z][A-Za-z0-9_.]{0,40}$/;
 /** Parameter names that are ours to set. Plex has no filter by these names. */
 /** Plex's own number for a collection. */
 const COLLECTION_TYPE = 18;
+/** What a theme path looks like. Verified against every one this server offers. */
+const THEME_PATH = /^\/library\/metadata\/\d+\/theme\/\d+$/;
 /**
  * A path the server may send us back to.
  *
@@ -69,6 +71,15 @@ const COLLECTION_TYPE = 18;
  * path, no traversal, optionally with a query.
  */
 const SECTION_PATH = /^\/library\/sections\/\d+\/[A-Za-z][A-Za-z0-9_.]{0,40}(\?[A-Za-z0-9_.=&%-]{0,120})?$/;
+/**
+ * The query parameters a server-supplied filter path may carry.
+ *
+ * An allowlist rather than a charset: the charset let through `X-Plex-Token`,
+ * and Plex prefers the query parameter over the header - so the server could
+ * make the request authenticate as a name of its choosing, get a 401, and have
+ * the app announce the household as signed out.
+ */
+const FILTER_PATH_PARAMS = new Set(["type", "includeCollections", "includeAdvanced", "includeMeta"]);
 const RESERVED = new Set(["sort", "type", "includeguids", "excludeallleaves"]);
 
 /**
@@ -360,7 +371,7 @@ export class PlexBackend implements MediaBackend {
     // The server's path when it gave one and it is a section path - it carries
     // the type the values need. Otherwise the name, which is all older servers
     // offer.
-    const at = path && SECTION_PATH.test(path) ? path.replace(/^\//, "") : null;
+    const at = path && SECTION_PATH.test(path) && safeQuery(path) ? path.replace(/^\//, "") : null;
     const c = container<MetadataContainer>(
       await this.req(at ?? `library/sections/${libraryId}/${encodeURIComponent(filter)}`),
     );
@@ -409,7 +420,7 @@ export class PlexBackend implements MediaBackend {
     if (hit && Date.now() - hit.at < 30_000) return hit.value;
 
     const c = container<MetadataContainer>(
-      await this.req(`library/metadata/${id}`, {
+      await this.req(`library/metadata/${encodeURIComponent(id)}`, {
         includeMarkers: 1,
         includeChapters: 1,
         includeReviews: 1,
@@ -434,7 +445,7 @@ export class PlexBackend implements MediaBackend {
    * under `playlists/<id>/items` and the metadata path answers nothing.
    */
   async children(id: string): Promise<MediaItem[]> {
-    const c = container<MetadataContainer>(await this.req(`library/metadata/${id}/children`));
+    const c = container<MetadataContainer>(await this.req(`library/metadata/${encodeURIComponent(id)}/children`));
     return (c.Metadata ?? []).map(toItem);
   }
 
@@ -588,7 +599,14 @@ export class PlexBackend implements MediaBackend {
    * has to turn it into a blob rather than hand the URL to an <audio> element.
    */
   themeUrl(item: MediaItem): string | undefined {
-    if (!item.theme) return undefined;
+    // Bounded to the one shape a theme has, because this value is the SERVER's
+    // and the caller fetches it with the account token attached. Unbounded, an
+    // absolute URL here overrides the base entirely - `new URL(path, base)` -
+    // and the box posts an admin-level credential wherever the metadata said;
+    // and a relative one reaches any endpoint on the server, `:/scrobble`
+    // included. Both are the bug artUrl and FILTER_KEY already exist for, and
+    // this shipped without either.
+    if (!item.theme || !THEME_PATH.test(item.theme)) return undefined;
     return buildUrl(this.base, item.theme.replace(/^\//, ""));
   }
 
@@ -902,7 +920,7 @@ export class PlexBackend implements MediaBackend {
   async searchSubtitles(itemId: string, language: string): Promise<Track[]> {
     const code = language.slice(0, 2).toLowerCase();
     const c = container<{ Stream?: PlexStream[] }>(
-      await this.req(`library/metadata/${itemId}/subtitles`, { language: code }),
+      await this.req(`library/metadata/${encodeURIComponent(itemId)}/subtitles`, { language: code }),
     );
     // Not embedded tracks: these are candidates to download, and an ordinal
     // among the file's own tracks would be meaningless for them.
@@ -911,7 +929,7 @@ export class PlexBackend implements MediaBackend {
 
   /** Download one of them onto the item. */
   async addSubtitle(itemId: string, subtitleId: string): Promise<void> {
-    await request(this.base, `library/metadata/${itemId}/subtitles`, this.id, {
+    await request(this.base, `library/metadata/${encodeURIComponent(itemId)}/subtitles`, this.id, {
       method: "PUT",
       token: this.session.token,
       query: { key: subtitleId },
@@ -1039,4 +1057,11 @@ function safeFilters(filters?: Record<string, string>): Record<string, string> {
     if (FILTER_KEY.test(k) && !/^x-plex-/i.test(k) && !RESERVED.has(k.toLowerCase())) out[k] = v;
   }
   return out;
+}
+
+/** Every parameter on a server-supplied path has to be one we expect. */
+function safeQuery(path: string): boolean {
+  const q = path.split("?")[1];
+  if (!q) return true;
+  return q.split("&").every((pair) => FILTER_PATH_PARAMS.has(decodeOnce(pair.split("=")[0] ?? "")));
 }

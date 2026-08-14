@@ -18,9 +18,13 @@ const FADE_MS = 600;
 
 function stop(): void {
   const a = audio;
+  // Cleared BEFORE the early return: leaving it set meant a theme whose fetch
+  // was interrupted - by walking away and back quickly, which is ordinary -
+  // was never retried for the life of the app, because the guard below saw its
+  // own stale value.
+  playingUrl = null;
   if (!a) return;
   audio = null;
-  playingUrl = null;
   const step = a.volume / (FADE_MS / 50);
   const timer = setInterval(() => {
     a.volume = Math.max(0, a.volume - step);

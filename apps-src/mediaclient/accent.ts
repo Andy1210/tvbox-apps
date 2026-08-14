@@ -4,7 +4,16 @@
 // carry Plex's own `ultraBlurColors` - so it is computed here, from the image
 // that is already loaded and decoded.
 
+/**
+ * Keyed on the SOURCE url, not the blob.
+ *
+ * A blob URL is unique per load and revoked when the image cache turns over, so
+ * keying on it meant every backdrop ever shown left a permanently dead entry -
+ * and a poster re-fetched after an eviction had to be sampled again for a
+ * colour it had already computed.
+ */
 const cache = new Map<string, string>();
+const MAX = 120;
 
 /**
  * Average the artwork down to one colour, biased away from mud.
@@ -19,8 +28,8 @@ const cache = new Map<string, string>();
  * average over a dark frame is a dark grey - technically the mean, and useless
  * as an accent. What we want is the colour someone would name if asked.
  */
-export async function accentFrom(objectUrl: string): Promise<string | null> {
-  const hit = cache.get(objectUrl);
+export async function accentFrom(objectUrl: string, key = objectUrl): Promise<string | null> {
+  const hit = cache.get(key);
   if (hit) return hit;
 
   const img = await load(objectUrl);
@@ -63,7 +72,8 @@ export async function accentFrom(objectUrl: string): Promise<string | null> {
   if (weight === 0) return null;
 
   const accent = mix(r / weight, g / weight, b / weight);
-  cache.set(objectUrl, accent);
+  if (cache.size >= MAX) cache.delete(cache.keys().next().value as string);
+  cache.set(key, accent);
   return accent;
 }
 

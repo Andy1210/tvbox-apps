@@ -133,3 +133,51 @@ describe("names the server chooses", () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe("everything the credential is attached to", () => {
+  const backend = new PlexBackend(session, { clientId: "c", deviceName: "d" });
+
+  it("only ever points at the server", () => {
+    // The rule this file needs, and did not have. "Not in the URL" was
+    // satisfied by a themeUrl that pointed at attacker.example.com - the token
+    // is a HEADER, so a substring check passes while the box posts an
+    // admin-level credential to whatever host the metadata named. What matters
+    // is the ORIGIN of everything imageHeaders() is handed to.
+    const ours = "http://192.168.1.10:32400";
+    const off = ["https://attacker.example.com/x", "http://192.168.1.99:32400/x", "//attacker.example.com/x"];
+
+    for (const bad of off) {
+      const art = backend.artUrl(bad);
+      if (art) expect(new URL(art).origin).toBe(ours);
+
+      const theme = backend.themeUrl({ id: "1", kind: "show", title: "x", theme: bad });
+      if (theme) expect(new URL(theme).origin).toBe(ours);
+
+      const drop = backend.backdropUrl({ id: "1", kind: "show", title: "x", art: bad }, 100, 100);
+      if (drop) expect(new URL(drop).origin).toBe(ours);
+    }
+  });
+
+  it("will not let a theme path reach another endpoint", () => {
+    // Same string the filter-name bound was added for, on the call site that
+    // shipped three commits later without one: with the token attached, this
+    // is a state-changing GET chosen by the server.
+    for (const bad of [
+      "/../:/scrobble?key=99&identifier=com.plexapp.plugins.library",
+      "/:/scrobble?key=99",
+      "/library/sections/1/refresh",
+      "/library/metadata/1/theme/2/../../..",
+    ]) {
+      expect(backend.themeUrl({ id: "1", kind: "show", title: "x", theme: bad })).toBeUndefined();
+    }
+
+    // The real shape still works.
+    const ok = backend.themeUrl({
+      id: "1",
+      kind: "show",
+      title: "x",
+      theme: "/library/metadata/61161/theme/1784859962",
+    });
+    expect(ok).toContain("/library/metadata/61161/theme/1784859962");
+  });
+});
