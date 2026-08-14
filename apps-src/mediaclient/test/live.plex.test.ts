@@ -222,10 +222,21 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     const b = backend();
     const lib = (await b.libraries())[0];
     const strip = await b.letters(lib.id);
+
+    // One entry per plain letter. The server keeps some accented initials as
+    // buckets of their own and lists them after Z, but it sorts them INSIDE the
+    // plain letter - so a separate entry pointed somewhere the alphabet does
+    // not have, and both of this server's landed at the end of the library.
+    expect(strip.map((l) => l.key)).toEqual([...new Set(strip.map((l) => l.key))]);
+    for (const l of strip) expect(l.key).toMatch(/^[A-Z#]$/);
+    expect(strip.reduce((n, l) => n + l.size, 0)).toBe((await b.libraryPage(lib.id, { offset: 0, limit: 1 })).total);
+
     const usable = strip.filter((l) => l.size > 0 && /^[A-Z]$/.test(l.title));
     expect(usable.length).toBeGreaterThan(5);
 
-    for (const l of [usable[1], usable[Math.floor(usable.length / 2)], usable[usable.length - 1]]) {
+    // EVERY bucket, not a sample: the two that were wrong were the two a sample
+    // of three never reached.
+    for (const l of usable) {
       const offset = await b.letterOffset(lib.id, l.key, { sort: "titleSort" });
       const at = await b.libraryPage(lib.id, { offset, limit: 1, sort: "titleSort" });
       const title = at.items[0]?.sortTitle ?? at.items[0]?.title ?? "";
