@@ -127,15 +127,17 @@ function Face({
           <span className="text-[2.6vh] text-fg-dim">{initials}</span>
         )}
       </div>
-      {/* Two lines each, at fixed heights: a Hungarian full name rarely fits one
-          line at this width, and letting either grow would leave the faces on a
-          ragged baseline and move the row under the D-pad's own measurements. */}
-      <div className="line-clamp-2 h-[5vh] w-full text-center text-[1.8vh] leading-[1.4]">{role.name}</div>
-      {role.character && (
-        <div className="line-clamp-2 h-[4.6vh] w-full text-center text-[1.7vh] leading-[1.4] text-fg-dim">
-          {role.character}
-        </div>
-      )}
+      {/* The BLOCK has the fixed height, not the lines inside it. Fixing each
+          line meant a one-line name reserved space for a second one, and the
+          character name sat an empty line below it. Fixed somewhere, though:
+          letting the block grow would leave the faces on a ragged baseline and
+          move the row under the D-pad's own measurements. */}
+      <div className="flex h-[9.6vh] w-full flex-col items-center gap-[0.2vh] overflow-hidden">
+        <div className="line-clamp-2 w-full text-center text-[1.8vh] leading-[1.4]">{role.name}</div>
+        {role.character && (
+          <div className="line-clamp-2 w-full text-center text-[1.7vh] leading-[1.4] text-fg-dim">{role.character}</div>
+        )}
+      </div>
     </div>
   );
 }

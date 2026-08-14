@@ -7,7 +7,9 @@
     "name": "Média"
   },
   "common": {
-    "loading": "Betöltés…"
+    "loading": "Betöltés…",
+    "done": "Kész",
+    "back": "Vissza"
   },
   "login": {
     "title": "Belépés a szerveredre",
@@ -36,7 +38,11 @@
   "library": {
     "all": "Mind",
     "empty": "Ez a könyvtár üres.",
-    "emptyLetter": "Ez alatt a betű alatt nincs semmi."
+    "emptyLetter": "Ez alatt a betű alatt nincs semmi.",
+    "arrange": "Rendezés és szűrés",
+    "sort": "Rendezés",
+    "filter": "Szűrés",
+    "clearFilters": "Szűrők törlése"
   },
   "detail": {
     "play": "Lejátszás",

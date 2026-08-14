@@ -7,7 +7,9 @@
     "name": "Media"
   },
   "common": {
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "done": "Done",
+    "back": "Back"
   },
   "login": {
     "title": "Sign in to your server",
@@ -36,7 +38,11 @@
   "library": {
     "all": "All",
     "empty": "This library is empty.",
-    "emptyLetter": "Nothing under this letter."
+    "emptyLetter": "Nothing under this letter.",
+    "arrange": "Sort and filter",
+    "sort": "Sort",
+    "filter": "Filter",
+    "clearFilters": "Clear filters"
   },
   "detail": {
     "play": "Play",

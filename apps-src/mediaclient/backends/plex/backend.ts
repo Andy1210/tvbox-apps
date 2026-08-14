@@ -15,6 +15,8 @@ import type {
   StreamDecision,
   Track,
   DeviceLogin,
+  SortOption,
+  FilterOption,
 } from "../types";
 import { buildUrl, container, request, type PlexIdentityHeaders } from "./http";
 import { beginDeviceLogin, listHomeUsers, switchHomeUser } from "./auth";
@@ -188,14 +190,60 @@ export class PlexBackend implements MediaBackend {
 
   async libraryPage(libraryId: string, q: PageQuery): Promise<Page<MediaItem>> {
     const c = container<MetadataContainer>(
-      await this.req(`library/sections/${libraryId}/all`, { sort: q.sort ?? "titleSort", ...page(q.offset, q.limit) }),
+      await this.req(`library/sections/${libraryId}/all`, {
+        // Direction rides on the sort key itself, which is what the server
+        // expects: a separate parameter is ignored.
+        sort: `${q.sort ?? "titleSort"}${q.desc ? ":desc" : ""}`,
+        ...(q.filters ?? {}),
+        ...page(q.offset, q.limit),
+      }),
     );
     return { items: (c.Metadata ?? []).map(toItem), total: c.totalSize };
   }
 
-  async letters(libraryId: string): Promise<{ key: string; title: string; size: number }[]> {
-    const c = container<MetadataContainer>(await this.req(`library/sections/${libraryId}/firstCharacter`));
+  /**
+   * The A-Z buckets.
+   *
+   * Filters are passed through, or the strip would count the whole library
+   * while the grid shows a filtered slice - so a letter with items in the strip
+   * would open an empty page, which reads as a broken jump rather than as an
+   * empty filter.
+   */
+  async letters(
+    libraryId: string,
+    filters?: Record<string, string>,
+  ): Promise<{ key: string; title: string; size: number }[]> {
+    const c = container<MetadataContainer>(
+      await this.req(`library/sections/${libraryId}/firstCharacter`, { ...(filters ?? {}) }),
+    );
     return (c.Directory ?? []).map((d) => ({ key: String(d.key ?? ""), title: d.title ?? "", size: d.size ?? 0 }));
+  }
+
+  async sortOptions(libraryId: string): Promise<SortOption[]> {
+    const c = container<MetadataContainer>(await this.req(`library/sections/${libraryId}/sorts`));
+    return (c.Directory ?? [])
+      .filter((d) => d.key)
+      .map((d) => ({ key: String(d.key), title: d.title ?? String(d.key) }));
+  }
+
+  async filterOptions(libraryId: string): Promise<FilterOption[]> {
+    const c = container<MetadataContainer>(await this.req(`library/sections/${libraryId}/filters`));
+    return (c.Directory ?? [])
+      .filter((d) => d.filter)
+      .map((d) => ({
+        key: String(d.filter),
+        title: d.title ?? String(d.filter),
+        // The server calls the on/off ones "boolean"; everything else has a
+        // list of values that has to be fetched before it can be offered.
+        kind: d.filterType === "boolean" ? ("flag" as const) : ("list" as const),
+      }));
+  }
+
+  async filterValues(libraryId: string, filter: string): Promise<SortOption[]> {
+    const c = container<MetadataContainer>(await this.req(`library/sections/${libraryId}/${filter}`));
+    return (c.Directory ?? [])
+      .filter((d) => d.key !== undefined)
+      .map((d) => ({ key: String(d.key), title: d.title ?? String(d.key) }));
   }
 
   /**

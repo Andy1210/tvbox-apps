@@ -177,6 +177,42 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     await b.endSession(session).catch(() => {});
   });
 
+  it("orders and narrows a library the way the server says it can", async () => {
+    // Both lists are asked of the server rather than hardcoded, because they
+    // differ by library type - a series library orders by unwatched episode
+    // count, a film library by resolution - so this checks the keys we send
+    // back are keys it offered, and that they actually change the answer.
+    const b = backend();
+    const lib = (await b.libraries())[0];
+
+    const sorts = await b.sortOptions(lib.id);
+    expect(sorts.map((s) => s.key)).toContain("titleSort");
+    expect(sorts.length).toBeGreaterThan(2);
+
+    const filters = await b.filterOptions(lib.id);
+    const unwatched = filters.find((f) => f.key === "unwatched");
+    expect(unwatched?.kind).toBe("flag");
+    const genre = filters.find((f) => f.key === "genre");
+    expect(genre?.kind).toBe("list");
+
+    const all = await b.libraryPage(lib.id, { offset: 0, limit: 1 });
+    const narrowed = await b.libraryPage(lib.id, { offset: 0, limit: 1, filters: { unwatched: "1" } });
+    // A filter that is accepted but ignored answers 200 with the whole library,
+    // which is indistinguishable from a working filter unless the totals are
+    // compared.
+    expect(narrowed.total).toBeLessThan(all.total ?? Number.MAX_SAFE_INTEGER);
+
+    // And ordering: the first title descending must not be the first ascending.
+    const asc = await b.libraryPage(lib.id, { offset: 0, limit: 1, sort: "titleSort" });
+    const desc = await b.libraryPage(lib.id, { offset: 0, limit: 1, sort: "titleSort", desc: true });
+    expect(desc.items[0]?.id).not.toBe(asc.items[0]?.id);
+
+    // The A-Z strip has to agree with the grid, or a letter opens an empty page.
+    const strip = await b.letters(lib.id, { unwatched: "1" });
+    const stripTotal = strip.reduce((n, l) => n + l.size, 0);
+    expect(stripTotal).toBeLessThanOrEqual(all.total ?? Number.MAX_SAFE_INTEGER);
+  });
+
   it("reads markers for an episode that has them", async () => {
     const b = backend();
     const libs = await b.libraries();
