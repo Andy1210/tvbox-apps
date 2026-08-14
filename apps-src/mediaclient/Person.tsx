@@ -71,7 +71,7 @@ export function Person({ personId, personName }: { personId: string; personName:
 
   return (
     <FocusContext.Provider value={focusKey}>
-      <div ref={ref} className="flex h-full flex-col gap-[2.4vh] overflow-y-auto py-[3vh]">
+      <div ref={ref} className="flex h-full flex-col gap-[2.4vh] overflow-y-auto py-[3vh] scroll-pt-[16vh] scroll-pb-[12vh]">
         <header className="flex flex-col gap-[0.6vh] px-[4vw]">
           <h1 className="text-[3.4vh] font-semibold tracking-tight">{personName}</h1>
           <p className="text-[1.8vh] text-fg-dim">

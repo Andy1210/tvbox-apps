@@ -71,7 +71,10 @@ export function TrackMenu({
   return (
     <FocusContext.Provider value={focusKey}>
       <div ref={ref} className="absolute inset-0 flex items-end justify-center bg-black/70 pb-[6vh]">
-        <div className="flex max-h-[64vh] w-[86vw] flex-col gap-[2vh] rounded-[1.4vh] bg-[#0c1219]/95 p-[3vh]">
+        <div // A fixed height, not a maximum: the panel would otherwise change size as
+          // a search adds rows to one column, and the whole overlay jumps under
+          // whatever the person is reading.
+          className="flex h-[64vh] w-[86vw] flex-col gap-[2vh] rounded-[1.4vh] bg-[#0c1219]/95 p-[3vh]">
           <div className="flex flex-1 gap-[2vw] overflow-hidden">
           {versions.length > 1 && (
             <Column title={t("tracks.version")}>
@@ -184,7 +187,7 @@ function subtitleHint(s: Track, t: (k: string) => string): string {
 
 function Column({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (
-    <section className="flex min-w-[20vw] flex-1 flex-col gap-[1vh] overflow-y-auto">
+    <section className="no-scrollbar flex min-w-[20vw] flex-1 flex-col gap-[1vh] overflow-y-auto">
       <h3 className="text-[2vh] font-semibold tracking-tight text-fg-dim">{title}</h3>
       <div className="flex flex-col gap-[0.6vh]">{children}</div>
     </section>

@@ -145,6 +145,24 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   }, [firstRow, lastRow, items, loadPage]);
 
   const { ref: gridRef, focusKey } = useFocusable({ focusKey: `grid-${libraryId}`, saveLastFocusedChild: true });
+
+  // Scrolls in whole rows, and only when the focused one is not already fully
+  // on screen. Aligning to the row keeps every tile at the same place from one
+  // press to the next, which is what stops the grid feeling like it slides
+  // under the highlight.
+  const scrollToRow = useCallback(
+    (el: HTMLElement) => {
+      const box = scroller.current;
+      if (!box) return;
+      const row = Math.round(el.parentElement ? el.parentElement.offsetTop / rowHeight : 0);
+      const top = row * rowHeight;
+      const margin = rowHeight * 0.35;
+      if (top < box.scrollTop + margin) box.scrollTo({ top: Math.max(0, top - margin), behavior: "smooth" });
+      else if (top + rowHeight > box.scrollTop + box.clientHeight - margin)
+        box.scrollTo({ top: top + rowHeight - box.clientHeight + margin, behavior: "smooth" });
+    },
+    [rowHeight],
+  );
   const poster = (item: MediaItem): string | undefined => backend?.posterUrl(item, 300 * artworkScale(), 450 * artworkScale());
 
   // Nothing focuses itself, so the first tile has to be told to take it - and a
@@ -177,6 +195,8 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
               focusKey={`cell-${i}`}
               heightVh={26}
               onEnter={() => go({ name: "item", itemId: item.id })}
+              onFocusedEl={scrollToRow}
+              ownsScroll
             />
           ) : (
             // A cell whose page has not arrived still renders, and still takes
@@ -188,6 +208,8 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
               focusKey={`cell-${i}`}
               heightVh={26}
               onEnter={() => {}}
+              onFocusedEl={scrollToRow}
+              ownsScroll
             />
           )}
         </div>,
@@ -248,11 +270,13 @@ function LetterStrip({
   const { ref, focusKey } = useFocusable({ focusKey: "letters", saveLastFocusedChild: true });
   return (
     <FocusContext.Provider value={focusKey}>
-      <div ref={ref} className="no-scrollbar flex w-[5vw] flex-col items-center gap-[0.4vh] overflow-y-auto py-[1vh]">
+      <div className="no-scrollbar flex flex-col items-stretch gap-[0.5vh] overflow-y-auto py-[2vh] pr-[1.5vw] pl-[0.5vw]" ref={ref}>
         <FocusButton
           focusKey="letter-all"
           onEnter={() => onPick(null)}
-          className={`w-[3.4vw] rounded-[0.6vh] py-[0.4vh] text-center text-[1.7vh] ${active === null ? "bg-white/20" : ""}`}
+          className={`rounded-[0.8vh] px-[1.2vw] py-[0.7vh] text-center text-[1.8vh] ${
+            active === null ? "bg-white/20" : "bg-white/5"
+          }`}
         >
           {allLabel}
         </FocusButton>
@@ -261,8 +285,12 @@ function LetterStrip({
             key={l.key}
             focusKey={`letter-${l.key}`}
             onEnter={() => onPick(l.key)}
-            className={`w-[3.4vw] rounded-[0.6vh] py-[0.4vh] text-center text-[1.7vh] tabular-nums ${
-              active === l.key ? "bg-white/20" : ""
+            // Sized by its content with real padding on both axes. A fixed
+            // narrow width squeezed the "all" label out of its own box and left
+            // every letter looking like bare text rather than something to
+            // press.
+            className={`rounded-[0.8vh] px-[1.2vw] py-[0.7vh] text-center text-[1.9vh] tabular-nums ${
+              active === l.key ? "bg-white/20" : "bg-white/5"
             }`}
           >
             {l.title}

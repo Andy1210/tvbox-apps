@@ -15,6 +15,8 @@ export interface TileProps {
   /** Called with this tile's element when it takes focus, so the container can
    *  scroll it into view on its own terms rather than the browser's. */
   onFocusedEl?: (el: HTMLElement) => void;
+  /** The container scrolls BOTH axes itself, so the browser must not also. */
+  ownsScroll?: boolean;
 }
 
 /** How far through the item, 0-1, or null when it was never started. */
@@ -47,10 +49,18 @@ export function Tile({
   onEnter,
   heightVh = 26,
   onFocusedEl,
+  ownsScroll,
 }: TileProps): React.JSX.Element {
-  // Only the vertical axis is left to the browser: a row scrolls itself so the
-  // focused tile keeps some run-up on each side, which scrollIntoView cannot do.
-  const { ref, focused } = useFocusableItem({ focusKey, onEnterPress: onEnter }, { block: "nearest" });
+  // scrollIntoView unless the container scrolls both axes itself. A row uses
+  // onFocusedEl for the horizontal axis only and still needs the browser for the
+  // vertical one; the grid does both, and letting the browser join in there
+  // changes scrollTop mid-navigation, re-renders the virtualised window, and
+  // moves the tiles out from under the measurement the D-pad is resolving
+  // against - the highlight then jumps two rows instead of one.
+  const { ref, focused } = useFocusableItem(
+    { focusKey, onEnterPress: onEnter },
+    ownsScroll ? undefined : { block: "nearest" },
+  );
   const el = useRef<HTMLDivElement | null>(null);
   const backend = useApp((s) => s.backend);
   const [src, setSrc] = useState<string | null>(null);
@@ -86,8 +96,10 @@ export function Tile({
         ref(node);
       }}
       onClick={onEnter}
-      className="flex shrink-0 flex-col gap-[0.8vh] transition-transform duration-150"
-      style={{ width: `${heightVh * (2 / 3)}vh`, transform: focused ? "scale(1.06)" : undefined }}
+      // No scale on focus. The ring says which tile is chosen on its own, and
+      // growing the element changes the rectangle the D-pad navigates against.
+      className="flex shrink-0 flex-col gap-[0.8vh]"
+      style={{ width: `${heightVh * (2 / 3)}vh` }}
     >
       <div
         className={[

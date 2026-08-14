@@ -41,7 +41,7 @@ interface State {
   failure: Failure | null;
 
   boot(): Promise<void>;
-  chooseProfile(id: string, pin?: string): Promise<void>;
+  chooseProfile(id: string, pin?: string, name?: string): Promise<void>;
   setAutologin(on: boolean): Promise<void>;
   signIn(session: Session): Promise<void>;
   signOut(): Promise<void>;
@@ -89,6 +89,10 @@ export const useApp = create<State>((set, get) => ({
       return;
     }
 
+    // A session stored before accountToken existed carries only one token, and
+    // at that point it WAS the account's. Naming it here is what stops the first
+    // profile switch from leaving the box unable to switch again.
+    if (!saved.accountToken) saved.accountToken = saved.token;
     const backend = new PlexBackend(saved, { clientId: identity.clientId, deviceName: deviceName(identity.host) });
     // On by default: a television that asks who is watching every single evening
     // is a television nobody uses. Off is for a household that shares one box
@@ -109,12 +113,16 @@ export const useApp = create<State>((set, get) => ({
    * chosen - which is what autologin means here, rather than "the account
    * owner".
    */
-  async chooseProfile(id, pin) {
+  async chooseProfile(id, pin, name) {
     const { backend, identity } = get();
     if (!backend) return;
     const session = await backend.switchProfile(id, pin);
-    const profiles = await backend.listProfiles().catch(() => []);
-    const named = { ...session, profileName: profiles.find((p) => p.id === id)?.name ?? session.profileName };
+    // The caller had the list in hand, so its name is used before asking again.
+    // Without it a failed re-list falls back to session.profileName, which the
+    // switch carried over from the PREVIOUS person - and the box would then
+    // announce itself as whoever was signed in before.
+    const listed = name ? undefined : (await backend.listProfiles().catch(() => [])).find((p) => p.id === id)?.name;
+    const named = { ...session, profileName: name ?? listed ?? session.profileName };
 
     const w = await writeJson(SESSION_KEY, named);
     if (!w.ok) log.warn("profile not persisted; the next launch will ask again");

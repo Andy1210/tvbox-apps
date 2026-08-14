@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { PinPad, useFocusableItem, useI18n } from "@sdk";
 import { Message } from "./Message";
 import { loadImage } from "./posters";
-import { useInitialFocus } from "./focus";
+import { useFocusFallback, useInitialFocus } from "./focus";
 import { classify, useApp } from "./state";
 import type { Profile } from "./backends/types";
 import { log } from "./redact";
@@ -25,11 +26,13 @@ export function Profiles(): React.JSX.Element {
   const chooseProfile = useApp((s) => s.chooseProfile);
   const fail = useApp((s) => s.fail);
   const failure = useApp((s) => s.failure);
+  const go = useApp((s) => s.go);
 
   const [profiles, setProfiles] = useState<Profile[] | null>(null);
   const [picked, setPicked] = useState<Profile | null>(null);
   const [pinError, setPinError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     if (!backend) return;
@@ -45,17 +48,27 @@ export function Profiles(): React.JSX.Element {
     return () => {
       live = false;
     };
-  }, [backend, fail]);
+  }, [backend, fail, reload]);
 
   const { ref, focusKey } = useFocusable({ focusKey: "profiles", saveLastFocusedChild: true });
   useInitialFocus(profiles?.length ? `profile-${profiles[0].id}` : undefined, Boolean(profiles));
+  // The PIN pad is what this guards against. Leaving it unmounts the key that
+  // held focus, and norigin's own recovery walks up to the root and stops there
+  // - so without this the list comes back with focus on a key that no longer
+  // exists and every press is discarded. Disabled while the pad is open, or it
+  // would pull focus out of the pad on the first digit.
+  useFocusFallback(
+    profiles?.length ? `profile-${profiles[0].id}` : undefined,
+    (key) => key.startsWith("profile-"),
+    !picked,
+  );
 
   const submit = async (pin?: string): Promise<void> => {
     if (!picked || busy) return;
     setBusy(true);
     setPinError(undefined);
     try {
-      await chooseProfile(picked.id, pin);
+      await chooseProfile(picked.id, pin, picked.name);
     } catch (e) {
       log.warn("profile switch failed", e);
       // A wrong PIN is the ordinary case, not a failure of the app - it stays on
@@ -65,18 +78,41 @@ export function Profiles(): React.JSX.Element {
     }
   };
 
-  if (failure) return <Message failure={failure} />;
+  if (failure)
+    return (
+      <Message
+        failure={failure}
+        onRetry={() => setReload((n) => n + 1)}
+        // The household list comes from plex.tv while everything else is asked
+        // of the server on the LAN. So a box that is online locally but cannot
+        // reach the internet must not be stuck here: carrying on with the saved
+        // session leaves the whole library usable, and Settings is where
+        // autologin can be turned back on.
+        actions={[{ key: "msg-continue", label: t("profiles.continue"), onEnter: () => go({ name: "home" }) }]}
+      />
+    );
   if (!profiles) return <Message loading />;
+  if (profiles.length === 0)
+    return (
+      <Message
+        text={t("profiles.none")}
+        actions={[{ key: "msg-continue", label: t("profiles.continue"), onEnter: () => go({ name: "home" }) }]}
+      />
+    );
 
   if (picked) {
     return (
       <PinPad
         title={t("profiles.enterPin", { name: picked.name })}
         error={pinError}
+        busy={busy}
         onSubmit={(pin) => void submit(pin)}
         onCancel={() => {
+          // Back to the face that was opened, not to the first one.
+          const was = picked.id;
           setPicked(null);
           setPinError(undefined);
+          setTimeout(() => setFocus(`profile-${was}`), 0);
         }}
       />
     );
@@ -93,7 +129,7 @@ export function Profiles(): React.JSX.Element {
               profile={p}
               onEnter={() => {
                 if (p.pinRequired) setPicked(p);
-                else void chooseProfile(p.id).catch(() => setPicked(p));
+                else void chooseProfile(p.id, undefined, p.name).catch(() => setPicked(p));
               }}
             />
           ))}

@@ -106,7 +106,9 @@
   },
   "profiles": {
     "title": "Who is watching?",
-    "enterPin": "{name}’s PIN",
-    "wrongPin": "That PIN is not right."
+    "enterPin": "Enter the PIN for {name}",
+    "wrongPin": "That PIN is not right.",
+    "continue": "Carry on without this",
+    "none": "This account has no other users."
   }
 }

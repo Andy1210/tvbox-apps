@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useBackspace } from "@sdk";
+import { fetchConfig, installNavSounds, setSoundsEnabled, setSoundsSuppressed, useBackspace } from "@sdk";
 import { Detail } from "./Detail";
 import { Home } from "./Home";
 import { Library } from "./Library";
@@ -31,6 +31,26 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   const boot = useApp((s) => s.boot);
   const back = useApp((s) => s.back);
   const playing = usePlayer((s) => s.current !== null);
+
+  // The same navigation ticks the launcher uses, honouring the same box-wide
+  // setting - a household that turned them off there does not expect them back
+  // inside an app. The listener is permanent; the setting only flips the flag.
+  useEffect(() => installNavSounds(), []);
+  useEffect(() => {
+    let live = true;
+    void fetchConfig().then((c) => {
+      if (live) setSoundsEnabled(c?.ui.navSounds ?? true);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  // Silent while a film is on: a tick over the soundtrack is the one place they
+  // are unwelcome, which is what the launcher does behind its own video too.
+  useEffect(() => {
+    setSoundsSuppressed(playing);
+    return () => setSoundsSuppressed(false);
+  }, [playing]);
 
   useEffect(() => {
     void boot();
