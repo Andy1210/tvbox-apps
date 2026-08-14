@@ -231,7 +231,20 @@ export class PlexBackend implements MediaBackend {
     const c = container<MetadataContainer>(
       await this.req(`library/sections/${libraryId}/firstCharacter`, safeFilters(filters)),
     );
-    return (c.Directory ?? []).map((d) => ({ key: String(d.key ?? ""), title: d.title ?? "", size: d.size ?? 0 }));
+    // Accented initials are merged into the plain letter. The server keeps some
+    // as buckets of their own and lists them after Z - but it SORTS them inside
+    // the plain letter, measured: this library's O-double-acute titles sit at
+    // 1163-1165 within O's 1145-1170. So a separate strip entry pointed at a
+    // place the alphabet does not have, and it cost two rows of a column that
+    // has to hold every letter without scrolling.
+    const merged = new Map<string, { key: string; title: string; size: number }>();
+    for (const d of c.Directory ?? []) {
+      const plain = foldInitial(decodeOnce(String(d.key ?? "")));
+      const at = merged.get(plain);
+      if (at) at.size += d.size ?? 0;
+      else merged.set(plain, { key: plain, title: plain, size: d.size ?? 0 });
+    }
+    return [...merged.values()];
   }
 
   async sortOptions(libraryId: string): Promise<SortOption[]> {
@@ -904,21 +917,26 @@ export class PlexBackend implements MediaBackend {
  * rather than 500 late.
  */
 function bucketIndex(title: string, keys: string[]): number {
-  const fold = (c: string): string => c.normalize("NFD")[0].toUpperCase();
-  const folded = keys.map((k) => {
-    let d = k;
-    try {
-      d = decodeURIComponent(k);
-    } catch {
-      /* a key that is not valid encoding is used as it stands */
-    }
-    return fold(d);
-  });
+  const folded = keys.map((k) => foldInitial(decodeOnce(k)));
   const t = (title ?? "").trim();
   const hash = folded.indexOf("#") >= 0 ? folded.indexOf("#") : 0;
   if (!t) return hash;
-  const i = folded.indexOf(fold(t[0]));
+  const i = folded.indexOf(foldInitial(t));
   return i >= 0 ? i : hash;
+}
+
+/**
+ * A title's initial, without its diacritic.
+ *
+ * NFD splits a letter from its accent, so the first code point is the plain
+ * letter. Anything that is not A-Z after that is the "#" bucket, which is where
+ * the server puts a title starting with a digit or a bracket.
+ */
+function foldInitial(s: string): string {
+  const t = (s ?? "").trim();
+  if (!t) return "#";
+  const c = t.normalize("NFD")[0].toUpperCase();
+  return c >= "A" && c <= "Z" ? c : "#";
 }
 
 /**
