@@ -1,6 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FocusContext, getCurrentFocusKey, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, useBackspace, useI18n } from "@sdk";
+import { useApp } from "./state";
+import { TrackMenu, type Choice } from "./TrackMenu";
 import { usePlayer } from "./playback/player";
 
 /** Nudge sizes as a press is held. Held longer means further per press. */
@@ -30,6 +32,7 @@ function clock(ms: number): string {
  */
 export function Player(): React.JSX.Element | null {
   const { t } = useI18n();
+  const backend = useApp((s) => s.backend);
   const current = usePlayer((s) => s.current);
   const state = usePlayer((s) => s.state);
   const positionMs = usePlayer((s) => s.positionMs);
@@ -38,6 +41,8 @@ export function Player(): React.JSX.Element | null {
   const buffering = usePlayer((s) => s.buffering);
   const overlay = usePlayer((s) => s.overlay);
 
+  const [menu, setMenu] = useState(false);
+  const [searchState, setSearchState] = useState<"idle" | "searching" | "unavailable" | "none">("idle");
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const held = useRef({ dir: 0, count: 0 });
 
@@ -102,6 +107,14 @@ export function Player(): React.JSX.Element | null {
         case "MediaTrackPrevious":
           p.seekBy(-60_000);
           break;
+        case "ArrowDown":
+          // Down is free here: nothing else on the overlay moves focus
+          // vertically, and a track menu behind a long-press or a coloured
+          // button is a track menu nobody finds.
+          e.preventDefault();
+          e.stopPropagation();
+          setMenu(true);
+          break;
       }
     };
 
@@ -130,6 +143,12 @@ export function Player(): React.JSX.Element | null {
   // listener registered later never sees the key at all - the film would keep
   // playing while the overlay claimed Back would pause it.
   useBackspace(() => {
+    // Back closes the menu first: it is a layer over the film, and leaving it
+    // open while the film pauses underneath would be two things at once.
+    if (menu) {
+      setMenu(false);
+      return;
+    }
     const p = usePlayer.getState();
     if (p.state === "playing") p.togglePause();
     else void p.stop();
@@ -142,6 +161,32 @@ export function Player(): React.JSX.Element | null {
   }, [skippable]);
 
   if (!current) return null;
+
+  if (menu && current.detail) {
+    const searchSubtitles = async (): Promise<void> => {
+      setSearchState("searching");
+      try {
+        const found = await backend!.searchSubtitles(current.item.id, "hun");
+        setSearchState(found.length ? "idle" : "none");
+      } catch {
+        // The server answers with an error rather than an empty list when it has
+        // no subtitle provider configured, so "none found" and "cannot look" are
+        // different sentences.
+        setSearchState("unavailable");
+      }
+    };
+
+    return (
+      <TrackMenu
+        versions={current.detail.versions}
+        current={current.choice as Choice}
+        onChoose={(next) => void usePlayer.getState().changeTracks(next)}
+        onClose={() => setMenu(false)}
+        onSearchSubtitles={backend ? () => void searchSubtitles() : undefined}
+        searchState={searchState}
+      />
+    );
+  }
 
   const shown = seekTargetMs ?? positionMs;
   const pct = durationMs > 0 ? Math.min(100, (shown / durationMs) * 100) : 0;

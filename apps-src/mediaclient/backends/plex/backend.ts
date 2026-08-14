@@ -13,12 +13,24 @@ import type {
   Profile,
   Session,
   StreamDecision,
+  Track,
   TrickplayIndex,
   DeviceLogin,
 } from "../types";
 import { buildUrl, container, request, type PlexIdentityHeaders } from "./http";
 import { beginDeviceLogin, listHomeUsers, switchHomeUser } from "./auth";
-import { onDeckOrder, rollUpEpisodes, toDetail, toItem, toLibrary, toMarkers, type PlexDirectory, type PlexMetadata } from "./map";
+import {
+  onDeckOrder,
+  rollUpEpisodes,
+  toDetail,
+  toItem,
+  toLibrary,
+  toMarkers,
+  toTrack,
+  type PlexDirectory,
+  type PlexMetadata,
+  type PlexStream,
+} from "./map";
 import { readJson, writeJson } from "../../storage";
 import { log } from "../../redact";
 
@@ -366,13 +378,23 @@ export class PlexBackend implements MediaBackend {
    */
   async resolveStream(
     id: string,
-    opts: { session: string; panel?: { width: number; height: number } | null },
+    opts: {
+      session: string;
+      panel?: { width: number; height: number } | null;
+      version?: number;
+      audio?: number;
+      subtitle?: number | "none";
+    },
   ): Promise<StreamDecision> {
     const screen = opts.panel ? `${opts.panel.width}x${opts.panel.height}` : undefined;
+    const version = opts.version ?? 0;
     const common = {
       hasMDE: 1,
       path: `/library/metadata/${id}`,
-      mediaIndex: 0,
+      // Which FILE, when the library holds more than one for this title. A
+      // second copy is as often a different language as a different resolution,
+      // so this is a real choice rather than a quality ladder.
+      mediaIndex: version,
       partIndex: 0,
       protocol: "hls",
       directPlay: 1,
@@ -391,6 +413,20 @@ export class PlexBackend implements MediaBackend {
       "X-Plex-Client-Profile-Extra": PROFILE_EXTRA,
       "X-Plex-Device-Screen-Resolution": screen,
     };
+
+    // Chosen tracks are told to the server before the decision, so the stream it
+    // builds already carries them - a transcode started with the wrong audio
+    // cannot be corrected without starting over.
+    if (opts.audio !== undefined || opts.subtitle !== undefined) {
+      const detail = await this.item(id).catch(() => null);
+      const v = detail?.versions[version];
+      if (v) {
+        await this.setTracks(id, version, {
+          audioId: opts.audio !== undefined ? v.audio[opts.audio]?.id : undefined,
+          subtitleId: opts.subtitle === "none" ? "none" : opts.subtitle !== undefined ? v.subtitles[opts.subtitle]?.id : undefined,
+        }).catch((e: unknown) => log.warn("could not set tracks", e));
+      }
+    }
 
     await this.rememberSession(opts.session);
 
@@ -416,6 +452,7 @@ export class PlexBackend implements MediaBackend {
         session: opts.session,
         location: this.session.location,
         transcoded: false,
+        version,
       };
     }
 
@@ -435,6 +472,7 @@ export class PlexBackend implements MediaBackend {
       session: opts.session,
       location: this.session.location,
       transcoded: true,
+      version,
     };
   }
 
@@ -506,6 +544,63 @@ export class PlexBackend implements MediaBackend {
       SESSIONS_KEY,
       current.filter((s) => s !== id),
     );
+  }
+
+  /**
+   * Remember which tracks were chosen.
+   *
+   * Told to the SERVER rather than kept here, because that is what makes the
+   * choice survive: the next episode, the next device and the resume all read
+   * it back. `allParts=1` applies it to every part of a multi-file item, which
+   * is what someone means by picking a language.
+   */
+  async setTracks(
+    itemId: string,
+    version: number,
+    choice: { audioId?: string; subtitleId?: string | "none" },
+  ): Promise<void> {
+    const detail = await this.item(itemId);
+    const part = detail.versions[version]?.partId;
+    if (!part) throw new Error(`no part for version ${version} of ${itemId}`);
+
+    const query: Record<string, string | number | undefined> = { allParts: 1 };
+    if (choice.audioId) query.audioStreamID = choice.audioId;
+    // Zero is how the server is told "no subtitles"; leaving it out means "no
+    // opinion", which is a different thing and leaves the old one selected.
+    if (choice.subtitleId === "none") query.subtitleStreamID = 0;
+    else if (choice.subtitleId) query.subtitleStreamID = choice.subtitleId;
+
+    await request(this.base, `library/parts/${part}`, this.id, {
+      method: "PUT",
+      token: this.session.token,
+      query,
+    });
+    // The cached metadata now describes the old selection.
+    this.metaCache.delete(itemId);
+  }
+
+  /**
+   * Subtitles the server could fetch for this item.
+   *
+   * Needs a subtitle provider configured on the server; without one it answers
+   * with an error rather than an empty list, so an empty result and "the server
+   * cannot do this" have to be told apart by the caller.
+   */
+  async searchSubtitles(itemId: string, language: string): Promise<Track[]> {
+    const c = container<{ Stream?: PlexStream[] }>(
+      await this.req(`library/metadata/${itemId}/subtitles`, { language }),
+    );
+    return (c.Stream ?? []).map((s, i) => toTrack(s, i, "subtitle"));
+  }
+
+  /** Download one of them onto the item. */
+  async addSubtitle(itemId: string, subtitleId: string): Promise<void> {
+    await request(this.base, `library/metadata/${itemId}/subtitles`, this.id, {
+      method: "PUT",
+      token: this.session.token,
+      query: { key: subtitleId },
+    });
+    this.metaCache.delete(itemId);
   }
 
   // ---- state ------------------------------------------------------------

@@ -272,4 +272,59 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     // backstop for a window that was killed while hidden.
     await expect(backend().reapOwnSessions()).resolves.toBe(0);
   });
+
+  it("finds the films the library holds more than one copy of, and labels them apart", async () => {
+    const b = backend();
+    const libs = await b.libraries();
+    const movies = libs.find((l) => l.kind === "movie")!;
+
+    let multi = 0;
+    for (let offset = 0; offset < 300 && multi < 2; offset += 100) {
+      const page = await b.libraryPage(movies.id, { offset, limit: 100, sort: "titleSort" });
+      for (const item of page.items) {
+        const d = await b.item(item.id);
+        if (d.versions.length < 2) continue;
+        multi += 1;
+
+        // The point of the label: two copies must never read the same, or the
+        // choice between them is a coin toss.
+        const labels = d.versions.map((v) => v.label);
+        expect(new Set(labels).size, `${d.title}: ${labels.join(" / ")}`).toBe(labels.length);
+        expect(labels.every((l) => l && l !== "?")).toBe(true);
+        // Each version addresses its own file.
+        expect(new Set(d.versions.map((v) => v.partId)).size).toBe(d.versions.length);
+        if (multi >= 2) break;
+      }
+    }
+    expect(multi, "no multi-version film found in the first 300").toBeGreaterThan(0);
+  }, 300_000);
+
+  it("plays the second copy when asked for it", async () => {
+    const b = backend();
+    const libs = await b.libraries();
+    const movies = libs.find((l) => l.kind === "movie")!;
+
+    for (let offset = 0; offset < 300; offset += 100) {
+      const page = await b.libraryPage(movies.id, { offset, limit: 100, sort: "titleSort" });
+      for (const item of page.items) {
+        const d = await b.item(item.id);
+        if (d.versions.length < 2) continue;
+
+        const session = `test-v-${Date.now()}`;
+        try {
+          const first = await b.resolveStream(d.id, { session, version: 0 });
+          const second = await b.resolveStream(d.id, { session: `${session}-b`, version: 1 });
+          expect(first.version).toBe(0);
+          expect(second.version).toBe(1);
+          // Different files, so different URLs - asking for the second and
+          // getting the first is the failure this guards.
+          expect(second.url).not.toBe(first.url);
+        } finally {
+          await b.endSession(session).catch(() => {});
+          await b.endSession(`${session}-b`).catch(() => {});
+        }
+        return;
+      }
+    }
+  }, 300_000);
 });

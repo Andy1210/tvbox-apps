@@ -7,7 +7,7 @@
 // truth, not what this app asked for.
 
 import { create } from "zustand";
-import type { MediaBackend, Marker, MediaItem, PlaybackState, StreamDecision } from "../backends/types";
+import type { ItemDetail, MediaBackend, Marker, MediaItem, PlaybackState, StreamDecision } from "../backends/types";
 import { PlaybackScheduler, type NowPlayingReport } from "./scheduler";
 import { onRelease, onResume } from "../lifecycle";
 import { log } from "../redact";
@@ -35,6 +35,10 @@ export interface PlayingItem {
   item: MediaItem;
   decision: StreamDecision;
   markers: Marker[];
+  /** Every file the library holds for this title, with their tracks. */
+  detail?: ItemDetail;
+  /** What is currently chosen. Undefined means "whatever the server picked". */
+  choice: { version: number; audio?: number; subtitle?: number | "none" };
 }
 
 interface PlayerState {
@@ -48,7 +52,9 @@ interface PlayerState {
   overlay: boolean;
   error: string | null;
 
-  play(backend: MediaBackend, item: MediaItem, opts?: { resume?: boolean }): Promise<void>;
+  play(backend: MediaBackend, item: MediaItem, opts?: { resume?: boolean; version?: number }): Promise<void>;
+  /** Switch version, audio or subtitles without losing the place. */
+  changeTracks(choice: { version: number; audio?: number; subtitle?: number | "none" }): Promise<void>;
   togglePause(): void;
   seekBy(deltaMs: number): void;
   seekTo(ms: number): void;
@@ -86,12 +92,17 @@ export const usePlayer = create<PlayerState>((set, get) => ({
 
     currentBackend = backend;
     const session = randomSession();
+    const choice = { version: opts?.version ?? 0 };
     let decision: StreamDecision;
     let markers: Marker[] = [];
+    let detail: ItemDetail | undefined;
     try {
-      [decision, markers] = await Promise.all([
-        backend.resolveStream(item.id, { session, panel: tv.panel ?? null }),
+      [decision, markers, detail] = await Promise.all([
+        backend.resolveStream(item.id, { session, panel: tv.panel ?? null, version: choice.version }),
         backend.markers(item.id).catch(() => []),
+        // Needed for the track menu, and cheap: the same document the decision
+        // path already fetched is still cached.
+        backend.item(item.id).catch(() => undefined),
       ]);
     } catch (e) {
       log.warn("could not resolve a stream", e);
@@ -105,7 +116,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     const startSec = resumeFrom > 10_000 ? Math.floor(resumeFrom / 1000) : 0;
 
     set({
-      current: { item, decision, markers },
+      current: { item, decision, markers, detail, choice },
       state: "playing",
       positionMs: resumeFrom,
       durationMs: item.durationMs ?? 0,
@@ -139,6 +150,54 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       postNowPlaying,
     });
     scheduler.start({ itemId: item.id, durationMs: item.durationMs ?? 0, session: decision.session });
+  },
+
+  /**
+   * Switch what is playing without losing the place.
+   *
+   * A subtitle or audio change on a file the box is playing as-is is a local
+   * switch: the player already has every track, so nothing has to be fetched
+   * and the picture does not blink. Anything else - a different file, or a
+   * stream the server is converting - has to be rebuilt, because the tracks
+   * were baked into it when it started.
+   *
+   * Either way the server is told, so the choice survives into the next episode
+   * and onto whatever plays it next.
+   */
+  async changeTracks(choice) {
+    const s = get();
+    const cur = s.current;
+    if (!cur) return;
+
+    const sameVersion = choice.version === cur.choice.version;
+    const localSwitch = sameVersion && !cur.decision.transcoded;
+    const at = s.positionMs;
+
+    if (localSwitch) {
+      set({ current: { ...cur, choice } });
+      void bridge()?.selectStreams?.({
+        audio: choice.audio,
+        sub: choice.subtitle === "none" ? -1 : choice.subtitle,
+      });
+      if (currentBackend) {
+        const v = cur.detail?.versions[choice.version];
+        void currentBackend
+          .setTracks(cur.item.id, choice.version, {
+            audioId: choice.audio !== undefined ? v?.audio[choice.audio]?.id : undefined,
+            subtitleId:
+              choice.subtitle === "none" ? "none" : choice.subtitle !== undefined ? v?.subtitles[choice.subtitle]?.id : undefined,
+          })
+          .catch((e: unknown) => log.warn("could not remember track choice", e));
+      }
+      return;
+    }
+
+    if (!currentBackend) return;
+    // Restart where it was, not where the item was left last time - the resume
+    // point on the server is behind by up to the report interval.
+    await get().play(currentBackend, { ...cur.item, viewOffsetMs: at }, { version: choice.version });
+    const after = get().current;
+    if (after) set({ current: { ...after, choice } });
   },
 
   togglePause() {

@@ -38,6 +38,7 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
   const fail = useApp((s) => s.fail);
   const failure = useApp((s) => s.failure);
   const [reload, setReload] = useState(0);
+  const [version, setVersion] = useState(0);
   const [detail, setDetail] = useState<ItemDetail | null>(null);
   const [children, setChildren] = useState<MediaItem[]>([]);
 
@@ -110,7 +111,7 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
           <div className="mt-[1vh] flex gap-[1.2vw]">
             <FocusButton
               focusKey="detail-play"
-              onEnter={() => backend && void usePlayer.getState().play(backend, detail)}
+              onEnter={() => backend && void usePlayer.getState().play(backend, detail, { version })}
               className="rounded-[1vh] bg-white/15 px-[2.4vw] py-[1.4vh] text-[2.1vh]"
             >
               {resumable ? t("detail.resume") : t("detail.play")}
@@ -118,13 +119,34 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
             {resumable && (
               <FocusButton
                 focusKey="detail-restart"
-                onEnter={() => backend && void usePlayer.getState().play(backend, detail, { resume: false })}
+                onEnter={() => backend && void usePlayer.getState().play(backend, detail, { resume: false, version })}
                 className="rounded-[1vh] bg-white/10 px-[2vw] py-[1.4vh] text-[2.1vh]"
               >
                 {t("detail.fromStart")}
               </FocusButton>
             )}
           </div>
+
+          {/* Only when there is a choice to make. A library keeps the same film
+              in two languages as often as in two resolutions, so this is picked
+              before pressing play rather than found afterwards in a menu. */}
+          {detail.versions.length > 1 && (
+            <div className="mt-[0.6vh] flex flex-wrap items-center gap-[0.8vw]">
+              <span className="text-[1.7vh] text-fg-dim">{t("tracks.version")}</span>
+              {detail.versions.map((v) => (
+                <FocusButton
+                  key={v.index}
+                  focusKey={`detail-version-${v.index}`}
+                  onEnter={() => setVersion(v.index)}
+                  className={`rounded-[0.8vh] px-[1.4vw] py-[0.8vh] text-[1.8vh] ${
+                    v.index === version ? "bg-white/25" : "bg-white/8"
+                  }`}
+                >
+                  {v.label}
+                </FocusButton>
+              ))}
+            </div>
+          )}
         </header>
 
         {children.length > 0 && (
