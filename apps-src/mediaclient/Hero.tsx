@@ -100,7 +100,7 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
         </div>
       )}
 
-      <section className="relative z-10 flex h-[42vh] w-[46vw] shrink-0 flex-col justify-center gap-[1.2vh] px-[4vw]">
+      <section className="relative z-10 flex h-[46vh] w-[46vw] shrink-0 flex-col justify-center gap-[1.2vh] px-[4vw]">
         <TitleArt title={title} logo={detail?.logo} />
         {sub && <p className="text-[2.1vh] text-fg-dim">{sub}</p>}
         {detail?.summary && (

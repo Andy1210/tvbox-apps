@@ -136,12 +136,11 @@ export function Home(): React.JSX.Element {
 
   return (
     <>
-      {/* Above the rows and inside the scroller, so it slides away as someone
-          goes down rather than eating the top of every screenful. */}
-      <div
-        ref={scroller}
-        className="relative z-10 flex h-full flex-col gap-[3vh] overflow-y-auto pb-[3vh] scroll-pt-[16vh] scroll-pb-[12vh]"
-      >
+      {/* The rail and the hero do not scroll. The hero is what the screen is
+          FOR - it is the only thing that says what a poster actually is - so it
+          stays put and the rows move under it. That also decides how many rows
+          are on screen at once: one, which is what someone is choosing from. */}
+      <div className="relative z-10 flex h-full flex-col">
         {/* One rail at the top holding the libraries AND the two actions.
           Separately, the actions sat far right in a header while the first tile
           sat far left, and spatial navigation resolves Up by geometry - so
@@ -160,59 +159,61 @@ export function Home(): React.JSX.Element {
           onSettings={() => go({ name: "settings" })}
         />
 
-        {/* Under the rail and above the rows: what the cursor is on, in full.
-            Inside the scroller, so it slides away as someone goes down rather
-            than taking the top of every screenful. */}
         <Hero item={under} />
 
         {nothing && <Message text={t("home.empty")} />}
 
-        {/* Ordered by the household, not by us. A row switched off is not
+        <div
+          ref={scroller}
+          className="no-scrollbar flex flex-1 flex-col gap-[3vh] overflow-y-auto pb-[3vh] scroll-pt-[2vh] scroll-pb-[4vh]"
+        >
+          {/* Ordered by the household, not by us. A row switched off is not
           rendered at all rather than rendered empty, and one with nothing in it
           is skipped for the same reason: a row that is blank on most boxes
           teaches people to scroll past that part of the screen. */}
-        {homeRows
-          .filter((id) => !hiddenRows.includes(id))
-          .map((id) => {
-            if (id === "ondeck")
-              return data.onDeck.length ? (
-                <Row
-                  key="ondeck"
-                  id="ondeck"
-                  title={t("home.continue")}
-                  items={data.onDeck}
-                  posterUrl={deckPoster}
-                  onSelect={open}
-                  onFocusItem={setUnder}
-                  heightVh={24}
-                />
-              ) : null;
+          {homeRows
+            .filter((id) => !hiddenRows.includes(id))
+            .map((id) => {
+              if (id === "ondeck")
+                return data.onDeck.length ? (
+                  <Row
+                    key="ondeck"
+                    id="ondeck"
+                    title={t("home.continue")}
+                    items={data.onDeck}
+                    posterUrl={deckPoster}
+                    onSelect={open}
+                    onFocusItem={setUnder}
+                    heightVh={24}
+                  />
+                ) : null;
 
-            if (id === "playlists")
-              return data.playlists.length ? (
+              if (id === "playlists")
+                return data.playlists.length ? (
+                  <Row
+                    key="playlists"
+                    id="playlists"
+                    title={t("home.playlists")}
+                    items={data.playlists}
+                    posterUrl={poster}
+                    onSelect={open}
+                    onFocusItem={setUnder}
+                  />
+                ) : null;
+
+              return data.recent.map(({ library, items }) => (
                 <Row
-                  key="playlists"
-                  id="playlists"
-                  title={t("home.playlists")}
-                  items={data.playlists}
+                  key={library.id}
+                  id={`recent-${library.id}`}
+                  title={t("home.recentIn", { library: library.title })}
+                  items={items}
                   posterUrl={poster}
                   onSelect={open}
                   onFocusItem={setUnder}
                 />
-              ) : null;
-
-            return data.recent.map(({ library, items }) => (
-              <Row
-                key={library.id}
-                id={`recent-${library.id}`}
-                title={t("home.recentIn", { library: library.title })}
-                items={items}
-                posterUrl={poster}
-                onSelect={open}
-                onFocusItem={setUnder}
-              />
-            ));
-          })}
+              ));
+            })}
+        </div>
       </div>
     </>
   );
