@@ -243,7 +243,10 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
         // Fetch before scrolling: the window is computed from scrollTop, so the
         // rows land already requested rather than as a screen of placeholders.
         void loadPage(Math.floor(offset / PAGE));
-        scroller.current?.scrollTo({ top: row * rowHeight, behavior: "smooth" });
+        // Instant, not smooth. A jump to "S" in a library of 1,700 crosses most
+        // of the list, and animating that distance is a second of scenery on the
+        // way to somewhere the person already chose.
+        scroller.current?.scrollTo({ top: row * rowHeight });
       })
       .catch((e) => log.warn("letter jump failed", e));
   };
@@ -278,7 +281,10 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
             // scroll-padding for the same reason the other screens have it: the
             // bottom row would otherwise land flush against the edge, which is
             // inside TV overscan on some sets.
-            className="no-scrollbar relative flex-1 overflow-y-auto px-[3vw] scroll-pt-[4vh] scroll-pb-[6vh]"
+            // Vertical padding, because the focus ring is drawn OUTSIDE the
+            // tile's box and this element clips: without it the top row's ring
+            // loses its upper edge against the scroller's own boundary.
+            className="no-scrollbar relative flex-1 overflow-y-auto px-[3vw] pt-[1.2vh] pb-[2vh] scroll-pt-[4vh] scroll-pb-[6vh]"
           >
             {total === 0 && (
               <div className="flex h-full items-center justify-center text-[2.2vh] text-fg-dim">
