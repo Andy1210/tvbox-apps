@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { fetchConfig, installNavSounds, setSoundsEnabled, setSoundsSuppressed, useBackspace } from "@sdk";
+import { installNavSounds, setSoundsEnabled, setSoundsSuppressed, useBackspace, useConfigStore } from "@sdk";
 import { Detail } from "./Detail";
 import { Home } from "./Home";
 import { Library } from "./Library";
@@ -36,15 +36,18 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   // setting - a household that turned them off there does not expect them back
   // inside an app. The listener is permanent; the setting only flips the flag.
   useEffect(() => installNavSounds(), []);
+  // Through the store rather than a one-shot fetch, so turning the setting off
+  // in Settings reaches an app that is already open. `ui` is read defensively:
+  // an app installed over the air outlives the shell it was built against, and
+  // a config without that section would otherwise throw inside the effect.
+  const navSounds = useConfigStore((s) => s.config?.ui?.navSounds);
+  const loadConfig = useConfigStore((s) => s.load);
   useEffect(() => {
-    let live = true;
-    void fetchConfig().then((c) => {
-      if (live) setSoundsEnabled(c?.ui.navSounds ?? true);
-    });
-    return () => {
-      live = false;
-    };
-  }, []);
+    void loadConfig().catch(() => {});
+  }, [loadConfig]);
+  useEffect(() => {
+    setSoundsEnabled(navSounds ?? true);
+  }, [navSounds]);
   // Silent while a film is on: a tick over the soundtrack is the one place they
   // are unwelcome, which is what the launcher does behind its own video too.
   useEffect(() => {

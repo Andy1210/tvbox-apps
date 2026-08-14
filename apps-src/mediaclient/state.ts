@@ -92,6 +92,13 @@ export const useApp = create<State>((set, get) => ({
     // A session stored before accountToken existed carries only one token, and
     // at that point it WAS the account's. Naming it here is what stops the first
     // profile switch from leaving the box unable to switch again.
+    //
+    // It cannot repair a session that had ALREADY switched under the old build:
+    // that token is the profile's, nothing in the stored blob distinguishes the
+    // two cases, and this promotes it to accountToken. That is the safe
+    // direction - it grants no privilege the old code did not already assume -
+    // but the household still cannot be listed, and the way out is the sign-in
+    // button the 401 puts on the picker.
     if (!saved.accountToken) saved.accountToken = saved.token;
     const backend = new PlexBackend(saved, { clientId: identity.clientId, deviceName: deviceName(identity.host) });
     // On by default: a television that asks who is watching every single evening
