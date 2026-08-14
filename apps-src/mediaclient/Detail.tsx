@@ -61,7 +61,13 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
 
         // A series or season has something under it; a film does not, and asking
         // costs a round trip that shows as a pause before the screen settles.
-        if (d.kind === "show" || d.kind === "season") {
+        // A collection and a playlist are lists of films, and the metadata path
+        // answers for a collection the same way it does for a series - a
+        // playlist is the one that needs its own call.
+        if (d.kind === "playlist") {
+          const kids = await backend.playlistItems(itemId);
+          if (live) setChildren(kids);
+        } else if (d.kind === "show" || d.kind === "season" || d.kind === "collection") {
           const kids = await backend.children(itemId);
           if (live) setChildren(kids);
         }

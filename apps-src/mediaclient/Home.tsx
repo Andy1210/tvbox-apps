@@ -14,6 +14,7 @@ interface Loaded {
   libraries: Library[];
   onDeck: MediaItem[];
   recent: { library: Library; items: MediaItem[] }[];
+  playlists: MediaItem[];
 }
 
 /**
@@ -48,14 +49,23 @@ export function Home(): React.JSX.Element {
         // TV look broken on a slow server.
         const onDeck = await backend.onDeck();
         if (!live) return;
-        setData({ libraries, onDeck, recent: [] });
+        setData({ libraries, onDeck, recent: [], playlists: [] });
+
+        // After the first paint, not before it: the account may have none, and
+        // nobody should wait on that answer to see what they were watching.
+        void backend
+          .playlists()
+          .then((p) => live && setData((d) => (d ? { ...d, playlists: p } : d)))
+          .catch(() => {
+            /* a row that does not appear is the right failure here */
+          });
 
         const recent: Loaded["recent"] = [];
         for (const library of libraries) {
           const items = await backend.recentlyAdded(library.id, library.kind);
           if (!live) return;
           if (items.length) recent.push({ library, items });
-          setData({ libraries, onDeck, recent: [...recent] });
+          setData((d) => ({ libraries, onDeck, recent: [...recent], playlists: d?.playlists ?? [] }));
         }
       } catch (e) {
         if (!live) return;
@@ -81,7 +91,12 @@ export function Home(): React.JSX.Element {
   // tile afterwards leaves the D-pad dead with only Back working.
   useFocusFallback(
     firstKey,
-    (key) => key.startsWith("ondeck-") || key.startsWith("lib-") || key.startsWith("recent-") || key.startsWith("nav-"),
+    (key) =>
+      key.startsWith("ondeck-") ||
+      key.startsWith("lib-") ||
+      key.startsWith("recent-") ||
+      key.startsWith("playlists-") ||
+      key.startsWith("nav-"),
     !playing,
   );
 
@@ -138,6 +153,12 @@ export function Home(): React.JSX.Element {
         onSelect={open}
         heightVh={24}
       />
+
+      {/* Only when the account has any. A row that is empty on most boxes is a
+          row that teaches people to scroll past that part of the screen. */}
+      {data.playlists.length > 0 && (
+        <Row id="playlists" title={t("home.playlists")} items={data.playlists} posterUrl={poster} onSelect={open} />
+      )}
 
       {data.recent.map(({ library, items }) => (
         <Row

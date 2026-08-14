@@ -249,9 +249,16 @@ export class PlexBackend implements MediaBackend {
 
   async sortOptions(libraryId: string): Promise<SortOption[]> {
     const c = container<MetadataContainer>(await this.req(`library/sections/${libraryId}/sorts`));
-    return (c.Directory ?? [])
-      .filter((d) => d.key)
-      .map((d) => ({ key: String(d.key), title: d.title ?? String(d.key) }));
+    return (
+      (c.Directory ?? [])
+        // "random" is offered and is not usable here: the grid is virtualised, so
+        // it asks for a page at a time and the server reshuffles between them -
+        // measured, two requests for the same first five items returned five
+        // different films, and scrolling back re-shuffled again. A shuffled
+        // library is a fine idea and would need a fetched-once list, not a window.
+        .filter((d) => d.key && d.key !== "random")
+        .map((d) => ({ key: String(d.key), title: d.title ?? String(d.key) }))
+    );
   }
 
   async filterOptions(libraryId: string): Promise<FilterOption[]> {
@@ -393,8 +400,35 @@ export class PlexBackend implements MediaBackend {
     return m;
   }
 
+  /**
+   * What is under an item.
+   *
+   * The metadata path answers for a collection as well as for a series or a
+   * season, so those need nothing of their own. A playlist does: its items live
+   * under `playlists/<id>/items` and the metadata path answers nothing.
+   */
   async children(id: string): Promise<MediaItem[]> {
     const c = container<MetadataContainer>(await this.req(`library/metadata/${id}/children`));
+    return (c.Metadata ?? []).map(toItem);
+  }
+
+  async collections(libraryId: string, q: PageQuery): Promise<Page<MediaItem>> {
+    const c = container<MetadataContainer>(
+      await this.req(`library/sections/${libraryId}/collections`, {
+        sort: `${q.sort ?? "titleSort"}${q.desc ? ":desc" : ""}`,
+        ...page(q.offset, q.limit),
+      }),
+    );
+    return { items: (c.Metadata ?? []).map(toItem), total: c.totalSize };
+  }
+
+  async playlists(): Promise<MediaItem[]> {
+    const c = container<MetadataContainer>(await this.req("playlists", { playlistType: "video" }));
+    return (c.Metadata ?? []).map(toItem);
+  }
+
+  async playlistItems(id: string): Promise<MediaItem[]> {
+    const c = container<MetadataContainer>(await this.req(`playlists/${encodeURIComponent(id)}/items`));
     return (c.Metadata ?? []).map(toItem);
   }
 

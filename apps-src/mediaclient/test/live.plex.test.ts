@@ -188,6 +188,10 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     const sorts = await b.sortOptions(lib.id);
     expect(sorts.map((s) => s.key)).toContain("titleSort");
     expect(sorts.length).toBeGreaterThan(2);
+    // "random" is offered by the server and cannot work against a virtualised
+    // grid: it reshuffles between page requests, so the same offset returns
+    // different films and scrolling back re-shuffles.
+    expect(sorts.map((s) => s.key)).not.toContain("random");
 
     const filters = await b.filterOptions(lib.id);
     const unwatched = filters.find((f) => f.key === "unwatched");
@@ -242,6 +246,32 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
       const title = at.items[0]?.sortTitle ?? at.items[0]?.title ?? "";
       const initial = title.trim()[0]?.normalize("NFD")[0]?.toUpperCase();
       expect(initial).toBe(l.title.toUpperCase());
+    }
+  });
+
+  it("reads collections and playlists as browsable lists", async () => {
+    const b = backend();
+    const lib = (await b.libraries())[0];
+
+    const page = await b.collections(lib.id, { offset: 0, limit: 5 });
+    // Paged, not fetched whole: this server holds 461, which is a grid rather
+    // than a row.
+    expect(page.total).toBeGreaterThan(10);
+    expect(page.items.length).toBe(5);
+    for (const c of page.items) expect(c.kind).toBe("collection");
+
+    // A collection answers on the ordinary metadata path, the same as a series
+    // - so nothing special is needed to open one.
+    const inside = await b.children(page.items[0].id);
+    expect(inside.length).toBeGreaterThan(0);
+
+    const lists = await b.playlists();
+    if (lists.length) {
+      expect(lists[0].kind).toBe("playlist");
+      // A playlist does NOT answer on the metadata path, which is the one thing
+      // that separates it from a collection.
+      const items = await b.playlistItems(lists[0].id);
+      expect(items.length).toBeGreaterThan(0);
     }
   });
 

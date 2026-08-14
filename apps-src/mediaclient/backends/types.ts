@@ -13,7 +13,7 @@ export interface Library {
   kind: "movie" | "show" | "music" | "photo" | "other";
 }
 
-export type ItemKind = "movie" | "show" | "season" | "episode";
+export type ItemKind = "movie" | "show" | "season" | "episode" | "collection" | "playlist";
 
 export interface MediaItem {
   id: string;
@@ -329,6 +329,18 @@ export interface MediaBackend {
    * resolution - and a fixed list would offer orders the server rejects.
    */
   sortOptions(libraryId: string): Promise<SortOption[]>;
+
+  /**
+   * The library's collections, as items in their own right.
+   *
+   * Paged like the library itself: this server holds 461 of them, which is a
+   * grid rather than a row.
+   */
+  collections(libraryId: string, q: PageQuery): Promise<Page<MediaItem>>;
+  /** Every playlist on the account. Few enough to be one request. */
+  playlists(): Promise<MediaItem[]>;
+  /** A playlist's items. Not `children` - the metadata path answers nothing. */
+  playlistItems(id: string): Promise<MediaItem[]>;
   filterOptions(libraryId: string): Promise<FilterOption[]>;
   /** The values a `list` filter can take. */
   filterValues(libraryId: string, filter: string): Promise<SortOption[]>;

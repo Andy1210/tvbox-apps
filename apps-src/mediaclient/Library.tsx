@@ -56,6 +56,16 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   const [letters, setLetters] = useState<Letter[]>([]);
   const [view, setView] = useState<LibraryView>({ sort: "titleSort", desc: false, filters: {}, labels: {} });
   const [arranging, setArranging] = useState(false);
+  /**
+   * Browsing the library's collections instead of its films.
+   *
+   * A mode on the same grid rather than a screen of its own: it pages the same
+   * way, it is the same shape, and this server holds 461 of them - which is a
+   * grid, not a row on the home screen.
+   */
+  const [mode, setMode] = useState<"items" | "collections">("items");
+  /** Sort key to its translated name, for the button. Empty until asked for. */
+  const [sortNames, setSortNames] = useState<Record<string, string>>({});
   /** Which letter search may still act. See jumpToLetter. */
   const jump = useRef(0);
   const [items, setItems] = useState<(MediaItem | null)[]>([]);
@@ -97,6 +107,23 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     };
   }, [backend, libraryId, view.filters]);
 
+  // Only once the order is not the default: naming it on the button needs the
+  // server's own word for it, and asking for that on every library open would
+  // be a request nobody reads.
+  useEffect(() => {
+    if (!backend || (view.sort === "titleSort" && !view.desc) || sortNames[view.sort]) return;
+    let live = true;
+    void backend
+      .sortOptions(libraryId)
+      .then((o) => live && setSortNames(Object.fromEntries(o.map((x) => [x.key, x.title]))))
+      .catch(() => {
+        /* the button falls back to the raw key */
+      });
+    return () => {
+      live = false;
+    };
+  }, [backend, libraryId, view.sort, view.desc, sortNames]);
+
   // Loading a page. `letter` selects between the whole library and one bucket;
   // both are asked of the server rather than derived from the other, because the
   // bucket list and the sorted grid do not agree on where accented initials go.
@@ -107,7 +134,8 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
       const mine = generation.current;
       try {
         const q = { offset: page * PAGE, limit: PAGE, sort: view.sort, desc: view.desc, filters: view.filters };
-        const res = await backend.libraryPage(libraryId, q);
+        const res =
+          mode === "collections" ? await backend.collections(libraryId, q) : await backend.libraryPage(libraryId, q);
         if (mine !== generation.current) return;
         answered.current.add(page);
 
@@ -128,7 +156,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
         pending.current.delete(page);
       }
     },
-    [backend, fail, libraryId, view],
+    [backend, fail, libraryId, view, mode],
   );
 
   // Changing letter, order or filter is a new list: drop what was there rather
@@ -250,6 +278,26 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   const narrowed = Object.keys(view.filters).length;
 
   /**
+   * What the button says.
+   *
+   * The first chosen filter by name, plus a count of the rest, and the order
+   * whenever it is not the default - so the state of the library can be read
+   * without opening the panel that set it.
+   */
+  const summary = ((): string => {
+    const parts: string[] = [];
+    const first = Object.keys(view.filters)[0];
+    if (first) {
+      parts.push(view.labels[first] ?? view.filters[first]);
+      if (narrowed > 1) parts.push(`+${narrowed - 1}`);
+    }
+    if (view.sort !== "titleSort" || view.desc) {
+      parts.push((sortNames[view.sort] ?? view.sort) + (view.desc ? " \u2193" : ""));
+    }
+    return parts.length ? `${t("library.arrange")} · ${parts.join(" · ")}` : t("library.arrange");
+  })();
+
+  /**
    * Which letter the grid is currently showing.
    *
    * Read off the first item of the top visible row, so the strip confirms a
@@ -316,12 +364,24 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
           {/* The count beside it, because a filtered library looks like a small
               library otherwise - and someone who left a filter on last week has
               no other way to tell. */}
+          {/* Collections are the library's own groupings, so they belong beside
+              it rather than on the home screen. */}
+          <FocusButton
+            focusKey="lib-mode"
+            onEnter={() => setMode((m) => (m === "items" ? "collections" : "items"))}
+            className="rounded-[1vh] bg-white/10 px-[2vw] py-[1vh] text-[2vh]"
+          >
+            {t(mode === "items" ? "library.collections" : "library.allItems")}
+          </FocusButton>
           <FocusButton
             focusKey="lib-arrange"
             onEnter={() => setArranging(true)}
             className="rounded-[1vh] bg-white/10 px-[2vw] py-[1vh] text-[2vh]"
           >
-            {narrowed ? `${t("library.arrange")} · ${narrowed}` : t("library.arrange")}
+            {/* What is on, not how much. A count says a filter exists without
+                saying which, and a non-default ORDER left no trace at all -
+                which is the same failure, on the half nobody had noticed. */}
+            {summary}
           </FocusButton>
         </div>
 
@@ -357,7 +417,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
               title's initial, which is monotonic in that order and in no other -
               under "date added" the search returns a meaningless offset and the
               grid lands somewhere arbitrary, with nothing to say why. */}
-          {letters.length > 1 && view.sort === "titleSort" && !view.desc && (
+          {mode === "items" && letters.length > 1 && view.sort === "titleSort" && !view.desc && (
             <LetterStrip letters={letters} onPick={jumpToLetter} active={activeLetter} />
           )}
         </div>
