@@ -31,6 +31,7 @@ function stubBackend(over: Partial<MediaBackend> = {}): MediaBackend {
     libraries: async () => [{ id: "1", title: "Movies", kind: "movie" }],
     onDeck: async () => [item(1), item(2), item(3)],
     recentlyAdded: async () => [],
+    playlists: async () => [],
     posterUrl: () => undefined,
     imageHeaders: () => ({}),
     ...over,

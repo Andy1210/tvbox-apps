@@ -25,7 +25,8 @@
     "recentIn": "Újdonságok itt: {library}",
     "empty": "Ezen a szerveren még nincs semmi.",
     "search": "Keresés",
-    "settings": "Beállítások"
+    "settings": "Beállítások",
+    "playlists": "Lejátszási listák"
   },
   "error": {
     "unreachable": "A szerver nem érhető el. Lehet, hogy ki van kapcsolva, vagy a box nincs a hálózaton.",
@@ -41,7 +42,9 @@
     "sort": "Rendezés",
     "filter": "Szűrés",
     "clearFilters": "Töröld a szűrőket",
-    "emptyFiltered": "Ehhez a szűréshez nincs találat."
+    "emptyFiltered": "Ehhez a szűréshez nincs találat.",
+    "collections": "Gyűjtemények",
+    "allItems": "Minden film"
   },
   "detail": {
     "play": "Lejátszás",

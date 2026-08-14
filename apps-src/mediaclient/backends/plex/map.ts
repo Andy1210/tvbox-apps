@@ -119,7 +119,14 @@ export interface PlexDirectory {
   filterType?: string;
 }
 
-const KINDS: Record<string, ItemKind> = { movie: "movie", show: "show", season: "season", episode: "episode" };
+const KINDS: Record<string, ItemKind> = {
+  movie: "movie",
+  show: "show",
+  season: "season",
+  episode: "episode",
+  collection: "collection",
+  playlist: "playlist",
+};
 
 export function toKind(t: string | undefined): ItemKind {
   return KINDS[t || ""] ?? "movie";

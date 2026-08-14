@@ -25,7 +25,8 @@
     "recentIn": "Recently added to {library}",
     "empty": "This server has nothing in it yet.",
     "search": "Search",
-    "settings": "Settings"
+    "settings": "Settings",
+    "playlists": "Playlists"
   },
   "error": {
     "unreachable": "The server cannot be reached. It may be switched off, or the box may be off the network.",
@@ -41,7 +42,9 @@
     "sort": "Sort",
     "filter": "Filter",
     "clearFilters": "Clear the filters",
-    "emptyFiltered": "Nothing matches this filter."
+    "emptyFiltered": "Nothing matches this filter.",
+    "collections": "Collections",
+    "allItems": "All items"
   },
   "detail": {
     "play": "Play",
