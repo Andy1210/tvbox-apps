@@ -173,10 +173,12 @@ function TopRow({
           libraries would otherwise push the only route to sign-out off the far
           end of a rail whose scrollbar is hidden. */}
       <div ref={ref} className="flex items-center gap-[1vw] px-[4vw] py-[1vh]">
-        {/* The padding is what stops a focused chip being clipped: the focus
-            state scales it by 4% and this element scrolls, so it clips its own
-            children. The negative margin puts the row back where it was. */}
-        <div className="no-scrollbar -my-[1.4vh] flex min-w-0 flex-1 items-center gap-[1vw] overflow-x-auto py-[1.4vh]">
+        {/* Padding on BOTH axes, with matching negative margins so the row does
+            not move. The focus state scales a chip by 4% and this element
+            scrolls, so it clips its own children - vertically at the top and
+            bottom, and horizontally at scroll position zero, which is where the
+            first chip sits and therefore the one most often focused. */}
+        <div className="no-scrollbar -mx-[0.8vw] -my-[1.4vh] flex min-w-0 flex-1 items-center gap-[1vw] overflow-x-auto px-[0.8vw] py-[1.4vh]">
           {libraries.map((l) => (
             <FocusButton
               key={l.id}
