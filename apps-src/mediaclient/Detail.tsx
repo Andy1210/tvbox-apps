@@ -47,6 +47,9 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
     let live = true;
     setDetail(null);
     setChildren([]);
+    // A different item has different versions; carrying an index across would
+    // play the wrong file, or none.
+    setVersion(0);
 
     (async () => {
       try {
@@ -114,7 +117,11 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
               onEnter={() => backend && void usePlayer.getState().play(backend, detail, { version })}
               className="rounded-[1vh] bg-white/15 px-[2.4vw] py-[1.4vh] text-[2.1vh]"
             >
-              {resumable ? t("detail.resume") : t("detail.play")}
+              {/* Naming the version on the button answers "does this chip start
+                  playback or configure it?" without anyone having to try. */}
+              {`${resumable ? t("detail.resume") : t("detail.play")}${
+                detail.versions.length > 1 ? ` · ${detail.versions[version]?.label ?? ""}` : ""
+              }`}
             </FocusButton>
             {resumable && (
               <FocusButton
@@ -138,8 +145,12 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
                   key={v.index}
                   focusKey={`detail-version-${v.index}`}
                   onEnter={() => setVersion(v.index)}
+                  // A ring, not a fill: a focused button turns white, so a white
+                  // "selected" background is invisible on the very chip someone
+                  // is standing on - the state would only be visible from a
+                  // distance, which is the opposite of useful.
                   className={`rounded-[0.8vh] px-[1.4vw] py-[0.8vh] text-[1.8vh] ${
-                    v.index === version ? "bg-white/25" : "bg-white/8"
+                    v.index === version ? "bg-white/15 ring-[0.3vh] ring-white" : "bg-white/8"
                   }`}
                 >
                   {v.label}

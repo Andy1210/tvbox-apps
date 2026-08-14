@@ -96,6 +96,7 @@
     "search": "Look for subtitles",
     "searching": "Looking…",
     "searchUnavailable": "This server has no subtitle service set up.",
-    "searchNone": "Nothing found."
+    "searchNone": "Nothing found.",
+    "download": "Download"
   }
 }

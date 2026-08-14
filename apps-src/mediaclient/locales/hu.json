@@ -96,6 +96,7 @@
     "search": "Felirat keresése",
     "searching": "Keresés…",
     "searchUnavailable": "Ezen a szerveren nincs beállítva feliratszolgáltató.",
-    "searchNone": "Nincs találat."
+    "searchNone": "Nincs találat.",
+    "download": "Letöltés"
   }
 }

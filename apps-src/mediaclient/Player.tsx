@@ -3,6 +3,7 @@ import { FocusContext, getCurrentFocusKey, setFocus, useFocusable } from "@norig
 import { FocusButton, useBackspace, useI18n } from "@sdk";
 import { useApp } from "./state";
 import { TrackMenu, type Choice } from "./TrackMenu";
+import type { Track } from "./backends/types";
 import { usePlayer } from "./playback/player";
 
 /** Nudge sizes as a press is held. Held longer means further per press. */
@@ -31,7 +32,7 @@ function clock(ms: number): string {
  * uses.
  */
 export function Player(): React.JSX.Element | null {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const backend = useApp((s) => s.backend);
   const current = usePlayer((s) => s.current);
   const state = usePlayer((s) => s.state);
@@ -43,6 +44,7 @@ export function Player(): React.JSX.Element | null {
 
   const [menu, setMenu] = useState(false);
   const [searchState, setSearchState] = useState<"idle" | "searching" | "unavailable" | "none">("idle");
+  const [foundSubs, setFoundSubs] = useState<Track[]>([]);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const held = useRef({ dir: 0, count: 0 });
 
@@ -66,7 +68,11 @@ export function Player(): React.JSX.Element | null {
   }, [current, state, positionMs === 0]);
 
   useEffect(() => {
-    if (!current) return;
+    // The menu owns the D-pad while it is open. This handler is capture-phase on
+    // window, ahead of spatial navigation's own - so leaving it running would
+    // scrub the film on Left/Right instead of moving between the menu's columns,
+    // and OK would both press the focused button and toggle pause.
+    if (!current || menu) return;
 
     const onKey = (e: KeyboardEvent): void => {
       const p = usePlayer.getState();
@@ -109,8 +115,11 @@ export function Player(): React.JSX.Element | null {
           break;
         case "ArrowDown":
           // Down is free here: nothing else on the overlay moves focus
-          // vertically, and a track menu behind a long-press or a coloured
-          // button is a track menu nobody finds.
+          // vertically, and a track menu behind a long press or a coloured
+          // button is a track menu nobody finds. Only when there is something to
+          // show - otherwise the press opens a state that renders nothing, and
+          // the next Back closes it instead of pausing.
+          if (!p.current?.detail) break;
           e.preventDefault();
           e.stopPropagation();
           setMenu(true);
@@ -130,7 +139,7 @@ export function Player(): React.JSX.Element | null {
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("keyup", onKeyUp, true);
     };
-  }, [current]);
+  }, [current, menu]);
 
   const marker = current ? usePlayer.getState().activeMarker() : null;
   const skippable = Boolean(marker && (marker.type === "intro" || (marker.type === "credits" && !marker.final)));
@@ -157,21 +166,45 @@ export function Player(): React.JSX.Element | null {
   // The skip button is only reachable if something puts focus on it: Left and
   // Right are taken by scrubbing and nothing else moves focus here.
   useEffect(() => {
-    if (skippable) setFocus("skip");
-  }, [skippable]);
+    // Not while the menu is open: the skip button is not rendered then, and
+    // focusing a key with no element behind it leaves the library with no origin
+    // to navigate from - every later press is discarded. The window is wide,
+    // because the first minute of an episode is exactly when someone opens this
+    // menu to fix the audio language.
+    if (skippable && !menu) setFocus("skip");
+  }, [skippable, menu]);
 
   if (!current) return null;
 
   if (menu && current.detail) {
     const searchSubtitles = async (): Promise<void> => {
+      if (searchState === "searching") return; // one at a time
       setSearchState("searching");
       try {
-        const found = await backend!.searchSubtitles(current.item.id, "hun");
+        // The interface language, not a fixed one: someone watching in English
+        // is not helped by Hungarian subtitles, and the button never said which
+        // language it would look for.
+        const found = await backend!.searchSubtitles(current.item.id, (locale ?? "en").slice(0, 2));
+        setFoundSubs(found);
         setSearchState(found.length ? "idle" : "none");
       } catch {
         // The server answers with an error rather than an empty list when it has
         // no subtitle provider configured, so "none found" and "cannot look" are
         // different sentences.
+        setSearchState("unavailable");
+      }
+    };
+
+    const downloadSubtitle = async (track: Track): Promise<void> => {
+      try {
+        await backend!.addSubtitle(current.item.id, track.id);
+        setFoundSubs([]);
+        // The item now has a track it did not have; without refetching, the
+        // column would keep showing the old list and the download would look
+        // like it did nothing.
+        const fresh = await backend!.item(current.item.id);
+        usePlayer.setState({ current: { ...current, detail: fresh } });
+      } catch {
         setSearchState("unavailable");
       }
     };
@@ -183,6 +216,8 @@ export function Player(): React.JSX.Element | null {
         onChoose={(next) => void usePlayer.getState().changeTracks(next)}
         onClose={() => setMenu(false)}
         onSearchSubtitles={backend ? () => void searchSubtitles() : undefined}
+        found={foundSubs}
+        onDownloadSubtitle={(track) => void downloadSubtitle(track)}
         searchState={searchState}
       />
     );

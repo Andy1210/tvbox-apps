@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, useI18n } from "@sdk";
-import { useInitialFocus } from "./focus";
+import { useFocusFallback, useInitialFocus } from "./focus";
 import type { MediaVersion, Track } from "./backends/types";
 
 export type Choice = { version: number; audio?: number; subtitle?: number | "none" };
@@ -13,6 +13,10 @@ export interface TrackMenuProps {
   onClose: () => void;
   /** Look for subtitles the server could fetch. Absent when unsupported. */
   onSearchSubtitles?: () => void;
+  /** What the search turned up, for the user to choose from. */
+  found?: Track[];
+  /** Fetch one onto the item. */
+  onDownloadSubtitle?: (t: Track) => void;
   searchState?: "idle" | "searching" | "unavailable" | "none";
 }
 
@@ -35,6 +39,8 @@ export function TrackMenu({
   onChoose,
   onClose,
   onSearchSubtitles,
+  found,
+  onDownloadSubtitle,
   searchState = "idle",
 }: TrackMenuProps): React.JSX.Element {
   const { t } = useI18n();
@@ -45,7 +51,17 @@ export function TrackMenu({
   const audio = version?.audio ?? [];
   const subtitles = version?.subtitles ?? [];
 
-  useInitialFocus(versions.length > 1 ? "ver-0" : "aud-0", true);
+  // The first key that will actually EXIST. Focusing one that does not leaves
+  // the library with no origin and every later press is discarded - and a file
+  // with no audio track is not hypothetical. "Off" is unconditional, so it is
+  // always a valid floor.
+  const firstKey =
+    versions.length > 1 ? `ver-${choice.version}` : audio.length ? `aud-${audio[0].ordinal}` : "sub-off";
+  useInitialFocus(firstKey, true);
+  useFocusFallback(
+    firstKey,
+    (k) => k.startsWith("ver-") || k.startsWith("aud-") || k.startsWith("sub-") || k === "tracks-close",
+  );
 
   const apply = (next: Choice): void => {
     setChoice(next);
@@ -55,7 +71,8 @@ export function TrackMenu({
   return (
     <FocusContext.Provider value={focusKey}>
       <div ref={ref} className="absolute inset-0 flex items-end justify-center bg-black/70 pb-[6vh]">
-        <div className="flex max-h-[64vh] w-[86vw] gap-[2vw] overflow-hidden rounded-[1.4vh] bg-[#0c1219]/95 p-[3vh]">
+        <div className="flex max-h-[64vh] w-[86vw] flex-col gap-[2vh] rounded-[1.4vh] bg-[#0c1219]/95 p-[3vh]">
+          <div className="flex flex-1 gap-[2vw] overflow-hidden">
           {versions.length > 1 && (
             <Column title={t("tracks.version")}>
               {versions.map((v) => (
@@ -106,6 +123,9 @@ export function TrackMenu({
 
             {onSearchSubtitles && (
               <>
+                {/* Above the tracks, not below them. A film with fifteen
+                    embedded subtitles would otherwise bury it past the fold of a
+                    scrolling column. */}
                 <Option
                   focusKey="sub-search"
                   active={false}
@@ -114,18 +134,35 @@ export function TrackMenu({
                 />
                 {searchState === "unavailable" && <Empty text={t("tracks.searchUnavailable")} />}
                 {searchState === "none" && <Empty text={t("tracks.searchNone")} />}
+                {/* Finding them is half the job: each one is pressable, and
+                    pressing it is what actually fetches it onto the item. */}
+                {(found ?? []).map((f) => (
+                  <Option
+                    key={`found-${f.id}`}
+                    focusKey={`sub-found-${f.id}`}
+                    active={false}
+                    label={f.label}
+                    hint={t("tracks.download")}
+                    onEnter={() => onDownloadSubtitle?.(f)}
+                  />
+                ))}
               </>
             )}
           </Column>
-        </div>
+          </div>
 
-        <FocusButton
-          focusKey="tracks-close"
-          onEnter={onClose}
-          className="absolute top-[3vh] right-[4vw] rounded-[1vh] bg-white/12 px-[2vw] py-[1vh] text-[1.9vh]"
-        >
-          {t("tracks.close")}
-        </FocusButton>
+          {/* In the panel rather than floating over the film in a corner. A
+              focusable out of flow is navigated to by whatever happens to be
+              measurable above it, and it reads as belonging to another screen.
+              It is also the only thing on screen that says Back closes this. */}
+          <FocusButton
+            focusKey="tracks-close"
+            onEnter={onClose}
+            className="self-center rounded-[1vh] bg-white/12 px-[3vw] py-[1vh] text-[2vh]"
+          >
+            {t("tracks.close")}
+          </FocusButton>
+        </div>
       </div>
     </FocusContext.Provider>
   );
@@ -148,7 +185,7 @@ function subtitleHint(s: Track, t: (k: string) => string): string {
 function Column({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (
     <section className="flex min-w-[20vw] flex-1 flex-col gap-[1vh] overflow-y-auto">
-      <h3 className="text-[1.9vh] font-semibold tracking-tight text-fg-dim">{title}</h3>
+      <h3 className="text-[2vh] font-semibold tracking-tight text-fg-dim">{title}</h3>
       <div className="flex flex-col gap-[0.6vh]">{children}</div>
     </section>
   );
@@ -177,13 +214,18 @@ function Option({
       onEnter={onEnter}
       className={`flex flex-col rounded-[0.8vh] px-[1.2vw] py-[0.9vh] text-left ${active ? "bg-white/20" : "bg-white/5"}`}
     >
-      <span className="text-[1.9vh]">
-        {/* A mark rather than a colour: the focus ring is already white, and two
-            whites next to each other say nothing about which is chosen. */}
-        {active ? "• " : "  "}
+      <span className="text-[2.4vh]">
+        {/* A mark rather than a fill: a focused button turns white, so a white
+            "selected" background says nothing about which one is chosen. Fixed
+            width, because two literal spaces collapse to one and leave the
+            column with a ragged left edge. */}
+        <span className="inline-block w-[1.4vw]">{active ? "•" : ""}</span>
         {label}
       </span>
-      {hint && <span className="text-[1.7vh] text-fg-dim">{hint}</span>}
+      {/* Reduced opacity of the inherited colour, not a fixed grey: a focused
+          button turns white, and a fixed grey on white is 3:1 - unreadable
+          exactly when someone is looking at it. */}
+      {hint && <span className="text-[1.7vh] opacity-60">{hint}</span>}
     </FocusButton>
   );
 }
