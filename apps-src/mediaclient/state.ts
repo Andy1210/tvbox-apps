@@ -21,7 +21,17 @@ export type Screen =
   | { name: "profiles" }
   | { name: "home" }
   | { name: "library"; libraryId: string; title: string }
-  | { name: "item"; itemId: string }
+  | {
+      name: "item";
+      itemId: string;
+      /**
+       * A child to open on.
+       *
+       * An episode has no screen of its own: everything about it lives on its
+       * season, and this is what says which one arrived pointing at.
+       */
+      focusChildId?: string;
+    }
   | { name: "person"; personId: string; personName: string }
   | { name: "search" }
   | { name: "settings" };
@@ -46,6 +56,7 @@ interface State {
   signIn(session: Session): Promise<void>;
   signOut(): Promise<void>;
   go(screen: Screen): void;
+  replace(screen: Screen): void;
   back(): boolean;
   fail(f: Failure | null): void;
 }
@@ -172,6 +183,11 @@ export const useApp = create<State>((set, get) => ({
 
   go(screen) {
     set((s) => ({ screen, history: [...s.history, s.screen], failure: null }));
+  },
+
+  /** Change where we are without adding a step to go back through. */
+  replace(screen) {
+    set({ screen, failure: null });
   },
 
   /** Returns false when there is nowhere to go back to, i.e. Back should exit. */

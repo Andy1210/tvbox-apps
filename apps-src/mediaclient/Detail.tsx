@@ -8,6 +8,7 @@ import { CastRow } from "./CastRow";
 import { Scores } from "./Scores";
 import { Reviews } from "./Reviews";
 import { TitleArt } from "./TitleArt";
+import { LanguagePicker } from "./LanguagePicker";
 import { useFocusFallback, useInitialFocus, useScrollToTopOnFirst } from "./focus";
 import { usePlayer } from "./playback/player";
 import { classify, useApp } from "./state";
@@ -31,10 +32,11 @@ function runtime(ms: number | undefined, t: (key: string, vars?: Record<string, 
  * only way into the person pages, and those are the thing a media server's own
  * client cannot do.
  */
-export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
+export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?: string }): React.JSX.Element {
   const { t } = useI18n();
   const backend = useApp((s) => s.backend);
   const go = useApp((s) => s.go);
+  const replace = useApp((s) => s.replace);
   const fail = useApp((s) => s.fail);
   const failure = useApp((s) => s.failure);
   const playing = usePlayer((s) => s.current !== null);
@@ -49,6 +51,7 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
    * so the language choice has to follow the highlight rather than the screen.
    */
   const [focused, setFocused] = useState<ItemDetail | null>(null);
+  const [picking, setPicking] = useState(false);
   const [detail, setDetail] = useState<ItemDetail | null>(null);
   const [busy, setBusy] = useState(false);
   const [children, setChildren] = useState<MediaItem[]>([]);
@@ -73,6 +76,15 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
         // A collection and a playlist are lists of films, and the metadata path
         // answers for a collection the same way it does for a series - a
         // playlist is the one that needs its own call.
+        // An episode is shown on its season, with itself highlighted - the
+        // description, the cast and the extras all belong to whichever episode
+        // the cursor is on, so a screen per episode would be the same screen
+        // with one row missing.
+        if (d.kind === "episode" && d.parentId) {
+          replace({ name: "item", itemId: d.parentId, focusChildId: d.id });
+          return;
+        }
+
         if (d.kind === "playlist") {
           const kids = await backend.playlistItems(itemId);
           if (live) setChildren(kids);
@@ -121,7 +133,9 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
       setBusy(false);
     }
   };
-  useInitialFocus("detail-play", Boolean(detail));
+  // Arriving from a carry-on-watching tile opens on THAT episode rather than on
+  // the play button, so the page is already describing what was pressed.
+  useInitialFocus(focusChildId ? `children-${itemId}-${focusChildId}` : "detail-play", Boolean(detail));
   // Returning from playback unmounts the player, which held focus - without a
   // fallback the detail page comes back with the D-pad dead.
   useFocusFallback(
@@ -132,8 +146,7 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
       key.startsWith("children-") ||
       key.startsWith("extras-") ||
       key.startsWith("review-") ||
-      key.startsWith("detail-aud-") ||
-      key.startsWith("detail-sub-"),
+      key.startsWith("detail-"),
     !playing,
   );
 
@@ -146,19 +159,40 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
   const wide = (item: MediaItem): string | undefined =>
     backend?.posterUrl(item, 400 * artworkScale(), 225 * artworkScale());
   const resumable = (detail.viewOffsetMs ?? 0) > 0;
-  /** A film's own tracks, or the highlighted episode's on a season. */
-  const tracksFrom = (detail.kind === "season" ? focused : detail)?.versions[version];
+  /**
+   * What the page is describing.
+   *
+   * On a season that is the episode the cursor is on, not the season: its
+   * synopsis, its cast, its extras, its scores. A season's own metadata is a
+   * repeat of the series, and a screen per episode would be this screen with
+   * one row missing - so the rows reload as the highlight moves, which is what
+   * makes the episode list a place you can read from rather than a menu.
+   */
+  const shown = (detail.kind === "season" && focused) || detail;
+  const tracksFrom = shown.versions[version];
 
   return (
     <FocusContext.Provider value={focusKey}>
+      {picking && (
+        <LanguagePicker
+          version={tracksFrom}
+          audio={audio}
+          subtitle={subtitle}
+          onAudio={setAudio}
+          onSubtitle={setSubtitle}
+          onClose={() => setPicking(false)}
+        />
+      )}
       <div
         ref={ref}
         className="flex h-full flex-col gap-[2.4vh] overflow-y-auto py-[3vh] scroll-pt-[16vh] scroll-pb-[12vh]"
       >
         <header className="flex flex-col gap-[1.2vh] px-[4vw]">
-          <TitleArt title={detail.seriesTitle ?? detail.title} logo={detail.logo} />
-          {detail.seriesTitle && <p className="text-[2vh] text-fg-dim">{detail.title}</p>}
-          {detail.tagline && <p className="text-[1.9vh] text-fg-dim italic">{detail.tagline}</p>}
+          <TitleArt title={shown.seriesTitle ?? shown.title} logo={shown.logo} />
+          {/* The episode's own name under the series art, so the page names what
+              it is describing rather than only what it belongs to. */}
+          {shown !== detail || shown.seriesTitle ? <p className="text-[2vh] text-fg-dim">{shown.title}</p> : null}
+          {shown.tagline && <p className="text-[1.9vh] text-fg-dim italic">{detail.tagline}</p>}
 
           <div className="flex flex-wrap items-center gap-[1.4vw] text-[1.7vh] text-fg-dim">
             {detail.year ? <span className="tabular-nums">{detail.year}</span> : null}
@@ -174,9 +208,9 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
             ))}
           </div>
 
-          <Scores scores={detail.scores} />
+          <Scores scores={shown.scores} />
 
-          {detail.summary && <p className="max-w-[62vw] text-[2vh] leading-relaxed">{detail.summary}</p>}
+          {shown.summary && <p className="max-w-[62vw] text-[2vh] leading-relaxed">{shown.summary}</p>}
 
           <div className="mt-[1vh] flex gap-[1.2vw]">
             <FocusButton
@@ -219,47 +253,17 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
             </FocusButton>
           </div>
 
-          {/* Language before playing, not after. A converted stream bakes its
-              tracks in when it starts, so changing them mid-film costs a
-              restart - and the version chips were already asking the same
-              question one axis over. On a season these follow the highlighted
-              episode, because a season has no tracks of its own and its
-              episodes do not share them. */}
+          {/* One button, not a wall. A film with fifteen embedded subtitles
+              filled the screen with them above the synopsis and the cast, for a
+              choice most people make once, if at all. */}
           {tracksFrom && (tracksFrom.audio.length > 1 || tracksFrom.subtitles.length > 0) && (
-            <div className="mt-[0.6vh] flex flex-col gap-[0.8vh]">
-              {tracksFrom.audio.length > 1 && (
-                <div className="flex flex-wrap items-center gap-[0.8vw]">
-                  <span className="w-[8vw] text-[1.7vh] text-fg-dim">{t("tracks.audio")}</span>
-                  {tracksFrom.audio.map((a) => (
-                    <Pick
-                      key={a.id}
-                      focusKey={`detail-aud-${a.ordinal}`}
-                      active={audio === undefined ? Boolean(a.selected) : audio === a.ordinal}
-                      label={a.label}
-                      onEnter={() => setAudio(a.ordinal)}
-                    />
-                  ))}
-                </div>
-              )}
-              <div className="flex flex-wrap items-center gap-[0.8vw]">
-                <span className="w-[8vw] text-[1.7vh] text-fg-dim">{t("tracks.subtitles")}</span>
-                <Pick
-                  focusKey="detail-sub-off"
-                  active={subtitle === "none"}
-                  label={t("tracks.subtitlesOff")}
-                  onEnter={() => setSubtitle("none")}
-                />
-                {tracksFrom.subtitles.map((sub) => (
-                  <Pick
-                    key={sub.id}
-                    focusKey={`detail-sub-${sub.ordinal}`}
-                    active={subtitle === undefined ? Boolean(sub.selected) : subtitle === sub.ordinal}
-                    label={sub.label}
-                    onEnter={() => setSubtitle(sub.ordinal)}
-                  />
-                ))}
-              </div>
-            </div>
+            <FocusButton
+              focusKey="detail-lang"
+              onEnter={() => setPicking(true)}
+              className="mt-[0.6vh] self-start rounded-[1vh] bg-white/10 px-[2vw] py-[1vh] text-[2vh]"
+            >
+              {`${t("tracks.title")} \u203a`}
+            </FocusButton>
           )}
 
           {/* Only when there is a choice to make. A library keeps the same film
@@ -325,15 +329,15 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
           />
         )}
 
-        {detail.roles.length > 0 && (
+        {shown.roles.length > 0 && (
           <CastRow
-            roles={detail.roles}
+            roles={shown.roles}
             title={t("detail.cast")}
             onSelect={(role) => go({ name: "person", personId: role.id, personName: role.name })}
           />
         )}
 
-        {detail.extras.length > 0 && (
+        {shown.extras.length > 0 && (
           <Row
             id={`extras-${itemId}`}
             title={t("detail.extras")}
@@ -343,7 +347,7 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
             heightVh={16}
             aspect={16 / 9}
             captionLines={2}
-            items={detail.extras.map((e) => ({
+            items={shown.extras.map((e) => ({
               id: e.id,
               kind: "movie" as const,
               title: e.title,
@@ -360,32 +364,8 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
           />
         )}
 
-        <Reviews reviews={detail.reviews} title={t("detail.reviews")} />
+        <Reviews reviews={shown.reviews} title={t("detail.reviews")} />
       </div>
     </FocusContext.Provider>
-  );
-}
-
-/** A chip whose check says chosen and whose fill says focused. */
-function Pick({
-  focusKey,
-  active,
-  label,
-  onEnter,
-}: {
-  focusKey: string;
-  active: boolean;
-  label: string;
-  onEnter: () => void;
-}): React.JSX.Element {
-  return (
-    <FocusButton
-      focusKey={focusKey}
-      onEnter={onEnter}
-      className="rounded-[0.8vh] bg-white/8 px-[1.2vw] py-[0.8vh] text-[1.8vh]"
-    >
-      <span className="inline-block w-[1.2vw] shrink-0 text-center">{active ? "\u2713" : ""}</span>
-      {label}
-    </FocusButton>
   );
 }
