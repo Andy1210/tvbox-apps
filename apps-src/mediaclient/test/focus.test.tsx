@@ -32,6 +32,10 @@ function stubBackend(over: Partial<MediaBackend> = {}): MediaBackend {
     onDeck: async () => [item(1), item(2), item(3)],
     recentlyAdded: async () => [],
     playlists: async () => [],
+    // The hero reads the focused item's details for its synopsis and cast.
+    item: async () => ({ id: "i1", kind: "movie", title: "Film 1", roles: [], extras: [], reviews: [], versions: [] }),
+    backdropUrl: () => undefined,
+    themeUrl: () => undefined,
     posterUrl: () => undefined,
     imageHeaders: () => ({}),
     ...over,
@@ -78,9 +82,11 @@ describe("the remote", () => {
 
     // happy-dom has no layout engine, so the harness supplies the geometry the
     // library resolves directions against.
+    // getAllByText, because the hero above the rows now prints the focused
+    // title too - the tile is the one with a caption, not the heading.
     ["Film 1", "Film 2", "Film 3"].forEach((label, i) => {
-      const tile = screen.getByText(label).closest("div")!.parentElement!;
-      place(tile, i * 120, 400, 100, 200);
+      const caption = screen.getAllByText(label).find((el) => el.tagName === "DIV")!;
+      place(caption.closest("div")!.parentElement!, i * 120, 400, 100, 200);
     });
     await setFocus("ondeck-i1");
 
