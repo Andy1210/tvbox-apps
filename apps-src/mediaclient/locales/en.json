@@ -113,7 +113,12 @@
     "subPos": "Subtitle position",
     "subColor": "Subtitle colour",
     "autoSkip": "Skip intro and credits",
-    "autoSkipHint": "Skips on its own when this is on. The marker is the server's guess, and a wrong one jumps past the opening of an episode."
+    "autoSkipHint": "Skips on its own when this is on. The marker is the server's guess, and a wrong one jumps past the opening of an episode.",
+    "subSample": "Sample text",
+    "posBottom": "At the bottom",
+    "posHigher": "A little higher",
+    "posHigh": "Higher",
+    "posMiddle": "Around the middle"
   },
   "tracks": {
     "version": "Version",
