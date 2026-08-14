@@ -61,13 +61,18 @@ export function Settings(): React.JSX.Element {
           </p>
         </div>
 
-        <FocusButton
-          focusKey="settings-playback"
-          onEnter={() => setPanel(true)}
-          className="self-start rounded-[1vh] bg-white/12 px-[2.4vw] py-[1.3vh] text-[2.1vh]"
-        >
-          {t("settings.playback")}
-        </FocusButton>
+        {/* Named for what it opens and marked as leading somewhere. On its own
+            the word "Playback" reads as a status line rather than a way in. */}
+        <div className="flex flex-col gap-[1vh]">
+          <FocusButton
+            focusKey="settings-playback"
+            onEnter={() => setPanel(true)}
+            className="self-start rounded-[1vh] bg-white/12 px-[2.4vw] py-[1.3vh] text-[2.1vh]"
+          >
+            {`${t("settings.playbackOpen")} \u203a`}
+          </FocusButton>
+          <p className="max-w-[60vw] text-[1.9vh] text-fg-dim">{t("settings.playbackHint")}</p>
+        </div>
 
         <div className="mt-[2vh] flex gap-[1.2vw]">
           <FocusButton

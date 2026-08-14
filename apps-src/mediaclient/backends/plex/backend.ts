@@ -271,7 +271,11 @@ export class PlexBackend implements MediaBackend {
    */
   async letterOffset(libraryId: string, letterKey: string, q: Omit<PageQuery, "offset" | "limit">): Promise<number> {
     const keys = (await this.letters(libraryId, q.filters)).map((l) => l.key);
-    const target = keys.indexOf(letterKey);
+    // Through the same folding as the items. Using the STRIP's position for the
+    // target while scoring items by their folded one made the two buckets that
+    // fold into another unreachable: no item could ever score their index, so
+    // the search ran to the end of the library.
+    const target = bucketIndex(decodeOnce(letterKey), keys);
     if (target <= 0) return 0;
 
     const first = await this.libraryPage(libraryId, { ...q, offset: 0, limit: 1 });
@@ -299,6 +303,16 @@ export class PlexBackend implements MediaBackend {
     return lo;
   }
 
+  /**
+   * The values a list filter can take.
+   *
+   * Keys are decoded before they leave here. The server offers them already
+   * percent-encoded - "5%2E1%28side%29", "20th%2520Century%2520Fox" - and the
+   * query builder encodes again, so the request asks for a value nothing
+   * matches: measured, 36 of the first 40 studio values returned an empty grid,
+   * and "5.1(side)" hid 1,208 films. 679 of this library's 10,383 offered values
+   * carry an escape.
+   */
   async filterValues(libraryId: string, filter: string): Promise<SortOption[]> {
     if (!FILTER_KEY.test(filter)) throw new Error("not a filter name");
     const c = container<MetadataContainer>(
@@ -306,7 +320,7 @@ export class PlexBackend implements MediaBackend {
     );
     return (c.Directory ?? [])
       .filter((d) => d.key !== undefined)
-      .map((d) => ({ key: String(d.key), title: d.title ?? String(d.key) }));
+      .map((d) => ({ key: decodeOnce(String(d.key)), title: d.title ?? String(d.key) }));
   }
 
   /**
@@ -870,23 +884,41 @@ export class PlexBackend implements MediaBackend {
 }
 
 /**
- * Which A-Z bucket a title falls in, as a position in the strip's own order.
+ * Which A-Z bucket a title falls in, as a position in the SORTED list.
  *
- * The rule is the server's, verified against every bucket on this library: take
- * the first character, drop its diacritics, uppercase it. The strip's keys are
- * checked BEFORE folding, because this server lists two Hungarian letters as
- * buckets of their own after Z - folding those to O and U first would search for
- * them in the wrong half of the list.
+ * Fold the first character and compare folded keys. That is not a shortcut, and
+ * an earlier version of this had the reasoning backwards: it matched the strip's
+ * key exactly first, on the theory that this server lists O-double-acute and
+ * U-double-acute as buckets after Z and folding them to O and U would look in
+ * the wrong half.
+ *
+ * The strip lists them after Z; the SORT does not. Measured on this library,
+ * those titles sit inside O (1163-1165 of O's 1145-1170) and inside U - which
+ * is why those two buckets are the only non-contiguous ones. Folding is what
+ * makes the other 27 correct, and the exact match was what broke these two: the
+ * strip's keys arrive percent-encoded, so the comparison never fired anyway, no
+ * item ever scored their index, and the search walked to the end of the library.
+ *
+ * Keys are decoded here for the same reason. A jump to one of those two lands
+ * at the start of the letter they sort within, which is a few items early
+ * rather than 500 late.
  */
 function bucketIndex(title: string, keys: string[]): number {
+  const fold = (c: string): string => c.normalize("NFD")[0].toUpperCase();
+  const folded = keys.map((k) => {
+    let d = k;
+    try {
+      d = decodeURIComponent(k);
+    } catch {
+      /* a key that is not valid encoding is used as it stands */
+    }
+    return fold(d);
+  });
   const t = (title ?? "").trim();
-  if (!t) return keys.indexOf("#");
-  const ch = t[0].toUpperCase();
-  const exact = keys.indexOf(ch);
-  if (exact >= 0) return exact;
-  const folded = ch.normalize("NFD")[0].toUpperCase();
-  const i = keys.indexOf(folded);
-  return i >= 0 ? i : keys.indexOf("#");
+  const hash = folded.indexOf("#") >= 0 ? folded.indexOf("#") : 0;
+  if (!t) return hash;
+  const i = folded.indexOf(fold(t[0]));
+  return i >= 0 ? i : hash;
 }
 
 /**
@@ -897,6 +929,15 @@ function bucketIndex(title: string, keys: string[]): number {
  * so the call authenticates as the server's choice and 401s, which the app
  * reports as being signed out. `sort` hijacks the order just as quietly.
  */
+/** One decode, and only when it is valid encoding. */
+function decodeOnce(v: string): string {
+  try {
+    return decodeURIComponent(v);
+  } catch {
+    return v;
+  }
+}
+
 function safeFilters(filters?: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(filters ?? {})) {

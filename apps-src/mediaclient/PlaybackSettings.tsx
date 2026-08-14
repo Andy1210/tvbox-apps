@@ -51,7 +51,9 @@ export function PlaybackSettings({ onClose }: { onClose: () => void }): React.JS
                 >
                   {/* Each option previews itself at its own size, so the choice
                       is made by looking rather than by reading a percentage. */}
-                  <span style={{ fontSize: `${v * 2.2}vh` }}>{t("settings.subSample")}</span>
+                  <span className="truncate" style={{ fontSize: `${v * 2.2}vh` }}>
+                    {t("settings.subSample")}
+                  </span>
                 </Choice>
               ))}
             </Group>
@@ -82,10 +84,13 @@ export function PlaybackSettings({ onClose }: { onClose: () => void }): React.JS
                   active={p.subColor === v}
                   onEnter={() => void p.set("subColor", v)}
                 >
-                  {/* The sample carries the colour AND names it: a swatch alone
-                      is a few arc-minutes at three metres, and two of these are
-                      pale enough to be told apart only side by side. */}
-                  <span style={{ color: v }}>{t("settings.subSample")}</span>
+                  {/* On its own dark ground, always. A focused chip turns solid
+                      white, and white subtitle text on it was invisible - the
+                      one option most people are choosing. The dark box is also
+                      truer to where a subtitle actually sits. */}
+                  <span className="rounded-[0.5vh] bg-black px-[0.8vw] py-[0.4vh]" style={{ color: v }}>
+                    {t("settings.subSample")}
+                  </span>
                 </Choice>
               ))}
             </Group>
@@ -118,7 +123,7 @@ function Group({
     <section className="flex flex-col gap-[1vh]">
       <h3 className="text-[2.2vh] font-semibold text-fg-dim">{title}</h3>
       {note && <p className="max-w-[70vw] text-[1.9vh] text-fg-dim">{note}</p>}
-      <div className="flex flex-wrap items-stretch gap-x-[1vw] gap-y-[1.4vh]">{children}</div>
+      <div className="grid grid-cols-4 gap-x-[1vw] gap-y-[1.4vh]">{children}</div>
     </section>
   );
 }
@@ -139,7 +144,7 @@ function Choice({
     <FocusButton
       focusKey={focusKey}
       onEnter={onEnter}
-      className="flex min-h-[7vh] items-center rounded-[0.8vh] bg-white/8 px-[1.6vw] py-[1vh] text-[2.1vh]"
+      className="flex min-h-[7vh] w-full items-center rounded-[0.8vh] bg-white/8 px-[1.6vw] py-[1vh] text-[2.1vh]"
     >
       <span className="inline-block w-[1.6vw] shrink-0 text-center">{active ? "✓" : ""}</span>
       {children}

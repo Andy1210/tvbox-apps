@@ -198,5 +198,16 @@ describe("a seek that has been committed", () => {
     expect(usePlayer.getState().seekTargetMs).toBe(100_000);
     report(97_000);
     expect(usePlayer.getState().seekTargetMs).toBeNull();
+
+    // A backward seek that lands PAST its target, on the first keyframe after
+    // it, and then plays away from it. Held on direction alone this never
+    // settled: the bar and clock froze at the target for the rest of the film,
+    // and every later jump and scrub took that stale number as its origin.
+    usePlayer.setState({ positionMs: 1_200_000 });
+    usePlayer.getState().seekTo(600_000);
+    report(1_199_000); // still where it was
+    expect(usePlayer.getState().seekTargetMs).toBe(600_000);
+    report(604_000); // landed, 4s past the target
+    expect(usePlayer.getState().seekTargetMs).toBeNull();
   });
 });

@@ -141,6 +141,15 @@ export function Player(): React.JSX.Element | null {
       switch (e.key) {
         case "ArrowLeft":
         case "ArrowRight": {
+          // Off the skip button rather than into whatever geometry finds: it is
+          // absolutely positioned away from both rows, so sideways from it
+          // landed on the resting anchor.
+          if (fk === "skip") {
+            e.preventDefault();
+            e.stopPropagation();
+            setFocus("scrub");
+            break;
+          }
           if (!idle && !onBar) break; // the button row: spatial navigation's
           e.preventDefault();
           e.stopPropagation();
@@ -198,12 +207,23 @@ export function Player(): React.JSX.Element | null {
           if (idle) setFocus("scrub");
           else if (fk?.startsWith("pb-")) setFocus("scrub");
           else if (onBar && skippableRef.current) setFocus("skip");
+          // From the skip button itself Up has nowhere to go, and the press is
+          // already consumed - so it goes back to the bar rather than sitting
+          // there looking broken.
+          else if (fk === "skip") setFocus("scrub");
           break;
         case "ArrowDown":
           e.preventDefault();
           e.stopPropagation();
           if (idle || fk === "skip") setFocus("scrub");
-          else if (onBar) setFocus("pb-playpause");
+          else if (onBar) {
+            // Leaving the bar withdraws the cursor. Left armed, it stayed drawn
+            // where nothing could move it, and the next OK - on a button, or on
+            // the resting anchor - jumped the film instead of doing what the
+            // button said.
+            p.cancelScrub();
+            setFocus("pb-playpause");
+          }
           break;
       }
 
@@ -400,7 +420,11 @@ export function Player(): React.JSX.Element | null {
             <FocusButton
               focusKey="skip"
               onEnter={() => usePlayer.getState().skipMarker()}
-              className="rounded-[1vh] bg-white/90 px-[2vw] py-[1.2vh] text-[2vh] font-semibold text-black"
+              // Not the focus colour at rest. It was solid white with black
+              // text whether focused or not, and focus only takes it from 90%
+              // to 100% - so on a button that is now a navigation target, there
+              // was no way to tell whether OK would skip or seek.
+              className="rounded-[1vh] bg-white/20 px-[2vw] py-[1.2vh] text-[2vh] font-semibold"
             >
               {t(marker!.type === "intro" ? "player.skipIntro" : "player.skipCredits")}
             </FocusButton>
