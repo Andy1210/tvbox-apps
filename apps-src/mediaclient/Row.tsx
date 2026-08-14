@@ -87,7 +87,7 @@ export function Row({
           // browser also brings a focused tile into view - and that call names no
           // behaviour, so the CSS decided for it and animated a jump of forty
           // episodes end to end.
-          className="no-scrollbar flex gap-[1.2vw] overflow-x-auto px-[4vw] py-[9vh] -my-[5vh]"
+          className="no-scrollbar flex gap-[1.2vw] overflow-x-auto px-[4vw] py-[6vh] -my-[4vh]"
         >
           {items.map((item, i) => (
             <Tile
