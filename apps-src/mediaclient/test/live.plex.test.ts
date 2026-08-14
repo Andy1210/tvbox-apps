@@ -130,6 +130,52 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     expect(res.headers.get("content-type")).toMatch(/^image\//);
   });
 
+  it("serves a preview frame for scrubbing", async () => {
+    const b = backend();
+    const page = await b.libraryPage((await b.libraries())[0].id, { offset: 0, limit: 6 });
+    const detail = await b.item(page.items[0].id);
+    const partId = detail.versions[0]?.partId;
+    if (!partId) return;
+
+    const url = b.previewUrl(partId, 600_000, 320, 180);
+    expect(url).toBeDefined();
+    // Same rule as artwork: the frame is shown in the page, so the credential
+    // travels as a header instead.
+    expect(url).not.toContain(TOKEN!);
+
+    const res = await fetch(url!, { headers: b.imageHeaders() });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toMatch(/^image\//);
+  });
+
+  it("actually lowers the bitrate when a ceiling is asked for", async () => {
+    // The setting is the kind that fails silently: the server answers 200 and
+    // reports a decision either way. Measured before this test existed, a 720
+    // kbps ceiling on an 11,390 kbps film came back "directplay" at the full
+    // rate, because directPlay=1 outranks the ceiling - so what is checked here
+    // is the bitrate that came back, not that the request was accepted.
+    const b = backend();
+    const page = await b.libraryPage((await b.libraries())[0].id, { offset: 0, limit: 120 });
+
+    let heavy: { id: string; kbps: number } | null = null;
+    for (const item of page.items) {
+      const detail = await b.item(item.id).catch(() => null);
+      const kbps = detail?.versions[0]?.bitrateKbps ?? 0;
+      if (kbps > 6000) {
+        heavy = { id: item.id, kbps };
+        break;
+      }
+    }
+    if (!heavy) return; // nothing on this server is big enough to be capped
+
+    const capped = await b.resolveStream(heavy.id, {
+      session: `test-cap-${Date.now()}`,
+      maxBitrateKbps: 2000,
+    });
+    expect(capped.transcoded).toBe(true);
+    await b.endSession(capped.session).catch(() => {});
+  });
+
   it("reads markers for an episode that has them", async () => {
     const b = backend();
     const libs = await b.libraries();

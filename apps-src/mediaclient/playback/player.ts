@@ -38,7 +38,7 @@ export interface PlayingItem {
   /** Every file the library holds for this title, with their tracks. */
   detail?: ItemDetail;
   /** What is currently chosen. Undefined means "whatever the server picked". */
-  choice: { version: number; audio?: number; subtitle?: number | "none" };
+  choice: { version: number; audio?: number; subtitle?: number | "none"; maxBitrateKbps?: number };
 }
 
 interface PlayerState {
@@ -49,18 +49,45 @@ interface PlayerState {
   buffering: boolean;
   /** Set while a seek is in flight, so the bar shows where it is going. */
   seekTargetMs: number | null;
+  /**
+   * Where the scrub cursor sits, or null when nobody is scrubbing.
+   *
+   * Deliberately NOT a seek. Left and Right move this and the overlay shows the
+   * frame there; the film keeps playing until OK commits it. Seeking on every
+   * press means each one costs a fresh transcode segment and a rebuffer, so
+   * finding a place in a two-hour film by eye used to mean paying for a dozen
+   * seeks to reach one.
+   */
+  scrubMs: number | null;
   overlay: boolean;
   error: string | null;
 
   play(
     backend: MediaBackend,
     item: MediaItem,
-    opts?: { resume?: boolean; version?: number; audio?: number; subtitle?: number | "none" },
+    opts?: {
+      resume?: boolean;
+      version?: number;
+      audio?: number;
+      subtitle?: number | "none";
+      maxBitrateKbps?: number;
+    },
   ): Promise<void>;
   /** Switch version, audio or subtitles without losing the place. */
-  changeTracks(choice: { version: number; audio?: number; subtitle?: number | "none" }): Promise<void>;
+  changeTracks(choice: {
+    version: number;
+    audio?: number;
+    subtitle?: number | "none";
+    maxBitrateKbps?: number;
+  }): Promise<void>;
   togglePause(): void;
   seekBy(deltaMs: number): void;
+  /** Move the cursor without seeking. Starts at the current position. */
+  scrubBy(deltaMs: number): void;
+  /** Go where the cursor is. */
+  commitScrub(): void;
+  /** Leave the cursor where the film actually is. */
+  cancelScrub(): void;
   seekTo(ms: number): void;
   stop(): Promise<void>;
   showOverlay(on: boolean): void;
@@ -81,6 +108,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   durationMs: 0,
   buffering: false,
   seekTargetMs: null,
+  scrubMs: null,
   overlay: false,
   error: null,
 
@@ -96,7 +124,12 @@ export const usePlayer = create<PlayerState>((set, get) => ({
 
     currentBackend = backend;
     const session = randomSession();
-    const choice = { version: opts?.version ?? 0, audio: opts?.audio, subtitle: opts?.subtitle };
+    const choice = {
+      version: opts?.version ?? 0,
+      audio: opts?.audio,
+      subtitle: opts?.subtitle,
+      maxBitrateKbps: opts?.maxBitrateKbps,
+    };
     let decision: StreamDecision;
     let markers: Marker[] = [];
     let detail: ItemDetail | undefined;
@@ -108,6 +141,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
           version: choice.version,
           audio: choice.audio,
           subtitle: choice.subtitle,
+          maxBitrateKbps: choice.maxBitrateKbps,
         }),
         backend.markers(item.id).catch(() => []),
         // Needed for the track menu, and cheap: the same document the decision
@@ -132,6 +166,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       durationMs: item.durationMs ?? 0,
       buffering: true,
       seekTargetMs: null,
+  scrubMs: null,
       overlay: true,
       error: null,
     });
@@ -180,7 +215,12 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     if (!cur) return;
 
     const sameVersion = choice.version === cur.choice.version;
-    const localSwitch = sameVersion && !cur.decision.transcoded;
+    // A ceiling is decided when the stream is built, so changing it means
+    // building a new one - the running stream cannot be re-rated. Anything that
+    // changes it therefore takes the restart path, even when the tracks did not
+    // move.
+    const sameQuality = choice.maxBitrateKbps === cur.choice.maxBitrateKbps;
+    const localSwitch = sameVersion && sameQuality && !cur.decision.transcoded;
     const at = s.positionMs;
 
     if (localSwitch) {
@@ -212,6 +252,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     await get().play(currentBackend, { ...cur.item, viewOffsetMs: at }, {
       version: choice.version,
       audio: choice.audio,
+      maxBitrateKbps: choice.maxBitrateKbps,
       subtitle: choice.subtitle,
     });
   },
@@ -231,6 +272,24 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     get().seekTo(Math.max(0, Math.min(durationMs || Number.MAX_SAFE_INTEGER, from + deltaMs)));
   },
 
+  scrubBy(deltaMs) {
+    const { positionMs, durationMs, seekTargetMs, scrubMs } = get();
+    const from = scrubMs ?? seekTargetMs ?? positionMs;
+    const to = Math.max(0, Math.min(durationMs || Number.MAX_SAFE_INTEGER, from + deltaMs));
+    set({ scrubMs: to, overlay: true });
+  },
+
+  commitScrub() {
+    const { scrubMs } = get();
+    if (scrubMs === null) return;
+    set({ scrubMs: null });
+    get().seekTo(scrubMs);
+  },
+
+  cancelScrub() {
+    set({ scrubMs: null });
+  },
+
   seekTo(ms) {
     // Shown immediately and reconciled when the player reports back, so the bar
     // never appears to jump backwards after a press.
@@ -246,7 +305,15 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     unsubscribePlayer = null;
     await scheduler?.end();
     scheduler = null;
-    set({ current: null, state: "stopped", positionMs: 0, seekTargetMs: null, overlay: false, buffering: false });
+    set({
+      current: null,
+      state: "stopped",
+      positionMs: 0,
+      seekTargetMs: null,
+      scrubMs: null,
+      overlay: false,
+      buffering: false,
+    });
   },
 
   showOverlay(on) {

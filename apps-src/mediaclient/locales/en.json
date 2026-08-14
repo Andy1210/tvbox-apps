@@ -64,7 +64,13 @@
     "buffering": "Buffering…",
     "converting": "Converting for this box",
     "hint": "Left/Right: jump · OK: pause · Down: audio and subtitles · Back: pause",
-    "hintPaused": "OK: carry on · Down: audio and subtitles · Back: stop"
+    "hintScrub": "OK to jump here · Back to cancel",
+    "play": "Play",
+    "pause": "Pause",
+    "tracks": "Audio and subtitles",
+    "quality": "Quality",
+    "qualityOriginal": "Original",
+    "qualityHint": "Lower on a weak network, but the server has to convert"
   },
   "search": {
     "title": "Search",

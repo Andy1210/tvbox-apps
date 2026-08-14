@@ -243,10 +243,6 @@ export interface HistoryRow {
 }
 
 /** Plex ships BIF (an offset table + concatenated JPEGs); Jellyfin ships tiles. */
-export type TrickplayIndex =
-  | { kind: "bif"; url: string; intervalMs: number; frames: { timestampMs: number; offset: number }[] }
-  | { kind: "tiles"; urlFor: (index: number) => string; intervalMs: number; cols: number; rows: number };
-
 export interface Profile {
   id: string;
   name: string;
@@ -316,6 +312,15 @@ export interface MediaBackend {
   posterUrl(item: MediaItem, w: number, h: number): string | undefined;
   /** Auth headers for fetching artwork. */
   imageHeaders(): Record<string, string>;
+
+  /**
+   * A frame from the film at `timeMs`, for scrubbing.
+   *
+   * Undefined when the file has no preview index - the server generates those
+   * per library, and a title added since the last pass has none. The scrub bar
+   * has to work without it, so this is a nicety rather than a dependency.
+   */
+  previewUrl(partId: string, timeMs: number, w: number, h: number): string | undefined;
   /** Absolutise a server-relative art path. Returns an absolute URL unchanged,
    *  since some artwork is hosted by the metadata provider rather than by the
    *  server. */
@@ -332,6 +337,14 @@ export interface MediaBackend {
       /** 0-based ordinals within their type. */
       audio?: number;
       subtitle?: number | "none";
+      /**
+       * Ceiling for the stream, in kbps. Undefined means the original file.
+       *
+       * Worth having on a box that is sometimes on wifi: a 4K remux is not
+       * watchable over a link that cannot carry it, and the alternative to
+       * naming a ceiling is a film that rebuffers every minute.
+       */
+      maxBitrateKbps?: number;
     },
   ): Promise<StreamDecision>;
   /** Tell the server which tracks were chosen, so it remembers next time. */
@@ -341,7 +354,6 @@ export interface MediaBackend {
   /** Download one of them onto the item. */
   addSubtitle(itemId: string, subtitleId: string): Promise<void>;
   markers(id: string): Promise<Marker[]>;
-  trickplay(id: string): Promise<TrickplayIndex | null>;
   keepAlive(session: string): Promise<void>;
   endSession(session: string): Promise<void>;
   /** Stop any session this client left behind. Called at startup, not only on exit. */

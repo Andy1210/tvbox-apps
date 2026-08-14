@@ -14,7 +14,6 @@ import type {
   Session,
   StreamDecision,
   Track,
-  TrickplayIndex,
   DeviceLogin,
 } from "../types";
 import { buildUrl, container, request, type PlexIdentityHeaders } from "./http";
@@ -361,6 +360,23 @@ export class PlexBackend implements MediaBackend {
     });
   }
 
+  /**
+   * Preview frames come through the photo transcoder rather than the index path
+   * directly: the raw one answers with a full-size frame, and this asks the
+   * server for the ~6 KB thumbnail the bar actually shows. It also keeps the
+   * credential out of the URL, exactly as artwork does.
+   */
+  previewUrl(partId: string, timeMs: number, w: number, h: number): string | undefined {
+    if (!partId) return undefined;
+    return buildUrl(this.base, "photo/:/transcode", {
+      width: Math.round(w),
+      height: Math.round(h),
+      minSize: 1,
+      upscale: 0,
+      url: `/library/parts/${encodeURIComponent(partId)}/indexes/sd/${Math.max(0, Math.round(timeMs))}`,
+    });
+  }
+
   imageHeaders(): Record<string, string> {
     return { "X-Plex-Token": this.session.token };
   }
@@ -406,6 +422,7 @@ export class PlexBackend implements MediaBackend {
       version?: number;
       audio?: number;
       subtitle?: number | "none";
+      maxBitrateKbps?: number;
     },
   ): Promise<StreamDecision> {
     const screen = opts.panel ? `${opts.panel.width}x${opts.panel.height}` : undefined;
@@ -421,7 +438,13 @@ export class PlexBackend implements MediaBackend {
       mediaIndex: chosen?.index ?? version,
       partIndex: chosen?.partIndex ?? 0,
       protocol: "hls",
-      directPlay: 1,
+      // directPlay is what the ceiling has to overrule, and it outranks it:
+      // measured on an 11,390 kbps film, a 720 kbps ceiling with directPlay=1
+      // still came back "directplay" at the full rate, so the setting did
+      // nothing at all. With it off the server converts to fit - 4,000 gave
+      // 3,794 at 720p, 2,000 gave 1,830 at SD. directStream stays on, so the
+      // audio can still be passed through untouched.
+      directPlay: opts.maxBitrateKbps ? 0 : 1,
       directStream: 1,
       fastSeek: 1,
       copyts: 1,
@@ -436,6 +459,10 @@ export class PlexBackend implements MediaBackend {
       "X-Plex-Client-Profile-Name": CLIENT_PROFILE,
       "X-Plex-Client-Profile-Extra": PROFILE_EXTRA,
       "X-Plex-Device-Screen-Resolution": screen,
+      // Omitting these entirely is what "play the original" means.
+      ...(opts.maxBitrateKbps
+        ? { maxVideoBitrate: opts.maxBitrateKbps, videoBitrate: opts.maxBitrateKbps, videoQuality: 100 }
+        : {}),
     };
 
     // Chosen tracks are told to the server before the decision, so the stream it
@@ -509,10 +536,6 @@ export class PlexBackend implements MediaBackend {
       transcoded: true,
       version,
     };
-  }
-
-  async trickplay(): Promise<TrickplayIndex | null> {
-    return null;
   }
 
   async keepAlive(session: string): Promise<void> {

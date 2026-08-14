@@ -14,6 +14,10 @@ const PAGE = 100;
 // Chosen so a tile fills its column: at 26vh tall a 2:3 poster is 17.3vw-ish of
 // height, and six of them left a third of each cell empty, which reads as a
 // mistake rather than as spacing.
+/** Poster height. The tile's own width follows from it at 2:3. */
+const TILE_VH = 26;
+/** Clearance between one row's tile and the next row's top. */
+const ROW_GAP_VH = 5;
 const COLUMNS = 7;
 /** Rows kept mounted above and below the viewport. */
 const OVERSCAN = 2;
@@ -58,7 +62,13 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
 
   // Row height in pixels: tiles are sized in vh, so this has to follow the
   // window rather than be a constant.
-  const rowHeight = useMemo(() => Math.round(viewport * 0.3), [viewport]);
+  // The pitch has to clear the tile, with room to spare. A tile is 26vh of
+  // poster plus a 0.8vh gap plus a 1.8vh caption at line-height 1.5, i.e.
+  // 29.5vh - and spatial navigation drops a row from the candidate set the
+  // moment the one above it measures taller than the gap between them. At 30vh
+  // that margin was 5.4px on a 1080p panel, which a caption of two lines or a
+  // slightly larger font would eat silently. ROW_GAP_VH is what keeps it honest.
+  const rowHeight = useMemo(() => Math.round(viewport * ((TILE_VH + ROW_GAP_VH) / 100)), [viewport]);
 
   useEffect(() => {
     const measure = (): void => setViewport(window.innerHeight);
@@ -146,23 +156,6 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
 
   const { ref: gridRef, focusKey } = useFocusable({ focusKey: `grid-${libraryId}`, saveLastFocusedChild: true });
 
-  // Scrolls in whole rows, and only when the focused one is not already fully
-  // on screen. Aligning to the row keeps every tile at the same place from one
-  // press to the next, which is what stops the grid feeling like it slides
-  // under the highlight.
-  const scrollToRow = useCallback(
-    (el: HTMLElement) => {
-      const box = scroller.current;
-      if (!box) return;
-      const row = Math.round(el.parentElement ? el.parentElement.offsetTop / rowHeight : 0);
-      const top = row * rowHeight;
-      const margin = rowHeight * 0.35;
-      if (top < box.scrollTop + margin) box.scrollTo({ top: Math.max(0, top - margin), behavior: "smooth" });
-      else if (top + rowHeight > box.scrollTop + box.clientHeight - margin)
-        box.scrollTo({ top: top + rowHeight - box.clientHeight + margin, behavior: "smooth" });
-    },
-    [rowHeight],
-  );
   const poster = (item: MediaItem): string | undefined => backend?.posterUrl(item, 300 * artworkScale(), 450 * artworkScale());
 
   // Nothing focuses itself, so the first tile has to be told to take it - and a
@@ -193,10 +186,8 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
               item={item}
               posterUrl={poster(item)}
               focusKey={`cell-${i}`}
-              heightVh={26}
+              heightVh={TILE_VH}
               onEnter={() => go({ name: "item", itemId: item.id })}
-              onFocusedEl={scrollToRow}
-              ownsScroll
             />
           ) : (
             // A cell whose page has not arrived still renders, and still takes
@@ -206,10 +197,8 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
             <Tile
               item={{ id: `pending-${i}`, kind: "movie", title: "" }}
               focusKey={`cell-${i}`}
-              heightVh={26}
+              heightVh={TILE_VH}
               onEnter={() => {}}
-              onFocusedEl={scrollToRow}
-              ownsScroll
             />
           )}
         </div>,
@@ -232,7 +221,10 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
               (gridRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
             }}
             onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
-            className="no-scrollbar relative flex-1 overflow-y-auto px-[3vw]"
+            // scroll-padding for the same reason the other screens have it: the
+            // bottom row would otherwise land flush against the edge, which is
+            // inside TV overscan on some sets.
+            className="no-scrollbar relative flex-1 overflow-y-auto px-[3vw] scroll-pt-[4vh] scroll-pb-[6vh]"
           >
             {total === 0 && (
               <div className="flex h-full items-center justify-center text-[2.2vh] text-fg-dim">
