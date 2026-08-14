@@ -40,14 +40,7 @@ function label(item: MediaItem): string {
  * partly-watched item shows how far in, a finished one a plain mark; an
  * unwatched one shows nothing, so the marks mean something.
  */
-export function Tile({
-  item,
-  posterUrl,
-  focusKey,
-  onEnter,
-  heightVh = 26,
-  onFocusedEl,
-}: TileProps): React.JSX.Element {
+export function Tile({ item, posterUrl, focusKey, onEnter, heightVh = 26, onFocusedEl }: TileProps): React.JSX.Element {
   // scrollIntoView scrolls BOTH axes - `inline` defaults to "nearest" - so a
   // row gets its vertical scrolling from here and then supersedes the horizontal
   // half with its own scrollTo, which gives the focused tile some run-up. That
@@ -145,8 +138,12 @@ export function Tile({
       {/* Skipped when the poster placeholder is already showing this title:
           otherwise an art-less item prints its name twice, once inside the grey
           box and once beneath it. */}
+      {/* Two lines, at a FIXED height. A trailer rail is what made one line
+          useless - "Official Trailer 2" and "Behind the Scenes" cut to the same
+          first two words - and letting the caption grow instead would move every
+          row below it, which is also what spatial navigation measures against. */}
       {!showsTitleInPlace && (
-        <div className="truncate text-[1.8vh]" title={label(item)}>
+        <div className="line-clamp-2 h-[5.4vh] text-[1.8vh] leading-[1.5]" title={label(item)}>
           {label(item)}
         </div>
       )}

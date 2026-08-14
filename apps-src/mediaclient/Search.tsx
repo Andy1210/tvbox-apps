@@ -93,7 +93,10 @@ export function Search(): React.JSX.Element {
 
   return (
     <FocusContext.Provider value={focusKey}>
-      <div ref={ref} className="flex h-full flex-col gap-[2vh] overflow-y-auto py-[3vh] scroll-pt-[16vh] scroll-pb-[12vh]">
+      <div
+        ref={ref}
+        className="flex h-full flex-col gap-[2vh] overflow-y-auto py-[3vh] scroll-pt-[16vh] scroll-pb-[12vh]"
+      >
         <div className="flex items-center gap-[1.4vw] px-[4vw]">
           <FocusButton
             focusKey="search-edit"

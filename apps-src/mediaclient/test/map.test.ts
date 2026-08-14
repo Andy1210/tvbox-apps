@@ -45,7 +45,9 @@ describe("item mapping", () => {
   it("falls back up the art chain so a poster grid has no holes", () => {
     // An episode's own thumb is a still from that episode; a season carries the
     // show's. Whichever exists, something must come out.
-    const episodes = md(ondeck).map(toItem).filter((i: MediaItem) => i.kind === "episode");
+    const episodes = md(ondeck)
+      .map(toItem)
+      .filter((i: MediaItem) => i.kind === "episode");
     expect(episodes.length).toBeGreaterThan(0);
     expect(episodes.every((e: MediaItem) => typeof e.thumb === "string" && e.thumb.length > 0)).toBe(true);
   });
@@ -148,7 +150,15 @@ describe("episode roll-up", () => {
     // under a series title, and asking a server for an episode's children is an
     // error rather than an empty list - so the season list dies with it.
     const [series] = rollUpEpisodes([
-      { id: "39451", kind: "episode", title: "Chapter 8", seriesTitle: "A series", seriesId: "39432", thumb: "/still", seriesThumb: "/poster" },
+      {
+        id: "39451",
+        kind: "episode",
+        title: "Chapter 8",
+        seriesTitle: "A series",
+        seriesId: "39432",
+        thumb: "/still",
+        seriesThumb: "/poster",
+      },
     ]);
 
     expect(series.id).toBe("39432");

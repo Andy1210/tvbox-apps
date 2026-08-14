@@ -27,7 +27,11 @@ describe("artwork URLs", () => {
     // The URL is rendered into <img src>, so anything in it is in the DOM, the
     // accessibility tree, and whatever the app later reports as now-playing -
     // which on this box is a retained topic other things read.
-    const url = backend.posterUrl({ id: "1", kind: "movie", title: "x", thumb: "/library/metadata/1/thumb/1" }, 300, 450);
+    const url = backend.posterUrl(
+      { id: "1", kind: "movie", title: "x", thumb: "/library/metadata/1/thumb/1" },
+      300,
+      450,
+    );
 
     expect(url).toBeDefined();
     expect(url).not.toContain(TOKEN);

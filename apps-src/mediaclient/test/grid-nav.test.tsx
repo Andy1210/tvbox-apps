@@ -27,16 +27,21 @@ setupRemote();
 const VIEWPORT = 1080;
 /** Must match Library.tsx. */
 const TILE_VH = 26;
-const ROW_GAP_VH = 5;
+const ROW_GAP_VH = 8;
 const COLUMNS = 7;
 
 const rowHeight = Math.round(VIEWPORT * ((TILE_VH + ROW_GAP_VH) / 100));
 
 /**
- * What a tile actually occupies: the poster, the gap under it, and one line of
- * caption at the app's inherited line-height of 1.5.
+ * What a tile actually occupies: the poster, the gap under it, and TWO lines of
+ * caption at 1.8vh and line-height 1.5.
+ *
+ * The caption is two lines because one truncated "Official Trailer 2" and
+ * "Behind the Scenes" to the same words. That change alone would have brought
+ * the row-skipping back - it added 2.7vh to a tile with 1.5vh of clearance -
+ * which is why the pitch is derived here rather than assumed.
  */
-const tileHeight = (VIEWPORT * (TILE_VH + 0.8 + 1.8 * 1.5)) / 100;
+const tileHeight = (VIEWPORT * (TILE_VH + 0.8 + 2 * 1.8 * 1.5)) / 100;
 
 function item(n: number): MediaItem {
   return { id: `i${n}`, kind: "movie", title: `Film ${n}`, thumb: `/t/${n}` };
@@ -101,10 +106,10 @@ describe("the library grid", () => {
   });
 
   it("keeps a focused tile inside the row pitch", () => {
-    // The guard the bug slipped through. 26vh of poster, a 0.8vh gap and a
-    // 1.8vh caption at line-height 1.5 come to 29.5vh; the pitch is 31vh. A
-    // caption that wraps to two lines, or a scale on focus, eats that margin -
-    // and spatial navigation loses the row below without any error.
+    // The guard the bug slipped through: 26vh of poster, a 0.8vh gap and two
+    // 1.8vh caption lines at line-height 1.5 come to 32.2vh against a 34vh
+    // pitch. A third caption line, a larger font or a scale on focus eats that
+    // margin, and spatial navigation loses the row below with no error at all.
     expect(tileHeight).toBeLessThan(rowHeight);
     const clearancePx = rowHeight - tileHeight;
     expect(clearancePx).toBeGreaterThan(10);

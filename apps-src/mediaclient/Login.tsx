@@ -8,10 +8,7 @@ import { useApp } from "./state";
 import { log } from "./redact";
 
 type Phase =
-  | { name: "starting" }
-  | { name: "waiting"; code: string; url: string }
-  | { name: "expired" }
-  | { name: "failed" };
+  { name: "starting" } | { name: "waiting"; code: string; url: string } | { name: "expired" } | { name: "failed" };
 
 /**
  * Signing in from the sofa.

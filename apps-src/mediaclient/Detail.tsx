@@ -41,6 +41,7 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
   const [reload, setReload] = useState(0);
   const [version, setVersion] = useState(0);
   const [detail, setDetail] = useState<ItemDetail | null>(null);
+  const [busy, setBusy] = useState(false);
   const [children, setChildren] = useState<MediaItem[]>([]);
 
   useEffect(() => {
@@ -79,6 +80,32 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
   const { ref, focusKey } = useFocusable({ focusKey: `detail-${itemId}`, saveLastFocusedChild: true });
   // The focus container IS the scroller here, so one ref serves both.
   const toTop = useScrollToTopOnFirst(ref);
+
+  const watched = (detail?.viewCount ?? 0) > 0;
+
+  /**
+   * Flip watched state, and show it straight away.
+   *
+   * The item is patched locally rather than refetched: the server answers the
+   * scrobble before its own view state has settled, so reading it back returns
+   * the OLD value often enough that the button appeared not to work. A refetch
+   * on failure would be worse - it would replace a correct optimistic state
+   * with a stale one.
+   */
+  const toggleWatched = async (): Promise<void> => {
+    if (!backend || !detail || busy) return;
+    setBusy(true);
+    const next = !watched;
+    setDetail({ ...detail, viewCount: next ? Math.max(1, detail.viewCount ?? 0) : 0 });
+    try {
+      await backend.setWatched(detail.id, next);
+    } catch (e) {
+      log.warn("could not change watched state", e);
+      setDetail(detail); // put the button back where it was
+    } finally {
+      setBusy(false);
+    }
+  };
   useInitialFocus("detail-play", Boolean(detail));
   // Returning from playback unmounts the player, which held focus - without a
   // fallback the detail page comes back with the D-pad dead.
@@ -154,6 +181,17 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
                 {t("detail.fromStart")}
               </FocusButton>
             )}
+            {/* Marking by hand is what a shared server needs: a film watched
+                somewhere else, or abandoned twenty minutes in and not worth
+                resuming, has no other way to be put right - and the carry-on
+                row is built from exactly this state. */}
+            <FocusButton
+              focusKey="detail-watched"
+              onEnter={() => void toggleWatched()}
+              className="rounded-[1vh] bg-white/10 px-[2vw] py-[1.4vh] text-[2.1vh]"
+            >
+              {t(watched ? "detail.markUnwatched" : "detail.markWatched")}
+            </FocusButton>
           </div>
 
           {/* Only when there is a choice to make. A library keeps the same film

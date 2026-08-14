@@ -548,5 +548,3 @@ export function toVersions(m: PlexMetadata & { Media?: PlexMediaEntry[] }): Medi
     subtitles: parsed[index].subtitles,
   }));
 }
-
-

@@ -105,7 +105,7 @@ export function profileScope(profileId: string): {
 } {
   const p = `p:${profileId}:`;
   return {
-    read: <T,>(key: string) => readJson<T>(p + key),
+    read: <T>(key: string) => readJson<T>(p + key),
     write: (key: string, value: unknown) => writeJson(p + key, value),
     remove: (key: string) => removeRaw(p + key),
   };

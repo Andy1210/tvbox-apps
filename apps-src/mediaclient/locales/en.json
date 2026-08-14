@@ -49,7 +49,9 @@
     "fromStart": "From the start",
     "audienceScore": "{source} · viewers",
     "runtimeHm": "{h}h {m}m",
-    "runtimeM": "{m}m"
+    "runtimeM": "{m}m",
+    "markWatched": "Mark as watched",
+    "markUnwatched": "Mark as unwatched"
   },
   "person": {
     "films": "Films",

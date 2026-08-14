@@ -327,20 +327,23 @@ function Option({
     <FocusButton
       focusKey={focusKey}
       onEnter={onEnter}
-      className={`flex flex-col rounded-[0.8vh] px-[1.2vw] py-[0.9vh] text-left ${active ? "bg-white/20" : "bg-white/5"}`}
+      // One background for every row. A lighter fill for the active one was
+      // the same language the focus uses - a focused row turns solid white - so
+      // two rows looked chosen at once and neither said which was which.
+      className="flex flex-col rounded-[0.8vh] bg-white/5 px-[1.2vw] py-[0.9vh] text-left"
     >
-      <span className="text-[2.4vh]">
-        {/* A mark rather than a fill: a focused button turns white, so a white
-            "selected" background says nothing about which one is chosen. Fixed
-            width, because two literal spaces collapse to one and leave the
-            column with a ragged left edge. */}
-        <span className="inline-block w-[1.4vw]">{active ? "•" : ""}</span>
-        {label}
+      <span className="flex items-baseline gap-[0.6vw] text-[2.4vh]">
+        {/* A mark, never a fill: the fill is what focus means everywhere in this
+            app, so it cannot also mean "this is the current setting". Fixed
+            width, or the rows sit at two different left edges depending on
+            which one is active. */}
+        <span className="inline-block w-[1.6vw] shrink-0 text-center">{active ? "✓" : ""}</span>
+        <span className="min-w-0">{label}</span>
       </span>
       {/* Reduced opacity of the inherited colour, not a fixed grey: a focused
           button turns white, and a fixed grey on white is 3:1 - unreadable
           exactly when someone is looking at it. */}
-      {hint && <span className="text-[1.7vh] opacity-60">{hint}</span>}
+      {hint && <span className="pl-[2.2vw] text-[1.9vh] opacity-65">{hint}</span>}
     </FocusButton>
   );
 }

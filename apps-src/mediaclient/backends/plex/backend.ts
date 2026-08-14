@@ -209,7 +209,10 @@ export class PlexBackend implements MediaBackend {
    */
   async letterPage(libraryId: string, letterKey: string, q: PageQuery): Promise<Page<MediaItem>> {
     const c = container<MetadataContainer>(
-      await this.req(`library/sections/${libraryId}/firstCharacter/${encodeLetterKey(letterKey)}`, page(q.offset, q.limit)),
+      await this.req(
+        `library/sections/${libraryId}/firstCharacter/${encodeLetterKey(letterKey)}`,
+        page(q.offset, q.limit),
+      ),
     );
     return { items: (c.Metadata ?? []).map(toItem), total: c.totalSize };
   }
@@ -324,10 +327,7 @@ export class PlexBackend implements MediaBackend {
       return { items, truncated: total === undefined };
     };
 
-    const [top, episodes] = await Promise.all([
-      fetchAll(`${TYPE_MOVIE},${TYPE_SHOW}`),
-      fetchAll(String(TYPE_EPISODE)),
-    ]);
+    const [top, episodes] = await Promise.all([fetchAll(`${TYPE_MOVIE},${TYPE_SHOW}`), fetchAll(String(TYPE_EPISODE))]);
 
     return {
       person,
@@ -567,7 +567,16 @@ export class PlexBackend implements MediaBackend {
     let live = new Set<string>();
     try {
       const c = container<{ TranscodeSession?: { key?: string }[] }>(await this.req("transcode/sessions"));
-      live = new Set((c.TranscodeSession ?? []).map((s) => String(s.key ?? "").split("/").pop() ?? "").filter(Boolean));
+      live = new Set(
+        (c.TranscodeSession ?? [])
+          .map(
+            (s) =>
+              String(s.key ?? "")
+                .split("/")
+                .pop() ?? "",
+          )
+          .filter(Boolean),
+      );
     } catch (e) {
       // Without the list, stop everything remembered: a stop for a session that
       // already ended is a harmless 404, an unreaped session is not.
@@ -687,7 +696,8 @@ export class PlexBackend implements MediaBackend {
     // position a few milliseconds past the end of the container at the end of a
     // file, and the server rejects that outright - which loses the very report
     // that marks a film finished.
-    const time = duration > 0 ? Math.min(duration, Math.max(0, Math.round(positionMs))) : Math.max(0, Math.round(positionMs));
+    const time =
+      duration > 0 ? Math.min(duration, Math.max(0, Math.round(positionMs))) : Math.max(0, Math.round(positionMs));
 
     await this.req(":/timeline", {
       ratingKey: id,

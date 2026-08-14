@@ -76,10 +76,7 @@ function Mark({ score }: { score: Score }): React.JSX.Element {
     return (
       <svg viewBox="0 0 24 24" className={size} aria-hidden="true">
         {rotten ? (
-          <path
-            d="M12 3l2 4 4-2-1 4 4 1-3 3 3 3-4 1 1 4-4-2-2 4-2-4-4 2 1-4-4-1 3-3-3-3 4-1-1-4 4 2z"
-            fill="#4a9b3f"
-          />
+          <path d="M12 3l2 4 4-2-1 4 4 1-3 3 3 3-4 1 1 4-4-2-2 4-2-4-4 2 1-4-4-1 3-3-3-3 4-1-1-4 4 2z" fill="#4a9b3f" />
         ) : (
           <circle cx="12" cy="13" r="8" fill="#e2372a" />
         )}
@@ -90,9 +87,7 @@ function Mark({ score }: { score: Score }): React.JSX.Element {
 
   if (score.source === "imdb") {
     return (
-      <span className="rounded-[0.3vh] bg-[#f5c518] px-[0.5vw] py-[0.1vh] text-[1.7vh] font-bold text-black">
-        IMDb
-      </span>
+      <span className="rounded-[0.3vh] bg-[#f5c518] px-[0.5vw] py-[0.1vh] text-[1.7vh] font-bold text-black">IMDb</span>
     );
   }
 

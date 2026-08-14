@@ -1,67 +1,67 @@
 {
- "MediaContainer": {
-  "Metadata": [
-   {
-    "addedAt": 1609459200,
-    "duration": 1500000,
-    "grandparentThumb": "/library/metadata/100/thumb/1",
-    "grandparentTitle": "Example Series",
-    "index": 4,
-    "lastViewedAt": 1609459700,
-    "parentIndex": 2,
-    "ratingKey": "101",
-    "thumb": "/library/metadata/101/thumb/1",
-    "title": "The Second Part",
-    "type": "episode",
-    "viewOffset": 600000
-   },
-   {
-    "addedAt": 1609459200,
-    "duration": 1400000,
-    "grandparentThumb": "/library/metadata/103/thumb/1",
-    "grandparentTitle": "Another Series",
-    "index": 9,
-    "lastViewedAt": 1609459600,
-    "parentIndex": 1,
-    "ratingKey": "102",
-    "title": "A Later One",
-    "type": "episode",
-    "viewOffset": 200000
-   },
-   {
-    "addedAt": 1609459500,
-    "duration": 1400000,
-    "grandparentThumb": "/library/metadata/105/thumb/1",
-    "grandparentTitle": "Third Series",
-    "index": 1,
-    "parentIndex": 1,
-    "ratingKey": "104",
-    "title": "Never Started",
-    "type": "episode"
-   },
-   {
-    "addedAt": 1609459200,
-    "duration": 7200000,
-    "lastViewedAt": 1609459400,
-    "ratingKey": "106",
-    "thumb": "/library/metadata/106/thumb/1",
-    "title": "Example Film",
-    "type": "movie",
-    "viewOffset": 3600000,
-    "year": 2011
-   },
-   {
-    "addedAt": 1609459200,
-    "duration": 6000000,
-    "lastViewedAt": 1609459300,
-    "ratingKey": "107",
-    "thumb": "/library/metadata/107/thumb/1",
-    "title": "Another Film",
-    "type": "movie",
-    "viewCount": 1,
-    "year": 2014
-   }
-  ],
-  "size": 5
- }
+  "MediaContainer": {
+    "Metadata": [
+      {
+        "addedAt": 1609459200,
+        "duration": 1500000,
+        "grandparentThumb": "/library/metadata/100/thumb/1",
+        "grandparentTitle": "Example Series",
+        "index": 4,
+        "lastViewedAt": 1609459700,
+        "parentIndex": 2,
+        "ratingKey": "101",
+        "thumb": "/library/metadata/101/thumb/1",
+        "title": "The Second Part",
+        "type": "episode",
+        "viewOffset": 600000
+      },
+      {
+        "addedAt": 1609459200,
+        "duration": 1400000,
+        "grandparentThumb": "/library/metadata/103/thumb/1",
+        "grandparentTitle": "Another Series",
+        "index": 9,
+        "lastViewedAt": 1609459600,
+        "parentIndex": 1,
+        "ratingKey": "102",
+        "title": "A Later One",
+        "type": "episode",
+        "viewOffset": 200000
+      },
+      {
+        "addedAt": 1609459500,
+        "duration": 1400000,
+        "grandparentThumb": "/library/metadata/105/thumb/1",
+        "grandparentTitle": "Third Series",
+        "index": 1,
+        "parentIndex": 1,
+        "ratingKey": "104",
+        "title": "Never Started",
+        "type": "episode"
+      },
+      {
+        "addedAt": 1609459200,
+        "duration": 7200000,
+        "lastViewedAt": 1609459400,
+        "ratingKey": "106",
+        "thumb": "/library/metadata/106/thumb/1",
+        "title": "Example Film",
+        "type": "movie",
+        "viewOffset": 3600000,
+        "year": 2011
+      },
+      {
+        "addedAt": 1609459200,
+        "duration": 6000000,
+        "lastViewedAt": 1609459300,
+        "ratingKey": "107",
+        "thumb": "/library/metadata/107/thumb/1",
+        "title": "Another Film",
+        "type": "movie",
+        "viewCount": 1,
+        "year": 2014
+      }
+    ],
+    "size": 5
+  }
 }

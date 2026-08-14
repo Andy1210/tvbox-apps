@@ -49,7 +49,9 @@
     "fromStart": "Elölről",
     "audienceScore": "{source} · nézők",
     "runtimeHm": "{h} ó {m} p",
-    "runtimeM": "{m} p"
+    "runtimeM": "{m} p",
+    "markWatched": "Nézettnek jelöld",
+    "markUnwatched": "Nézetlennek jelöld"
   },
   "person": {
     "films": "Filmek",
