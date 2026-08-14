@@ -39,10 +39,7 @@ export function CastRow({
     <FocusContext.Provider value={focusKey}>
       <section ref={ref} className="flex flex-col gap-[1vh]">
         <h2 className="px-[4vw] text-[2vh] font-semibold tracking-tight">{title}</h2>
-        <div
-          ref={scroller}
-          className="no-scrollbar flex gap-[1.2vw] overflow-x-auto scroll-smooth px-[4vw] py-[9vh] -my-[5vh]"
-        >
+        <div ref={scroller} className="no-scrollbar flex gap-[1.2vw] overflow-x-auto px-[4vw] py-[9vh] -my-[5vh]">
           {roles.map((role) => (
             <Face key={role.id} role={role} onEnter={() => onSelect(role)} onFocusedEl={scrollTo} />
           ))}

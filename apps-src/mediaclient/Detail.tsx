@@ -145,9 +145,12 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
       key.startsWith("cast-") ||
       key.startsWith("children-") ||
       key.startsWith("extras-") ||
-      key.startsWith("review-") ||
-      key.startsWith("detail-"),
-    !playing,
+      key.startsWith("review-"),
+    // Not while the language panel is up. This is a window listener and stays
+    // armed behind it; the panel's keys are none of the above, so every press
+    // it could not resolve threw focus back onto the play button - which is
+    // exactly "I cannot navigate in the subtitle list".
+    !playing && !picking,
   );
 
   if (failure) return <Message failure={failure} onRetry={() => setReload((n) => n + 1)} />;

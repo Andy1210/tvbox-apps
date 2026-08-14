@@ -31,13 +31,14 @@ export function LanguagePicker({
   onClose: () => void;
 }): React.JSX.Element {
   const { t } = useI18n();
-  const { ref, focusKey } = useFocusable({ focusKey: "langpicker", saveLastFocusedChild: true, isFocusBoundary: true });
-  useInitialFocus("lp-close", true);
-  useFocusFallback("lp-close", (k) => k.startsWith("lp-"), true);
-  useBackspace(onClose, true);
-
   const tracks = version?.audio ?? [];
   const subs = version?.subtitles ?? [];
+  const { ref, focusKey } = useFocusable({ focusKey: "langpicker", saveLastFocusedChild: true, isFocusBoundary: true });
+  // On the first thing there is to choose, not on the way out: this panel is
+  // opened to pick something.
+  useInitialFocus(tracks.length ? `lp-aud-${tracks[0].ordinal}` : "lp-sub-off", true);
+  useFocusFallback("lp-sub-off", (k) => k.startsWith("lp-"), true);
+  useBackspace(onClose, true);
 
   return (
     <FocusContext.Provider value={focusKey}>
