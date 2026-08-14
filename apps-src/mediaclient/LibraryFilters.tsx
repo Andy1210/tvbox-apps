@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
+import { FocusContext, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, useBackspace, useI18n } from "@sdk";
 import { useFocusFallback, useInitialFocus } from "./focus";
 import { useApp } from "./state";
@@ -55,7 +55,9 @@ export function LibraryFilters({
 
   const { ref, focusKey } = useFocusable({ focusKey: "libfilters", saveLastFocusedChild: true, isFocusBoundary: true });
   useInitialFocus("lf-sort-0", sorts.length > 0);
-  useFocusFallback("lf-close", (k) => k.startsWith("lf-"), true);
+  // The first sort chip, not the close button: a fallback that lands on "leave"
+  // turns a lost cursor into an accidental exit.
+  useFocusFallback("lf-sort-0", (k) => k.startsWith("lf-"), true);
   useBackspace(() => {
     // The value list is a layer over the panel, so Back closes that first.
     if (openFilter) {
@@ -114,7 +116,13 @@ export function LibraryFilters({
     return (
       <Panel title={openFilter.title} onClose={() => setOpenFilter(null)} closeLabel={t("common.back")}>
         {values === null && <p className="text-[2vh] text-fg-dim">{t("common.loading")}</p>}
-        <div className="flex flex-wrap items-stretch gap-x-[0.8vw] gap-y-[1.4vh]">
+        <div // A strict grid, not a wrapped flex. Spatial navigation resolves by
+          // rectangles, and chips of different widths wrapping onto ragged
+          // lines gave it no clean answer: Right skipped one, and there was
+          // no way back to the row above. Fixed columns make every chip line
+          // up with the one under it.
+          className="grid grid-cols-4 gap-x-[1vw] gap-y-[1.4vh]"
+        >
           {values?.map((v, i) => (
             <Chip
               key={v.key}
@@ -123,8 +131,14 @@ export function LibraryFilters({
               label={v.title}
               onEnter={() => {
                 const same = view.filters[openFilter.key] === v.key;
+                const from = filters.findIndex((f) => f.key === openFilter.key);
                 setFilter(openFilter.key, same ? null : v.key, v.title);
                 setOpenFilter(null);
+                // Back to the filter you opened. The value list unmounts under
+                // the cursor, and the fallback would otherwise drop focus on
+                // the close button - losing your place in a list of thirty and
+                // putting a reflexive OK on "leave".
+                if (from >= 0) setTimeout(() => setFocus(`lf-filter-${from}`), 0);
               }}
             />
           ))}
@@ -151,7 +165,13 @@ export function LibraryFilters({
           <div className="no-scrollbar flex flex-col gap-[2.4vh] overflow-y-auto">
             <section className="flex flex-col gap-[1vh]">
               <h3 className="text-[2.1vh] font-semibold text-fg-dim">{t("library.sort")}</h3>
-              <div className="flex flex-wrap items-stretch gap-x-[0.8vw] gap-y-[1.4vh]">
+              <div // A strict grid, not a wrapped flex. Spatial navigation resolves by
+                // rectangles, and chips of different widths wrapping onto ragged
+                // lines gave it no clean answer: Right skipped one, and there was
+                // no way back to the row above. Fixed columns make every chip line
+                // up with the one under it.
+                className="grid grid-cols-4 gap-x-[1vw] gap-y-[1.4vh]"
+              >
                 {sorts.map((s, i) => (
                   <Chip
                     key={s.key}
@@ -173,7 +193,13 @@ export function LibraryFilters({
 
             <section className="flex flex-col gap-[1vh]">
               <h3 className="text-[2.1vh] font-semibold text-fg-dim">{t("library.filter")}</h3>
-              <div className="flex flex-wrap items-stretch gap-x-[0.8vw] gap-y-[1.4vh]">
+              <div // A strict grid, not a wrapped flex. Spatial navigation resolves by
+                // rectangles, and chips of different widths wrapping onto ragged
+                // lines gave it no clean answer: Right skipped one, and there was
+                // no way back to the row above. Fixed columns make every chip line
+                // up with the one under it.
+                className="grid grid-cols-4 gap-x-[1vw] gap-y-[1.4vh]"
+              >
                 {filters.map((f, i) => {
                   const chosen = view.filters[f.key];
                   return (
@@ -197,7 +223,11 @@ export function LibraryFilters({
             {Object.keys(view.filters).length > 0 && (
               <FocusButton
                 focusKey="lf-clear"
-                onEnter={() => onApply({ ...view, filters: {}, labels: {} })}
+                onEnter={() => {
+                  onApply({ ...view, filters: {}, labels: {} });
+                  // The button disappears with the filters it cleared.
+                  setTimeout(() => setFocus("lf-filter-0"), 0);
+                }}
                 className="self-start rounded-[1vh] bg-white/10 px-[2vw] py-[1.1vh] text-[2vh]"
               >
                 {t("library.clearFilters")}
@@ -267,7 +297,7 @@ function Chip({
       // inside the focused element's box, so a wrapped grid of chips of
       // different heights loses whole rows to a press - which reads as the
       // D-pad skipping over them.
-      className="flex min-h-[6vh] items-center rounded-[0.8vh] bg-white/8 px-[1.4vw] text-[2vh]"
+      className="flex min-h-[6vh] w-full items-center rounded-[0.8vh] bg-white/8 px-[1.4vw] text-[2vh]"
     >
       <span className="inline-block w-[1.4vw] shrink-0 text-center">{active ? "✓" : ""}</span>
       {label}

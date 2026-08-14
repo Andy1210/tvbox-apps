@@ -68,6 +68,33 @@ function evictIfNeeded(): void {
  * Fetch an image with auth and return a blob URL for it, or null when it cannot
  * be had. A missing poster is never an error - the tile falls back to a title.
  */
+/**
+ * How many image fetches may be in flight.
+ *
+ * A page landing in the grid mounts seven columns of several rows at once, so
+ * without a bound the browser opens thirty-odd connections in the same tick and
+ * some of them lose - and a poster that lost used to stay lost, because the
+ * tile latched onto the failure. Six is enough to keep the pipe full on a LAN
+ * without a burst that the server answers by dropping.
+ */
+const MAX_INFLIGHT = 6;
+let active = 0;
+const waiting: (() => void)[] = [];
+
+async function slot(): Promise<void> {
+  if (active < MAX_INFLIGHT) {
+    active += 1;
+    return;
+  }
+  await new Promise<void>((resolve) => waiting.push(resolve));
+  active += 1;
+}
+
+function release(): void {
+  active -= 1;
+  waiting.shift()?.();
+}
+
 export async function loadImage(url: string, headers: Record<string, string>): Promise<string | null> {
   const hit = cache.get(url);
   if (hit) {
@@ -80,9 +107,14 @@ export async function loadImage(url: string, headers: Record<string, string>): P
 
   const mine = generation;
   const task = (async () => {
+    await slot();
     try {
-      const res = await fetch(url, { headers });
-      if (!res.ok) return null;
+      // One retry, because the failure this guards against is a burst losing a
+      // connection rather than a poster that does not exist - and a 404 comes
+      // back as !ok, which is not retried.
+      let res = await fetch(url, { headers }).catch(() => null);
+      if (!res) res = await fetch(url, { headers }).catch(() => null);
+      if (!res || !res.ok) return null;
       const blob = await res.blob();
       // Signed out while this was in flight: the answer belongs to the previous
       // account, and poster URLs repeat across sessions, so caching it would
@@ -99,6 +131,7 @@ export async function loadImage(url: string, headers: Record<string, string>): P
       log.warn("poster failed", url, e);
       return null;
     } finally {
+      release();
       inflight.delete(url);
     }
   })();

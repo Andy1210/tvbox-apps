@@ -25,6 +25,18 @@ export interface PlexIdentityHeaders {
  * otherwise would put it in the account's player list where a phone (or the
  * house assistant) could cast to it and get silence.
  */
+/**
+ * The interface language, as a bare two-letter code.
+ *
+ * Read at call time rather than captured, because the backend outlives a
+ * language change and a stale header would leave one screen translated and the
+ * next not.
+ */
+function language(): string {
+  const l = typeof document !== "undefined" ? document.documentElement.lang : "";
+  return (l || "en").slice(0, 2);
+}
+
 export function plexHeaders(id: PlexIdentityHeaders, extra?: Record<string, string>): Record<string, string> {
   return {
     Accept: "application/json",
@@ -34,6 +46,12 @@ export function plexHeaders(id: PlexIdentityHeaders, extra?: Record<string, stri
     "X-Plex-Platform": CLIENT_PLATFORM,
     "X-Plex-Device": CLIENT_PRODUCT,
     "X-Plex-Device-Name": id.deviceName,
+    // The server translates what IT names - sort orders, filter titles, genres -
+    // and without this it answers in English. That is the largest text surface
+    // in the app that no locale file can reach: "Rendezés" heading a column of
+    // "Date Added" and "Audience Rating".
+    "X-Plex-Language": language(),
+    "Accept-Language": language(),
     ...(extra || {}),
   };
 }

@@ -132,7 +132,7 @@ function Face({
           character name sat an empty line below it. Fixed somewhere, though:
           letting the block grow would leave the faces on a ragged baseline and
           move the row under the D-pad's own measurements. */}
-      <div className="flex h-[9.6vh] w-full flex-col items-center gap-[0.2vh] overflow-hidden">
+      <div className="flex h-[10.2vh] w-full flex-col items-center gap-[0.2vh] overflow-hidden">
         <div className="line-clamp-2 w-full text-center text-[1.8vh] leading-[1.4]">{role.name}</div>
         {role.character && (
           <div className="line-clamp-2 w-full text-center text-[1.7vh] leading-[1.4] text-fg-dim">{role.character}</div>

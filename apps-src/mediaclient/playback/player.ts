@@ -404,10 +404,19 @@ function wirePlayerEvents(set: Setter, get: () => PlayerState): void {
         // backward seek every stale position is already past it, so the target
         // would clear on the first report and the bar would snap back.
         const from = get().seekFromMs;
+        // Settled once the report is nearer where it was SENT than where it came
+        // from. Direction alone was not enough: a backward seek lands on the
+        // first keyframe AFTER its target and then plays away from it, so
+        // "ms <= target" was never satisfied and the bar and clock froze at the
+        // target for the rest of the film - and every later jump and scrub takes
+        // seekTargetMs as its origin, so they were all measured from a stale
+        // number. Comparing the two distances handles a late landing in either
+        // direction and still holds every stale report.
         const settled =
           target === null ||
           Math.abs(ms - target) < 2_000 ||
-          (from === null || target >= from ? ms >= target : ms <= target);
+          from === null ||
+          Math.abs(ms - target) < Math.abs(ms - from);
         set({ positionMs: ms, seekTargetMs: settled ? null : target, seekFromMs: settled ? null : from });
         break;
       }

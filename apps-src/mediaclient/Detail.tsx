@@ -254,7 +254,7 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
             // "Official Trailer 2" and "Behind the Scenes" to the same words.
             heightVh={16}
             aspect={16 / 9}
-            captionLines={3}
+            captionLines={2}
             items={detail.extras.map((e) => ({
               id: e.id,
               kind: "movie" as const,

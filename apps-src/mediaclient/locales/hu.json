@@ -8,7 +8,7 @@
   },
   "common": {
     "loading": "Betöltés…",
-    "done": "Kész",
+    "done": "Vissza",
     "back": "Vissza"
   },
   "login": {
@@ -40,7 +40,7 @@
     "arrange": "Rendezés és szűrés",
     "sort": "Rendezés",
     "filter": "Szűrés",
-    "clearFilters": "Szűrők törlése",
+    "clearFilters": "Töröld a szűrőket",
     "emptyFiltered": "Ehhez a szűréshez nincs találat."
   },
   "detail": {
@@ -55,8 +55,8 @@
     "audienceScore": "{source} · nézők",
     "runtimeHm": "{h} ó {m} p",
     "runtimeM": "{m} p",
-    "markWatched": "Nézettnek jelöld",
-    "markUnwatched": "Nézetlennek jelöld"
+    "markWatched": "Jelöld nézettnek",
+    "markUnwatched": "Jelöld nem nézettnek"
   },
   "person": {
     "films": "Filmek",
@@ -112,13 +112,15 @@
     "subSize": "Felirat mérete",
     "subPos": "Felirat helye",
     "subColor": "Felirat színe",
-    "autoSkip": "Intro és stáblista átugrása",
-    "autoSkipHint": "Ha bekapcsolod, magától átugrik. A jelölés a szerver becslése, és ha téved, egy epizód nyitányát is átugorhatja.",
+    "autoSkip": "Főcím és stáblista átugrása",
+    "autoSkipHint": "Ha bekapcsolod, magától átugrik. A jelzés a szerver becslése, és ha téved, egy epizód nyitányát is átugorhatja.",
     "subSample": "Minta szöveg",
     "posBottom": "Legalul",
     "posHigher": "Kicsit feljebb",
     "posHigh": "Feljebb",
-    "posMiddle": "Középtájt"
+    "posMiddle": "Középtájt",
+    "playbackOpen": "Lejátszás beállításai",
+    "playbackHint": "Felirat mérete, helye és színe, meg az intro átugrása."
   },
   "tracks": {
     "version": "Verzió",

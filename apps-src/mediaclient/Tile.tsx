@@ -83,6 +83,10 @@ export function Tile({
   useEffect(() => {
     if (!posterUrl || !backend) return;
     let live = true;
+    // Reset first: without this a tile that failed once keeps showing its title
+    // even after the URL changes under it, and the only cure is an unmount -
+    // which is why scrolling away and back appeared to fix it.
+    setBroken(false);
     void loadImage(posterUrl, backend.imageHeaders()).then((url) => {
       if (!live) return;
       if (url) setSrc(url);

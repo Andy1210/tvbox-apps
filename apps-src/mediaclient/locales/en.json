@@ -8,7 +8,7 @@
   },
   "common": {
     "loading": "Loading…",
-    "done": "Done",
+    "done": "Back",
     "back": "Back"
   },
   "login": {
@@ -40,7 +40,7 @@
     "arrange": "Sort and filter",
     "sort": "Sort",
     "filter": "Filter",
-    "clearFilters": "Clear filters",
+    "clearFilters": "Clear the filters",
     "emptyFiltered": "Nothing matches this filter."
   },
   "detail": {
@@ -118,7 +118,9 @@
     "posBottom": "At the bottom",
     "posHigher": "A little higher",
     "posHigh": "Higher",
-    "posMiddle": "Around the middle"
+    "posMiddle": "Around the middle",
+    "playbackOpen": "Playback settings",
+    "playbackHint": "Subtitle size, position and colour, and skipping intros."
   },
   "tracks": {
     "version": "Version",

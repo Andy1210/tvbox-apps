@@ -177,13 +177,38 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   useFocusFallback(
     "cell-0",
     (key) => key.startsWith("cell-") || key.startsWith("letter-") || key.startsWith("lib-"),
-    !playing,
+    // Not while the panel is open: this is a window listener, and it stays armed
+    // behind the panel. Its predicate rejects every panel key, so any press the
+    // panel could not resolve - a row edge, and it wraps twenty-seven chips -
+    // threw focus out onto an unmounted grid cell and cost the next press.
+    !playing && !arranging,
   );
+
+  // Built before every early return, and rendered in each of them. Applying a
+  // sort empties the list, which puts the screen back on "Loading" - and that
+  // unmounted the panel mid-press: which filter was open was lost, both option
+  // lists were refetched, and focus landed on a grid cell that was not mounted.
+  const panel = arranging ? (
+    <LibraryFilters
+      libraryId={libraryId}
+      view={view}
+      // A new order or filter is a new list, so the grid resets to the top on
+      // its own; the strip needs nothing, because it holds no state now.
+      onApply={setView}
+      onClose={() => setArranging(false)}
+    />
+  ) : null;
 
   if (failure) return <Message failure={failure} onRetry={() => void loadPage(0)} />;
   // `total === null` is "not asked yet"; a total of zero is an answer, and an
   // empty library must say so rather than spin forever.
-  if (total === null && items.length === 0) return <Message loading />;
+  if (total === null && items.length === 0)
+    return (
+      <>
+        {panel}
+        <Message loading />
+      </>
+    );
 
   const visible: React.JSX.Element[] = [];
   for (let r = firstRow; r < lastRow; r += 1) {
@@ -222,19 +247,26 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     }
   }
 
-  if (arranging)
-    return (
-      <LibraryFilters
-        libraryId={libraryId}
-        view={view}
-        // A new order or filter is a new list, so the grid resets to the top on
-        // its own; the strip needs nothing, because it holds no state now.
-        onApply={setView}
-        onClose={() => setArranging(false)}
-      />
-    );
-
   const narrowed = Object.keys(view.filters).length;
+
+  /**
+   * Which letter the grid is currently showing.
+   *
+   * Read off the first item of the top visible row, so the strip confirms a
+   * jump and keeps confirming while someone scrolls by hand - without it the
+   * letter pressed looks exactly like the other twenty-eight and nothing on
+   * screen says the press did anything.
+   */
+  const activeLetter = ((): string | null => {
+    const first = items[firstRow * COLUMNS];
+    const t = (first?.sortTitle ?? first?.title ?? "").trim();
+    if (!t) return null;
+    const ch = t[0].toUpperCase();
+    const keys = letters.map((l) => l.key);
+    if (keys.includes(ch)) return ch;
+    const folded = ch.normalize("NFD")[0].toUpperCase();
+    return keys.includes(folded) ? folded : "#";
+  })();
 
   /**
    * Take the grid to a letter.
@@ -268,6 +300,13 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
 
   return (
     <FocusContext.Provider value={focusKey}>
+      {/* Over the grid, never instead of it. Replacing it unmounted the
+          scroller while `scrollTop` lived on in React state, so on close a
+          fresh scroller mounted at 0 while the virtualised window was still
+          computed from the old position - the only mounted rows were far below
+          the viewport, the screen was blank, and the focus guard then set focus
+          to a cell that was not mounted, over and over. Every press discarded. */}
+      {panel}
       <div className="flex h-full flex-col">
         <div className="flex items-center gap-[1.4vw] px-[4vw] py-[2vh]">
           <h1 className="text-[2.6vh] font-semibold tracking-tight">
@@ -314,14 +353,28 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
             </div>
           </div>
 
-          {letters.length > 1 && <LetterStrip letters={letters} onPick={jumpToLetter} />}
+          {/* Only under an ascending title sort. The jump binary-searches on a
+              title's initial, which is monotonic in that order and in no other -
+              under "date added" the search returns a meaningless offset and the
+              grid lands somewhere arbitrary, with nothing to say why. */}
+          {letters.length > 1 && view.sort === "titleSort" && !view.desc && (
+            <LetterStrip letters={letters} onPick={jumpToLetter} active={activeLetter} />
+          )}
         </div>
       </div>
     </FocusContext.Provider>
   );
 }
 
-function LetterStrip({ letters, onPick }: { letters: Letter[]; onPick: (key: string) => void }): React.JSX.Element {
+function LetterStrip({
+  letters,
+  onPick,
+  active,
+}: {
+  letters: Letter[];
+  onPick: (key: string) => void;
+  active: string | null;
+}): React.JSX.Element {
   const { ref, focusKey } = useFocusable({ focusKey: "letters", saveLastFocusedChild: true });
   return (
     <FocusContext.Provider value={focusKey}>
@@ -330,7 +383,11 @@ function LetterStrip({ letters, onPick }: { letters: Letter[]; onPick: (key: str
         // through is slower than scrolling the grid it is meant to shortcut -
         // so the letters shrink to fit the height instead, which they can
         // because each is one character.
-        className="flex h-full flex-col items-stretch justify-center gap-[0.2vh] py-[1vh] pr-[1vw] pl-[0.4vw]"
+        // overflow-y-auto is a backstop, not the plan: 29 letters fit, but a
+        // library with every Hungarian accented bucket would exceed the column
+        // and the ends would otherwise be clipped while still focusable - which
+        // is a dead remote rather than a cosmetic problem.
+        className="no-scrollbar flex h-full flex-col items-stretch justify-center gap-[0.1vh] overflow-y-auto py-[1vh] pr-[1vw] pl-[0.4vw]"
         ref={ref}
       >
         {letters.map((l) => (
@@ -341,7 +398,13 @@ function LetterStrip({ letters, onPick }: { letters: Letter[]; onPick: (key: str
             // A bare character, not a button-shaped box: thirty of those made a
             // second column down the side of the screen. Focus still fills, as
             // it does everywhere else.
-            className="rounded-[0.5vh] px-[0.6vw] text-center text-[1.9vh] leading-[1.35]"
+            // Bigger than it was, and tighter, because those trade against each
+            // other: 29 letters have to fit the column height without scrolling,
+            // and at leading 1.35 that capped the size below the 24px floor a
+            // television wants for body text. Tighter leading buys the size.
+            className={`rounded-[0.5vh] px-[0.6vw] text-center text-[2.4vh] leading-[1.15] ${
+              l.key === active ? "font-bold" : "text-fg-dim"
+            }`}
           >
             {l.title}
           </FocusButton>
