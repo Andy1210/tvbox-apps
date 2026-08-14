@@ -21,6 +21,11 @@ import type {
 } from "../types";
 
 export interface PlexMetadata {
+  grandparentArt?: string;
+  parentArt?: string;
+  theme?: string;
+  grandparentTheme?: string;
+  parentTheme?: string;
   titleSort?: string;
   ratingKey?: string | number;
   key?: string;
@@ -159,7 +164,10 @@ export function toItem(m: PlexMetadata): MediaItem {
     sortTitle: m.titleSort,
     year: m.year,
     thumb,
-    art: m.art,
+    // An episode carries none of its own, so it inherits the season's and then
+    // the series' - which is what a backdrop behind an episode list should be.
+    art: m.art ?? m.parentArt ?? m.grandparentArt,
+    theme: m.theme ?? m.parentTheme ?? m.grandparentTheme,
     durationMs: m.duration,
     viewOffsetMs: m.viewOffset,
     viewCount: m.viewCount,

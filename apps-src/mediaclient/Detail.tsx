@@ -9,6 +9,8 @@ import { Scores } from "./Scores";
 import { Reviews } from "./Reviews";
 import { TitleArt } from "./TitleArt";
 import { LanguagePicker } from "./LanguagePicker";
+import { Backdrop } from "./Backdrop";
+import { useTheme } from "./theme";
 import { useFocusFallback, useInitialFocus, useScrollToTopOnFirst } from "./focus";
 import { usePlayer } from "./playback/player";
 import { classify, useApp } from "./state";
@@ -153,6 +155,10 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
     !playing && !picking,
   );
 
+  // Before the early returns, as hooks must be. `detail` is null while loading,
+  // which is simply no theme yet.
+  useTheme(detail?.kind === "season" || detail?.kind === "show" ? detail : null);
+
   if (failure) return <Message failure={failure} onRetry={() => setReload((n) => n + 1)} />;
   if (!detail) return <Message loading />;
 
@@ -176,6 +182,7 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
 
   return (
     <FocusContext.Provider value={focusKey}>
+      <Backdrop item={shown} />
       {picking && (
         <LanguagePicker
           version={tracksFrom}

@@ -30,6 +30,8 @@ export interface MediaItem {
   seriesId?: string;
   /** The series' own poster, as opposed to the episode still. */
   seriesThumb?: string;
+  /** Theme music, where the server has any. Series mostly; films rarely. */
+  theme?: string;
   /** What the server sorts by, which is not always the title ("A" articles). */
   sortTitle?: string;
   year?: number;
@@ -392,6 +394,10 @@ export interface MediaBackend {
    * has to work without it, so this is a nicety rather than a dependency.
    */
   previewUrl(partId: string, timeMs: number, w: number, h: number): string | undefined;
+  /** A scaled backdrop, or undefined when the item has none. */
+  backdropUrl(item: MediaItem, w: number, h: number): string | undefined;
+  /** The theme's audio, or undefined. Credentials travel as headers. */
+  themeUrl(item: MediaItem): string | undefined;
   /** Absolutise a server-relative art path. Returns an absolute URL unchanged,
    *  since some artwork is hosted by the metadata provider rather than by the
    *  server. */
