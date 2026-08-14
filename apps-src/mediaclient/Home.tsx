@@ -52,7 +52,7 @@ export function Home(): React.JSX.Element {
 
         const recent: Loaded["recent"] = [];
         for (const library of libraries) {
-          const items = await backend.recentlyAdded(library.id);
+          const items = await backend.recentlyAdded(library.id, library.kind);
           if (!live) return;
           if (items.length) recent.push({ library, items });
           setData({ libraries, onDeck, recent: [...recent] });
@@ -70,10 +70,12 @@ export function Home(): React.JSX.Element {
   }, [backend, fail, reload]);
 
   // The first thing worth pressing: what you were watching, or a library when
-  // there is nothing to carry on with.
-  // The top rail, so the first press is already among the things that lead
-  // somewhere - and Down from there reaches what you were watching.
-  const firstKey = data?.libraries.length ? `lib-${data.libraries[0].id}` : "nav-search";
+  // there is nothing to carry on with. Up from there reaches the top rail.
+  const firstKey = data?.onDeck.length
+    ? `ondeck-${data.onDeck[0].id}`
+    : data?.libraries.length
+      ? `lib-${data.libraries[0].id}`
+      : "nav-search";
   useInitialFocus(firstKey, Boolean(data));
   // Focus is set once; without a fallback anything that unmounts the focused
   // tile afterwards leaves the D-pad dead with only Back working.
@@ -88,7 +90,7 @@ export function Home(): React.JSX.Element {
   const nothing = data.onDeck.length === 0 && data.recent.length === 0;
 
   return (
-    <div className="flex h-full flex-col gap-[3vh] overflow-y-auto py-[3vh]">
+    <div className="flex h-full flex-col gap-[3vh] overflow-y-auto py-[3vh] scroll-pt-[16vh] scroll-pb-[12vh]">
       {/* One rail at the top holding the libraries AND the two actions.
           Separately, the actions sat far right in a header while the first tile
           sat far left, and spatial navigation resolves Up by geometry - so
@@ -147,32 +149,34 @@ function TopRow({
 
   return (
     <FocusContext.Provider value={focusKey}>
-      <div ref={ref} className="no-scrollbar flex items-center gap-[1vw] overflow-x-auto px-[4vw] py-[1vh]">
-        {libraries.map((l) => (
-          <FocusButton
-            key={l.id}
-            focusKey={`lib-${l.id}`}
-            onEnter={() => onLibrary(l)}
-            className="shrink-0 rounded-[1vh] bg-white/10 px-[2vw] py-[1.1vh] text-[2.2vh]"
-          >
-            {l.title}
-          </FocusButton>
-        ))}
+      {/* The libraries scroll; search and settings do not. A server with five
+          libraries would otherwise push the only route to sign-out off the far
+          end of a rail whose scrollbar is hidden. */}
+      <div ref={ref} className="flex items-center gap-[1vw] px-[4vw] py-[1vh]">
+        <div className="no-scrollbar flex min-w-0 flex-1 items-center gap-[1vw] overflow-x-auto">
+          {libraries.map((l) => (
+            <FocusButton
+              key={l.id}
+              focusKey={`lib-${l.id}`}
+              onEnter={() => onLibrary(l)}
+              className="shrink-0 rounded-[1vh] bg-white/10 px-[2vw] py-[1.1vh] text-[2.2vh]"
+            >
+              {l.title}
+            </FocusButton>
+          ))}
+        </div>
 
-        {/* After the libraries, because those are what someone is usually
-            reaching for; both are still one row and never more than a few
-            presses away. */}
         <FocusButton
           focusKey="nav-search"
           onEnter={onSearch}
-          className="shrink-0 rounded-[1vh] bg-white/6 px-[1.8vw] py-[1.1vh] text-[2vh]"
+          className="shrink-0 rounded-[1vh] bg-white/10 px-[2vw] py-[1.1vh] text-[2.2vh]"
         >
           {t("home.search")}
         </FocusButton>
         <FocusButton
           focusKey="nav-settings"
           onEnter={onSettings}
-          className="shrink-0 rounded-[1vh] bg-white/6 px-[1.8vw] py-[1.1vh] text-[2vh]"
+          className="shrink-0 rounded-[1vh] bg-white/10 px-[2vw] py-[1.1vh] text-[2.2vh]"
         >
           {t("home.settings")}
         </FocusButton>

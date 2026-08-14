@@ -90,7 +90,7 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
 
   return (
     <FocusContext.Provider value={focusKey}>
-      <div ref={ref} className="flex h-full flex-col gap-[2.4vh] overflow-y-auto py-[3vh]">
+      <div ref={ref} className="flex h-full flex-col gap-[2.4vh] overflow-y-auto py-[3vh] scroll-pt-[16vh] scroll-pb-[12vh]">
         <header className="flex flex-col gap-[1.2vh] px-[4vw]">
           <TitleArt title={detail.seriesTitle ?? detail.title} logo={detail.logo} />
           {detail.seriesTitle && <p className="text-[2vh] text-fg-dim">{detail.title}</p>}

@@ -290,7 +290,13 @@ export interface MediaBackend {
   // --- browse ---
   libraries(): Promise<Library[]>;
   onDeck(): Promise<MediaItem[]>;
-  recentlyAdded(libraryId?: string): Promise<MediaItem[]>;
+  /**
+   * `kind` is the library's own kind, and it decides how wide to ask. A show
+   * library answers with EPISODES which then roll up to series, so a full row
+   * needs more rows than it shows; a film library does not, and asking wide
+   * there costs 2.5x the payload for an identical answer.
+   */
+  recentlyAdded(libraryId?: string, kind?: string): Promise<MediaItem[]>;
   libraryPage(libraryId: string, q: PageQuery): Promise<Page<MediaItem>>;
   /** Buckets for the A-Z strip, in the backend's own order. */
   letters(libraryId: string): Promise<{ key: string; title: string; size: number }[]>;

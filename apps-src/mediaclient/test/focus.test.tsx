@@ -65,9 +65,9 @@ describe("the remote", () => {
     await settle();
 
     // Without this, every arrow press is discarded and the app is a picture.
-    // The top rail, so the first press is already among the things that lead
-    // somewhere.
-    expect(getCurrentFocusKey()).toBe("lib-1");
+    // What you were watching, because that is what an evening usually starts
+    // with; the top rail is one press up from it.
+    expect(getCurrentFocusKey()).toBe("ondeck-i1");
   });
 
   it("moves along a row when Right is pressed", async () => {
@@ -98,6 +98,7 @@ describe("the remote", () => {
     place(screen.getByText("Movies"), 0, 0, 120, 60);
     place(screen.getByText(en.home.search), 140, 0, 120, 60);
     place(screen.getByText(en.home.settings), 280, 0, 120, 60);
+    await setFocus("lib-1");
 
     await remote.right();
     expect(getCurrentFocusKey()).toBe("nav-search");

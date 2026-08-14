@@ -37,7 +37,10 @@ export function Reviews({ reviews, title }: { reviews: Review[]; title: string }
         <h2 className="px-[4vw] text-[2vh] font-semibold tracking-tight">{title}</h2>
         <div
           ref={scroller}
-          className="no-scrollbar flex gap-[1.2vw] overflow-x-auto scroll-smooth px-[4vw] py-[4vh] -my-[2vh]"
+          // items-start, or the cards stretch to the tallest one: opening the
+          // focused quotation would then leave every neighbour with a tall empty
+          // box under its four clamped lines.
+          className="no-scrollbar flex items-start gap-[1.2vw] overflow-x-auto scroll-smooth px-[4vw] py-[4vh] -my-[2vh]"
         >
           {reviews.map((r) => (
             <Card key={r.id} review={r} onFocusedEl={scrollTo} />
@@ -49,21 +52,20 @@ export function Reviews({ reviews, title }: { reviews: Review[]; title: string }
 }
 
 function Card({ review, onFocusedEl }: { review: Review; onFocusedEl: (el: HTMLElement) => void }): React.JSX.Element {
-  // Focusable but does nothing on OK: what makes it focusable is that the row
-  // has to be reachable at all, not that a quotation leads anywhere.
-  const { ref, focused } = useFocusableItem({ focusKey: `review-${review.id}` }, { block: "nearest" });
-  const el = useRef<HTMLDivElement | null>(null);
   const [expanded, setExpanded] = useState(false);
+  // OK opens the quotation out and closes it again. Tying it to focus instead
+  // changed the row's height on every Left/Right press - the row breathed under
+  // whatever was being read - and left OK doing nothing on the one card someone
+  // is standing on.
+  const { ref, focused } = useFocusableItem(
+    { focusKey: `review-${review.id}`, onEnterPress: () => setExpanded((v) => !v) },
+    { block: "nearest" },
+  );
+  const el = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (focused && el.current) onFocusedEl(el.current);
   }, [focused, onFocusedEl]);
-
-  // A long quotation is clamped on the card and opens out when focused, so the
-  // row stays a row and nothing is unreadable.
-  useEffect(() => {
-    setExpanded(focused);
-  }, [focused]);
 
   return (
     <div
@@ -78,12 +80,12 @@ function Card({ review, onFocusedEl }: { review: Review; onFocusedEl: (el: HTMLE
     >
       <div className="flex items-center gap-[0.6vw]">
         <Sentiment sentiment={review.sentiment} />
-        <span className="truncate text-[1.7vh] opacity-70">
+        <span className="truncate text-[1.9vh] opacity-80">
           {review.author}
           {review.source ? ` · ${review.source}` : ""}
         </span>
       </div>
-      <p className={`text-[1.9vh] leading-relaxed ${expanded ? "" : "line-clamp-4"}`}>{review.text}</p>
+      <p className={`text-[2.1vh] leading-relaxed ${expanded ? "" : "line-clamp-4"}`}>{review.text}</p>
     </div>
   );
 }
@@ -91,10 +93,25 @@ function Card({ review, onFocusedEl }: { review: Review; onFocusedEl: (el: HTMLE
 function Sentiment({ sentiment }: { sentiment?: "fresh" | "rotten" }): React.JSX.Element {
   // Inline SVG, never an emoji: this browser has no colour-emoji font and draws
   // a hollow box in its place.
-  const colour = sentiment === "rotten" ? "#4a9b3f" : sentiment === "fresh" ? "#e2372a" : "#8a96a6";
+  // Two SHAPES, not one shape in two colours. Rotten Tomatoes paints its
+  // positive verdict red and its negative one green, which is backwards against
+  // every other use of those colours - so the silhouette has to carry the
+  // meaning on its own, exactly as it does on the score badges.
+  if (!sentiment) return <svg viewBox="0 0 24 24" className="h-[1.8vh] w-[1.8vh] shrink-0" aria-hidden="true" />;
+  const rotten = sentiment === "rotten";
   return (
     <svg viewBox="0 0 24 24" className="h-[1.8vh] w-[1.8vh] shrink-0" aria-hidden="true">
-      <circle cx="12" cy="12" r="7" fill={colour} />
+      {rotten ? (
+        <path
+          d="M12 3l2 4 4-2-1 4 4 1-3 3 3 3-4 1 1 4-4-2-2 4-2-4-4 2 1-4-4-1 3-3-3-3 4-1-1-4 4 2z"
+          fill="#4a9b3f"
+        />
+      ) : (
+        <>
+          <circle cx="12" cy="13" r="8" fill="#e2372a" />
+          <path d="M12 5c1-2 3-2 4-1-1 1-2 2-4 1z" fill="#3f8f34" />
+        </>
+      )}
     </svg>
   );
 }

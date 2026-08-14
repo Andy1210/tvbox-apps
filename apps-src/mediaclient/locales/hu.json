@@ -106,7 +106,9 @@
   },
   "profiles": {
     "title": "Ki néz?",
-    "enterPin": "{name} PIN-kódja",
-    "wrongPin": "Nem jó a PIN-kód."
+    "enterPin": "Add meg {name} PIN-kódját",
+    "wrongPin": "Nem jó a PIN-kód.",
+    "continue": "Tovább enélkül",
+    "none": "Ehhez a fiókhoz nincs másik felhasználó."
   }
 }

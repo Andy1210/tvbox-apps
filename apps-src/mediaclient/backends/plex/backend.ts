@@ -148,7 +148,11 @@ export class PlexBackend implements MediaBackend {
     const profileToken = await switchHomeUser(this.id, this.accountToken, id, pin);
     // The server is reached with the profile's token from here on, but the
     // account's is kept so the household can be listed and switched again.
-    this.session = { ...this.session, token: profileToken, profileId: id };
+    // accountToken is written out explicitly rather than left to the spread: a
+    // session stored by an older build carries no such field, so the spread
+    // would hand back one whose only token is the profile's - and the NEXT
+    // switch would then try to list the household with it.
+    this.session = { ...this.session, token: profileToken, accountToken: this.accountToken, profileId: id };
     // Anything cached was fetched as somebody else: watch state, on deck and the
     // resume points all belong to whoever was signed in a moment ago.
     this.metaCache.clear();
@@ -175,11 +179,11 @@ export class PlexBackend implements MediaBackend {
    * call them four new things. They are rolled up to their series, which both
    * gives the row cover art and stops one series filling it.
    */
-  async recentlyAdded(libraryId?: string): Promise<MediaItem[]> {
+  async recentlyAdded(libraryId?: string, kind?: string): Promise<MediaItem[]> {
     const path = libraryId ? `library/sections/${libraryId}/recentlyAdded` : "library/recentlyAdded";
     // Asked wider than shown: rolling four episodes into one series leaves a
     // short row otherwise.
-    const c = container<MetadataContainer>(await this.req(path, page(0, 60)));
+    const c = container<MetadataContainer>(await this.req(path, page(0, kind === "show" ? 60 : 24)));
     return rollUpEpisodes((c.Metadata ?? []).map(toItem)).slice(0, 24);
   }
 
