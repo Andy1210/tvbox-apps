@@ -36,6 +36,10 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
   const artId = item?.seriesId ?? item?.id;
 
   useEffect(() => {
+    // Cleared first. Held, the previous title's picture stayed under the new
+    // title - and an item with no art of its own kept the last one entirely.
+    setArt(null);
+    setAccent(null);
     if (!backend || !item?.art) return;
     const url = backend.backdropUrl(item, 960, 540);
     if (!url) return;
@@ -55,15 +59,24 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
   }, [backend, item?.id, item?.art]);
 
   useEffect(() => {
+    // Cleared, or the synopsis and cast of the PREVIOUS title sit under the new
+    // one's name for a round trip - measured, a title from one film with the
+    // blurb and cast of another.
+    setDetail(null);
     if (!backend || !artId) return;
     let live = true;
-    // Cached by the backend, so moving back along a row costs nothing.
-    void backend
-      .item(artId)
-      .then((d) => live && setDetail(d))
-      .catch(() => live && setDetail(null));
+    // Debounced: this is one metadata document per D-pad press otherwise, and
+    // they are 29-48 KB each. Scanning a row should cost the row, not the row
+    // times a fetch.
+    const id = setTimeout(() => {
+      void backend
+        .item(artId)
+        .then((d) => live && setDetail(d))
+        .catch(() => live && setDetail(null));
+    }, 220);
     return () => {
       live = false;
+      clearTimeout(id);
     };
   }, [backend, artId]);
 
@@ -105,14 +118,17 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
 
       <section className="relative z-10 flex h-[42vh] w-[46vw] shrink-0 flex-col justify-center gap-[1.2vh] px-[4vw]">
         <TitleArt title={title} logo={detail?.logo} />
-        {sub && <p className="text-[2.1vh] text-fg-dim">{sub}</p>}
+        {sub && <p className="text-[2.1vh] text-white/85 [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.8)]">{sub}</p>}
         {detail?.summary && (
           <p className="line-clamp-3 max-w-[42vw] text-[2vh] leading-relaxed [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.8)]">
             {detail.summary}
           </p>
         )}
+        {/* Not fg-dim. Measured on the box, that grey over the computed tint is
+            3.37:1 - the tint is what takes it under, and these two lines carry
+            the episode name and the cast. */}
         {cast.length > 0 && (
-          <p className="text-[1.9vh] text-fg-dim">
+          <p className="text-[1.9vh] text-white/80 [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.8)]">
             {t("detail.cast")}: {cast.join(", ")}
           </p>
         )}

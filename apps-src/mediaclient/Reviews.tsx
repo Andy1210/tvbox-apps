@@ -34,7 +34,7 @@ export function Reviews({ reviews, title }: { reviews: Review[]; title: string }
 
   return (
     <FocusContext.Provider value={focusKey}>
-      <section ref={ref} className="flex flex-col gap-[1vh]">
+      <section ref={ref} className="flex shrink-0 flex-col gap-[1vh]">
         <h2 className="px-[4vw] text-[2vh] font-semibold tracking-tight">{title}</h2>
         <div
           ref={scroller}

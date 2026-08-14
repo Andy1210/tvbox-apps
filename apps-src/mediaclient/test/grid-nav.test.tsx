@@ -232,3 +232,24 @@ describe("a tile that reports its focus", () => {
     expect(calls).toBe(afterFocus);
   });
 });
+
+describe("a row inside a scrolling column", () => {
+  it("is not allowed to shrink", async () => {
+    // A row is a flex item in a column that scrolls. Flexbox shrinks items
+    // before it lets the box scroll, so several rows taller than the box get
+    // squashed - and what survives is the middle, which is the posters: the
+    // heading above them and the captions below them both disappear. Two
+    // versions shipped like that, and the second "fix" chased scroll padding
+    // instead, because the symptom looks like clipping.
+    const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Row.tsx"), "utf8");
+    const section = /<section[\s\S]*?className="([^"]*)"/.exec(src)?.[1] ?? "";
+    expect(section, "the row's own section").toContain("shrink-0");
+
+    // The same trap, same shape, on the two other rows a screen stacks.
+    for (const f of ["CastRow.tsx", "Reviews.tsx"]) {
+      const other = readFileSync(resolve(process.cwd(), `apps-src/mediaclient/${f}`), "utf8");
+      const cls = /<section[\s\S]*?className="([^"]*)"/.exec(other)?.[1] ?? "";
+      expect(cls, f).toContain("shrink-0");
+    }
+  });
+});

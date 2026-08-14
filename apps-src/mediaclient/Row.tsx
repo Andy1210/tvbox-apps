@@ -79,7 +79,14 @@ export function Row({
 
   return (
     <FocusContext.Provider value={focusKey}>
-      <section ref={ref} className="flex flex-col gap-[1vh]">
+      <section
+        ref={ref}
+        // shrink-0, because a row is a flex item in a column that scrolls: with
+        // several of them taller than the box, flexbox squashes each one rather
+        // than letting the box scroll - and what survives is the middle, so the
+        // heading above the tiles and the captions below them both vanish.
+        className="flex shrink-0 flex-col gap-[1vh]"
+      >
         <h2 className="px-[4vw] text-[2vh] font-semibold tracking-tight">{title}</h2>
         <div
           ref={scroller}

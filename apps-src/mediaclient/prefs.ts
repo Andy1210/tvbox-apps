@@ -27,6 +27,8 @@ export interface Prefs {
    * what happened. The button is always there for anyone who wants the choice.
    */
   autoSkip: boolean;
+  /** Play a series' theme while looking at it. */
+  themeMusic: boolean;
   /**
    * Row order, top to bottom.
    *
@@ -46,6 +48,7 @@ export const DEFAULTS: Prefs = {
   subPos: 100,
   subColor: "#ffffff",
   autoSkip: false,
+  themeMusic: true,
   homeRows: [...ROW_IDS],
   hiddenRows: [],
 };
@@ -61,6 +64,7 @@ export function sane(v: Partial<Prefs>): Prefs {
     // Strictly boolean: a stored "yes-please" is truthy, and auto-skip would run
     // on a value nothing here ever wrote.
     autoSkip: v.autoSkip === true,
+    themeMusic: v.themeMusic !== false,
     // Rebuilt rather than trusted: a stored order from an older build is
     // missing any row added since, and one from a newer build may name a row
     // this code has never heard of. Known ids in their stored order first, then
@@ -97,8 +101,8 @@ export const usePrefs = create<PrefsState>((set, get) => ({
 
   async set(key, value) {
     set({ [key]: value } as Pick<Prefs, typeof key>);
-    const { subScale, subPos, subColor, autoSkip, homeRows, hiddenRows } = get();
-    const w = await writeJson(KEY, { subScale, subPos, subColor, autoSkip, homeRows, hiddenRows });
+    const { subScale, subPos, subColor, autoSkip, themeMusic, homeRows, hiddenRows } = get();
+    const w = await writeJson(KEY, { subScale, subPos, subColor, autoSkip, themeMusic, homeRows, hiddenRows });
     if (!w.ok) log.warn("playback preference not saved");
     applySubtitleStyle();
   },

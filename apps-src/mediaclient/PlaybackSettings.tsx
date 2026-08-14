@@ -95,6 +95,15 @@ export function PlaybackSettings({ onClose }: { onClose: () => void }): React.JS
               ))}
             </Group>
 
+            <Group title={t("settings.themeMusic")} note={t("settings.themeMusicHint")}>
+              <Choice focusKey="ps-theme-on" active={p.themeMusic} onEnter={() => void p.set("themeMusic", true)}>
+                {t("settings.on")}
+              </Choice>
+              <Choice focusKey="ps-theme-off" active={!p.themeMusic} onEnter={() => void p.set("themeMusic", false)}>
+                {t("settings.off")}
+              </Choice>
+            </Group>
+
             <Group title={t("settings.autoSkip")} note={t("settings.autoSkipHint")}>
               <Choice focusKey="ps-skip-off" active={!p.autoSkip} onEnter={() => void p.set("autoSkip", false)}>
                 {t("settings.off")}

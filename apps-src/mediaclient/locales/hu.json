@@ -49,7 +49,7 @@
     "clearFilters": "Töröld a szűrőket",
     "emptyFiltered": "Ehhez a szűréshez nincs találat.",
     "collections": "Gyűjtemények",
-    "allItems": "Minden film",
+    "allItems": "Minden elem",
     "tooMany": "Az első {shown} látszik a(z) {total} közül."
   },
   "detail": {
@@ -135,7 +135,10 @@
     "moveUp": "Feljebb",
     "moveDown": "Lejjebb",
     "rowShown": "Látszik",
-    "rowHidden": "Rejtve"
+    "rowHidden": "Rejtve",
+    "rowVisible": "Sor",
+    "themeMusic": "Sorozatok főcímzenéje",
+    "themeMusicHint": "A sorozat saját zenéje szól, amíg nézegeted. Kétszer megy le, aztán elhallgat."
   },
   "tracks": {
     "version": "Verzió",
