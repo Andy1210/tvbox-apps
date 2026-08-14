@@ -32,6 +32,14 @@ export interface MediaItem {
   seriesThumb?: string;
   /** Theme music, where the server has any. Series mostly; films rarely. */
   theme?: string;
+  /**
+   * The four corner colours the server derived from the artwork.
+   *
+   * Present on 1,668 of this library's 1,693 films. Worth taking over anything
+   * computed here: it is free, it needs no second decode, and four corners make
+   * a gradient where one average makes a wash.
+   */
+  colors?: { topLeft: string; topRight: string; bottomRight: string; bottomLeft: string };
   /** What the server sorts by, which is not always the title ("A" articles). */
   sortTitle?: string;
   year?: number;
@@ -343,7 +351,7 @@ export interface MediaBackend {
    * - a series library orders by unwatched episode count, a film library by
    * resolution - and a fixed list would offer orders the server rejects.
    */
-  sortOptions(libraryId: string): Promise<SortOption[]>;
+  sortOptions(libraryId: string, of?: "collections"): Promise<SortOption[]>;
 
   /**
    * The library's collections, as items in their own right.

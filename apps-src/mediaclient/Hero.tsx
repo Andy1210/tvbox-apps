@@ -41,6 +41,8 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
     setArt(null);
     setAccent(null);
     if (!backend || !item?.art) return;
+    // Only when the server gave no colours of its own.
+    const needsAccent = !item.colors;
     const url = backend.backdropUrl(item, 960, 540);
     if (!url) return;
     let live = true;
@@ -51,7 +53,7 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
         return;
       }
       setArt(objectUrl);
-      void accentFrom(objectUrl, url).then((c) => live && c && setAccent(c));
+      if (needsAccent) void accentFrom(objectUrl, url).then((c) => live && c && setAccent(c));
     });
     return () => {
       live = false;
@@ -82,6 +84,24 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
 
   if (!item) return null;
 
+  /**
+   * The server's four corners where it has them, our own average where it does
+   * not.
+   *
+   * The server derives these from the artwork itself and offers them on 1,668
+   * of this library's 1,693 films - free, with no second decode, and four
+   * corners make a gradient where one average makes a flat wash. An earlier
+   * version of this file claimed the server supplied none; that measurement
+   * read the wrong spelling of the field.
+   *
+   * Held at low opacity for the same reason the average was darkened: these are
+   * the artwork's real colours, and at full strength they fight the text.
+   */
+  const corners = (item.colors ?? detail?.colors) as MediaItem["colors"];
+  const tint = corners
+    ? `linear-gradient(135deg, ${corners.topLeft} 0%, ${corners.bottomLeft} 45%, ${corners.bottomRight} 100%)`
+    : accent;
+
   const cast = (detail?.roles ?? []).slice(0, 4).map((r) => r.name);
   const title = item.seriesTitle ?? item.title;
   const sub = item.seriesTitle ? item.title : null;
@@ -92,10 +112,15 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
           rather than one band's - the rows scroll over them and the screen keeps
           its colour all the way down. Only the words below are in flow. */}
       <div
-        className="pointer-events-none fixed inset-0 z-0 transition-colors duration-500"
-        style={{ background: accent ?? "transparent" }}
+        className="pointer-events-none fixed inset-0 z-0 transition-[background] duration-500"
+        style={{ background: tint ?? "transparent" }}
         aria-hidden="true"
       />
+
+      {/* The tint is the artwork's own colours, so it is dimmed rather than
+          shown: a scrim over it keeps every answer in the band the app's
+          background lives in. */}
+      {tint && <div className="pointer-events-none fixed inset-0 z-0 bg-bg-0/72" aria-hidden="true" />}
 
       {art && (
         <div
