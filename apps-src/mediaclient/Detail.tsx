@@ -8,7 +8,7 @@ import { CastRow } from "./CastRow";
 import { Scores } from "./Scores";
 import { Reviews } from "./Reviews";
 import { TitleArt } from "./TitleArt";
-import { useFocusFallback, useInitialFocus } from "./focus";
+import { useFocusFallback, useInitialFocus, useScrollToTopOnFirst } from "./focus";
 import { usePlayer } from "./playback/player";
 import { classify, useApp } from "./state";
 import type { ItemDetail, MediaItem } from "./backends/types";
@@ -77,20 +77,35 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
   }, [backend, itemId, fail, reload]);
 
   const { ref, focusKey } = useFocusable({ focusKey: `detail-${itemId}`, saveLastFocusedChild: true });
+  // The focus container IS the scroller here, so one ref serves both.
+  const toTop = useScrollToTopOnFirst(ref);
   useInitialFocus("detail-play", Boolean(detail));
   // Returning from playback unmounts the player, which held focus - without a
   // fallback the detail page comes back with the D-pad dead.
-  useFocusFallback("detail-play", (key) => key.startsWith("detail-") || key.startsWith("cast-") || key.startsWith("children-") || key.startsWith("extras-") || key.startsWith("review-"), !playing);
+  useFocusFallback(
+    "detail-play",
+    (key) =>
+      key.startsWith("detail-") ||
+      key.startsWith("cast-") ||
+      key.startsWith("children-") ||
+      key.startsWith("extras-") ||
+      key.startsWith("review-"),
+    !playing,
+  );
 
   if (failure) return <Message failure={failure} onRetry={() => setReload((n) => n + 1)} />;
   if (!detail) return <Message loading />;
 
-  const poster = (item: MediaItem): string | undefined => backend?.posterUrl(item, 300 * artworkScale(), 450 * artworkScale());
+  const poster = (item: MediaItem): string | undefined =>
+    backend?.posterUrl(item, 300 * artworkScale(), 450 * artworkScale());
   const resumable = (detail.viewOffsetMs ?? 0) > 0;
 
   return (
     <FocusContext.Provider value={focusKey}>
-      <div ref={ref} className="flex h-full flex-col gap-[2.4vh] overflow-y-auto py-[3vh] scroll-pt-[16vh] scroll-pb-[12vh]">
+      <div
+        ref={ref}
+        className="flex h-full flex-col gap-[2.4vh] overflow-y-auto py-[3vh] scroll-pt-[16vh] scroll-pb-[12vh]"
+      >
         <header className="flex flex-col gap-[1.2vh] px-[4vw]">
           <TitleArt title={detail.seriesTitle ?? detail.title} logo={detail.logo} />
           {detail.seriesTitle && <p className="text-[2vh] text-fg-dim">{detail.title}</p>}
@@ -105,7 +120,9 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
               </span>
             ) : null}
             {detail.studio ? <span>{detail.studio}</span> : null}
-            {detail.genres?.slice(0, 3).map((g) => <span key={g}>{g}</span>)}
+            {detail.genres?.slice(0, 3).map((g) => (
+              <span key={g}>{g}</span>
+            ))}
           </div>
 
           <Scores scores={detail.scores} />
@@ -115,6 +132,10 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
           <div className="mt-[1vh] flex gap-[1.2vw]">
             <FocusButton
               focusKey="detail-play"
+              // The first focusable on the page, so reaching it means going back
+              // to the top - the title art and synopsis above it can be reached
+              // no other way.
+              onFocused={toTop}
               onEnter={() => backend && void usePlayer.getState().play(backend, detail, { version })}
               className="rounded-[1vh] bg-white/15 px-[2.4vw] py-[1.4vh] text-[2.1vh]"
             >
@@ -154,7 +175,9 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
                     v.index === version ? "bg-white/15 ring-[0.3vh] ring-white" : "bg-white/8"
                   }`}
                 >
-                  {v.parts > 1 ? `${v.label} · ${t("tracks.part", { n: String(v.partIndex + 1), of: String(v.parts) })}` : v.label}
+                  {v.parts > 1
+                    ? `${v.label} · ${t("tracks.part", { n: String(v.partIndex + 1), of: String(v.parts) })}`
+                    : v.label}
                 </FocusButton>
               ))}
             </div>

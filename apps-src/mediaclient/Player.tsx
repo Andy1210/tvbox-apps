@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { FocusContext, getCurrentFocusKey, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
+import {
+  FocusContext,
+  doesFocusableExist,
+  getCurrentFocusKey,
+  setFocus,
+  useFocusable,
+} from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, useBackspace, useFocusableItem, useI18n } from "@sdk";
 import { useApp } from "./state";
 import { TrackMenu, type Choice } from "./TrackMenu";
@@ -68,7 +74,9 @@ export function Player(): React.JSX.Element | null {
     const bump = (): void => {
       usePlayer.getState().showOverlay(true);
       if (hideTimer.current) clearTimeout(hideTimer.current);
-      if (usePlayer.getState().state === "playing") {
+      // Not while a cursor is out: hiding it leaves the film looking untouched
+      // while OK still means "jump to a place you can no longer see".
+      if (usePlayer.getState().state === "playing" && usePlayer.getState().scrubMs === null) {
         hideTimer.current = setTimeout(() => usePlayer.getState().showOverlay(false), IDLE_HIDE_MS);
       }
     };
@@ -85,6 +93,19 @@ export function Player(): React.JSX.Element | null {
     // and OK would both press the focused button and toggle pause.
     if (!current || menu) return;
 
+    // Re-armed from FRESH state, and after the key has been acted on. Reading
+    // the snapshot taken at the top of the handler meant the first arrow press
+    // armed the hide while scrubMs was still null - so the overlay vanished
+    // four seconds later with the cursor out, and the next OK jumped the film
+    // to a place nobody could see.
+    const rearmHide = (): void => {
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+      const p = usePlayer.getState();
+      if (p.state === "playing" && p.scrubMs === null) {
+        hideTimer.current = setTimeout(() => usePlayer.getState().showOverlay(false), IDLE_HIDE_MS);
+      }
+    };
+
     const onKey = (e: KeyboardEvent): void => {
       const p = usePlayer.getState();
       // Which row owns the arrows. On the bar they move the cursor; on the
@@ -94,7 +115,6 @@ export function Player(): React.JSX.Element | null {
       const onBar = getCurrentFocusKey() === "scrub" || !getCurrentFocusKey();
       p.showOverlay(true);
       if (hideTimer.current) clearTimeout(hideTimer.current);
-      if (p.state === "playing") hideTimer.current = setTimeout(() => usePlayer.getState().showOverlay(false), IDLE_HIDE_MS);
 
       switch (e.key) {
         case "ArrowLeft":
@@ -131,15 +151,20 @@ export function Player(): React.JSX.Element | null {
           e.preventDefault();
           void p.stop();
           break;
+        // A dedicated skip key is unambiguous, so it jumps rather than arming a
+        // cursor - and arming one from the button row stranded it: the arrows
+        // could not move it and OK belonged to whatever button had focus.
         case "MediaTrackNext":
-          p.scrubBy(60_000);
+          p.seekBy(60_000);
           break;
         case "MediaTrackPrevious":
-          p.scrubBy(-60_000);
+          p.seekBy(-60_000);
           break;
         // Up and Down are left alone: they are what moves between the bar and
         // the row of buttons under it, and that is spatial navigation's job.
       }
+
+      rearmHide();
     };
 
     const onKeyUp = (): void => {
@@ -185,14 +210,21 @@ export function Player(): React.JSX.Element | null {
     else void p.stop();
   }, Boolean(current));
 
-  // The bar takes focus as the film starts, and takes it back whenever the
-  // overlay returns. Without an origin, spatial navigation discards every press
-  // - and the arrows would then not even reach the buttons under it.
+  // The bar takes focus off ANYTHING the overlay does not own.
+  //
+  // Playback starts from a screen behind this one, so focus arrives on that
+  // screen's button - and the arrows are routed by what has focus, so it
+  // silently disabled the whole overlay: nothing scrubbed, the buttons could
+  // not be reached, and OK re-fired the play button that was still focused and
+  // restarted the film. Closing the track menu left focus on a track row and
+  // did the same. Keys that no longer exist behave identically, because
+  // spatial navigation walks up to the root and gives up there.
   useEffect(() => {
     if (!current || menu) return;
     const id = setTimeout(() => {
       const key = getCurrentFocusKey();
-      if (!key || key === "skip") setFocus("scrub");
+      const ours = key === "scrub" || key?.startsWith("pb-") || key === "skip";
+      if (!ours || !doesFocusableExist(key!)) setFocus("scrub");
     }, 0);
     return () => clearTimeout(id);
   }, [current, menu, overlay]);
@@ -205,7 +237,11 @@ export function Player(): React.JSX.Element | null {
     // to navigate from - every later press is discarded. The window is wide,
     // because the first minute of an episode is exactly when someone opens this
     // menu to fix the audio language.
-    if (skippable && !menu) setFocus("skip");
+    // Not while a cursor is out: the mark would stay drawn on the bar while the
+    // arrows stopped moving it and OK skipped the marker instead of committing
+    // - the bar would be showing a place OK was never going to go.
+    if (skippable && !menu && usePlayer.getState().scrubMs === null && getCurrentFocusKey() === "scrub")
+      setFocus("skip");
   }, [skippable, menu]);
 
   if (!current) return null;
@@ -273,6 +309,15 @@ export function Player(): React.JSX.Element | null {
   // otherwise there is no way to tell how far you have wandered, or to get back.
   const playedPct = durationMs > 0 ? Math.min(100, ((seekTargetMs ?? positionMs) / durationMs) * 100) : 0;
   const partId = current.detail?.versions[current.choice.version]?.partId;
+  const onButtons = Boolean(getCurrentFocusKey()?.startsWith("pb-"));
+  const hintKey =
+    scrubMs !== null
+      ? "player.hintScrub"
+      : onButtons
+        ? "player.hintButtons"
+        : state === "paused"
+          ? "player.hintPaused"
+          : "player.hint";
 
   return (
     <FocusContext.Provider value={focusKey}>
@@ -296,15 +341,28 @@ export function Player(): React.JSX.Element | null {
 
         {/* A gradient rather than a panel: the film keeps showing through, which
             is what makes the overlay feel like it belongs to the picture. */}
-        <div className="bg-gradient-to-t from-black/85 to-transparent px-[4vw] pt-[8vh] pb-[4vh]">
+        {/* The stop in the middle matters: with a single stop to transparent,
+            the title sat in the top third at alpha 0.18 and was the least
+            readable thing on the overlay over a bright scene. */}
+        <div className="bg-gradient-to-t from-black/90 via-black/65 to-transparent px-[4vw] pt-[10vh] pb-[4vh]">
           <div className="flex flex-col gap-[1.4vh]">
             <div className="flex items-baseline gap-[1.2vw]">
-              <h2 className="text-[2.6vh] font-semibold tracking-tight">
+              <h2 className="text-[2.8vh] font-semibold tracking-tight [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]">
                 {current.item.seriesTitle ?? current.item.title}
               </h2>
-              {current.item.seriesTitle && <span className="text-[1.9vh] text-fg-dim">{current.item.title}</span>}
-              {buffering && <span className="text-[1.7vh] text-fg-dim">{t("player.buffering")}</span>}
-              {current.decision.transcoded && <span className="text-[1.7vh] text-fg-dim">{t("player.converting")}</span>}
+              {current.item.seriesTitle && (
+                <span className="text-[2.1vh] text-white/80 [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]">
+                  {current.item.title}
+                </span>
+              )}
+              {buffering && (
+                <span className="text-[2.1vh] text-white/85 [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]">
+                  {t("player.buffering")}
+                </span>
+              )}
+              {current.decision.transcoded && (
+                <span className="text-[1.7vh] text-fg-dim">{t("player.converting")}</span>
+              )}
             </div>
 
             <ScrubBar
@@ -315,6 +373,7 @@ export function Player(): React.JSX.Element | null {
               markers={current.markers}
               scrubbing={scrubMs !== null}
               partId={partId}
+              hintKey={hintKey}
             />
 
             <ButtonRow
@@ -345,6 +404,7 @@ function ScrubBar({
   markers,
   scrubbing,
   partId,
+  hintKey,
 }: {
   shown: number;
   pct: number;
@@ -353,6 +413,7 @@ function ScrubBar({
   markers: { type: string; startMs: number; endMs: number }[];
   scrubbing: boolean;
   partId?: string;
+  hintKey: string;
 }): React.JSX.Element {
   const { t } = useI18n();
   // No scroll options: the overlay does not scroll, and asking the browser to
@@ -364,21 +425,19 @@ function ScrubBar({
       {/* The frame rides above the cursor and only exists while scrubbing: a
           preview pinned over a film nobody is scrubbing is just a smaller
           picture in front of a bigger one. */}
-      <div className="relative h-[16vh]">
-        {scrubbing && (
-          <div
-            className="absolute bottom-0 -translate-x-1/2"
-            // Clamped, or the frame hangs off the screen at either end and the
-            // one place it matters most - the last minutes - is unreadable.
-            style={{ left: `clamp(14vh, ${pct}%, calc(100% - 14vh))` }}
-          >
-            <ScrubPreview partId={partId} timeMs={shown} widthVh={26} />
-          </div>
-        )}
-      </div>
+      {/* Vertical room only. The frame itself is positioned inside the bar
+          below, because a percentage here would resolve against this full-width
+          box while the cursor's resolves against the bar - two coordinate
+          systems that agree only at the exact midpoint, and are 162px apart a
+          tenth of the way into a film. Reserved only while scrubbing: kept
+          always, it pushed the title and the bar up the screen for a preview
+          that was not there. */}
+      <div className={scrubbing ? "h-[16vh]" : "hidden"} />
 
       <div className="flex items-center gap-[1.2vw]">
-        <span className="w-[9vw] text-[1.9vh] tabular-nums">{clock(shown)}</span>
+        <span className="w-[9vw] text-[2.2vh] tabular-nums [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]">
+          {clock(shown)}
+        </span>
 
         <div
           className={`relative h-[0.7vh] flex-1 rounded-full bg-white/25 transition-all ${
@@ -400,26 +459,48 @@ function ScrubBar({
           <div className="absolute top-0 left-0 h-full rounded-full bg-white" style={{ width: `${playedPct}%` }} />
           {/* While scrubbing there are two marks: where the film is, and where
               the cursor points. Without the first one there is no way back. */}
+          {/* Where the film IS, while the cursor is away from it. A thin upright
+              tick rather than a smaller disc: the two marks have to differ in
+              shape, because at three metres a size difference alone is a few
+              arc-minutes and reads as one mark that moved. */}
           {scrubbing && (
             <div
-              className="absolute top-1/2 h-[1.2vh] w-[1.2vh] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/50"
+              className="absolute top-1/2 h-[2.4vh] w-[0.35vh] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white"
               style={{ left: `${playedPct}%` }}
             />
           )}
+          {/* Above the cursor, in the cursor's own coordinate system. */}
+          {scrubbing && (
+            <div
+              className="absolute bottom-[2.4vh] -translate-x-1/2"
+              // Clamped by half its own width, or the frame hangs off the screen
+              // at either end - and the last minutes are exactly where someone
+              // is looking for the point they fell asleep.
+              style={{ left: `clamp(13vh, ${pct}%, calc(100% - 13vh))` }}
+            >
+              <ScrubPreview partId={partId} timeMs={shown} widthVh={26} />
+            </div>
+          )}
           <div
-            className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-[0_0_1.5vh_rgba(0,0,0,0.6)] ${
-              scrubbing ? "h-[2.6vh] w-[2.6vh] bg-accent" : "h-[2vh] w-[2vh] bg-white"
+            className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-[0_0_1.5vh_rgba(0,0,0,0.7)] ${
+              scrubbing
+                ? "h-[2.8vh] w-[2.8vh] border-[0.3vh] border-white bg-[var(--color-accent)]"
+                : "h-[2vh] w-[2vh] bg-white"
             }`}
             style={{ left: `${pct}%` }}
           />
         </div>
 
-        <span className="w-[9vw] text-right text-[1.9vh] text-fg-dim tabular-nums">
+        <span className="w-[9vw] text-right text-[2.2vh] text-white/80 tabular-nums [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]">
           -{clock(Math.max(0, durationMs - shown))}
         </span>
       </div>
 
-      <p className="text-[1.7vh] text-fg-dim">{t(scrubbing ? "player.hintScrub" : "player.hint")}</p>
+      {/* One line, and it has to say what the arrows do RIGHT NOW: which row has
+          focus decides that, so a single fixed sentence was wrong in three of
+          the four states - it still described jumping on Left and Right, which
+          is the behaviour this screen no longer has. */}
+      <p className="text-[2vh] text-white/85 [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]">{t(hintKey)}</p>
     </div>
   );
 }
@@ -439,7 +520,9 @@ function ButtonRow({
   onQuality: () => void;
 }): React.JSX.Element {
   const { t } = useI18n();
-  const cls = "rounded-[1vh] bg-white/12 px-[2vw] py-[1.2vh] text-[2vh]";
+  // Opaque enough to read against any frame, and above the 10-foot floor of
+  // 2.22vh at 1080p.
+  const cls = "rounded-[1vh] bg-black/55 px-[2vw] py-[1.3vh] text-[2.4vh]";
 
   return (
     <div className="flex items-center gap-[1vw]">

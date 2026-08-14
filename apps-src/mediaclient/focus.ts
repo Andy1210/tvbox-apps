@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, type RefObject } from "react";
 import { doesFocusableExist, getCurrentFocusKey, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 
 // The cursor must never end up nowhere.
@@ -70,4 +70,19 @@ export function useFocusFallback(
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, []);
+}
+
+/**
+ * Bring a page's own top back into view.
+ *
+ * scrollIntoView can only reveal the focused element, and on a detail page
+ * everything above the first focusable - the title art, the synopsis, the
+ * scores - is not focusable at all. So once someone has scrolled down through
+ * the cast, there is nothing to navigate back UP to: the page ends at its first
+ * button. Reaching that button scrolls the whole way instead.
+ */
+export function useScrollToTopOnFirst(scroller: RefObject<HTMLElement | null>): () => void {
+  return useCallback(() => {
+    scroller.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [scroller]);
 }

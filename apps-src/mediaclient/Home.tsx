@@ -81,7 +81,23 @@ export function Home(): React.JSX.Element {
   // tile afterwards leaves the D-pad dead with only Back working.
   useFocusFallback(firstKey, (key) => key.startsWith("ondeck-") || key.startsWith("lib-") || key.startsWith("recent-") || key.startsWith("nav-"), !playing);
 
-  const poster = (item: MediaItem): string | undefined => backend?.posterUrl(item, 300 * artworkScale(), 450 * artworkScale());
+  const poster = (item: MediaItem): string | undefined =>
+    backend?.posterUrl(item, 300 * artworkScale(), 450 * artworkScale());
+
+  /**
+   * Carry-on-watching rows show the SERIES cover, not the episode's own still.
+   *
+   * An episode's thumb is a frame from the episode, which is 16:9 and arrives
+   * letterboxed into a 2:3 tile - so a row of them reads as a row of blurry
+   * screenshots next to the posters beside it, and none of them says which show
+   * it is. Films are unaffected: they carry no series.
+   */
+  const deckPoster = (item: MediaItem): string | undefined =>
+    backend?.posterUrl(
+      item.seriesThumb ? { ...item, thumb: item.seriesThumb } : item,
+      300 * artworkScale(),
+      450 * artworkScale(),
+    );
   const open = (item: MediaItem): void => go({ name: "item", itemId: item.id });
 
   if (failure) return <Message failure={failure} onRetry={() => setReload((n) => n + 1)} />;
@@ -114,7 +130,7 @@ export function Home(): React.JSX.Element {
         id="ondeck"
         title={t("home.continue")}
         items={data.onDeck}
-        posterUrl={poster}
+        posterUrl={deckPoster}
         onSelect={open}
         heightVh={24}
       />
