@@ -30,6 +30,8 @@ export interface MediaItem {
   seriesId?: string;
   /** The series' own poster, as opposed to the episode still. */
   seriesThumb?: string;
+  /** What the server sorts by, which is not always the title ("A" articles). */
+  sortTitle?: string;
   year?: number;
   /** Backend-relative art paths; resolve with `posterUrl` / `artUrl`. */
   thumb?: string;
@@ -330,6 +332,16 @@ export interface MediaBackend {
   filterOptions(libraryId: string): Promise<FilterOption[]>;
   /** The values a `list` filter can take. */
   filterValues(libraryId: string, filter: string): Promise<SortOption[]>;
+
+  /**
+   * Where a letter's items begin in the ordered list.
+   *
+   * The A-Z strip scrolls rather than filters, so it needs a position rather
+   * than a page. Summing the bucket sizes is the obvious way and is wrong:
+   * measured on this server, 14 of 29 buckets landed on the previous letter,
+   * because the strip and the sort disagree about where accented initials go.
+   */
+  letterOffset(libraryId: string, letterKey: string, q: Omit<PageQuery, "offset" | "limit">): Promise<number>;
   /** The items under one letter. Used instead of offset arithmetic - see design §4.1. */
   letterPage(libraryId: string, letterKey: string, q: PageQuery): Promise<Page<MediaItem>>;
   item(id: string): Promise<ItemDetail>;

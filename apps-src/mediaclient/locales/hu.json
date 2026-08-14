@@ -36,13 +36,12 @@
     "retry": "Újra"
   },
   "library": {
-    "all": "Mind",
     "empty": "Ez a könyvtár üres.",
-    "emptyLetter": "Ez alatt a betű alatt nincs semmi.",
     "arrange": "Rendezés és szűrés",
     "sort": "Rendezés",
     "filter": "Szűrés",
-    "clearFilters": "Szűrők törlése"
+    "clearFilters": "Szűrők törlése",
+    "emptyFiltered": "Ehhez a szűréshez nincs találat."
   },
   "detail": {
     "play": "Lejátszás",
@@ -108,7 +107,13 @@
     "off": "ki",
     "autologinOnHint": "A box magától {who} néven indul.",
     "autologinOffHint": "A box minden induláskor megkérdezi, ki néz.",
-    "switchUser": "Felhasználóváltás"
+    "switchUser": "Felhasználóváltás",
+    "playback": "Lejátszás",
+    "subSize": "Felirat mérete",
+    "subPos": "Felirat helye",
+    "subColor": "Felirat színe",
+    "autoSkip": "Intro és stáblista átugrása",
+    "autoSkipHint": "Ha bekapcsolod, magától átugrik. A jelölés a szerver becslése, és ha téved, egy epizód nyitányát is átugorhatja."
   },
   "tracks": {
     "version": "Verzió",

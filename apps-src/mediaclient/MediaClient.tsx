@@ -12,6 +12,7 @@ import { Search } from "./Search";
 import { Settings } from "./Settings";
 import { usePlayer } from "./playback/player";
 import { useApp } from "./state";
+import { usePrefs } from "./prefs";
 
 export interface MediaClientProps {
   /** Leave the app and return to the launcher. */
@@ -35,6 +36,10 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   // The same navigation ticks the launcher uses, honouring the same box-wide
   // setting - a household that turned them off there does not expect them back
   // inside an app. The listener is permanent; the setting only flips the flag.
+  // Read once at start: everything below reads them, and Settings writes.
+  const loadPrefs = usePrefs((s) => s.load);
+  useEffect(() => void loadPrefs(), [loadPrefs]);
+
   useEffect(() => installNavSounds(), []);
   // Through the store rather than a one-shot fetch, so turning the setting off
   // in Settings reaches an app that is already open. `ui` is read defensively:
