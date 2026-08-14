@@ -38,7 +38,7 @@ beforeEach(async () => {
   await act(async () => setFocus(""));
 });
 
-async function settle(): Promise<void> {
+async function settle2(): Promise<void> {
   await act(async () => {
     await new Promise((r) => setTimeout(r, 0));
   });
@@ -49,16 +49,16 @@ describe("the who-is-watching screen", () => {
   it("answers the remote again after backing out of the PIN pad", async () => {
     render(<Profiles />);
     await waitFor(() => expect(screen.getByText("Anna")).toBeInTheDocument());
-    await settle();
+    await settle2();
     expect(getCurrentFocusKey()).toBe("profile-u1");
 
     // Open a face, then think better of it.
     await remote.ok();
-    await settle();
+    await settle2();
     expect(getCurrentFocusKey()).toBe("pin-1");
 
     await remote.back();
-    await settle();
+    await settle2();
 
     // The pad's focusable is gone. Norigin's own recovery walks up to the root
     // and stops there, so without a fallback the cursor stays on a key that no
@@ -84,7 +84,7 @@ describe("the who-is-watching screen", () => {
     });
     render(<Profiles />);
     await waitFor(() => expect(screen.getByText(en.profiles.continue)).toBeInTheDocument());
-    await settle();
+    await settle2();
 
     // Something is focused, so the screen answers the remote at all - that is
     // the half that was missing, since an unreachable failure produced no
@@ -94,6 +94,64 @@ describe("the who-is-watching screen", () => {
     await act(async () => setFocus("msg-continue"));
     await remote.ok();
     expect(useApp.getState().screen.name).toBe("home");
+  });
+});
+
+describe("a check that is still running when the pad is closed", () => {
+  it("cannot write its answer onto the attempt that replaced it", async () => {
+    // Back is deliberately not gated on the in-flight check: the switch carries
+    // no timeout, so gating it would trap someone behind a request that can take
+    // minutes on a bad connection. An answer arriving after its own pad has gone
+    // is therefore ordinary - and it must not land on whatever is on screen by
+    // then, or the second attempt shows the first one's wrong-PIN error and
+    // stops accepting digits before anything has been typed into it.
+    const pending: (() => void)[] = [];
+    useApp.setState({
+      chooseProfile: () =>
+        new Promise<void>((_, reject) => pending.push(() => reject(new Error("401")))),
+    } as never);
+
+    render(<Profiles />);
+    await waitFor(() => expect(screen.getByText("Anna")).toBeInTheDocument());
+    await settle2();
+
+    const typeAPin = async (): Promise<void> => {
+      for (const d of ["pin-1", "pin-2", "pin-3", "pin-4"]) {
+        await act(async () => setFocus(d));
+        await remote.ok();
+      }
+      await settle2();
+    };
+
+    await remote.ok(); // open the pad
+    await settle2();
+    await typeAPin(); // attempt 1 is now in flight
+    expect(pending.length).toBe(1);
+
+    await remote.back(); // abandon it
+    await settle2();
+
+    await remote.ok(); // open the pad again
+    await settle2();
+    await typeAPin(); // attempt 2 in flight
+    expect(pending.length).toBe(2);
+
+    // Attempt 1 finally answers. It belongs to a pad that no longer exists.
+    await act(async () => {
+      pending[0]();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    // Nothing typed into attempt 2 has been rejected, so it must show no error
+    // and must still be waiting on its own answer.
+    expect(screen.queryByText(en.profiles.wrongPin)).toBeNull();
+
+    // And attempt 2's own answer still lands.
+    await act(async () => {
+      pending[1]();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await waitFor(() => expect(screen.getByText(en.profiles.wrongPin)).toBeInTheDocument());
   });
 });
 

@@ -63,14 +63,31 @@ export function Profiles(): React.JSX.Element {
     !picked,
   );
 
+  // Which attempt is allowed to write back. Cancelling is possible mid-check -
+  // Back is not gated on busy, and gating it would trap someone behind a
+  // request that has no timeout - so a reply can arrive after its own pad has
+  // gone. Without an owner the late reply either leaves busy set (and the next
+  // pad ignores every digit) or writes a wrong-PIN error onto a pad that has
+  // not been typed into yet.
+  const attempt = useRef(0);
+
+  const start = (p: Profile): void => {
+    attempt.current += 1;
+    setBusy(false);
+    setPinError(undefined);
+    setPicked(p);
+  };
+
   const submit = async (pin?: string): Promise<void> => {
     if (!picked || busy) return;
+    const mine = attempt.current;
     setBusy(true);
     setPinError(undefined);
     try {
       await chooseProfile(picked.id, pin, picked.name);
     } catch (e) {
       log.warn("profile switch failed", e);
+      if (mine !== attempt.current) return;
       // A wrong PIN is the ordinary case, not a failure of the app - it stays on
       // the pad rather than throwing the person back to the list.
       setPinError(t("profiles.wrongPin"));
@@ -110,6 +127,8 @@ export function Profiles(): React.JSX.Element {
         onCancel={() => {
           // Back to the face that was opened, not to the first one.
           const was = picked.id;
+          attempt.current += 1;
+          setBusy(false);
           setPicked(null);
           setPinError(undefined);
           setTimeout(() => setFocus(`profile-${was}`), 0);
@@ -128,8 +147,20 @@ export function Profiles(): React.JSX.Element {
               key={p.id}
               profile={p}
               onEnter={() => {
-                if (p.pinRequired) setPicked(p);
-                else void chooseProfile(p.id, undefined, p.name).catch(() => setPicked(p));
+                if (p.pinRequired) {
+                  start(p);
+                  return;
+                }
+                // Guarded the same way as the pad: a remote gets pressed twice,
+                // and each press was starting its own switch.
+                if (busy) return;
+                setBusy(true);
+                const mine = ++attempt.current;
+                void chooseProfile(p.id, undefined, p.name).catch(() => {
+                  if (mine !== attempt.current) return;
+                  setBusy(false);
+                  start(p);
+                });
               }}
             />
           ))}
