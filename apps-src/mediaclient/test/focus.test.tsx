@@ -4,8 +4,7 @@ import { configureI18n } from "@sdk";
 import { Home } from "../Home";
 import { Message } from "../Message";
 import { useApp } from "../state";
-import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
-import { setupRemote, place, remote, getCurrentFocusKey, flushFocus } from "./remote";
+import { setupRemote, place, remote, setFocus, getCurrentFocusKey, flushFocus } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaBackend, MediaItem } from "../backends/types";
@@ -62,11 +61,13 @@ async function settle(): Promise<void> {
 describe("the remote", () => {
   it("has something focused once the home screen has loaded", async () => {
     render(<Home />);
-    await waitFor(() => expect(screen.getByText("Film 1")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Movies")).toBeInTheDocument());
     await settle();
 
     // Without this, every arrow press is discarded and the app is a picture.
-    expect(getCurrentFocusKey()).toBe("ondeck-i1");
+    // The top rail, so the first press is already among the things that lead
+    // somewhere.
+    expect(getCurrentFocusKey()).toBe("lib-1");
   });
 
   it("moves along a row when Right is pressed", async () => {
@@ -78,20 +79,39 @@ describe("the remote", () => {
     // library resolves directions against.
     ["Film 1", "Film 2", "Film 3"].forEach((label, i) => {
       const tile = screen.getByText(label).closest("div")!.parentElement!;
-      place(tile, i * 120, 0, 100, 200);
+      place(tile, i * 120, 400, 100, 200);
     });
+    await setFocus("ondeck-i1");
 
     await remote.right();
     expect(getCurrentFocusKey()).toBe("ondeck-i2");
   });
 
-  it("falls back to the libraries row when there is nothing to carry on with", async () => {
+  it("keeps search and settings one press away from the libraries", async () => {
+    // They used to sit far right in a header while the first tile sat far left,
+    // and Up is resolved by geometry - so reaching them meant finding the one
+    // column that happened to line up.
+    render(<Home />);
+    await waitFor(() => expect(screen.getByText("Movies")).toBeInTheDocument());
+    await settle();
+
+    place(screen.getByText("Movies"), 0, 0, 120, 60);
+    place(screen.getByText(en.home.search), 140, 0, 120, 60);
+    place(screen.getByText(en.home.settings), 280, 0, 120, 60);
+
+    await remote.right();
+    expect(getCurrentFocusKey()).toBe("nav-search");
+    await remote.right();
+    expect(getCurrentFocusKey()).toBe("nav-settings");
+  });
+
+  it("still focuses the top rail when there is nothing to carry on with", async () => {
     useApp.setState({ backend: stubBackend({ onDeck: async () => [] }) });
     render(<Home />);
     await waitFor(() => expect(screen.getByText("Movies")).toBeInTheDocument());
     await settle();
 
-    expect(getCurrentFocusKey()).toBe("libraries-lib:1");
+    expect(getCurrentFocusKey()).toBe("lib-1");
   });
 });
 

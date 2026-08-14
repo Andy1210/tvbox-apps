@@ -21,7 +21,6 @@
   "home": {
     "continue": "Carry on watching",
     "recentIn": "Recently added to {library}",
-    "libraries": "Libraries",
     "empty": "This server has nothing in it yet.",
     "search": "Search",
     "settings": "Settings"
@@ -47,7 +46,6 @@
     "cast": "Cast",
     "extras": "Trailers and extras",
     "reviews": "Reviews",
-    "moreReviews": "Show {n} more",
     "fromStart": "From the start",
     "audienceScore": "{source} · viewers",
     "runtimeHm": "{h}h {m}m",
@@ -82,7 +80,13 @@
     "remote": "Remote (the server limits quality)",
     "profile": "Profile",
     "owner": "Account owner",
-    "signOut": "Sign out"
+    "signOut": "Sign out",
+    "autologin": "Sign in automatically",
+    "on": "on",
+    "off": "off",
+    "autologinOnHint": "The box starts as {who} without asking.",
+    "autologinOffHint": "The box asks who is watching each time it starts.",
+    "switchUser": "Switch user"
   },
   "tracks": {
     "version": "Version",
@@ -99,5 +103,10 @@
     "searchNone": "Nothing found.",
     "download": "Download",
     "part": "part {n} of {of}"
+  },
+  "profiles": {
+    "title": "Who is watching?",
+    "enterPin": "{name}’s PIN",
+    "wrongPin": "That PIN is not right."
   }
 }

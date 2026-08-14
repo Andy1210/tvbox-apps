@@ -21,6 +21,7 @@ const session: Session = {
   profileId: "test",
   profileName: "test",
   token: TOKEN ?? "",
+  accountToken: TOKEN ?? "",
   serverId: "test",
   serverName: "test",
   baseUrl: BASE ?? "",
@@ -327,4 +328,15 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
       }
     }
   }, 300_000);
+
+  it("lists the household's people", async () => {
+    // Read-only on purpose: switching would change which user the account is
+    // actually signed in as, on a real household's account.
+    const profiles = await backend().listProfiles();
+    expect(profiles.length).toBeGreaterThan(0);
+    // The uuid, not the numeric id: the switch endpoint takes that one, and a
+    // picker built on the wrong field looks right until someone presses it.
+    expect(profiles.every((p) => /^[0-9a-f]{8,}$/i.test(p.id))).toBe(true);
+    expect(profiles.every((p) => p.name)).toBe(true);
+  }, 60_000);
 });

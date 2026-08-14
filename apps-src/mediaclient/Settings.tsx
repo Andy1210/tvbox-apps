@@ -15,9 +15,13 @@ export function Settings(): React.JSX.Element {
   const { t } = useI18n();
   const session = useApp((s) => s.session);
   const signOut = useApp((s) => s.signOut);
+  const autologin = useApp((s) => s.autologin);
+  const setAutologin = useApp((s) => s.setAutologin);
+  const go = useApp((s) => s.go);
 
   const { ref, focusKey } = useFocusable({ focusKey: "settings", saveLastFocusedChild: true });
-  useInitialFocus("settings-signout", true);
+  // The setting someone came here to change, not the one that logs them out.
+  useInitialFocus("settings-autologin", true);
 
   return (
     <FocusContext.Provider value={focusKey}>
@@ -35,7 +39,31 @@ export function Settings(): React.JSX.Element {
           <Field label={t("settings.profile")} value={session?.profileName || t("settings.owner")} />
         </dl>
 
+        <div className="flex flex-col gap-[1vh]">
+          <FocusButton
+            focusKey="settings-autologin"
+            onEnter={() => void setAutologin(!autologin)}
+            className="self-start rounded-[1vh] bg-white/12 px-[2.4vw] py-[1.3vh] text-[2.1vh]"
+          >
+            {`${t("settings.autologin")} · ${t(autologin ? "settings.on" : "settings.off")}`}
+          </FocusButton>
+          {/* Says what the setting DOES rather than restating its name: "on"
+              alone does not tell anyone which of the five people it will pick. */}
+          <p className="max-w-[60vw] text-[1.7vh] text-fg-dim">
+            {autologin
+              ? t("settings.autologinOnHint", { who: session?.profileName || t("settings.owner") })
+              : t("settings.autologinOffHint")}
+          </p>
+        </div>
+
         <div className="mt-[2vh] flex gap-[1.2vw]">
+          <FocusButton
+            focusKey="settings-switch"
+            onEnter={() => go({ name: "profiles" })}
+            className="rounded-[1vh] bg-white/12 px-[2.4vw] py-[1.4vh] text-[2.1vh]"
+          >
+            {t("settings.switchUser")}
+          </FocusButton>
           <FocusButton
             focusKey="settings-signout"
             onEnter={() => void signOut()}

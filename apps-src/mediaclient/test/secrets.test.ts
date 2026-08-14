@@ -13,6 +13,7 @@ const session: Session = {
   profileId: "p",
   profileName: "p",
   token: TOKEN,
+  accountToken: TOKEN,
   serverId: "s",
   serverName: "s",
   baseUrl: "http://192.168.1.10:32400",

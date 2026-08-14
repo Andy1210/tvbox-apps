@@ -7,6 +7,7 @@ import { Login } from "./Login";
 import { Message } from "./Message";
 import { Person } from "./Person";
 import { Player } from "./Player";
+import { Profiles } from "./Profiles";
 import { Search } from "./Search";
 import { Settings } from "./Settings";
 import { usePlayer } from "./playback/player";
@@ -59,6 +60,7 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
       >
         {screen.name === "boot" && <Message loading />}
         {screen.name === "login" && <Login />}
+        {screen.name === "profiles" && <Profiles />}
         {screen.name === "home" && <Home />}
         {screen.name === "library" && (
           // Keyed on the library so switching between two of them starts a fresh

@@ -182,6 +182,7 @@ export async function firstServer(
       profileId: "owner",
       profileName: "",
       token: s.accessToken || accountToken,
+      accountToken,
       serverId: s.clientIdentifier,
       serverName: s.name,
       baseUrl: conn.uri,

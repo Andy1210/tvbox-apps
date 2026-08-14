@@ -118,9 +118,12 @@ export class PlexBackend implements MediaBackend {
   constructor(
     private session: Session,
     private id: PlexIdentityHeaders,
-    /** The account token, when it differs from the server token (home switching). */
-    private accountToken: string = session.token,
   ) {}
+
+  /** The household's own token, which outlives a profile switch. */
+  private get accountToken(): string {
+    return this.session.accountToken || this.session.token;
+  }
 
   private get base(): string {
     return this.session.baseUrl;
@@ -142,8 +145,13 @@ export class PlexBackend implements MediaBackend {
   }
 
   async switchProfile(id: string, pin?: string): Promise<Session> {
-    const token = await switchHomeUser(this.id, this.accountToken, id, pin);
-    this.session = { ...this.session, token, profileId: id };
+    const profileToken = await switchHomeUser(this.id, this.accountToken, id, pin);
+    // The server is reached with the profile's token from here on, but the
+    // account's is kept so the household can be listed and switched again.
+    this.session = { ...this.session, token: profileToken, profileId: id };
+    // Anything cached was fetched as somebody else: watch state, on deck and the
+    // resume points all belong to whoever was signed in a moment ago.
+    this.metaCache.clear();
     return this.session;
   }
 
@@ -159,10 +167,20 @@ export class PlexBackend implements MediaBackend {
     return onDeckOrder((c.Metadata ?? []).map(toItem));
   }
 
+  /**
+   * What a library gained recently.
+   *
+   * A show library answers with EPISODES - and it ignores a type filter asking
+   * for anything else - so the row would show four stills from one series and
+   * call them four new things. They are rolled up to their series, which both
+   * gives the row cover art and stops one series filling it.
+   */
   async recentlyAdded(libraryId?: string): Promise<MediaItem[]> {
     const path = libraryId ? `library/sections/${libraryId}/recentlyAdded` : "library/recentlyAdded";
-    const c = container<MetadataContainer>(await this.req(path, page(0, 24)));
-    return (c.Metadata ?? []).map(toItem);
+    // Asked wider than shown: rolling four episodes into one series leaves a
+    // short row otherwise.
+    const c = container<MetadataContainer>(await this.req(path, page(0, 60)));
+    return rollUpEpisodes((c.Metadata ?? []).map(toItem)).slice(0, 24);
   }
 
   async libraryPage(libraryId: string, q: PageQuery): Promise<Page<MediaItem>> {

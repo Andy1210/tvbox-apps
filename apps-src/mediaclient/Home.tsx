@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, useI18n } from "@sdk";
 import { Row } from "./Row";
 import { Message } from "./Message";
@@ -70,15 +71,13 @@ export function Home(): React.JSX.Element {
 
   // The first thing worth pressing: what you were watching, or a library when
   // there is nothing to carry on with.
-  const firstKey = data?.onDeck.length
-    ? `ondeck-${data.onDeck[0].id}`
-    : data?.libraries.length
-      ? `libraries-lib:${data.libraries[0].id}`
-      : undefined;
+  // The top rail, so the first press is already among the things that lead
+  // somewhere - and Down from there reaches what you were watching.
+  const firstKey = data?.libraries.length ? `lib-${data.libraries[0].id}` : "nav-search";
   useInitialFocus(firstKey, Boolean(data));
   // Focus is set once; without a fallback anything that unmounts the focused
   // tile afterwards leaves the D-pad dead with only Back working.
-  useFocusFallback(firstKey, (key) => key.startsWith("ondeck-") || key.startsWith("libraries-") || key.startsWith("recent-") || key.startsWith("nav-"), !playing);
+  useFocusFallback(firstKey, (key) => key.startsWith("ondeck-") || key.startsWith("lib-") || key.startsWith("recent-") || key.startsWith("nav-"), !playing);
 
   const poster = (item: MediaItem): string | undefined => backend?.posterUrl(item, 300 * artworkScale(), 450 * artworkScale());
   const open = (item: MediaItem): void => go({ name: "item", itemId: item.id });
@@ -90,26 +89,22 @@ export function Home(): React.JSX.Element {
 
   return (
     <div className="flex h-full flex-col gap-[3vh] overflow-y-auto py-[3vh]">
-      {/* The only route to search and settings. Without it a library of
-          thousands is navigable by the A-Z strip alone, and a rejected token
-          leaves the app with no way to sign in again. */}
-      <header className="flex items-center gap-[1.2vw] px-[4vw]">
-        <h1 className="mr-auto text-[2.6vh] font-semibold tracking-tight">{t("app.name")}</h1>
-        <FocusButton
-          focusKey="nav-search"
-          onEnter={() => go({ name: "search" })}
-          className="rounded-[1vh] bg-white/10 px-[1.8vw] py-[1vh] text-[1.9vh]"
-        >
-          {t("home.search")}
-        </FocusButton>
-        <FocusButton
-          focusKey="nav-settings"
-          onEnter={() => go({ name: "settings" })}
-          className="rounded-[1vh] bg-white/10 px-[1.8vw] py-[1vh] text-[1.9vh]"
-        >
-          {t("home.settings")}
-        </FocusButton>
-      </header>
+      {/* One rail at the top holding the libraries AND the two actions.
+          Separately, the actions sat far right in a header while the first tile
+          sat far left, and spatial navigation resolves Up by geometry - so
+          reaching them meant finding the one column of the grid that happened to
+          line up. In one row they are always one Left press away, and the
+          libraries are where someone looks for them. */}
+      {/* Not focusable, so it cannot get in the way of the rail below it - but
+          something has to say which app this is. */}
+      <h1 className="px-[4vw] text-[2.2vh] font-semibold tracking-tight opacity-70">{t("app.name")}</h1>
+
+      <TopRow
+        libraries={data.libraries}
+        onLibrary={(l) => go({ name: "library", libraryId: l.id, title: l.title })}
+        onSearch={() => go({ name: "search" })}
+        onSettings={() => go({ name: "settings" })}
+      />
 
       {nothing && <Message text={t("home.empty")} />}
 
@@ -122,23 +117,6 @@ export function Home(): React.JSX.Element {
         heightVh={24}
       />
 
-      {/* Above the recents, not below them: reaching a library was otherwise one
-          press per "recently added" row, on tiles that are only grey boxes. */}
-      {data.libraries.length > 0 && (
-        <Row
-          id="libraries"
-          title={t("home.libraries")}
-          items={data.libraries.map((l) => ({ id: `lib:${l.id}`, kind: "show" as const, title: l.title }))}
-          posterUrl={() => undefined}
-          onSelect={(item) => {
-            const id = item.id.slice("lib:".length);
-            const library = data.libraries.find((l) => l.id === id);
-            if (library) go({ name: "library", libraryId: library.id, title: library.title });
-          }}
-          heightVh={12}
-        />
-      )}
-
       {data.recent.map(({ library, items }) => (
         <Row
           key={library.id}
@@ -150,5 +128,55 @@ export function Home(): React.JSX.Element {
         />
       ))}
     </div>
+  );
+}
+
+function TopRow({
+  libraries,
+  onLibrary,
+  onSearch,
+  onSettings,
+}: {
+  libraries: Library[];
+  onLibrary: (l: Library) => void;
+  onSearch: () => void;
+  onSettings: () => void;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  const { ref, focusKey } = useFocusable({ focusKey: "top", saveLastFocusedChild: true });
+
+  return (
+    <FocusContext.Provider value={focusKey}>
+      <div ref={ref} className="no-scrollbar flex items-center gap-[1vw] overflow-x-auto px-[4vw] py-[1vh]">
+        {libraries.map((l) => (
+          <FocusButton
+            key={l.id}
+            focusKey={`lib-${l.id}`}
+            onEnter={() => onLibrary(l)}
+            className="shrink-0 rounded-[1vh] bg-white/10 px-[2vw] py-[1.1vh] text-[2.2vh]"
+          >
+            {l.title}
+          </FocusButton>
+        ))}
+
+        {/* After the libraries, because those are what someone is usually
+            reaching for; both are still one row and never more than a few
+            presses away. */}
+        <FocusButton
+          focusKey="nav-search"
+          onEnter={onSearch}
+          className="shrink-0 rounded-[1vh] bg-white/6 px-[1.8vw] py-[1.1vh] text-[2vh]"
+        >
+          {t("home.search")}
+        </FocusButton>
+        <FocusButton
+          focusKey="nav-settings"
+          onEnter={onSettings}
+          className="shrink-0 rounded-[1vh] bg-white/6 px-[1.8vw] py-[1.1vh] text-[2vh]"
+        >
+          {t("home.settings")}
+        </FocusButton>
+      </div>
+    </FocusContext.Provider>
   );
 }
