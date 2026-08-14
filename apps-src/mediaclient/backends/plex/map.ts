@@ -113,6 +113,9 @@ export interface PlexDirectory {
   type?: string;
   title?: string;
   size?: number;
+  /** On /filters rows: the filter's own key, and whether it is a flag. */
+  filter?: string;
+  filterType?: string;
 }
 
 const KINDS: Record<string, ItemKind> = { movie: "movie", show: "show", season: "season", episode: "episode" };

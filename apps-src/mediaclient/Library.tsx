@@ -7,6 +7,7 @@ import { artworkScale } from "./posters";
 import { useFocusFallback, useInitialFocus } from "./focus";
 import { usePlayer } from "./playback/player";
 import { classify, useApp } from "./state";
+import { LibraryFilters, type LibraryView } from "./LibraryFilters";
 import type { MediaItem } from "./backends/types";
 import { log } from "./redact";
 
@@ -53,6 +54,8 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   const playing = usePlayer((s) => s.current !== null);
 
   const [letters, setLetters] = useState<Letter[]>([]);
+  const [view, setView] = useState<LibraryView>({ sort: "titleSort", desc: false, filters: {}, labels: {} });
+  const [arranging, setArranging] = useState(false);
   const [letter, setLetter] = useState<string | null>(null);
   const [items, setItems] = useState<(MediaItem | null)[]>([]);
   const [total, setTotal] = useState<number | null>(null);
@@ -83,7 +86,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     if (!backend) return;
     let live = true;
     backend
-      .letters(libraryId)
+      .letters(libraryId, view.filters)
       .then((l) => live && setLetters(l))
       .catch(() => {
         /* the strip is an accelerator; the grid works without it */
@@ -91,7 +94,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     return () => {
       live = false;
     };
-  }, [backend, libraryId]);
+  }, [backend, libraryId, view.filters]);
 
   // Loading a page. `letter` selects between the whole library and one bucket;
   // both are asked of the server rather than derived from the other, because the
@@ -102,7 +105,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
       pending.current.add(page);
       const mine = generation.current;
       try {
-        const q = { offset: page * PAGE, limit: PAGE, sort: "titleSort" as const };
+        const q = { offset: page * PAGE, limit: PAGE, sort: view.sort, desc: view.desc, filters: view.filters };
         const res = letter ? await backend.letterPage(libraryId, letter, q) : await backend.libraryPage(libraryId, q);
         if (mine !== generation.current) return;
         answered.current.add(page);
@@ -124,11 +127,11 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
         pending.current.delete(page);
       }
     },
-    [backend, fail, letter, libraryId],
+    [backend, fail, letter, libraryId, view],
   );
 
-  // Changing letter is a new list: drop what was there rather than let old items
-  // show through while the first page arrives.
+  // Changing letter, order or filter is a new list: drop what was there rather
+  // than let old items show through while the first page arrives.
   useEffect(() => {
     generation.current += 1;
     pending.current.clear();
@@ -210,13 +213,42 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     }
   }
 
+  if (arranging)
+    return (
+      <LibraryFilters
+        libraryId={libraryId}
+        view={view}
+        onApply={(next) => {
+          setView(next);
+          // A new list means the letter no longer points anywhere known, and a
+          // filtered library often has no items under it at all.
+          setLetter(null);
+        }}
+        onClose={() => setArranging(false)}
+      />
+    );
+
+  const narrowed = Object.keys(view.filters).length;
+
   return (
     <FocusContext.Provider value={focusKey}>
       <div className="flex h-full flex-col">
-        <h1 className="px-[4vw] py-[2vh] text-[2.6vh] font-semibold tracking-tight">
-          {title}
-          {total !== null && <span className="ml-[1vw] text-[1.8vh] text-fg-dim tabular-nums">{total}</span>}
-        </h1>
+        <div className="flex items-center gap-[1.4vw] px-[4vw] py-[2vh]">
+          <h1 className="text-[2.6vh] font-semibold tracking-tight">
+            {title}
+            {total !== null && <span className="ml-[1vw] text-[1.8vh] text-fg-dim tabular-nums">{total}</span>}
+          </h1>
+          {/* The count beside it, because a filtered library looks like a small
+              library otherwise - and someone who left a filter on last week has
+              no other way to tell. */}
+          <FocusButton
+            focusKey="lib-arrange"
+            onEnter={() => setArranging(true)}
+            className="rounded-[1vh] bg-white/10 px-[2vw] py-[1vh] text-[2vh]"
+          >
+            {narrowed ? `${t("library.arrange")} · ${narrowed}` : t("library.arrange")}
+          </FocusButton>
+        </div>
 
         <div className="flex flex-1 overflow-hidden">
           <div

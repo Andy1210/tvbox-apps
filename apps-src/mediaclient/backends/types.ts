@@ -53,7 +53,29 @@ export interface MediaItem {
 export interface PageQuery {
   offset: number;
   limit: number;
-  sort?: "titleSort" | "addedAt" | "lastViewedAt";
+  /** A key from `sortOptions`. Backend-defined, not a fixed set. */
+  sort?: string;
+  desc?: boolean;
+  /** Filter key to chosen value, from `filterOptions` / `filterValues`. */
+  filters?: Record<string, string>;
+}
+
+/** One way to order a library, as the server itself describes it. */
+export interface SortOption {
+  key: string;
+  title: string;
+}
+
+/**
+ * One way to narrow a library.
+ *
+ * `kind` decides how it is chosen: `list` needs its values fetched (genres,
+ * years, actors), `flag` is on or off (unwatched, HDR).
+ */
+export interface FilterOption {
+  key: string;
+  title: string;
+  kind: "list" | "flag";
 }
 
 export interface Page<T> {
@@ -295,7 +317,19 @@ export interface MediaBackend {
   recentlyAdded(libraryId?: string, kind?: string): Promise<MediaItem[]>;
   libraryPage(libraryId: string, q: PageQuery): Promise<Page<MediaItem>>;
   /** Buckets for the A-Z strip, in the backend's own order. */
-  letters(libraryId: string): Promise<{ key: string; title: string; size: number }[]>;
+  letters(libraryId: string, filters?: Record<string, string>): Promise<{ key: string; title: string; size: number }[]>;
+
+  /**
+   * How this library can be ordered and narrowed.
+   *
+   * Asked of the server rather than hardcoded: the sets differ by library type
+   * - a series library orders by unwatched episode count, a film library by
+   * resolution - and a fixed list would offer orders the server rejects.
+   */
+  sortOptions(libraryId: string): Promise<SortOption[]>;
+  filterOptions(libraryId: string): Promise<FilterOption[]>;
+  /** The values a `list` filter can take. */
+  filterValues(libraryId: string, filter: string): Promise<SortOption[]>;
   /** The items under one letter. Used instead of offset arithmetic - see design §4.1. */
   letterPage(libraryId: string, letterKey: string, q: PageQuery): Promise<Page<MediaItem>>;
   item(id: string): Promise<ItemDetail>;
