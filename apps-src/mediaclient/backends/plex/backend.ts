@@ -62,6 +62,13 @@ const FILTER_KEY = /^[A-Za-z][A-Za-z0-9_.]{0,40}$/;
 /** Parameter names that are ours to set. Plex has no filter by these names. */
 /** Plex's own number for a collection. */
 const COLLECTION_TYPE = 18;
+/**
+ * A path the server may send us back to.
+ *
+ * Bounded because it comes from the server and becomes a request URL: a section
+ * path, no traversal, optionally with a query.
+ */
+const SECTION_PATH = /^\/library\/sections\/\d+\/[A-Za-z][A-Za-z0-9_.]{0,40}(\?[A-Za-z0-9_.=&%-]{0,120})?$/;
 const RESERVED = new Set(["sort", "type", "includeguids", "excludeallleaves"]);
 
 /**
@@ -254,7 +261,12 @@ export class PlexBackend implements MediaBackend {
       if (at) at.size += d.size ?? 0;
       else merged.set(plain, { key: plain, title: plain, size: d.size ?? 0 });
     }
-    return [...merged.values()];
+    // Ordered by the plain letter, with "#" first - which is the order the
+    // SERVER sorts by. Keeping each merged entry where its accented bucket sat
+    // broke the one property the letter search depends on: a TV library here
+    // has no plain U bucket at all, only U-double-acute after Z, so the strip
+    // read "... X Y Z U" and five letters jumped to the same wrong place.
+    return [...merged.values()].sort((a, b) => (a.key === "#" ? -1 : b.key === "#" ? 1 : a.key.localeCompare(b.key)));
   }
 
   async sortOptions(libraryId: string): Promise<SortOption[]> {
@@ -343,10 +355,14 @@ export class PlexBackend implements MediaBackend {
    * and "5.1(side)" hid 1,208 films. 679 of this library's 10,383 offered values
    * carry an escape.
    */
-  async filterValues(libraryId: string, filter: string): Promise<SortOption[]> {
+  async filterValues(libraryId: string, filter: string, path?: string): Promise<SortOption[]> {
     if (!FILTER_KEY.test(filter)) throw new Error("not a filter name");
+    // The server's path when it gave one and it is a section path - it carries
+    // the type the values need. Otherwise the name, which is all older servers
+    // offer.
+    const at = path && SECTION_PATH.test(path) ? path.replace(/^\//, "") : null;
     const c = container<MetadataContainer>(
-      await this.req(`library/sections/${libraryId}/${encodeURIComponent(filter)}`),
+      await this.req(at ?? `library/sections/${libraryId}/${encodeURIComponent(filter)}`),
     );
     return (c.Directory ?? [])
       .filter((d) => d.key !== undefined)

@@ -6,6 +6,9 @@ import { useApp } from "./state";
 import type { FilterOption, SortOption } from "./backends/types";
 import { log } from "./redact";
 
+/** How many values one filter offers before the list stops being a control. */
+const VALUE_CAP = 120;
+
 export interface LibraryView {
   sort: string;
   desc: boolean;
@@ -88,7 +91,7 @@ export function LibraryFilters({
     let live = true;
     setValues(null);
     void backend
-      .filterValues(libraryId, openFilter.key)
+      .filterValues(libraryId, openFilter.key, openFilter.path)
       .then((v) => live && setValues(v))
       .catch((e) => {
         log.warn("could not read filter values", e);
@@ -116,6 +119,15 @@ export function LibraryFilters({
     return (
       <Panel title={openFilter.title} onClose={() => setOpenFilter(null)} closeLabel={t("common.back")}>
         {values === null && <p className="text-[2vh] text-fg-dim">{t("common.loading")}</p>}
+        {values && values.length > VALUE_CAP && (
+          // Said rather than silently truncated. Some of these lists run to
+          // thousands - this server offers 2,580 actors - and a D-pad walk
+          // through 645 rows is not a control. The cap is honest about what is
+          // missing until there is an index for them.
+          <p className="pb-[1vh] text-[1.9vh] text-fg-dim">
+            {t("library.tooMany", { shown: String(VALUE_CAP), total: String(values.length) })}
+          </p>
+        )}
         <div // A strict grid, not a wrapped flex. Spatial navigation resolves by
           // rectangles, and chips of different widths wrapping onto ragged
           // lines gave it no clean answer: Right skipped one, and there was
@@ -123,7 +135,7 @@ export function LibraryFilters({
           // up with the one under it.
           className="grid grid-cols-4 gap-x-[1vw] gap-y-[1.4vh]"
         >
-          {values?.map((v, i) => (
+          {values?.slice(0, VALUE_CAP).map((v, i) => (
             <Chip
               key={v.key}
               focusKey={`lf-val-${i}`}
@@ -162,7 +174,7 @@ export function LibraryFilters({
             </FocusButton>
           </div>
 
-          <div className="no-scrollbar flex flex-col gap-[2.4vh] overflow-y-auto">
+          <div className="no-scrollbar -mx-[0.6vw] flex flex-col gap-[2.4vh] overflow-y-auto px-[0.6vw]">
             <section className="flex flex-col gap-[1vh]">
               <h3 className="text-[2.1vh] font-semibold text-fg-dim">{t("library.sort")}</h3>
               <div // A strict grid, not a wrapped flex. Spatial navigation resolves by
@@ -269,7 +281,7 @@ function Panel({
               {closeLabel}
             </FocusButton>
           </div>
-          <div className="no-scrollbar overflow-y-auto">{children}</div>
+          <div className="no-scrollbar -mx-[0.6vw] overflow-y-auto px-[0.6vw]">{children}</div>
         </div>
       </div>
     </FocusContext.Provider>

@@ -424,7 +424,11 @@ export function Player(): React.JSX.Element | null {
               // text whether focused or not, and focus only takes it from 90%
               // to 100% - so on a button that is now a navigation target, there
               // was no way to tell whether OK would skip or seek.
-              className="rounded-[1vh] bg-white/20 px-[2vw] py-[1.2vh] text-[2vh] font-semibold"
+              // Dark ground and a shadow, like the buttons below it. A 20%
+              // white wash over a bright frame composites to near-white, and
+              // white text on that is about 1.15:1 - the button sits above the
+              // gradient, so it has nothing else to stand on.
+              className="rounded-[1vh] bg-black/55 px-[2vw] py-[1.2vh] text-[2vh] font-semibold [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]"
             >
               {t(marker!.type === "intro" ? "player.skipIntro" : "player.skipCredits")}
             </FocusButton>

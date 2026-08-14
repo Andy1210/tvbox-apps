@@ -40,6 +40,15 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
   const playing = usePlayer((s) => s.current !== null);
   const [reload, setReload] = useState(0);
   const [version, setVersion] = useState(0);
+  const [audio, setAudio] = useState<number | undefined>();
+  const [subtitle, setSubtitle] = useState<number | "none" | undefined>();
+  /**
+   * The episode the cursor is on, with its own tracks.
+   *
+   * A season carries no tracks of its own and its episodes do not share them,
+   * so the language choice has to follow the highlight rather than the screen.
+   */
+  const [focused, setFocused] = useState<ItemDetail | null>(null);
   const [detail, setDetail] = useState<ItemDetail | null>(null);
   const [busy, setBusy] = useState(false);
   const [children, setChildren] = useState<MediaItem[]>([]);
@@ -122,7 +131,9 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
       key.startsWith("cast-") ||
       key.startsWith("children-") ||
       key.startsWith("extras-") ||
-      key.startsWith("review-"),
+      key.startsWith("review-") ||
+      key.startsWith("detail-aud-") ||
+      key.startsWith("detail-sub-"),
     !playing,
   );
 
@@ -135,6 +146,8 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
   const wide = (item: MediaItem): string | undefined =>
     backend?.posterUrl(item, 400 * artworkScale(), 225 * artworkScale());
   const resumable = (detail.viewOffsetMs ?? 0) > 0;
+  /** A film's own tracks, or the highlighted episode's on a season. */
+  const tracksFrom = (detail.kind === "season" ? focused : detail)?.versions[version];
 
   return (
     <FocusContext.Provider value={focusKey}>
@@ -172,7 +185,7 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
               // to the top - the title art and synopsis above it can be reached
               // no other way.
               onFocused={toTop}
-              onEnter={() => backend && void usePlayer.getState().play(backend, detail, { version })}
+              onEnter={() => backend && void usePlayer.getState().play(backend, detail, { version, audio, subtitle })}
               className="rounded-[1vh] bg-white/15 px-[2.4vw] py-[1.4vh] text-[2.1vh]"
             >
               {/* Naming the version on the button answers "does this chip start
@@ -184,7 +197,10 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
             {resumable && (
               <FocusButton
                 focusKey="detail-restart"
-                onEnter={() => backend && void usePlayer.getState().play(backend, detail, { resume: false, version })}
+                onEnter={() =>
+                  backend &&
+                  void usePlayer.getState().play(backend, detail, { resume: false, version, audio, subtitle })
+                }
                 className="rounded-[1vh] bg-white/10 px-[2vw] py-[1.4vh] text-[2.1vh]"
               >
                 {t("detail.fromStart")}
@@ -202,6 +218,49 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
               {t(watched ? "detail.markUnwatched" : "detail.markWatched")}
             </FocusButton>
           </div>
+
+          {/* Language before playing, not after. A converted stream bakes its
+              tracks in when it starts, so changing them mid-film costs a
+              restart - and the version chips were already asking the same
+              question one axis over. On a season these follow the highlighted
+              episode, because a season has no tracks of its own and its
+              episodes do not share them. */}
+          {tracksFrom && (tracksFrom.audio.length > 1 || tracksFrom.subtitles.length > 0) && (
+            <div className="mt-[0.6vh] flex flex-col gap-[0.8vh]">
+              {tracksFrom.audio.length > 1 && (
+                <div className="flex flex-wrap items-center gap-[0.8vw]">
+                  <span className="w-[8vw] text-[1.7vh] text-fg-dim">{t("tracks.audio")}</span>
+                  {tracksFrom.audio.map((a) => (
+                    <Pick
+                      key={a.id}
+                      focusKey={`detail-aud-${a.ordinal}`}
+                      active={audio === undefined ? Boolean(a.selected) : audio === a.ordinal}
+                      label={a.label}
+                      onEnter={() => setAudio(a.ordinal)}
+                    />
+                  ))}
+                </div>
+              )}
+              <div className="flex flex-wrap items-center gap-[0.8vw]">
+                <span className="w-[8vw] text-[1.7vh] text-fg-dim">{t("tracks.subtitles")}</span>
+                <Pick
+                  focusKey="detail-sub-off"
+                  active={subtitle === "none"}
+                  label={t("tracks.subtitlesOff")}
+                  onEnter={() => setSubtitle("none")}
+                />
+                {tracksFrom.subtitles.map((sub) => (
+                  <Pick
+                    key={sub.id}
+                    focusKey={`detail-sub-${sub.ordinal}`}
+                    active={subtitle === undefined ? Boolean(sub.selected) : subtitle === sub.ordinal}
+                    label={sub.label}
+                    onEnter={() => setSubtitle(sub.ordinal)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Only when there is a choice to make. A library keeps the same film
               in two languages as often as in two resolutions, so this is picked
@@ -237,9 +296,32 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
             id={`children-${itemId}`}
             title={detail.kind === "show" ? t("detail.seasons") : t("detail.episodes")}
             items={children}
-            posterUrl={poster}
-            onSelect={(item) => go({ name: "item", itemId: item.id })}
-            heightVh={22}
+            // An episode's artwork is a frame from it, which is 16:9 - shown in
+            // a poster-shaped tile it was letterboxed into a strip. A season's
+            // artwork IS a poster, so only the episodes change shape.
+            posterUrl={detail.kind === "season" ? wide : poster}
+            aspect={detail.kind === "season" ? 16 / 9 : undefined}
+            heightVh={detail.kind === "season" ? 15 : 22}
+            onFocusItem={(item) => {
+              if (item.kind !== "episode" || !backend) return;
+              // Cached by the backend, so moving along a row of episodes is not
+              // a request each.
+              void backend
+                .item(item.id)
+                .then((d) => setFocused(d))
+                .catch(() => setFocused(null));
+            }}
+            onSelect={(item) => {
+              // An episode plays. There is nothing on a screen of its own worth
+              // the press: what someone wants from a list of episodes is to
+              // watch one, and everything else about it - cast, extras, the
+              // audio and subtitle choice - is on this screen already.
+              if (item.kind === "episode" && backend) {
+                void usePlayer.getState().play(backend, item, { version, audio, subtitle });
+                return;
+              }
+              go({ name: "item", itemId: item.id });
+            }}
           />
         )}
 
@@ -281,5 +363,29 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
         <Reviews reviews={detail.reviews} title={t("detail.reviews")} />
       </div>
     </FocusContext.Provider>
+  );
+}
+
+/** A chip whose check says chosen and whose fill says focused. */
+function Pick({
+  focusKey,
+  active,
+  label,
+  onEnter,
+}: {
+  focusKey: string;
+  active: boolean;
+  label: string;
+  onEnter: () => void;
+}): React.JSX.Element {
+  return (
+    <FocusButton
+      focusKey={focusKey}
+      onEnter={onEnter}
+      className="rounded-[0.8vh] bg-white/8 px-[1.2vw] py-[0.8vh] text-[1.8vh]"
+    >
+      <span className="inline-block w-[1.2vw] shrink-0 text-center">{active ? "\u2713" : ""}</span>
+      {label}
+    </FocusButton>
   );
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
+import { FocusContext, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, useI18n } from "@sdk";
 import { Tile } from "./Tile";
 import { Message } from "./Message";
@@ -197,14 +197,21 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   // Nothing focuses itself, so the first tile has to be told to take it - and a
   // press arriving after the grid was cleared for a letter change has to land
   // somewhere rather than be discarded.
-  useInitialFocus("cell-0", total !== null && total > 0);
+  // The button, when the grid is empty. A filter that matches nothing left the
+  // screen with its own "no results" text and the button that could undo it
+  // visible but unreachable - every press re-aimed at a cell that was not there.
+  useInitialFocus(total === 0 ? "lib-arrange" : "cell-0", total !== null);
   // Every key this screen owns has to be listed. A focusable the guard does not
   // recognise is treated as gone and focus is yanked back to the grid - so the
   // sort-and-filter button could be reached and then lost between the press
   // landing on it and OK arriving, which opened the first film instead.
   useFocusFallback(
-    "cell-0",
-    (key) => key.startsWith("cell-") || key.startsWith("letter-") || key.startsWith("lib-"),
+    // Always mounted, unlike cell-0: that is only near the top of the grid, so
+    // recovering focus while scrolled down aimed at nothing and the remote went
+    // dead. The button is on screen in every state this screen has.
+    "lib-arrange",
+    (key) =>
+      key.startsWith("cell-") || key.startsWith("letter-") || key.startsWith("lib-") || key.startsWith("letter-"),
     // Not while the panel is open: this is a window listener, and it stays armed
     // behind the panel. Its predicate rejects every panel key, so any press the
     // panel could not resolve - a row edge, and it wraps twenty-seven chips -
@@ -227,15 +234,25 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     />
   ) : null;
 
-  if (failure) return <Message failure={failure} onRetry={() => void loadPage(0)} />;
+  // Every early return keeps the same root element type and renders the panel.
+  // React unmounts a subtree when the type at a position changes, so returning
+  // a fragment from one branch and a provider from another remounted the panel
+  // mid-press: which filter was open was lost and both option lists refetched.
+  if (failure)
+    return (
+      <FocusContext.Provider value={focusKey}>
+        {panel}
+        <Message failure={failure} onRetry={() => void loadPage(0)} />
+      </FocusContext.Provider>
+    );
   // `total === null` is "not asked yet"; a total of zero is an answer, and an
   // empty library must say so rather than spin forever.
   if (total === null && items.length === 0)
     return (
-      <>
+      <FocusContext.Provider value={focusKey}>
         {panel}
         <Message loading />
-      </>
+      </FocusContext.Provider>
     );
 
   const visible: React.JSX.Element[] = [];
@@ -443,7 +460,14 @@ function LetterStrip({
   onPick: (key: string) => void;
   active: string | null;
 }): React.JSX.Element {
-  const { ref, focusKey } = useFocusable({ focusKey: "letters", saveLastFocusedChild: true });
+  const { ref, focusKey } = useFocusable({
+    focusKey: "letters",
+    saveLastFocusedChild: true,
+    // Enter where the grid already is, not at "#". From the M's, reaching M
+    // otherwise cost up to twenty-six presses down a strip whose whole purpose
+    // is to be faster than scrolling.
+    preferredChildFocusKey: active ? `letter-${active}` : undefined,
+  });
   return (
     <FocusContext.Provider value={focusKey}>
       <div
@@ -458,11 +482,22 @@ function LetterStrip({
         className="no-scrollbar flex h-full flex-col items-stretch justify-center gap-[0.1vh] overflow-y-auto py-[1vh] pr-[1vw] pl-[0.4vw]"
         ref={ref}
       >
-        {letters.map((l) => (
+        {letters.map((l, i) => (
           <FocusButton
             key={l.key}
             focusKey={`letter-${l.key}`}
             onEnter={() => onPick(l.key)}
+            onArrowPress={(dir) => {
+              // Up from the first letter goes to the header rather than into
+              // the grid. Geometry says the grid - it is what lies up and to
+              // the left - but the strip is a column of its own, and its top is
+              // where someone reaches for the controls above it.
+              if (dir === "up" && i === 0) {
+                setFocus("lib-arrange");
+                return false;
+              }
+              return true;
+            }}
             // A bare character, not a button-shaped box: thirty of those made a
             // second column down the side of the screen. Focus still fills, as
             // it does everywhere else.

@@ -40,7 +40,7 @@ export function PlaybackSettings({ onClose }: { onClose: () => void }): React.JS
             </FocusButton>
           </div>
 
-          <div className="no-scrollbar flex flex-col gap-[2.6vh] overflow-y-auto">
+          <div className="no-scrollbar -mx-[0.6vw] flex flex-col gap-[2.6vh] overflow-y-auto px-[0.6vw]">
             <Group title={t("settings.subSize")}>
               {[0.8, 1, 1.25, 1.5, 2].map((v, i) => (
                 <Choice
