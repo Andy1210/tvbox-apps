@@ -4,6 +4,7 @@ import { Row } from "./Row";
 import { Message } from "./Message";
 import { artworkScale } from "./posters";
 import { useFocusFallback, useInitialFocus } from "./focus";
+import { usePlayer } from "./playback/player";
 import { classify, useApp } from "./state";
 import type { Library, MediaItem } from "./backends/types";
 import { log } from "./redact";
@@ -28,6 +29,7 @@ export function Home(): React.JSX.Element {
   const go = useApp((s) => s.go);
   const fail = useApp((s) => s.fail);
   const failure = useApp((s) => s.failure);
+  const playing = usePlayer((s) => s.current !== null);
   const [reload, setReload] = useState(0);
   const [data, setData] = useState<Loaded | null>(null);
 
@@ -76,7 +78,7 @@ export function Home(): React.JSX.Element {
   useInitialFocus(firstKey, Boolean(data));
   // Focus is set once; without a fallback anything that unmounts the focused
   // tile afterwards leaves the D-pad dead with only Back working.
-  useFocusFallback(firstKey, (key) => key.startsWith("ondeck-") || key.startsWith("libraries-") || key.startsWith("recent-") || key.startsWith("nav-"));
+  useFocusFallback(firstKey, (key) => key.startsWith("ondeck-") || key.startsWith("libraries-") || key.startsWith("recent-") || key.startsWith("nav-"), !playing);
 
   const poster = (item: MediaItem): string | undefined => backend?.posterUrl(item, 300 * artworkScale(), 450 * artworkScale());
   const open = (item: MediaItem): void => go({ name: "item", itemId: item.id });

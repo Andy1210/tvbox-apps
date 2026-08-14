@@ -388,14 +388,16 @@ export class PlexBackend implements MediaBackend {
   ): Promise<StreamDecision> {
     const screen = opts.panel ? `${opts.panel.width}x${opts.panel.height}` : undefined;
     const version = opts.version ?? 0;
+
+    // `version` is a position in the list the UI showed, and that list has one
+    // entry per FILE - a film split across two discs contributes two. So the
+    // media and part indices come from the item rather than from the position.
+    const chosen = (await this.item(id).catch(() => null))?.versions[version];
     const common = {
       hasMDE: 1,
       path: `/library/metadata/${id}`,
-      // Which FILE, when the library holds more than one for this title. A
-      // second copy is as often a different language as a different resolution,
-      // so this is a real choice rather than a quality ladder.
-      mediaIndex: version,
-      partIndex: 0,
+      mediaIndex: chosen?.index ?? version,
+      partIndex: chosen?.partIndex ?? 0,
       protocol: "hls",
       directPlay: 1,
       directStream: 1,
@@ -417,15 +419,26 @@ export class PlexBackend implements MediaBackend {
     // Chosen tracks are told to the server before the decision, so the stream it
     // builds already carries them - a transcode started with the wrong audio
     // cannot be corrected without starting over.
-    if (opts.audio !== undefined || opts.subtitle !== undefined) {
-      const detail = await this.item(id).catch(() => null);
-      const v = detail?.versions[version];
-      if (v) {
-        await this.setTracks(id, version, {
-          audioId: opts.audio !== undefined ? v.audio[opts.audio]?.id : undefined,
-          subtitleId: opts.subtitle === "none" ? "none" : opts.subtitle !== undefined ? v.subtitles[opts.subtitle]?.id : undefined,
-        }).catch((e: unknown) => log.warn("could not set tracks", e));
-      }
+    if (chosen && (opts.audio !== undefined || opts.subtitle !== undefined)) {
+      const audioId = opts.audio !== undefined ? chosen.audio[opts.audio]?.id : undefined;
+      const subtitleId =
+        opts.subtitle === "none"
+          ? "none"
+          : opts.subtitle !== undefined
+            ? chosen.subtitles.find((t) => t.ordinal === opts.subtitle)?.id
+            : undefined;
+
+      // An ordinal that resolves to nothing must not be dropped in silence: the
+      // parameter would simply be omitted, which the server reads as "no
+      // opinion" and leaves the OLD track selected - the opposite of the
+      // request, with nothing on screen or in the log to say so.
+      if (opts.audio !== undefined && !audioId) log.warn(`no audio track ${opts.audio} on version ${version}`);
+      if (opts.subtitle !== undefined && opts.subtitle !== "none" && !subtitleId)
+        log.warn(`no subtitle track ${opts.subtitle} on version ${version}`);
+
+      await this.setTracks(id, version, { audioId, subtitleId }).catch((e: unknown) =>
+        log.warn("could not set tracks", e),
+      );
     }
 
     await this.rememberSession(opts.session);
@@ -563,7 +576,11 @@ export class PlexBackend implements MediaBackend {
     const part = detail.versions[version]?.partId;
     if (!part) throw new Error(`no part for version ${version} of ${itemId}`);
 
-    const query: Record<string, string | number | undefined> = { allParts: 1 };
+    // NOT allParts. Measured: with it, choosing Hungarian on the 720p copy also
+    // rewrote the 1080p copy's audio AND both copies' subtitle selection, since
+    // the stream ids do not line up between two different files. A version is a
+    // separate file and its tracks are its own.
+    const query: Record<string, string | number | undefined> = {};
     if (choice.audioId) query.audioStreamID = choice.audioId;
     // Zero is how the server is told "no subtitles"; leaving it out means "no
     // opinion", which is a different thing and leaves the old one selected.
@@ -582,15 +599,22 @@ export class PlexBackend implements MediaBackend {
   /**
    * Subtitles the server could fetch for this item.
    *
-   * Needs a subtitle provider configured on the server; without one it answers
-   * with an error rather than an empty list, so an empty result and "the server
-   * cannot do this" have to be told apart by the caller.
+   * The language must be a TWO-letter code. A three-letter one is answered with
+   * a server error rather than an empty list, which reads as "this server cannot
+   * search" when it can perfectly well - measured, "hun" fails and "hu" returns
+   * results from the same provider.
+   *
+   * A genuine error still means the server has no provider set up, so the caller
+   * can tell that apart from finding nothing.
    */
   async searchSubtitles(itemId: string, language: string): Promise<Track[]> {
+    const code = language.slice(0, 2).toLowerCase();
     const c = container<{ Stream?: PlexStream[] }>(
-      await this.req(`library/metadata/${itemId}/subtitles`, { language }),
+      await this.req(`library/metadata/${itemId}/subtitles`, { language: code }),
     );
-    return (c.Stream ?? []).map((s, i) => toTrack(s, i, "subtitle"));
+    // Not embedded tracks: these are candidates to download, and an ordinal
+    // among the file's own tracks would be meaningless for them.
+    return (c.Stream ?? []).map((s) => ({ ...toTrack(s, -1, "subtitle"), external: true }));
   }
 
   /** Download one of them onto the item. */

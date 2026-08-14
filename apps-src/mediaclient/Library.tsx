@@ -5,6 +5,7 @@ import { Tile } from "./Tile";
 import { Message } from "./Message";
 import { artworkScale } from "./posters";
 import { useFocusFallback, useInitialFocus } from "./focus";
+import { usePlayer } from "./playback/player";
 import { classify, useApp } from "./state";
 import type { MediaItem } from "./backends/types";
 import { log } from "./redact";
@@ -37,6 +38,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   const go = useApp((s) => s.go);
   const fail = useApp((s) => s.fail);
   const failure = useApp((s) => s.failure);
+  const playing = usePlayer((s) => s.current !== null);
 
   const [letters, setLetters] = useState<Letter[]>([]);
   const [letter, setLetter] = useState<string | null>(null);
@@ -149,7 +151,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   // press arriving after the grid was cleared for a letter change has to land
   // somewhere rather than be discarded.
   useInitialFocus("cell-0", total !== null && total > 0);
-  useFocusFallback("cell-0", (key) => key.startsWith("cell-") || key.startsWith("letter-"));
+  useFocusFallback("cell-0", (key) => key.startsWith("cell-") || key.startsWith("letter-"), !playing);
 
   if (failure) return <Message failure={failure} onRetry={() => void loadPage(0)} />;
   // `total === null` is "not asked yet"; a total of zero is an answer, and an

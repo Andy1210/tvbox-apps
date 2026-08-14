@@ -97,6 +97,7 @@
     "searching": "Keresés…",
     "searchUnavailable": "Ezen a szerveren nincs beállítva feliratszolgáltató.",
     "searchNone": "Nincs találat.",
-    "download": "Letöltés"
+    "download": "Letöltés",
+    "part": "{n}. rész / {of}"
   }
 }

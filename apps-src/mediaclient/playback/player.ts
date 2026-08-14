@@ -52,7 +52,11 @@ interface PlayerState {
   overlay: boolean;
   error: string | null;
 
-  play(backend: MediaBackend, item: MediaItem, opts?: { resume?: boolean; version?: number }): Promise<void>;
+  play(
+    backend: MediaBackend,
+    item: MediaItem,
+    opts?: { resume?: boolean; version?: number; audio?: number; subtitle?: number | "none" },
+  ): Promise<void>;
   /** Switch version, audio or subtitles without losing the place. */
   changeTracks(choice: { version: number; audio?: number; subtitle?: number | "none" }): Promise<void>;
   togglePause(): void;
@@ -92,13 +96,19 @@ export const usePlayer = create<PlayerState>((set, get) => ({
 
     currentBackend = backend;
     const session = randomSession();
-    const choice = { version: opts?.version ?? 0 };
+    const choice = { version: opts?.version ?? 0, audio: opts?.audio, subtitle: opts?.subtitle };
     let decision: StreamDecision;
     let markers: Marker[] = [];
     let detail: ItemDetail | undefined;
     try {
       [decision, markers, detail] = await Promise.all([
-        backend.resolveStream(item.id, { session, panel: tv.panel ?? null, version: choice.version }),
+        backend.resolveStream(item.id, {
+          session,
+          panel: tv.panel ?? null,
+          version: choice.version,
+          audio: choice.audio,
+          subtitle: choice.subtitle,
+        }),
         backend.markers(item.id).catch(() => []),
         // Needed for the track menu, and cheap: the same document the decision
         // path already fetched is still cached.
@@ -134,8 +144,8 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       {
         // The tri-state matters: leaving subtitles unset lets the player honour
         // whatever the container marks as default, which is not the same as off.
-        sub: decision.sub === "no" ? -1 : undefined,
-        audio: decision.audio === "no" ? -1 : undefined,
+        sub: decision.sub === "no" ? -1 : typeof decision.sub === "number" ? decision.sub : undefined,
+        audio: decision.audio === "no" ? -1 : typeof decision.audio === "number" ? decision.audio : undefined,
         subFile: decision.subFile,
       },
       startSec,
@@ -195,9 +205,15 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     if (!currentBackend) return;
     // Restart where it was, not where the item was left last time - the resume
     // point on the server is behind by up to the report interval.
-    await get().play(currentBackend, { ...cur.item, viewOffsetMs: at }, { version: choice.version });
-    const after = get().current;
-    if (after) set({ current: { ...after, choice } });
+    // The choice has to travel with the restart. Without it the new stream
+    // carries the OLD tracks while the menu shows the new ones selected - and on
+    // a converted stream that is the only path there is, because the tracks were
+    // baked in when it started.
+    await get().play(currentBackend, { ...cur.item, viewOffsetMs: at }, {
+      version: choice.version,
+      audio: choice.audio,
+      subtitle: choice.subtitle,
+    });
   },
 
   togglePause() {

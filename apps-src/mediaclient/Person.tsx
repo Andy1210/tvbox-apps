@@ -5,6 +5,7 @@ import { Row } from "./Row";
 import { Message } from "./Message";
 import { artworkScale } from "./posters";
 import { useFocusFallback, useInitialFocus } from "./focus";
+import { usePlayer } from "./playback/player";
 import { classify, useApp } from "./state";
 import type { CreditSet, MediaItem } from "./backends/types";
 import { log } from "./redact";
@@ -28,6 +29,7 @@ export function Person({ personId, personName }: { personId: string; personName:
   const go = useApp((s) => s.go);
   const fail = useApp((s) => s.fail);
   const failure = useApp((s) => s.failure);
+  const playing = usePlayer((s) => s.current !== null);
   const [reload, setReload] = useState(0);
   const [credits, setCredits] = useState<CreditSet | null>(null);
 
@@ -56,7 +58,7 @@ export function Person({ personId, personName }: { personId: string; personName:
   useInitialFocus(firstCreditKey, Boolean(credits));
   // Focus is set once; without a fallback anything that unmounts the focused
   // tile afterwards leaves the D-pad dead with only Back working.
-  useFocusFallback(firstCreditKey, (key) => key.startsWith("films-") || key.startsWith("series-"));
+  useFocusFallback(firstCreditKey, (key) => key.startsWith("films-") || key.startsWith("series-"), !playing);
 
   if (failure) return <Message failure={failure} onRetry={() => setReload((n) => n + 1)} />;
   if (!credits) return <Message loading />;

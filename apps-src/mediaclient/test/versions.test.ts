@@ -47,14 +47,18 @@ describe("versions", () => {
 
   it("names the language when that is what differs", () => {
     const versions = toVersions(item([media({ langs: ["magyar"] }), media({ langs: ["angol"] })]));
-    expect(versions.map((v) => v.label)).toEqual(["magyar", "angol"]);
+    expect(versions.map((v) => v.label)).toEqual(["magyar · 1080p", "angol · 1080p"]);
   });
 
-  it("names the resolution when that is what differs", () => {
+  it("keeps a fixed shape rather than only naming what differs", () => {
+    // Two copies in the same language: the resolution is what separates them,
+    // but the language stays on the label. A row reading only "4K" does not say
+    // whether the other one is a language you cannot watch, and two films'
+    // version rows should read the same way as each other.
     const versions = toVersions(
       item([media({ videoResolution: "4k", langs: ["magyar"] }), media({ videoResolution: "720", langs: ["magyar"] })]),
     );
-    expect(versions.map((v) => v.label)).toEqual(["4K", "720p"]);
+    expect(versions.map((v) => v.label)).toEqual(["magyar · 4K", "magyar · 720p"]);
   });
 
   it("names both when both differ, language first", () => {
@@ -67,16 +71,20 @@ describe("versions", () => {
     expect(versions[1].label).toBe("magyar · 720p");
   });
 
-  it("falls back to size when nothing else separates them", () => {
+  it("adds size only when nothing else separates them", () => {
     // Two identical-looking copies must still be told apart, or the choice is a
     // coin toss.
     const versions = toVersions(
       item([
-        media({ langs: ["magyar"], Part: [{ id: 1, size: 2_000_000_000 }] }),
-        media({ langs: ["magyar"], Part: [{ id: 2, size: 8_000_000_000 }] }),
+        media({
+          Part: [{ id: 1, size: 2_000_000_000, Stream: [{ id: 20, streamType: 2, language: "magyar", codec: "ac3" }] }],
+        }),
+        media({
+          Part: [{ id: 2, size: 8_000_000_000, Stream: [{ id: 21, streamType: 2, language: "magyar", codec: "ac3" }] }],
+        }),
       ]),
     );
-    expect(versions.map((v) => v.label)).toEqual(["2.0 GB", "8.0 GB"]);
+    expect(versions.map((v) => v.label)).toEqual(["magyar · 1080p · 2.0 GB", "magyar · 1080p · 8.0 GB"]);
   });
 
   it("reads the server's own title when it has one", () => {
@@ -87,7 +95,7 @@ describe("versions", () => {
   it("writes SD rather than the server's placeholder", () => {
     // "sdp" and "sd" are the server saying it does not know, not a resolution.
     const versions = toVersions(item([media({ videoResolution: "sdp" }), media({ videoResolution: "1080" })]));
-    expect(versions.map((v) => v.label)).toEqual(["SD", "1080p"]);
+    expect(versions.map((v) => v.label)).toEqual(["? · SD", "? · 1080p"]);
   });
 
   it("carries the part id, which is what a track change is addressed to", () => {
@@ -119,7 +127,9 @@ describe("tracks", () => {
     // position from a mixed list selects the wrong one.
     const [v] = toVersions(withTracks);
     expect(v.audio.map((a) => a.ordinal)).toEqual([0, 1]);
-    expect(v.subtitles.map((s) => s.ordinal)).toEqual([0, 1]);
+    // The external one has NO position among the file's own tracks - giving it
+    // one selects a track the player cannot find.
+    expect(v.subtitles.map((s) => s.ordinal)).toEqual([-1, 0]);
   });
 
   it("keeps the server's own id, which is what a change is reported with", () => {
@@ -139,6 +149,7 @@ describe("tracks", () => {
     // other is inside it and is chosen by position.
     const [v] = toVersions(withTracks);
     expect(v.subtitles[0].external).toBe(true);
+    expect(v.subtitles[0].key).toBe("/library/streams/30");
     expect(v.subtitles[1].external).toBe(false);
     expect(v.subtitles[1].forced).toBe(true);
   });
