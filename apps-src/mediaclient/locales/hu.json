@@ -113,7 +113,12 @@
     "subPos": "Felirat helye",
     "subColor": "Felirat színe",
     "autoSkip": "Intro és stáblista átugrása",
-    "autoSkipHint": "Ha bekapcsolod, magától átugrik. A jelölés a szerver becslése, és ha téved, egy epizód nyitányát is átugorhatja."
+    "autoSkipHint": "Ha bekapcsolod, magától átugrik. A jelölés a szerver becslése, és ha téved, egy epizód nyitányát is átugorhatja.",
+    "subSample": "Minta szöveg",
+    "posBottom": "Legalul",
+    "posHigher": "Kicsit feljebb",
+    "posHigh": "Feljebb",
+    "posMiddle": "Középtájt"
   },
   "tracks": {
     "version": "Verzió",
