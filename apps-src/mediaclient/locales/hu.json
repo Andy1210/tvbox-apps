@@ -21,7 +21,6 @@
   "home": {
     "continue": "Folytasd, ahol abbahagytad",
     "recentIn": "Újdonságok itt: {library}",
-    "libraries": "Könyvtárak",
     "empty": "Ezen a szerveren még nincs semmi.",
     "search": "Keresés",
     "settings": "Beállítások"
@@ -47,7 +46,6 @@
     "cast": "Szereplők",
     "extras": "Előzetesek és extrák",
     "reviews": "Kritikák",
-    "moreReviews": "Még {n} megjelenítése",
     "fromStart": "Elölről",
     "audienceScore": "{source} · nézők",
     "runtimeHm": "{h} ó {m} p",
@@ -82,7 +80,13 @@
     "remote": "Távoli (a szerver korlátozza a minőséget)",
     "profile": "Profil",
     "owner": "A fiók tulajdonosa",
-    "signOut": "Kijelentkezés"
+    "signOut": "Kijelentkezés",
+    "autologin": "Automatikus belépés",
+    "on": "be",
+    "off": "ki",
+    "autologinOnHint": "A box magától {who} néven indul.",
+    "autologinOffHint": "A box minden induláskor megkérdezi, ki néz.",
+    "switchUser": "Felhasználóváltás"
   },
   "tracks": {
     "version": "Verzió",
@@ -99,5 +103,10 @@
     "searchNone": "Nincs találat.",
     "download": "Letöltés",
     "part": "{n}. rész / {of}"
+  },
+  "profiles": {
+    "title": "Ki néz?",
+    "enterPin": "{name} PIN-kódja",
+    "wrongPin": "Nem jó a PIN-kód."
   }
 }

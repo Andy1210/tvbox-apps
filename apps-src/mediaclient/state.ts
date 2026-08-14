@@ -13,10 +13,12 @@ import { clearImages } from "./posters";
 import { log } from "./redact";
 
 const SESSION_KEY = "session";
+const AUTOLOGIN_KEY = "autologin";
 
 export type Screen =
   | { name: "boot" }
   | { name: "login" }
+  | { name: "profiles" }
   | { name: "home" }
   | { name: "library"; libraryId: string; title: string }
   | { name: "item"; itemId: string }
@@ -32,11 +34,15 @@ interface State {
   session: Session | null;
   backend: MediaBackend | null;
   screen: Screen;
+  /** Sign back in as the last profile without asking. Off means the picker. */
+  autologin: boolean;
   /** Screens visited, so Back returns rather than exiting the app. */
   history: Screen[];
   failure: Failure | null;
 
   boot(): Promise<void>;
+  chooseProfile(id: string, pin?: string): Promise<void>;
+  setAutologin(on: boolean): Promise<void>;
   signIn(session: Session): Promise<void>;
   signOut(): Promise<void>;
   go(screen: Screen): void;
@@ -49,6 +55,7 @@ export const useApp = create<State>((set, get) => ({
   session: null,
   backend: null,
   screen: { name: "boot" },
+  autologin: true,
   history: [],
   failure: null,
 
@@ -83,12 +90,49 @@ export const useApp = create<State>((set, get) => ({
     }
 
     const backend = new PlexBackend(saved, { clientId: identity.clientId, deviceName: deviceName(identity.host) });
-    set({ session: saved, backend, screen: { name: "home" } });
+    // On by default: a television that asks who is watching every single evening
+    // is a television nobody uses. Off is for a household that shares one box
+    // and does not want last night's viewer to inherit tonight's watch state.
+    const autologin = (await readJson<boolean>(AUTOLOGIN_KEY)) ?? true;
+    set({ session: saved, backend, autologin, screen: { name: autologin ? "home" : "profiles" } });
 
     // Anything this client left running on the server outlives the window that
     // started it, and leaving the app produces no event to clean up on. So the
     // first thing a new run does is tidy after the last one.
     backend.reapOwnSessions().catch(() => {});
+  },
+
+  /**
+   * Become one of the household's people.
+   *
+   * The session is written back so the next launch starts as whoever was last
+   * chosen - which is what autologin means here, rather than "the account
+   * owner".
+   */
+  async chooseProfile(id, pin) {
+    const { backend, identity } = get();
+    if (!backend) return;
+    const session = await backend.switchProfile(id, pin);
+    const profiles = await backend.listProfiles().catch(() => []);
+    const named = { ...session, profileName: profiles.find((p) => p.id === id)?.name ?? session.profileName };
+
+    const w = await writeJson(SESSION_KEY, named);
+    if (!w.ok) log.warn("profile not persisted; the next launch will ask again");
+    // Artwork and everything cached under it belonged to the previous person.
+    clearImages();
+    set({
+      session: named,
+      backend: new PlexBackend(named, { clientId: identity!.clientId, deviceName: deviceName(identity!.host) }),
+      screen: { name: "home" },
+      history: [],
+      failure: null,
+    });
+  },
+
+  async setAutologin(on) {
+    const w = await writeJson(AUTOLOGIN_KEY, on);
+    if (!w.ok) log.warn("autologin preference not saved");
+    set({ autologin: on });
   },
 
   async signIn(session) {

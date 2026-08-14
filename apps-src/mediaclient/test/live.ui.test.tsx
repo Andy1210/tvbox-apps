@@ -27,6 +27,7 @@ const session: Session = {
   profileId: "test",
   profileName: "test",
   token: TOKEN ?? "",
+  accountToken: TOKEN ?? "",
   serverId: "test",
   serverName: "test",
   baseUrl: BASE ?? "",

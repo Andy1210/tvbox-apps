@@ -5,8 +5,12 @@
     "hu": "Média",
     "en": "Media"
   },
-  "version": "0.2.0",
+  "version": "0.3.0",
   "changelog": [
+    {
+      "version": "0.3.0",
+      "notes": "Pick who is watching when the box starts, so everyone's continue-watching row is their own - and turn that off in Settings if you would rather it just carried on as you. The libraries moved to the top, with search and settings beside them on the same row, so getting to them is one press sideways instead of hunting upwards. Reviews are a row you can move through with the remote. And a TV show that gained episodes now shows the series' own cover rather than four stills from it."
+    },
     {
       "version": "0.2.0",
       "notes": "Sign in from the TV with a code, carry on where you left off, and browse a library by letter. Films and series show their cast - and pressing a face lists everything that person is in, films and series together, which the Plex app cannot do. Scores, reviews and trailers are there too. Playback has a scrub bar, skip buttons for the intro and the credits, and a menu on Down for the audio, the subtitles, and which copy to play when the library holds more than one."

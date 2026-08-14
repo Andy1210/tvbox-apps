@@ -258,7 +258,12 @@ export interface Profile {
 export interface Session {
   profileId: string;
   profileName: string;
+  /** The token in use, which after a profile switch belongs to that profile. */
   token: string;
+  /** The ACCOUNT's own token. Kept apart because the household user list and
+   *  every later switch are asked with it - after one switch the token above is
+   *  a profile's and can no longer enumerate the household. */
+  accountToken: string;
   serverId: string;
   serverName: string;
   baseUrl: string;
