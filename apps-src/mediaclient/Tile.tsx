@@ -178,7 +178,7 @@ export function Tile({
           row below it, which is also what spatial navigation measures against. */}
       {!showsTitleInPlace && (
         <div
-          className={`${captionLines === 3 ? "line-clamp-3" : "line-clamp-2"} text-[1.8vh] leading-[1.5]`}
+          className={`shrink-0 ${captionLines === 3 ? "line-clamp-3" : "line-clamp-2"} text-[1.8vh] leading-[1.5]`}
           style={{ height: `${captionLines * 2.7}vh` }}
           title={label(item)}
         >

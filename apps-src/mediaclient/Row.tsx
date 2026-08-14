@@ -87,7 +87,7 @@ export function Row({
         // heading above the tiles and the captions below them both vanish.
         className="flex shrink-0 flex-col gap-[1vh]"
       >
-        <h2 className="px-[4vw] text-[2vh] font-semibold tracking-tight">{title}</h2>
+        <h2 className="shrink-0 px-[4vw] text-[2vh] font-semibold tracking-tight">{title}</h2>
         <div
           ref={scroller}
           // No scroll-smooth. This row does its own scrolling and says how, but the

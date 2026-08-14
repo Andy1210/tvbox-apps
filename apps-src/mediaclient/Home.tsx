@@ -149,7 +149,7 @@ export function Home(): React.JSX.Element {
           libraries are where someone looks for them. */}
         {/* Not focusable, so it cannot get in the way of the rail below it - but
           something has to say which app this is. */}
-        <h1 className="px-[4vw] text-[2.2vh] font-semibold tracking-tight opacity-70">{t("app.name")}</h1>
+        <h1 className="shrink-0 px-[4vw] text-[2.2vh] font-semibold tracking-tight opacity-70">{t("app.name")}</h1>
 
         <TopRow
           onReachTop={toTop}
@@ -245,7 +245,7 @@ function TopRow({
       {/* The libraries scroll; search and settings do not. A server with five
           libraries would otherwise push the only route to sign-out off the far
           end of a rail whose scrollbar is hidden. */}
-      <div ref={ref} className="flex items-center gap-[1vw] px-[4vw] py-[1vh]">
+      <div ref={ref} className="flex shrink-0 items-center gap-[1vw] px-[4vw] py-[1vh]">
         {/* Padding on BOTH axes, with matching negative margins so the row does
             not move. The focus state scales a chip by 4% and this element
             scrolls, so it clips its own children - vertically at the top and
