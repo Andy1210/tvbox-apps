@@ -43,16 +43,26 @@ const NAV_KEYS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "En
  * Capture phase, ahead of the library's own handler, which would otherwise act
  * on the dead focus first.
  */
-export function useFocusFallback(firstKey: string | undefined, owns: (key: string) => boolean): void {
+export function useFocusFallback(
+  firstKey: string | undefined,
+  owns: (key: string) => boolean,
+  /** Off while another surface owns the screen. A hidden screen's fallback is
+   *  still a live window listener, and it will happily pull focus back onto a
+   *  button nobody can see - measured, one OK press then both paused the film
+   *  and pressed the detail page's Play button behind it. */
+  enabled = true,
+): void {
   const key = useRef(firstKey);
   const mine = useRef(owns);
+  const on = useRef(enabled);
   useEffect(() => {
     key.current = firstKey;
     mine.current = owns;
+    on.current = enabled;
   });
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (!NAV_KEYS.has(e.key) || !key.current) return;
+      if (!on.current || !NAV_KEYS.has(e.key) || !key.current) return;
       const current = getCurrentFocusKey();
       if (current && mine.current(current) && doesFocusableExist(current)) return;
       setFocus(key.current);

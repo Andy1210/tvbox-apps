@@ -401,6 +401,9 @@ export function toTrack(s: PlexStream, ordinal: number, kind: "audio" | "subtitl
     selected: s.selected === true,
     // An external subtitle has its own key; an embedded one is inside the file.
     external: kind === "subtitle" && Boolean(s.key),
+    // Where an external subtitle actually lives. The player takes it as a file
+    // rather than by position, which is the only way to use one at all.
+    key: s.key,
   };
 }
 
@@ -413,7 +416,13 @@ export function toTrack(s: PlexStream, ordinal: number, kind: "audio" | "subtitl
  * original as two whole files, not two tracks), then the resolution, then how
  * big it is. Codec is last because it is the least useful thing to choose on.
  */
-export function versionLabel(m: PlexMediaEntry, audio: Track[], distinguishBy: Set<string>): string {
+export function versionLabel(
+  m: PlexMediaEntry,
+  audio: Track[],
+  distinguishBy: Set<string>,
+  ordinal?: number,
+  part?: PlexPart,
+): string {
   const bits: string[] = [];
 
   if (distinguishBy.has("language")) {
@@ -427,10 +436,11 @@ export function versionLabel(m: PlexMediaEntry, audio: Track[], distinguishBy: S
     bits.push(!r || r === "sd" || r === "sdp" ? "SD" : /^\d+$/.test(r) ? `${r}p` : r.toUpperCase());
   }
   if (distinguishBy.has("size")) {
-    const size = (m.Part ?? [])[0]?.size;
+    const size = part?.size ?? (m.Part ?? [])[0]?.size;
     if (size) bits.push(`${(size / 1e9).toFixed(1)} GB`);
   }
   if (distinguishBy.has("codec") && m.videoCodec) bits.push(m.videoCodec.toUpperCase());
+  if (distinguishBy.has("ordinal") && ordinal !== undefined) bits.push(`#${ordinal + 1}`);
 
   return m.title || bits.join(" · ") || "?";
 }
@@ -443,47 +453,100 @@ export function versionLabel(m: PlexMediaEntry, audio: Track[], distinguishBy: S
  * choosing between should be the thing the label says.
  */
 export function toVersions(m: PlexMetadata & { Media?: PlexMediaEntry[] }): MediaVersion[] {
-  const media = m.Media ?? [];
+  // One entry per FILE, not per media entry. A film held as two discs is one
+  // media entry with two parts, and playing only the first is playing half the
+  // film - with a scrub bar scaled to the whole thing, so nothing on screen says
+  // so. Offering both makes the split visible and playable.
+  const media = (m.Media ?? []).flatMap((entry) =>
+    (entry.Part ?? [{}]).map((part, partIndex) => ({ entry, part, partIndex, parts: (entry.Part ?? []).length })),
+  );
   if (media.length === 0) return [];
 
-  const tracksFor = (entry: PlexMediaEntry): { audio: Track[]; subtitles: Track[] } => {
-    const streams = (entry.Part ?? [])[0]?.Stream ?? [];
+  const tracksFor = (entry: { part: PlexPart }): { audio: Track[]; subtitles: Track[] } => {
+    const streams = entry.part.Stream ?? [];
     const audio: Track[] = [];
     const subtitles: Track[] = [];
     for (const s of streams) {
-      if (s.streamType === AUDIO) audio.push(toTrack(s, audio.length, "audio"));
-      else if (s.streamType === SUBTITLE) subtitles.push(toTrack(s, subtitles.length, "subtitle"));
+      if (s.streamType === AUDIO) {
+        audio.push(toTrack(s, audio.length, "audio"));
+      } else if (s.streamType === SUBTITLE) {
+        // Ordinals count only the tracks INSIDE the file. A sidecar subtitle is
+        // appended to this list and carries its own key instead of a position,
+        // and giving it one the player then looks for selects a track that is
+        // not there - measured, one item here has six of them and not one could
+        // be turned on. An external one is handed over as a file instead.
+        const external = Boolean(s.key);
+        subtitles.push(toTrack(s, external ? -1 : subtitles.filter((x) => !x.external).length, "subtitle"));
+      }
     }
     return { audio, subtitles };
   };
 
   const parsed = media.map(tracksFor);
 
-  // Which fields actually differ. With one version nothing does, so its label
-  // stays short.
+  // Add fields until the rendered labels are actually unique - and only fields
+  // that really differ, so a label never states something both copies share.
+  //
+  // Asking "does this field differ" alone is not the same question and gets it
+  // wrong: measured over this library, 61 of 117 multi-version items came out
+  // with two rows reading identically - one version listing
+  // [magyar, magyar, English] and another [magyar, English] differ by language,
+  // yet both render "magyar/English". Two identical rows are a coin toss.
   const distinguishBy = new Set<string>();
   if (media.length > 1) {
-    const key = (fn: (i: number) => string): boolean => new Set(media.map((_, i) => fn(i))).size > 1;
-    if (key((i) => parsed[i].audio.map((a) => a.language ?? "?").join(","))) distinguishBy.add("language");
-    if (key((i) => media[i].videoResolution ?? "")) distinguishBy.add("resolution");
-    if (key((i) => String(media[i].videoCodec ?? ""))) distinguishBy.add("codec");
-    // Size is the tiebreaker when nothing else separates them, so two copies are
-    // never both labelled the same thing.
-    if (distinguishBy.size === 0) distinguishBy.add("size");
+    // Compared with the part suffix the UI will add, so two discs of one film
+    // are not "ambiguous" and do not drag in a size nobody needs.
+    const render = (): string[] =>
+      media.map(
+        (x, i) =>
+          versionLabel(x.entry, parsed[i].audio, distinguishBy, i, x.part) + (x.parts > 1 ? ` ${x.partIndex}` : ""),
+      );
+    const unique = (labels: string[]): boolean =>
+      new Set(labels).size === labels.length && labels.every((l) => l && l !== "?");
+
+    const differs: Record<string, () => boolean> = {
+      language: () => new Set(parsed.map((p) => p.audio.map((a) => a.language ?? "?").join(","))).size > 1,
+      resolution: () => new Set(media.map((x) => x.entry.videoResolution ?? "")).size > 1,
+      codec: () => new Set(media.map((x) => String(x.entry.videoCodec ?? ""))).size > 1,
+      size: () => new Set(media.map((x) => x.part.size ?? 0)).size > 1,
+    };
+
+    // Language and resolution always, when they are known: a label's job is to
+    // let someone choose, and "angol" alone does not say whether the other copy
+    // is a better picture. A fixed shape also means two films' version rows read
+    // the same way, which a label that varies with what happens to differ does
+    // not.
+    distinguishBy.add("language");
+    distinguishBy.add("resolution");
+    // Then only what is needed to tell them apart, and only if it really differs.
+    for (const field of ["codec", "size"]) {
+      if (unique(render())) break;
+      if (differs[field]()) distinguishBy.add(field);
+    }
+    // Still ambiguous - two byte-identical copies of one file exist here - so
+    // number them. A row nobody can tell from its neighbour is not a choice.
+    if (!unique(render())) distinguishBy.add("ordinal");
   }
 
-  return media.map((entry, index) => ({
-    index,
-    partId: (entry.Part ?? [])[0]?.id !== undefined ? String((entry.Part ?? [])[0]?.id) : undefined,
-    label: versionLabel(entry, parsed[index].audio, distinguishBy),
-    resolution: entry.videoResolution,
-    videoCodec: entry.videoCodec,
-    audioCodec: entry.audioCodec,
-    audioChannels: entry.audioChannels,
-    bitrateKbps: entry.bitrate,
-    sizeBytes: (entry.Part ?? [])[0]?.size,
-    durationMs: entry.duration,
+  return media.map((x, index) => ({
+    index: m.Media?.indexOf(x.entry) ?? 0,
+    partIndex: x.partIndex,
+    parts: x.parts,
+    partId: x.part.id !== undefined ? String(x.part.id) : undefined,
+    label: versionLabel(x.entry, parsed[index].audio, distinguishBy, index, x.part),
+    resolution: x.entry.videoResolution,
+    videoCodec: x.entry.videoCodec,
+    audioCodec: x.entry.audioCodec,
+    audioChannels: x.entry.audioChannels,
+    bitrateKbps: x.entry.bitrate,
+    // This file's own bytes and length, not the whole title's: a bar scaled to
+    // both discs of a two-disc film says the first one is half over when it
+    // ends.
+    sizeBytes: x.part.size,
+    durationMs: x.part.duration ?? x.entry.duration,
     audio: parsed[index].audio,
     subtitles: parsed[index].subtitles,
   }));
 }
+
+

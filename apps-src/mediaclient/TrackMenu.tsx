@@ -80,7 +80,7 @@ export function TrackMenu({
                   key={v.index}
                   focusKey={`ver-${v.index}`}
                   active={v.index === choice.version}
-                  label={v.label}
+                  label={v.parts > 1 ? `${v.label} · ${t("tracks.part", { n: String(v.partIndex + 1), of: String(v.parts) })}` : v.label}
                   hint={versionHint(v)}
                   // Changing the file invalidates the track choices made against
                   // the old one, so they go back to the server's own selection.

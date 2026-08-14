@@ -97,6 +97,7 @@
     "searching": "Looking…",
     "searchUnavailable": "This server has no subtitle service set up.",
     "searchNone": "Nothing found.",
-    "download": "Download"
+    "download": "Download",
+    "part": "part {n} of {of}"
   }
 }

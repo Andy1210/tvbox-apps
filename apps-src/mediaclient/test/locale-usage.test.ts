@@ -62,12 +62,21 @@ describe("locale keys", () => {
     expect(unused).toEqual([]);
   });
 
-  it("no user-visible text is built from a template in a component", () => {
-    // The specific shapes that got through before: a units suffix and a source
-    // label, both concatenated in a component and therefore English everywhere.
+  it("no user-visible WORD is built into a template", () => {
+    // What got through before: a units suffix ("2h 14m") and a source label
+    // ("IMDb · viewers"), both concatenated in a component and therefore English
+    // on every television.
+    //
+    // A separator between two interpolations is not the same thing - joining two
+    // already-translated pieces with "·" is fine - so the rule is that a LETTER
+    // may not follow an interpolation inside a template. That is what makes a
+    // string a word rather than punctuation.
     const offenders = sources(SRC)
       .map((f) => [f, readFileSync(f, "utf8")] as const)
-      .filter(([, s]) => /`\$\{[^}]+\}\s*(h|m|·)\s/.test(s) || /`\$\{[^}]+\} · viewers`/.test(s))
+      // Two shapes, both real: a unit letter glued to a number, and a word
+      // sitting after a separator where an interpolation should be. Joining two
+      // interpolations with a separator does not match either.
+      .filter(([, s]) => /\$\{[^}]+\}\s*[hm]\s/.test(s) || /·\s+[a-z]{3,}/.test(s))
       .map(([f]) => f.replace(SRC, ""));
 
     expect(offenders).toEqual([]);

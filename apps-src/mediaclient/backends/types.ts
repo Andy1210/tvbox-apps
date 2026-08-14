@@ -120,8 +120,11 @@ export interface Track {
   forced?: boolean;
   /** The server's current choice. */
   selected?: boolean;
-  /** A subtitle that lives beside the file rather than inside it. */
+  /** A subtitle that lives beside the file rather than inside it. Its `ordinal`
+   *  is -1, because it has no position among the file's own tracks. */
   external?: boolean;
+  /** Server path for an external subtitle, handed to the player as a file. */
+  key?: string;
 }
 
 /**
@@ -134,6 +137,11 @@ export interface Track {
  */
 export interface MediaVersion {
   index: number;
+  /** Which part of that media entry, when a film is split across two files. */
+  partIndex: number;
+  /** How many parts that media entry has. More than one means the title is
+   *  split across files, which the label has to say. */
+  parts: number;
   /** The file itself; the server addresses track changes by this. */
   partId?: string;
   /** Composed here: servers leave their own version title empty in practice. */

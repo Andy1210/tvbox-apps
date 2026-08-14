@@ -37,6 +37,7 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
   const go = useApp((s) => s.go);
   const fail = useApp((s) => s.fail);
   const failure = useApp((s) => s.failure);
+  const playing = usePlayer((s) => s.current !== null);
   const [reload, setReload] = useState(0);
   const [version, setVersion] = useState(0);
   const [detail, setDetail] = useState<ItemDetail | null>(null);
@@ -79,7 +80,7 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
   useInitialFocus("detail-play", Boolean(detail));
   // Returning from playback unmounts the player, which held focus - without a
   // fallback the detail page comes back with the D-pad dead.
-  useFocusFallback("detail-play", (key) => key.startsWith("detail-") || key.startsWith("cast-") || key.startsWith("children-") || key.startsWith("extras-") || key === "reviews-more");
+  useFocusFallback("detail-play", (key) => key.startsWith("detail-") || key.startsWith("cast-") || key.startsWith("children-") || key.startsWith("extras-") || key === "reviews-more", !playing);
 
   if (failure) return <Message failure={failure} onRetry={() => setReload((n) => n + 1)} />;
   if (!detail) return <Message loading />;
@@ -153,7 +154,7 @@ export function Detail({ itemId }: { itemId: string }): React.JSX.Element {
                     v.index === version ? "bg-white/15 ring-[0.3vh] ring-white" : "bg-white/8"
                   }`}
                 >
-                  {v.label}
+                  {v.parts > 1 ? `${v.label} · ${t("tracks.part", { n: String(v.partIndex + 1), of: String(v.parts) })}` : v.label}
                 </FocusButton>
               ))}
             </div>
