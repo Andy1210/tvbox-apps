@@ -48,6 +48,19 @@ const SESSIONS_KEY = "plex-sessions";
  * report stay our own, which is what the account's device list shows.
  */
 const CLIENT_PROFILE = "Chrome";
+/** A library this size is a broken total, not a library. */
+const MAX_LIBRARY_ITEMS = 5_000_000;
+/** log2(MAX_LIBRARY_ITEMS) with room to spare. */
+const MAX_SEARCH_STEPS = 40;
+/**
+ * What a filter key may be.
+ *
+ * Not a formatting nicety: the key becomes a path segment on one call and a
+ * query parameter NAME on another, and both come from the server.
+ */
+const FILTER_KEY = /^[A-Za-z][A-Za-z0-9_.]{0,40}$/;
+/** Parameter names that are ours to set. Plex has no filter by these names. */
+const RESERVED = new Set(["sort", "type", "includeguids", "excludeallleaves"]);
 
 /**
  * What this player can take. mpv on this hardware plays essentially anything, so
@@ -191,10 +204,12 @@ export class PlexBackend implements MediaBackend {
   async libraryPage(libraryId: string, q: PageQuery): Promise<Page<MediaItem>> {
     const c = container<MetadataContainer>(
       await this.req(`library/sections/${libraryId}/all`, {
+        // Filters first, ours after: whatever the server named cannot then
+        // replace the order or the page we asked for.
+        ...safeFilters(q.filters),
         // Direction rides on the sort key itself, which is what the server
         // expects: a separate parameter is ignored.
         sort: `${q.sort ?? "titleSort"}${q.desc ? ":desc" : ""}`,
-        ...(q.filters ?? {}),
         ...page(q.offset, q.limit),
       }),
     );
@@ -214,7 +229,7 @@ export class PlexBackend implements MediaBackend {
     filters?: Record<string, string>,
   ): Promise<{ key: string; title: string; size: number }[]> {
     const c = container<MetadataContainer>(
-      await this.req(`library/sections/${libraryId}/firstCharacter`, { ...(filters ?? {}) }),
+      await this.req(`library/sections/${libraryId}/firstCharacter`, safeFilters(filters)),
     );
     return (c.Directory ?? []).map((d) => ({ key: String(d.key ?? ""), title: d.title ?? "", size: d.size ?? 0 }));
   }
@@ -228,15 +243,23 @@ export class PlexBackend implements MediaBackend {
 
   async filterOptions(libraryId: string): Promise<FilterOption[]> {
     const c = container<MetadataContainer>(await this.req(`library/sections/${libraryId}/filters`));
-    return (c.Directory ?? [])
-      .filter((d) => d.filter)
-      .map((d) => ({
-        key: String(d.filter),
-        title: d.title ?? String(d.filter),
-        // The server calls the on/off ones "boolean"; everything else has a
-        // list of values that has to be fetched before it can be offered.
-        kind: d.filterType === "boolean" ? ("flag" as const) : ("list" as const),
-      }));
+    return (
+      (c.Directory ?? [])
+        // A filter key becomes both a PATH SEGMENT and a QUERY NAME later, and it
+        // is the server's string. Held to a bare identifier here, at the one place
+        // it enters, rather than escaped at each use: measured, a key of
+        // "../../../../:/scrobble?key=99&identifier=..." reached the server as a
+        // state-changing request with the account token attached, and a key of
+        // "X-Plex-Token" replaced the credential on the next query.
+        .filter((d) => d.filter && FILTER_KEY.test(d.filter))
+        .map((d) => ({
+          key: String(d.filter),
+          title: d.title ?? String(d.filter),
+          // The server calls the on/off ones "boolean"; everything else has a
+          // list of values that has to be fetched before it can be offered.
+          kind: d.filterType === "boolean" ? ("flag" as const) : ("list" as const),
+        }))
+    );
   }
 
   /**
@@ -260,10 +283,16 @@ export class PlexBackend implements MediaBackend {
       return bucketIndex(p.items[0]?.sortTitle ?? p.items[0]?.title ?? "", keys);
     };
 
+    // Math.floor, not `>>`: the shift coerces to int32, so once lo + hi passes
+    // 2^31 the midpoint goes NEGATIVE and the loop never converges - measured,
+    // a totalSize of 1.5e9 kept issuing requests (with negative offsets on the
+    // wire) until it exhausted memory. The total comes from the server, so it
+    // is not ours to trust, and the iteration cap is a second floor under that.
+    if (!Number.isFinite(total) || total <= 0) return 0;
     let lo = 0;
-    let hi = total - 1;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
+    let hi = Math.min(total, MAX_LIBRARY_ITEMS) - 1;
+    for (let step = 0; lo < hi && step <= MAX_SEARCH_STEPS; step += 1) {
+      const mid = Math.floor((lo + hi) / 2);
       if ((await at(mid)) < target) lo = mid + 1;
       else hi = mid;
     }
@@ -271,7 +300,10 @@ export class PlexBackend implements MediaBackend {
   }
 
   async filterValues(libraryId: string, filter: string): Promise<SortOption[]> {
-    const c = container<MetadataContainer>(await this.req(`library/sections/${libraryId}/${filter}`));
+    if (!FILTER_KEY.test(filter)) throw new Error("not a filter name");
+    const c = container<MetadataContainer>(
+      await this.req(`library/sections/${libraryId}/${encodeURIComponent(filter)}`),
+    );
     return (c.Directory ?? [])
       .filter((d) => d.key !== undefined)
       .map((d) => ({ key: String(d.key), title: d.title ?? String(d.key) }));
@@ -468,8 +500,31 @@ export class PlexBackend implements MediaBackend {
    * which answers with its web page rather than a 404, so the failure is an
    * image that will not decode rather than an error anyone can see.
    */
-  artUrl(path: string): string {
-    if (/^https?:\/\//.test(path)) return path;
+  /**
+   * Turn an artwork path into a URL, and refuse to leave the server.
+   *
+   * Some artwork arrives as an absolute URL rather than a server path, and the
+   * value comes from the SERVER - so returning it verbatim let the server name
+   * any host it liked. That matters because the caller pairs this with
+   * `imageHeaders()`, which carries the account token: a hostile or compromised
+   * server could have had the box post an admin-level credential to a machine
+   * of its choosing, and the receiving host answers its own CORS preflight, so
+   * nothing in the browser stands in the way.
+   *
+   * An off-origin URL is dropped rather than fetched without the header. A
+   * missing logo is a cosmetic loss; deciding per-URL whether to attach the
+   * credential is a rule that gets forgotten at the next call site.
+   */
+  artUrl(path: string): string | undefined {
+    if (/^https?:\/\//i.test(path)) {
+      try {
+        if (new URL(path).origin === new URL(this.session.baseUrl).origin) return path;
+      } catch {
+        return undefined;
+      }
+      log.warn("artwork URL points off the server; dropped");
+      return undefined;
+    }
     return buildUrl(this.base, path.replace(/^\//, ""));
   }
 
@@ -790,6 +845,11 @@ export class PlexBackend implements MediaBackend {
 
   /** Here `key` is the number, the opposite convention from the timeline above. */
   async setWatched(id: string, watched: boolean): Promise<void> {
+    // The cached document still says the old view count, and the detail screen
+    // reads it: without this, leaving and returning within the cache window
+    // flips the button back - the exact "it looks broken" symptom this feature
+    // was added to remove, moved one screen along. Every other mutator does it.
+    this.metaCache.delete(id);
     await this.req(watched ? ":/scrobble" : ":/unscrobble", {
       key: id,
       identifier: "com.plexapp.plugins.library",
@@ -827,4 +887,20 @@ function bucketIndex(title: string, keys: string[]): number {
   const folded = ch.normalize("NFD")[0].toUpperCase();
   const i = keys.indexOf(folded);
   return i >= 0 ? i : keys.indexOf("#");
+}
+
+/**
+ * Filters, reduced to what may safely become query parameters.
+ *
+ * The names come from the server. A name of `X-Plex-Token` replaces the
+ * credential on the request - Plex prefers the query parameter over the header,
+ * so the call authenticates as the server's choice and 401s, which the app
+ * reports as being signed out. `sort` hijacks the order just as quietly.
+ */
+function safeFilters(filters?: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(filters ?? {})) {
+    if (FILTER_KEY.test(k) && !/^x-plex-/i.test(k) && !RESERVED.has(k.toLowerCase())) out[k] = v;
+  }
+  return out;
 }

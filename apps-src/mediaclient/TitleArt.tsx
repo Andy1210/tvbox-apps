@@ -23,7 +23,11 @@ export function TitleArt({ title, logo }: { title: string; logo?: string }): Rea
     setFailed(false);
     if (!logo || !backend) return;
     let live = true;
-    void loadImage(backend.artUrl(logo), backend.imageHeaders()).then((url) => {
+    // Undefined when the server pointed the logo off its own origin, which the
+    // backend refuses rather than fetch with the account token attached.
+    const src = backend.artUrl(logo);
+    if (!src) return;
+    void loadImage(src, backend.imageHeaders()).then((url) => {
       if (!live) return;
       if (url) setSrc(url);
       else setFailed(true);

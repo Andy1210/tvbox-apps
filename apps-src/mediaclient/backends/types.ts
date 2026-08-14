@@ -370,7 +370,13 @@ export interface MediaBackend {
   /** Absolutise a server-relative art path. Returns an absolute URL unchanged,
    *  since some artwork is hosted by the metadata provider rather than by the
    *  server. */
-  artUrl(path: string): string;
+  /**
+   * Absolute URL for a server-supplied artwork path.
+   *
+   * Undefined when the value points off the server: the caller pairs this with
+   * `imageHeaders()`, which carries an admin-level credential.
+   */
+  artUrl(path: string): string | undefined;
 
   // --- playback ---
   resolveStream(
