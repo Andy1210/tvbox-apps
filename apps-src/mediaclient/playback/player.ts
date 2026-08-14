@@ -416,6 +416,13 @@ function wirePlayerEvents(set: Setter, get: () => PlayerState): void {
           target === null ||
           Math.abs(ms - target) < 2_000 ||
           from === null ||
+          // A seek to where the film already is has nothing to wait for, and the
+          // distance test degenerates to "x < x" there - so it could only ever
+          // settle inside the window, and a rebuffer or an inexact landing left
+          // the bar and clock frozen for the rest of the film. Rewind at 0
+          // reaches this every time, because the clamp puts the target on the
+          // origin.
+          from === target ||
           Math.abs(ms - target) < Math.abs(ms - from);
         set({ positionMs: ms, seekTargetMs: settled ? null : target, seekFromMs: settled ? null : from });
         break;

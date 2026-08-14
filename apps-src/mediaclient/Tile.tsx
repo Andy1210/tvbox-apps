@@ -34,12 +34,17 @@ function progress(item: MediaItem): number | null {
 }
 
 function label(item: MediaItem): string {
-  if (item.kind === "episode" && item.seriesTitle) {
-    const s = item.parentIndex !== undefined ? `S${item.parentIndex}` : "";
-    const e = item.index !== undefined ? `E${item.index}` : "";
-    return [item.seriesTitle, [s, e].filter(Boolean).join("")].filter(Boolean).join(" · ");
-  }
-  return item.title;
+  if (item.kind !== "episode") return item.title;
+
+  // The episode's own NAME, with its number in front of it. The number alone -
+  // which is what a row of episodes used to show - tells you where you are in a
+  // series you already know and nothing at all about the one you are choosing
+  // from. The series title is dropped here: inside a season it is on the screen
+  // already, and outside one the row's own heading carries it.
+  const s = item.parentIndex !== undefined ? `S${item.parentIndex}` : "";
+  const e = item.index !== undefined ? `E${item.index}` : "";
+  const number = [s, e].filter(Boolean).join("");
+  return [number, item.title].filter(Boolean).join(" · ");
 }
 
 /**

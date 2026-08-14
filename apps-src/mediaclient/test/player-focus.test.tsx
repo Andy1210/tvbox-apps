@@ -199,6 +199,14 @@ describe("a seek that has been committed", () => {
     report(97_000);
     expect(usePlayer.getState().seekTargetMs).toBeNull();
 
+    // A seek to where the film already is: rewinding at the start clamps the
+    // target onto the origin, and the distance rule degenerates there. Held on
+    // it alone, only a landing within two seconds could ever release it.
+    usePlayer.setState({ positionMs: 0 });
+    usePlayer.getState().seekTo(0);
+    report(5_000);
+    expect(usePlayer.getState().seekTargetMs).toBeNull();
+
     // A backward seek that lands PAST its target, on the first keyframe after
     // it, and then plays away from it. Held on direction alone this never
     // settled: the bar and clock froze at the target for the rest of the film,

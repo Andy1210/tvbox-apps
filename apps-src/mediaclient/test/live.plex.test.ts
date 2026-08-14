@@ -224,7 +224,15 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     // because the strip and the sort disagree about accented initials. So the
     // check is the title at the offset, not that a number came back.
     const b = backend();
-    const lib = (await b.libraries())[0];
+    // EVERY library, not the first. The first version of this walked only
+    // libraries[0] and reported "0 wrong" while a series library got five
+    // letters wrong - the same sampling error one level up from the one that
+    // made the test walk every bucket rather than three.
+    for (const lib of await b.libraries()) await checkStrip(b, lib.id);
+  });
+
+  async function checkStrip(b: PlexBackend, libraryId: string): Promise<void> {
+    const lib = { id: libraryId };
     const strip = await b.letters(lib.id);
 
     // One entry per plain letter. The server keeps some accented initials as
@@ -236,7 +244,9 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     expect(strip.reduce((n, l) => n + l.size, 0)).toBe((await b.libraryPage(lib.id, { offset: 0, limit: 1 })).total);
 
     const usable = strip.filter((l) => l.size > 0 && /^[A-Z]$/.test(l.title));
-    expect(usable.length).toBeGreaterThan(5);
+    // A library can be empty - this account has one - and a strip of nothing is
+    // the correct answer there rather than a failure.
+    if (usable.length < 2) return;
 
     // EVERY bucket, not a sample: the two that were wrong were the two a sample
     // of three never reached.
@@ -245,9 +255,9 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
       const at = await b.libraryPage(lib.id, { offset, limit: 1, sort: "titleSort" });
       const title = at.items[0]?.sortTitle ?? at.items[0]?.title ?? "";
       const initial = title.trim()[0]?.normalize("NFD")[0]?.toUpperCase();
-      expect(initial).toBe(l.title.toUpperCase());
+      expect(initial, `letter ${l.title} in library ${lib.id}`).toBe(l.title.toUpperCase());
     }
-  });
+  }
 
   it("reads collections and playlists as browsable lists", async () => {
     const b = backend();

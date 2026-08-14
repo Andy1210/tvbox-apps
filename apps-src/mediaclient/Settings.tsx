@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, useI18n } from "@sdk";
-import { useInitialFocus } from "./focus";
+import { useFocusFallback, useInitialFocus } from "./focus";
 import { useApp } from "./state";
 import { PlaybackSettings } from "./PlaybackSettings";
 import { HomeRows } from "./HomeRows";
@@ -26,12 +26,19 @@ export function Settings(): React.JSX.Element {
   const { ref, focusKey } = useFocusable({ focusKey: "settings", saveLastFocusedChild: true });
   // The setting someone came here to change, not the one that logs them out.
   useInitialFocus("settings-autologin", true);
-
-  if (panel === "playback") return <PlaybackSettings onClose={() => setPanel(null)} />;
-  if (panel === "rows") return <HomeRows onClose={() => setPanel(null)} />;
+  // Disabled while a panel is up, or it fights the panel for every press the
+  // panel could not resolve - and armed again on close, which is the moment the
+  // cursor has nowhere to be.
+  useFocusFallback("settings-autologin", (k) => k.startsWith("settings-"), !panel);
 
   return (
     <FocusContext.Provider value={focusKey}>
+      {/* Over the screen, never instead of it: replacing it unmounted every
+          focusable underneath, and on close the cursor was left on a key that
+          no longer existed - a Settings screen with no highlight and a dead
+          remote. */}
+      {panel === "playback" && <PlaybackSettings onClose={() => setPanel(null)} />}
+      {panel === "rows" && <HomeRows onClose={() => setPanel(null)} />}
       <div ref={ref} className="flex h-full flex-col gap-[3vh] px-[6vw] py-[5vh]">
         <h1 className="text-[3vh] font-semibold tracking-tight">{t("settings.title")}</h1>
 

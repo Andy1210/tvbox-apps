@@ -49,7 +49,8 @@
     "clearFilters": "Clear the filters",
     "emptyFiltered": "Nothing matches this filter.",
     "collections": "Collections",
-    "allItems": "All items"
+    "allItems": "All items",
+    "tooMany": "Showing the first {shown} of {total}."
   },
   "detail": {
     "play": "Play",
@@ -79,7 +80,7 @@
     "buffering": "Buffering…",
     "converting": "Converting for this box",
     "hint": "Arrows to find a scene · Down for buttons · Back to pause",
-    "hintScrub": "The film is still playing. OK to jump here · Back to cancel",
+    "hintScrub": "The film is still playing. OK to jump here · Back or Down to cancel",
     "play": "Play",
     "pause": "Pause",
     "tracks": "Audio and subtitles",
@@ -122,7 +123,7 @@
     "subColor": "Subtitle colour",
     "autoSkip": "Skip intro and credits",
     "autoSkipHint": "Skips on its own when this is on. The marker is the server's guess, and a wrong one jumps past the opening of an episode.",
-    "subSample": "Sample text",
+    "subSample": "Sample",
     "posBottom": "At the bottom",
     "posHigher": "A little higher",
     "posHigh": "Higher",

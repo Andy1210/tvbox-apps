@@ -21,6 +21,14 @@ export interface RowProps {
    * past it. The first row uses this to take the page back to its top.
    */
   onReached?: () => void;
+  /**
+   * Which item the cursor is on.
+   *
+   * A season's audio and subtitle choice belongs to the episode about to play,
+   * and the tracks differ per episode - so the screen has to know which one is
+   * highlighted, not merely which one was pressed.
+   */
+  onFocusItem?: (item: MediaItem) => void;
 }
 
 /**
@@ -40,6 +48,7 @@ export function Row({
   aspect,
   captionLines,
   onReached,
+  onFocusItem,
 }: RowProps): React.JSX.Element | null {
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -82,7 +91,10 @@ export function Row({
               aspect={aspect}
               captionLines={captionLines}
               onEnter={() => onSelect(item)}
-              onFocusedEl={onFocusChild}
+              onFocusedEl={(el) => {
+                onFocusChild(el);
+                onFocusItem?.(item);
+              }}
             />
           ))}
         </div>

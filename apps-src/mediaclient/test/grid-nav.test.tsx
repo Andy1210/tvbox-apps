@@ -139,14 +139,21 @@ describe("a screen's focus guard", () => {
     // Read out of the source rather than asserted against a copy, because a
     // copy would keep passing after the predicate changed.
     const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Library.tsx"), "utf8");
-    const guard = /useFocusFallback\(\s*"cell-0",\s*\(key\) =>([\s\S]*?)\),/.exec(src)?.[1] ?? "";
-    expect(guard).toBeTruthy();
+    // Matched on the call, not on its target: the fallback key is a choice that
+    // changes, and pinning it here made this test silently stop looking the
+    // moment it did.
+    const guard =
+      /useFocusFallback\([\s\S]*?\(key\) =>([\s\S]*?)\n\s*\/\/|useFocusFallback\([\s\S]*?\(key\) =>([\s\S]*?)\),\n/.exec(
+        src,
+      ) ?? [];
+    const body = (guard[1] ?? guard[2] ?? "") as string;
+    expect(body).toBeTruthy();
 
     // Every focusKey prefix the file hands to a focusable.
     const prefixes = new Set([...src.matchAll(/focusKey=\{?["`]([a-z]+)-/g)].map((m) => m[1]));
     expect(prefixes.size).toBeGreaterThan(1);
     for (const p of prefixes) {
-      expect(guard, `focus guard does not accept "${p}-" keys`).toContain(`"${p}-"`);
+      expect(body, `focus guard does not accept "${p}-" keys`).toContain(`"${p}-"`);
     }
   });
 });

@@ -85,6 +85,8 @@ export interface FilterOption {
   key: string;
   title: string;
   kind: "list" | "flag";
+  /** The backend's own route to this filter's values, when it gave one. */
+  path?: string;
 }
 
 export interface Page<T> {
@@ -354,7 +356,7 @@ export interface MediaBackend {
   playlistItems(id: string): Promise<MediaItem[]>;
   filterOptions(libraryId: string): Promise<FilterOption[]>;
   /** The values a `list` filter can take. */
-  filterValues(libraryId: string, filter: string): Promise<SortOption[]>;
+  filterValues(libraryId: string, filter: string, path?: string): Promise<SortOption[]>;
 
   /**
    * Where a letter's items begin in the ordered list.
