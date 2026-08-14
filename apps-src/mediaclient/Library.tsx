@@ -168,7 +168,15 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   // press arriving after the grid was cleared for a letter change has to land
   // somewhere rather than be discarded.
   useInitialFocus("cell-0", total !== null && total > 0);
-  useFocusFallback("cell-0", (key) => key.startsWith("cell-") || key.startsWith("letter-"), !playing);
+  // Every key this screen owns has to be listed. A focusable the guard does not
+  // recognise is treated as gone and focus is yanked back to the grid - so the
+  // sort-and-filter button could be reached and then lost between the press
+  // landing on it and OK arriving, which opened the first film instead.
+  useFocusFallback(
+    "cell-0",
+    (key) => key.startsWith("cell-") || key.startsWith("letter-") || key.startsWith("lib-"),
+    !playing,
+  );
 
   if (failure) return <Message failure={failure} onRetry={() => void loadPage(0)} />;
   // `total === null` is "not asked yet"; a total of zero is an answer, and an
