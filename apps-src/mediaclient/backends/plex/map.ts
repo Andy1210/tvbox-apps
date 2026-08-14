@@ -25,6 +25,8 @@ export interface PlexMetadata {
   parentArt?: string;
   theme?: string;
   grandparentTheme?: string;
+  composite?: string;
+  UltraBlurColors?: { topLeft?: string; topRight?: string; bottomRight?: string; bottomLeft?: string };
   parentTheme?: string;
   titleSort?: string;
   ratingKey?: string | number;
@@ -149,7 +151,10 @@ export function toLibrary(d: PlexDirectory): Library {
 export function toItem(m: PlexMetadata): MediaItem {
   // An episode's own thumb is a still from the episode; a season's is the show's
   // art. Falling back up the chain keeps a poster grid from showing holes.
-  const thumb = m.thumb || m.parentThumb || m.grandparentThumb;
+  // A playlist has no thumb of its own; the server offers a composite built
+  // from its items instead. Without it the tile is a grey box with the title
+  // printed inside it.
+  const thumb = m.thumb || m.parentThumb || m.grandparentThumb || m.composite;
   const leaf = m.leafCount;
   const viewedLeaf = m.viewedLeafCount;
   return {
@@ -168,6 +173,7 @@ export function toItem(m: PlexMetadata): MediaItem {
     // the series' - which is what a backdrop behind an episode list should be.
     art: m.art ?? m.parentArt ?? m.grandparentArt,
     theme: m.theme ?? m.parentTheme ?? m.grandparentTheme,
+    colors: toColors(m.UltraBlurColors),
     durationMs: m.duration,
     viewOffsetMs: m.viewOffset,
     viewCount: m.viewCount,
@@ -176,7 +182,13 @@ export function toItem(m: PlexMetadata): MediaItem {
     index: m.index,
     parentIndex: m.parentIndex,
     summary: m.summary,
-    unwatchedCount: typeof leaf === "number" ? leaf - (viewedLeaf ?? 0) : undefined,
+    // Series and seasons only. A playlist also carries leafCount, and painting
+    // it as an unwatched badge said "278 unwatched" on a list that returns 252
+    // items and has no watched state of its own - wrong twice over.
+    unwatchedCount:
+      typeof leaf === "number" && (toKind(m.type) === "show" || toKind(m.type) === "season")
+        ? leaf - (viewedLeaf ?? 0)
+        : undefined,
   };
 }
 
@@ -567,4 +579,18 @@ export function toVersions(m: PlexMetadata & { Media?: PlexMediaEntry[] }): Medi
     audio: parsed[index].audio,
     subtitles: parsed[index].subtitles,
   }));
+}
+
+/**
+ * The server's corner colours, held to six hex digits.
+ *
+ * They end up in a CSS gradient, and they are the server's strings - a value
+ * that is not a colour would either do nothing or, in the wrong place, be a
+ * style someone else chose.
+ */
+function toColors(c: PlexMetadata["UltraBlurColors"]): MediaItem["colors"] {
+  if (!c) return undefined;
+  const ok = (v: string | undefined): string | null => (v && /^[0-9a-fA-F]{6}$/.test(v) ? `#${v}` : null);
+  const [tl, tr, br, bl] = [ok(c.topLeft), ok(c.topRight), ok(c.bottomRight), ok(c.bottomLeft)];
+  return tl && tr && br && bl ? { topLeft: tl, topRight: tr, bottomRight: br, bottomLeft: bl } : undefined;
 }

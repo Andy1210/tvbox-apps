@@ -149,7 +149,14 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
   };
   // Arriving from a carry-on-watching tile opens on THAT episode rather than on
   // the play button, so the page is already describing what was pressed.
-  useInitialFocus(focusChildId ? `children-${itemId}-${focusChildId}` : "detail-play", Boolean(detail));
+  useInitialFocus(
+    focusChildId
+      ? `children-${itemId}-${focusChildId}`
+      : detail && !playableKind(detail)
+        ? `children-${itemId}-${children[0]?.id}`
+        : "detail-play",
+    Boolean(detail),
+  );
   // Returning from playback unmounts the player, which held focus - without a
   // fallback the detail page comes back with the D-pad dead.
   useFocusFallback(
@@ -180,6 +187,8 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
   const wide = (item: MediaItem): string | undefined =>
     backend?.posterUrl(item, 400 * artworkScale(), 225 * artworkScale());
   const resumable = (detail.viewOffsetMs ?? 0) > 0;
+  /** A group is a list of things to play, not a thing to play. */
+  const playable = detail.kind !== "collection" && detail.kind !== "playlist";
   /**
    * What the page is describing.
    *
@@ -246,25 +255,31 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
 
           {shown.summary && <p className="max-w-[62vw] text-[2vh] leading-relaxed">{shown.summary}</p>}
 
+          {/* Not on a collection or a playlist: measured, resolveStream answers
+              400 for both, so the button accepted OK and did nothing - and it
+              was the initial focus on 461 collection screens. Their first
+              child is what plays, and it is one row down. */}
           <div className="mt-[1vh] flex gap-[1.2vw]">
-            <FocusButton
-              focusKey="detail-play"
-              // The first focusable on the page, so reaching it means going back
-              // to the top - the title art and synopsis above it can be reached
-              // no other way.
-              onFocused={toTop}
-              onEnter={() =>
-                backend && void usePlayer.getState().play(backend, detail, { version, ...pick(tracksFrom) })
-              }
-              className="rounded-[1vh] bg-white/15 px-[2.4vw] py-[1.4vh] text-[2.1vh]"
-            >
-              {/* Naming the version on the button answers "does this chip start
+            {playable && (
+              <FocusButton
+                focusKey="detail-play"
+                // The first focusable on the page, so reaching it means going back
+                // to the top - the title art and synopsis above it can be reached
+                // no other way.
+                onFocused={toTop}
+                onEnter={() =>
+                  backend && void usePlayer.getState().play(backend, detail, { version, ...pick(tracksFrom) })
+                }
+                className="rounded-[1vh] bg-white/15 px-[2.4vw] py-[1.4vh] text-[2.1vh]"
+              >
+                {/* Naming the version on the button answers "does this chip start
                   playback or configure it?" without anyone having to try. */}
-              {`${resumable ? t("detail.resume") : t("detail.play")}${
-                detail.versions.length > 1 ? ` · ${detail.versions[version]?.label ?? ""}` : ""
-              }`}
-            </FocusButton>
-            {resumable && (
+                {`${resumable ? t("detail.resume") : t("detail.play")}${
+                  detail.versions.length > 1 ? ` · ${detail.versions[version]?.label ?? ""}` : ""
+                }`}
+              </FocusButton>
+            )}
+            {playable && resumable && (
               <FocusButton
                 focusKey="detail-restart"
                 onEnter={() =>
@@ -280,13 +295,15 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
                 somewhere else, or abandoned twenty minutes in and not worth
                 resuming, has no other way to be put right - and the carry-on
                 row is built from exactly this state. */}
-            <FocusButton
-              focusKey="detail-watched"
-              onEnter={() => void toggleWatched()}
-              className="rounded-[1vh] bg-white/10 px-[2vw] py-[1.4vh] text-[2.1vh]"
-            >
-              {t(watched ? "detail.markUnwatched" : "detail.markWatched")}
-            </FocusButton>
+            {playable && (
+              <FocusButton
+                focusKey="detail-watched"
+                onEnter={() => void toggleWatched()}
+                className="rounded-[1vh] bg-white/10 px-[2vw] py-[1.4vh] text-[2.1vh]"
+              >
+                {t(watched ? "detail.markUnwatched" : "detail.markWatched")}
+              </FocusButton>
+            )}
           </div>
 
           {/* One button, not a wall. A film with fifteen embedded subtitles
@@ -334,7 +351,13 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
         {children.length > 0 && (
           <Row
             id={`children-${itemId}`}
-            title={detail.kind === "show" ? t("detail.seasons") : t("detail.episodes")}
+            title={
+              detail.kind === "show"
+                ? t("detail.seasons")
+                : detail.kind === "season"
+                  ? t("detail.episodes")
+                  : t("detail.inThis")
+            }
             items={children}
             // An episode's artwork is a frame from it, which is 16:9 - shown in
             // a poster-shaped tile it was letterboxed into a strip. A season's
@@ -411,4 +434,9 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
       </div>
     </FocusContext.Provider>
   );
+}
+
+/** Whether an item is a thing to play rather than a list of them. */
+function playableKind(d: ItemDetail): boolean {
+  return d.kind !== "collection" && d.kind !== "playlist";
 }

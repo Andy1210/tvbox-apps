@@ -280,7 +280,17 @@ export class PlexBackend implements MediaBackend {
     return [...merged.values()].sort((a, b) => (a.key === "#" ? -1 : b.key === "#" ? 1 : a.key.localeCompare(b.key)));
   }
 
-  async sortOptions(libraryId: string): Promise<SortOption[]> {
+  /**
+   * Orders that actually take effect.
+   *
+   * Measured with type=18: four of the eight the server offers - release date,
+   * both ratings, and last viewed - come back in title order regardless, while
+   * the button on the library screen names the order that was chosen. An order
+   * that is silently ignored is worse than one that is not offered.
+   */
+  private static readonly COLLECTION_SORTS = new Set(["titleSort", "duration", "addedAt", "mediaHeight"]);
+
+  async sortOptions(libraryId: string, of?: "collections"): Promise<SortOption[]> {
     const c = container<MetadataContainer>(await this.req(`library/sections/${libraryId}/sorts`));
     return (
       (c.Directory ?? [])
@@ -290,6 +300,7 @@ export class PlexBackend implements MediaBackend {
         // different films, and scrolling back re-shuffled again. A shuffled
         // library is a fine idea and would need a fetched-once list, not a window.
         .filter((d) => d.key && d.key !== "random")
+        .filter((d) => !of || PlexBackend.COLLECTION_SORTS.has(String(d.key)))
         .map((d) => ({ key: String(d.key), title: d.title ?? String(d.key) }))
     );
   }
@@ -323,7 +334,11 @@ export class PlexBackend implements MediaBackend {
    * the alphabet's, because this server puts two Hungarian letters after Z.
    */
   async letterOffset(libraryId: string, letterKey: string, q: Omit<PageQuery, "offset" | "limit">): Promise<number> {
-    const keys = (await this.letters(libraryId, q.filters)).map((l) => l.key);
+    // The strip of the list being searched, not of the library's items. They
+    // fold to the same keys today, so nothing shows - but one collection under
+    // a letter no film starts with makes the scoring non-monotonic, and a
+    // binary search on that corrupts several letters, not only the extra one.
+    const keys = (await this.letters(libraryId, q.filters, q.of)).map((l) => l.key);
     // Through the same folding as the items. Using the STRIP's position for the
     // target while scoring items by their folded one made the two buckets that
     // fold into another unreachable: no item could ever score their index, so

@@ -50,7 +50,8 @@
     "emptyFiltered": "Ehhez a szűréshez nincs találat.",
     "collections": "Gyűjtemények",
     "allItems": "Minden elem",
-    "tooMany": "Az első {shown} látszik a(z) {total} közül."
+    "tooMany": "Az első {shown} látszik a(z) {total} közül.",
+    "noCollections": "Ebben a könyvtárban nincsenek gyűjtemények."
   },
   "detail": {
     "play": "Lejátszás",
@@ -65,7 +66,8 @@
     "runtimeHm": "{h} ó {m} p",
     "runtimeM": "{m} p",
     "markWatched": "Jelöld nézettnek",
-    "markUnwatched": "Jelöld nem nézettnek"
+    "markUnwatched": "Jelöld nem nézettnek",
+    "inThis": "Ebben"
   },
   "person": {
     "films": "Filmek",

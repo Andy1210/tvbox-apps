@@ -321,6 +321,39 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     }
   });
 
+  it("takes the server's own corner colours", async () => {
+    // An earlier version of the client computed a tint from the artwork on the
+    // grounds that the server supplied none. It supplies four corners for 1,668
+    // of this library's 1,693 films - the measurement behind that claim read
+    // the wrong spelling of the field.
+    const b = backend();
+    const page = await b.libraryPage((await b.libraries())[0].id, { offset: 0, limit: 40 });
+    const withColors = page.items.filter((i) => i.colors);
+    expect(withColors.length).toBeGreaterThan(page.items.length / 2);
+    for (const c of withColors[0].colors ? [withColors[0].colors] : []) {
+      for (const v of [c.topLeft, c.topRight, c.bottomRight, c.bottomLeft]) {
+        // They reach a CSS gradient, so they are held to a colour.
+        expect(v).toMatch(/^#[0-9a-fA-F]{6}$/);
+      }
+    }
+  });
+
+  it("does not offer a collection order the server ignores", async () => {
+    // Measured with type=18: release date, both ratings and last-viewed all
+    // come back in title order regardless, while the library screen names the
+    // order that was chosen. An order silently ignored is worse than one not
+    // offered.
+    const b = backend();
+    const lib = (await b.libraries())[0];
+    const forCollections = (await b.sortOptions(lib.id, "collections")).map((s) => s.key);
+    expect(forCollections).toContain("titleSort");
+    for (const ignored of ["originallyAvailableAt", "rating", "audienceRating", "lastViewedAt"]) {
+      expect(forCollections).not.toContain(ignored);
+    }
+    // And the item list keeps them.
+    expect((await b.sortOptions(lib.id)).length).toBeGreaterThan(forCollections.length);
+  });
+
   it("reads markers for an episode that has them", async () => {
     const b = backend();
     const libs = await b.libraries();

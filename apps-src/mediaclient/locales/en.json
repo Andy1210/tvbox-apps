@@ -50,7 +50,8 @@
     "emptyFiltered": "Nothing matches this filter.",
     "collections": "Collections",
     "allItems": "All items",
-    "tooMany": "Showing the first {shown} of {total}."
+    "tooMany": "Showing the first {shown} of {total}.",
+    "noCollections": "This library has no collections."
   },
   "detail": {
     "play": "Play",
@@ -65,7 +66,8 @@
     "runtimeHm": "{h}h {m}m",
     "runtimeM": "{m}m",
     "markWatched": "Mark as watched",
-    "markUnwatched": "Mark as unwatched"
+    "markUnwatched": "Mark as unwatched",
+    "inThis": "In this"
   },
   "person": {
     "films": "Films",

@@ -76,10 +76,14 @@ export function LanguagePicker({
                 label={t("tracks.subtitlesOff")}
                 onEnter={() => onSubtitle("none")}
               />
+              {/* Keyed by the track's own id, not its ordinal: every external
+                  subtitle carries ordinal -1, so a film with two sidecars gave
+                  them one focus key between them - only one was reachable, and
+                  choosing it always picked the first. */}
               {subs.map((sub) => (
                 <Line
                   key={sub.id}
-                  focusKey={`lp-sub-${sub.ordinal}`}
+                  focusKey={`lp-sub-${sub.id}`}
                   active={subtitle === undefined ? Boolean(sub.selected) : subtitle === sub.ordinal}
                   label={sub.label}
                   onEnter={() => onSubtitle(sub.ordinal)}

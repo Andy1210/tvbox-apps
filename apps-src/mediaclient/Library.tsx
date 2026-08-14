@@ -390,7 +390,13 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
               it rather than on the home screen. */}
           <FocusButton
             focusKey="lib-mode"
-            onEnter={() => setMode((m) => (m === "items" ? "collections" : "items"))}
+            onEnter={() => {
+              // Filters do not carry across: measured, every list filter returns
+              // nothing against collections, so the grid emptied while the
+              // button still named the filter that emptied it.
+              setView((v) => ({ ...v, filters: {}, labels: {} }));
+              setMode((m) => (m === "items" ? "collections" : "items"));
+            }}
             className="rounded-[1vh] bg-white/10 px-[2vw] py-[1vh] text-[2vh]"
           >
             {t(mode === "items" ? "library.collections" : "library.allItems")}
@@ -424,7 +430,11 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
           >
             {total === 0 && (
               <div className="flex h-full items-center justify-center text-[2.2vh] text-fg-dim">
-                {Object.keys(view.filters).length ? t("library.emptyFiltered") : t("library.empty")}
+                {mode === "collections"
+                  ? t("library.noCollections")
+                  : Object.keys(view.filters).length
+                    ? t("library.emptyFiltered")
+                    : t("library.empty")}
               </div>
             )}
             {/* One tall spacer carries the scrollbar; only the visible rows are
