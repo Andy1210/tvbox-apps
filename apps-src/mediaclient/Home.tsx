@@ -165,7 +165,12 @@ export function Home(): React.JSX.Element {
 
         <div
           ref={scroller}
-          className="no-scrollbar flex flex-1 flex-col gap-[3vh] overflow-y-auto pb-[3vh] scroll-pt-[2vh] scroll-pb-[4vh]"
+          // scroll-pt has to clear the row's HEADING, not just the tile. The
+          // browser brings the focused tile into view and knows nothing about
+          // the title above it, so a small padding parked the tile at the top
+          // and pushed "Carry on watching" off the screen - and with it the
+          // captions at the bottom of the same row.
+          className="no-scrollbar flex flex-1 flex-col gap-[2vh] overflow-y-auto pb-[2vh] scroll-pt-[11vh] scroll-pb-[6vh]"
         >
           {/* Ordered by the household, not by us. A row switched off is not
           rendered at all rather than rendered empty, and one with nothing in it
