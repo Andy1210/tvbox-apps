@@ -47,7 +47,7 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
         return;
       }
       setArt(objectUrl);
-      void accentFrom(objectUrl).then((c) => live && c && setAccent(c));
+      void accentFrom(objectUrl, url).then((c) => live && c && setAccent(c));
     });
     return () => {
       live = false;
