@@ -7,6 +7,8 @@
 import { useEffect } from "react";
 import { useApp } from "./state";
 import { usePlayer } from "./playback/player";
+import { usePrefs } from "./prefs";
+import { onRelease } from "./lifecycle";
 import type { MediaItem } from "./backends/types";
 import { log } from "./redact";
 
@@ -52,7 +54,14 @@ function stop(): void {
 export function useTheme(item: MediaItem | null | undefined): void {
   const backend = useApp((s) => s.backend);
   const playing = usePlayer((s) => s.current !== null);
-  const url = item && backend ? backend.themeUrl(item) : undefined;
+  const on = usePrefs((s) => s.themeMusic);
+  const url = item && backend && on ? backend.themeUrl(item) : undefined;
+
+  // The shell HIDES an app window rather than destroying it, and audio in a
+  // hidden page is not throttled - so without this, pressing Home from a season
+  // screen left the theme looping over the launcher and over whatever app came
+  // next.
+  useEffect(() => onRelease(() => stop()), []);
 
   useEffect(() => {
     if (!backend || !url || playing) {
@@ -69,7 +78,14 @@ export function useTheme(item: MediaItem | null | undefined): void {
       .then((blob) => {
         if (!live || !blob || playingUrl !== url) return;
         const a = new Audio(URL.createObjectURL(blob));
-        a.loop = true;
+        // Twice, then silence. Reading a list of twenty-four episodes to the
+        // same sting on endless repeat is the version nobody wants.
+        let plays = 0;
+        a.loop = false;
+        a.onended = () => {
+          plays += 1;
+          if (plays < 2 && audio === a) void a.play().catch(() => {});
+        };
         // Under the room's conversation, not over it - but audible: 0.35 was
         // measured on a television as almost nothing.
         a.volume = 0.7;

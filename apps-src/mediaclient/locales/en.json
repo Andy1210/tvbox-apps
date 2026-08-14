@@ -135,7 +135,10 @@
     "moveUp": "Move up",
     "moveDown": "Move down",
     "rowShown": "Shown",
-    "rowHidden": "Hidden"
+    "rowHidden": "Hidden",
+    "rowVisible": "Row",
+    "themeMusic": "Series theme music",
+    "themeMusicHint": "A series plays its own theme while you look at it. Twice, then silence."
   },
   "tracks": {
     "version": "Version",

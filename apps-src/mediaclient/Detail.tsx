@@ -14,7 +14,7 @@ import { useTheme } from "./theme";
 import { useFocusFallback, useInitialFocus, useScrollToTopOnFirst } from "./focus";
 import { usePlayer } from "./playback/player";
 import { classify, useApp } from "./state";
-import type { ItemDetail, MediaItem } from "./backends/types";
+import type { ItemDetail, MediaItem, MediaVersion } from "./backends/types";
 import { log } from "./redact";
 
 /** Hours and minutes, with the unit letters coming from the locale - "2h 14m"
@@ -44,8 +44,17 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
   const playing = usePlayer((s) => s.current !== null);
   const [reload, setReload] = useState(0);
   const [version, setVersion] = useState(0);
-  const [audio, setAudio] = useState<number | undefined>();
-  const [subtitle, setSubtitle] = useState<number | "none" | undefined>();
+  /**
+   * The chosen tracks, kept as a LANGUAGE rather than an ordinal.
+   *
+   * An ordinal is a position in one item's own track list, and episodes of a
+   * season do not agree on it: measured, choosing Hungarian on an episode whose
+   * tracks read English, Magyar and then pressing the next one - whose read
+   * Magyar, English - played English. And a converted stream bakes its tracks
+   * in at start, so that costs a restart to undo.
+   */
+  const [audioLang, setAudioLang] = useState<string | undefined>();
+  const [subLang, setSubLang] = useState<string | "none" | undefined>();
   /**
    * The episode the cursor is on, with its own tracks.
    *
@@ -53,6 +62,7 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
    * so the language choice has to follow the highlight rather than the screen.
    */
   const [focused, setFocused] = useState<ItemDetail | null>(null);
+  const [firstChild, setFirstChild] = useState<ItemDetail | null>(null);
   const [picking, setPicking] = useState(false);
   const [detail, setDetail] = useState<ItemDetail | null>(null);
   const [busy, setBusy] = useState(false);
@@ -92,6 +102,8 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
           if (live) setChildren(kids);
         } else if (d.kind === "show" || d.kind === "season" || d.kind === "collection") {
           const kids = await backend.children(itemId);
+          // Its tracks stand in until something is highlighted.
+          if (kids[0] && d.kind === "season") void backend.item(kids[0].id).then((k) => live && setFirstChild(k));
           if (live) setChildren(kids);
         }
       } catch (e) {
@@ -178,7 +190,17 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
    * makes the episode list a place you can read from rather than a menu.
    */
   const shown = (detail.kind === "season" && focused) || detail;
-  const tracksFrom = shown.versions[version];
+  // On a season, the highlighted episode's tracks - or the FIRST episode's
+  // before anything is highlighted, so the button exists on arrival rather than
+  // materialising only after someone has been down into the list and back.
+  const tracksFrom = shown.versions[version] ?? firstChild?.versions[version];
+
+  /** The chosen language, resolved against whatever is about to play. */
+  const pick = (v: MediaVersion | undefined): { audio?: number; subtitle?: number | "none" } => ({
+    audio: audioLang ? v?.audio.find((a) => a.language === audioLang)?.ordinal : undefined,
+    subtitle:
+      subLang === "none" ? "none" : subLang ? v?.subtitles.find((x) => x.language === subLang)?.ordinal : undefined,
+  });
 
   return (
     <FocusContext.Provider value={focusKey}>
@@ -186,10 +208,12 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
       {picking && (
         <LanguagePicker
           version={tracksFrom}
-          audio={audio}
-          subtitle={subtitle}
-          onAudio={setAudio}
-          onSubtitle={setSubtitle}
+          audio={pick(tracksFrom).audio}
+          subtitle={pick(tracksFrom).subtitle}
+          onAudio={(ordinal) => setAudioLang(tracksFrom?.audio.find((a) => a.ordinal === ordinal)?.language)}
+          onSubtitle={(ordinal) =>
+            setSubLang(ordinal === "none" ? "none" : tracksFrom?.subtitles.find((x) => x.ordinal === ordinal)?.language)
+          }
           onClose={() => setPicking(false)}
         />
       )}
@@ -202,7 +226,7 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
           {/* The episode's own name under the series art, so the page names what
               it is describing rather than only what it belongs to. */}
           {shown !== detail || shown.seriesTitle ? <p className="text-[2vh] text-fg-dim">{shown.title}</p> : null}
-          {shown.tagline && <p className="text-[1.9vh] text-fg-dim italic">{detail.tagline}</p>}
+          {shown.tagline && <p className="text-[1.9vh] text-fg-dim italic">{shown.tagline}</p>}
 
           <div className="flex flex-wrap items-center gap-[1.4vw] text-[1.7vh] text-fg-dim">
             {detail.year ? <span className="tabular-nums">{detail.year}</span> : null}
@@ -229,7 +253,9 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
               // to the top - the title art and synopsis above it can be reached
               // no other way.
               onFocused={toTop}
-              onEnter={() => backend && void usePlayer.getState().play(backend, detail, { version, audio, subtitle })}
+              onEnter={() =>
+                backend && void usePlayer.getState().play(backend, detail, { version, ...pick(tracksFrom) })
+              }
               className="rounded-[1vh] bg-white/15 px-[2.4vw] py-[1.4vh] text-[2.1vh]"
             >
               {/* Naming the version on the button answers "does this chip start
@@ -243,7 +269,7 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
                 focusKey="detail-restart"
                 onEnter={() =>
                   backend &&
-                  void usePlayer.getState().play(backend, detail, { resume: false, version, audio, subtitle })
+                  void usePlayer.getState().play(backend, detail, { resume: false, version, ...pick(tracksFrom) })
                 }
                 className="rounded-[1vh] bg-white/10 px-[2vw] py-[1.4vh] text-[2.1vh]"
               >
@@ -334,7 +360,11 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
               // watch one, and everything else about it - cast, extras, the
               // audio and subtitle choice - is on this screen already.
               if (item.kind === "episode" && backend) {
-                void usePlayer.getState().play(backend, item, { version, audio, subtitle });
+                // Resolved against the episode being started, not the one the
+                // cursor was on when the language was chosen.
+                void backend
+                  .item(item.id)
+                  .then((d) => usePlayer.getState().play(backend, item, { version, ...pick(d.versions[version]) }));
                 return;
               }
               go({ name: "item", itemId: item.id });
