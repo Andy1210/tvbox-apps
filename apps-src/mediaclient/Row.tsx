@@ -10,6 +10,9 @@ export interface RowProps {
   posterUrl: (item: MediaItem) => string | undefined;
   onSelect: (item: MediaItem) => void;
   heightVh?: number;
+  /** Tile shape and caption depth. See Tile. */
+  aspect?: number;
+  captionLines?: 2 | 3;
   /**
    * Called when any tile in this row takes focus.
    *
@@ -34,6 +37,8 @@ export function Row({
   posterUrl,
   onSelect,
   heightVh,
+  aspect,
+  captionLines,
   onReached,
 }: RowProps): React.JSX.Element | null {
   const scroller = useRef<HTMLDivElement>(null);
@@ -74,6 +79,8 @@ export function Row({
               posterUrl={posterUrl(item)}
               focusKey={`${id}-${item.id || i}`}
               heightVh={heightVh}
+              aspect={aspect}
+              captionLines={captionLines}
               onEnter={() => onSelect(item)}
               onFocusedEl={onFocusChild}
             />

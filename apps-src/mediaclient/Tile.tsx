@@ -15,6 +15,16 @@ export interface TileProps {
   /** Called with this tile's element when it takes focus, so the container can
    *  scroll it into view on its own terms rather than the browser's. */
   onFocusedEl?: (el: HTMLElement) => void;
+  /**
+   * Width as a multiple of the height. Default is a 2:3 poster.
+   *
+   * Extras and trailers are clips, not films: their artwork is 16:9 and their
+   * names are sentences ("Behind the Scenes: Building the Ship"), neither of
+   * which fits a poster-shaped tile.
+   */
+  aspect?: number;
+  /** Caption lines before it truncates. */
+  captionLines?: 2 | 3;
 }
 
 /** How far through the item, 0-1, or null when it was never started. */
@@ -40,7 +50,16 @@ function label(item: MediaItem): string {
  * partly-watched item shows how far in, a finished one a plain mark; an
  * unwatched one shows nothing, so the marks mean something.
  */
-export function Tile({ item, posterUrl, focusKey, onEnter, heightVh = 26, onFocusedEl }: TileProps): React.JSX.Element {
+export function Tile({
+  item,
+  posterUrl,
+  focusKey,
+  onEnter,
+  heightVh = 26,
+  onFocusedEl,
+  aspect = 2 / 3,
+  captionLines = 2,
+}: TileProps): React.JSX.Element {
   // scrollIntoView scrolls BOTH axes - `inline` defaults to "nearest" - so a
   // row gets its vertical scrolling from here and then supersedes the horizontal
   // half with its own scrollTo, which gives the focused tile some run-up. That
@@ -89,7 +108,7 @@ export function Tile({ item, posterUrl, focusKey, onEnter, heightVh = 26, onFocu
       // candidate set: Down skipped to the row after it, and the last row of a
       // library could not be reached at all.
       className="flex shrink-0 flex-col gap-[0.8vh]"
-      style={{ width: `${heightVh * (2 / 3)}vh` }}
+      style={{ width: `${heightVh * aspect}vh` }}
     >
       <div
         className={[
@@ -143,7 +162,11 @@ export function Tile({ item, posterUrl, focusKey, onEnter, heightVh = 26, onFocu
           first two words - and letting the caption grow instead would move every
           row below it, which is also what spatial navigation measures against. */}
       {!showsTitleInPlace && (
-        <div className="line-clamp-2 h-[5.4vh] text-[1.8vh] leading-[1.5]" title={label(item)}>
+        <div
+          className={`${captionLines === 3 ? "line-clamp-3" : "line-clamp-2"} text-[1.8vh] leading-[1.5]`}
+          style={{ height: `${captionLines * 2.7}vh` }}
+          title={label(item)}
+        >
           {label(item)}
         </div>
       )}
