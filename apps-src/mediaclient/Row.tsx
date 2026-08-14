@@ -62,9 +62,13 @@ export function Row({
       const pad = el.offsetWidth * 0.6;
       const left = el.offsetLeft - pad;
       const right = el.offsetLeft + el.offsetWidth + pad;
-      if (left < box.scrollLeft) box.scrollTo({ left, behavior: "smooth" });
-      else if (right > box.scrollLeft + box.clientWidth)
-        box.scrollTo({ left: right - box.clientWidth, behavior: "smooth" });
+      // Instant when the jump is more than a screen: arriving on episode 40
+      // otherwise animates the whole way there, which reads as the app hanging
+      // rather than as a transition.
+      const far = Math.abs(left - box.scrollLeft) > box.clientWidth;
+      const behavior = far ? "auto" : "smooth";
+      if (left < box.scrollLeft) box.scrollTo({ left, behavior });
+      else if (right > box.scrollLeft + box.clientWidth) box.scrollTo({ left: right - box.clientWidth, behavior });
     },
     [onReached],
   );

@@ -189,3 +189,46 @@ describe("home row preferences", () => {
     expect(sane({ hiddenRows: ["playlists", "nope"] } as never).hiddenRows).toEqual(["playlists"]);
   });
 });
+
+describe("a tile that reports its focus", () => {
+  it("reports once, not on every render", async () => {
+    // A caller that sets state from this - a season loading the highlighted
+    // episode's details - rendered again, was called again, and locked the app
+    // up. The effect must not depend on the callback's identity, because a
+    // parent passing an inline arrow gives it a new one every render.
+    const { Tile } = await import("../Tile");
+    let calls = 0;
+    const { rerender } = render(
+      <Tile
+        item={item(1)}
+        focusKey="loop"
+        heightVh={TILE_VH}
+        onEnter={() => {}}
+        onFocusedEl={() => {
+          calls += 1;
+        }}
+      />,
+    );
+    await act(async () => setFocus("loop"));
+
+    const afterFocus = calls;
+    // Ten renders, each handing in a brand-new callback, as a parent that
+    // re-renders on any state change does.
+    for (let i = 0; i < 10; i += 1) {
+      rerender(
+        <Tile
+          item={item(1)}
+          focusKey="loop"
+          heightVh={TILE_VH}
+          onEnter={() => {}}
+          onFocusedEl={() => {
+            calls += 1;
+          }}
+        />,
+      );
+    }
+
+    expect(afterFocus).toBeLessThanOrEqual(1);
+    expect(calls).toBe(afterFocus);
+  });
+});

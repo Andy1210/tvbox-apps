@@ -78,9 +78,15 @@ export function Tile({
   const watched = !pct && (item.viewCount ?? 0) > 0;
   const showsTitleInPlace = (!src || broken) && item.title !== "";
 
+  // The callback is held in a ref and the effect depends on `focused` alone.
+  // Depending on the callback re-ran this on EVERY render - and a caller that
+  // sets state from it (a season loading the highlighted episode's details)
+  // then rendered again, called again, and the app locked up.
+  const notify = useRef(onFocusedEl);
+  notify.current = onFocusedEl;
   useEffect(() => {
-    if (focused && el.current) onFocusedEl?.(el.current);
-  }, [focused, onFocusedEl]);
+    if (focused && el.current) notify.current?.(el.current);
+  }, [focused]);
 
   // Artwork is fetched with the credential in a header and shown as a blob, so
   // the token never appears in markup. A failure is not an error: the tile has a

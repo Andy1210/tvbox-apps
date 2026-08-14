@@ -308,6 +308,9 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
             heightVh={detail.kind === "season" ? 15 : 22}
             onFocusItem={(item) => {
               if (item.kind !== "episode" || !backend) return;
+              // Already showing it: moving back onto the same tile must not
+              // start another request or another render.
+              if (focused?.id === item.id) return;
               // Cached by the backend, so moving along a row of episodes is not
               // a request each.
               void backend
