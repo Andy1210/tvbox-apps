@@ -9,6 +9,9 @@ import { log } from "./redact";
 
 const KEY = "prefs";
 
+/** The home screen's rows, as things that can be ordered and switched off. */
+export type HomeRowId = "ondeck" | "recent" | "playlists";
+
 export interface Prefs {
   /** Subtitle size as a multiple of mpv's own default. */
   subScale: number;
@@ -24,12 +27,31 @@ export interface Prefs {
    * what happened. The button is always there for anyone who wants the choice.
    */
   autoSkip: boolean;
+  /**
+   * Row order, top to bottom.
+   *
+   * Playlists last by default: an account often has none, and where it has one
+   * it is a thing you go looking for rather than the first thing you want to
+   * see on opening the app.
+   */
+  homeRows: HomeRowId[];
+  /** Rows switched off entirely. */
+  hiddenRows: HomeRowId[];
 }
 
-export const DEFAULTS: Prefs = { subScale: 1, subPos: 100, subColor: "#ffffff", autoSkip: false };
+const ROW_IDS: HomeRowId[] = ["ondeck", "recent", "playlists"];
+
+export const DEFAULTS: Prefs = {
+  subScale: 1,
+  subPos: 100,
+  subColor: "#ffffff",
+  autoSkip: false,
+  homeRows: [...ROW_IDS],
+  hiddenRows: [],
+};
 
 /** Ranges are the shell's own, from playeropts.js. Out of range means default. */
-function sane(v: Partial<Prefs>): Prefs {
+export function sane(v: Partial<Prefs>): Prefs {
   const num = (x: unknown, lo: number, hi: number, fallback: number): number =>
     typeof x === "number" && Number.isFinite(x) && x >= lo && x <= hi ? x : fallback;
   return {
@@ -39,6 +61,15 @@ function sane(v: Partial<Prefs>): Prefs {
     // Strictly boolean: a stored "yes-please" is truthy, and auto-skip would run
     // on a value nothing here ever wrote.
     autoSkip: v.autoSkip === true,
+    // Rebuilt rather than trusted: a stored order from an older build is
+    // missing any row added since, and one from a newer build may name a row
+    // this code has never heard of. Known ids in their stored order first, then
+    // whatever is new, so a row can be added without anyone losing their order.
+    homeRows: [
+      ...(Array.isArray(v.homeRows) ? v.homeRows.filter((r) => ROW_IDS.includes(r)) : []),
+      ...ROW_IDS.filter((r) => !(Array.isArray(v.homeRows) ? v.homeRows : []).includes(r)),
+    ],
+    hiddenRows: Array.isArray(v.hiddenRows) ? v.hiddenRows.filter((r) => ROW_IDS.includes(r)) : [],
   };
 }
 
@@ -61,8 +92,8 @@ export const usePrefs = create<PrefsState>((set, get) => ({
 
   async set(key, value) {
     set({ [key]: value } as Pick<Prefs, typeof key>);
-    const { subScale, subPos, subColor, autoSkip } = get();
-    const w = await writeJson(KEY, { subScale, subPos, subColor, autoSkip });
+    const { subScale, subPos, subColor, autoSkip, homeRows, hiddenRows } = get();
+    const w = await writeJson(KEY, { subScale, subPos, subColor, autoSkip, homeRows, hiddenRows });
     if (!w.ok) log.warn("playback preference not saved");
     applySubtitleStyle();
   },

@@ -4,6 +4,7 @@ import { FocusButton, useI18n } from "@sdk";
 import { useInitialFocus } from "./focus";
 import { useApp } from "./state";
 import { PlaybackSettings } from "./PlaybackSettings";
+import { HomeRows } from "./HomeRows";
 
 /**
  * Which server, which account, and how to leave.
@@ -21,12 +22,13 @@ export function Settings(): React.JSX.Element {
   const setAutologin = useApp((s) => s.setAutologin);
   const go = useApp((s) => s.go);
 
-  const [panel, setPanel] = useState(false);
+  const [panel, setPanel] = useState<null | "playback" | "rows">(null);
   const { ref, focusKey } = useFocusable({ focusKey: "settings", saveLastFocusedChild: true });
   // The setting someone came here to change, not the one that logs them out.
   useInitialFocus("settings-autologin", true);
 
-  if (panel) return <PlaybackSettings onClose={() => setPanel(false)} />;
+  if (panel === "playback") return <PlaybackSettings onClose={() => setPanel(null)} />;
+  if (panel === "rows") return <HomeRows onClose={() => setPanel(null)} />;
 
   return (
     <FocusContext.Provider value={focusKey}>
@@ -66,12 +68,21 @@ export function Settings(): React.JSX.Element {
         <div className="flex flex-col gap-[1vh]">
           <FocusButton
             focusKey="settings-playback"
-            onEnter={() => setPanel(true)}
+            onEnter={() => setPanel("playback")}
             className="self-start rounded-[1vh] bg-white/12 px-[2.4vw] py-[1.3vh] text-[2.1vh]"
           >
             {`${t("settings.playbackOpen")} \u203a`}
           </FocusButton>
           <p className="max-w-[60vw] text-[1.9vh] text-fg-dim">{t("settings.playbackHint")}</p>
+
+          <FocusButton
+            focusKey="settings-rows"
+            onEnter={() => setPanel("rows")}
+            className="mt-[1vh] self-start rounded-[1vh] bg-white/12 px-[2.4vw] py-[1.3vh] text-[2.1vh]"
+          >
+            {`${t("settings.homeRows")} \u203a`}
+          </FocusButton>
+          <p className="max-w-[60vw] text-[1.9vh] text-fg-dim">{t("settings.homeRowsHint")}</p>
         </div>
 
         <div className="mt-[2vh] flex gap-[1.2vw]">

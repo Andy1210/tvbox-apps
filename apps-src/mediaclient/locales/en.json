@@ -26,7 +26,12 @@
     "empty": "This server has nothing in it yet.",
     "search": "Search",
     "settings": "Settings",
-    "playlists": "Playlists"
+    "playlists": "Playlists",
+    "row": {
+      "ondeck": "Carry on watching",
+      "recent": "Recently added",
+      "playlists": "Playlists"
+    }
   },
   "error": {
     "unreachable": "The server cannot be reached. It may be switched off, or the box may be off the network.",
@@ -123,7 +128,13 @@
     "posHigh": "Higher",
     "posMiddle": "Around the middle",
     "playbackOpen": "Playback settings",
-    "playbackHint": "Subtitle size, position and colour, and skipping intros."
+    "playbackHint": "Subtitle size, position and colour, and skipping intros.",
+    "homeRows": "Home screen rows",
+    "homeRowsHint": "Order and hide. Playlists sit last by default.",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "rowShown": "Shown",
+    "rowHidden": "Hidden"
   },
   "tracks": {
     "version": "Version",

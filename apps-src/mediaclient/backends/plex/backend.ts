@@ -60,6 +60,8 @@ const MAX_SEARCH_STEPS = 40;
  */
 const FILTER_KEY = /^[A-Za-z][A-Za-z0-9_.]{0,40}$/;
 /** Parameter names that are ours to set. Plex has no filter by these names. */
+/** Plex's own number for a collection. */
+const COLLECTION_TYPE = 18;
 const RESERVED = new Set(["sort", "type", "includeguids", "excludeallleaves"]);
 
 /**
@@ -210,6 +212,10 @@ export class PlexBackend implements MediaBackend {
         // Direction rides on the sort key itself, which is what the server
         // expects: a separate parameter is ignored.
         sort: `${q.sort ?? "titleSort"}${q.desc ? ":desc" : ""}`,
+        // 18 is the collection type. Asking for them through the ordinary list
+        // is what lets the A-Z strip, the paging and the order work on them
+        // without a second implementation of each.
+        ...(q.of === "collections" ? { type: COLLECTION_TYPE } : {}),
         ...page(q.offset, q.limit),
       }),
     );
@@ -227,9 +233,13 @@ export class PlexBackend implements MediaBackend {
   async letters(
     libraryId: string,
     filters?: Record<string, string>,
+    of?: "collections",
   ): Promise<{ key: string; title: string; size: number }[]> {
     const c = container<MetadataContainer>(
-      await this.req(`library/sections/${libraryId}/firstCharacter`, safeFilters(filters)),
+      await this.req(`library/sections/${libraryId}/firstCharacter`, {
+        ...safeFilters(filters),
+        ...(of === "collections" ? { type: COLLECTION_TYPE } : {}),
+      }),
     );
     // Accented initials are merged into the plain letter. The server keeps some
     // as buckets of their own and lists them after Z - but it SORTS them inside
@@ -413,13 +423,7 @@ export class PlexBackend implements MediaBackend {
   }
 
   async collections(libraryId: string, q: PageQuery): Promise<Page<MediaItem>> {
-    const c = container<MetadataContainer>(
-      await this.req(`library/sections/${libraryId}/collections`, {
-        sort: `${q.sort ?? "titleSort"}${q.desc ? ":desc" : ""}`,
-        ...page(q.offset, q.limit),
-      }),
-    );
-    return { items: (c.Metadata ?? []).map(toItem), total: c.totalSize };
+    return this.libraryPage(libraryId, { ...q, of: "collections" });
   }
 
   async playlists(): Promise<MediaItem[]> {
