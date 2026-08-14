@@ -95,7 +95,9 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
           // grid rather than showing the previous one's rows while it reloads.
           <Library key={screen.libraryId} libraryId={screen.libraryId} title={screen.title} />
         )}
-        {screen.name === "item" && <Detail key={screen.itemId} itemId={screen.itemId} />}
+        {screen.name === "item" && (
+          <Detail key={screen.itemId} itemId={screen.itemId} focusChildId={screen.focusChildId} />
+        )}
         {screen.name === "person" && (
           <Person key={screen.personId} personId={screen.personId} personName={screen.personName} />
         )}

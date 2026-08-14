@@ -151,7 +151,8 @@
     "searchUnavailable": "Ezen a szerveren nincs beállítva feliratszolgáltató.",
     "searchNone": "Nincs találat.",
     "download": "Letöltés",
-    "part": "{n}. rész / {of}"
+    "part": "{n}. rész / {of}",
+    "title": "Hang és felirat"
   },
   "profiles": {
     "title": "Ki néz?",
