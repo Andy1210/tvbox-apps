@@ -86,14 +86,17 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
 
       {art && (
         <div
-          className="pointer-events-none fixed top-0 right-0 z-0 h-screen w-[58vw]"
+          className="pointer-events-none fixed top-0 right-0 z-0 h-[62vh] w-[58vw]"
           aria-hidden="true"
           style={{
             // A circle, not an ellipse: an ellipse stretched to the box takes
             // the shape of the box, which is the thing the mask exists to hide.
-            // Sized in vh so it stays round whatever the panel's aspect is.
-            maskImage: "radial-gradient(circle 62vh at 72% 42%, #000 45%, transparent 82%)",
-            WebkitMaskImage: "radial-gradient(circle 62vh at 72% 42%, #000 45%, transparent 82%)",
+            // Sized in vh so it stays round whatever the panel's aspect is, and
+            // small enough to fade out INSIDE the 62vh box - a circle that runs
+            // past the edge is cut off there, which puts back the straight line
+            // the mask is for.
+            maskImage: "radial-gradient(circle 34vh at 70% 45%, #000 42%, transparent 88%)",
+            WebkitMaskImage: "radial-gradient(circle 34vh at 70% 45%, #000 42%, transparent 88%)",
           }}
         >
           <img src={art} alt="" className="h-full w-full object-cover" />
