@@ -114,7 +114,7 @@ export function LibraryFilters({
     return (
       <Panel title={openFilter.title} onClose={() => setOpenFilter(null)} closeLabel={t("common.back")}>
         {values === null && <p className="text-[2vh] text-fg-dim">{t("common.loading")}</p>}
-        <div className="flex flex-wrap gap-[0.8vw]">
+        <div className="flex flex-wrap items-stretch gap-x-[0.8vw] gap-y-[1.4vh]">
           {values?.map((v, i) => (
             <Chip
               key={v.key}
@@ -151,7 +151,7 @@ export function LibraryFilters({
           <div className="no-scrollbar flex flex-col gap-[2.4vh] overflow-y-auto">
             <section className="flex flex-col gap-[1vh]">
               <h3 className="text-[2.1vh] font-semibold text-fg-dim">{t("library.sort")}</h3>
-              <div className="flex flex-wrap gap-[0.8vw]">
+              <div className="flex flex-wrap items-stretch gap-x-[0.8vw] gap-y-[1.4vh]">
                 {sorts.map((s, i) => (
                   <Chip
                     key={s.key}
@@ -173,7 +173,7 @@ export function LibraryFilters({
 
             <section className="flex flex-col gap-[1vh]">
               <h3 className="text-[2.1vh] font-semibold text-fg-dim">{t("library.filter")}</h3>
-              <div className="flex flex-wrap gap-[0.8vw]">
+              <div className="flex flex-wrap items-stretch gap-x-[0.8vw] gap-y-[1.4vh]">
                 {filters.map((f, i) => {
                   const chosen = view.filters[f.key];
                   return (
@@ -262,7 +262,12 @@ function Chip({
     <FocusButton
       focusKey={focusKey}
       onEnter={onEnter}
-      className="rounded-[0.8vh] bg-white/8 px-[1.4vw] py-[0.9vh] text-[2vh]"
+      // A uniform height, and a vertical gap wider than the 4% the focus state
+      // grows a chip by. Spatial navigation drops a candidate whose top sits
+      // inside the focused element's box, so a wrapped grid of chips of
+      // different heights loses whole rows to a press - which reads as the
+      // D-pad skipping over them.
+      className="flex min-h-[6vh] items-center rounded-[0.8vh] bg-white/8 px-[1.4vw] text-[2vh]"
     >
       <span className="inline-block w-[1.4vw] shrink-0 text-center">{active ? "✓" : ""}</span>
       {label}

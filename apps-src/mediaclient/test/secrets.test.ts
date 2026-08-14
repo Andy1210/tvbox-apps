@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { PlexBackend } from "../backends/plex/backend";
 import { redact, redactHeaders } from "../redact";
 import type { Session } from "../backends/types";
@@ -76,5 +76,60 @@ describe("redaction", () => {
     expect(out.Accept).toBe("application/json");
     expect(out["X-Plex-Token"]).not.toContain(TOKEN);
     expect(out.Authorization).not.toContain("Bearer x");
+  });
+});
+
+describe("artwork the server points elsewhere", () => {
+  const backend = new PlexBackend(session, { clientId: "c", deviceName: "d" });
+
+  it("refuses a logo URL that leaves the server", () => {
+    // Some artwork arrives as an absolute URL, and the value is the SERVER's.
+    // The caller pairs artUrl with imageHeaders(), which carries the account
+    // token - so returning a foreign host verbatim would have the box post an
+    // admin-level credential wherever the server said, and the receiving host
+    // answers its own CORS preflight.
+    expect(backend.artUrl("https://attacker.example.com/collect")).toBeUndefined();
+    expect(backend.artUrl("http://192.168.1.99:32400/library/x")).toBeUndefined();
+    // A protocol-relative URL is not absolute by this test, so it resolves
+    // against the server and stays there - which is the safe outcome.
+    const relative = backend.artUrl("//attacker.example.com/x")!;
+    expect(new URL(relative).origin).toBe("http://192.168.1.10:32400");
+  });
+
+  it("still resolves the server's own artwork", () => {
+    expect(backend.artUrl("http://192.168.1.10:32400/library/metadata/1/clearLogo/2")).toBe(
+      "http://192.168.1.10:32400/library/metadata/1/clearLogo/2",
+    );
+    expect(backend.artUrl("/library/metadata/1/clearLogo/2")).toContain("192.168.1.10:32400");
+  });
+});
+
+describe("names the server chooses", () => {
+  const backend = new PlexBackend(session, { clientId: "c", deviceName: "d" });
+
+  it("will not take a filter name into a path", async () => {
+    // Measured before the bound: a filter key of
+    // "../../../../:/scrobble?key=99&identifier=..." reached the server as a
+    // state-changing GET with the token attached.
+    await expect(backend.filterValues("1", "../../../../:/scrobble?key=99")).rejects.toThrow();
+    await expect(backend.filterValues("1", "genre/../..")).rejects.toThrow();
+  });
+
+  it("will not let a filter name replace the credential", async () => {
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      seen.push(String(input));
+      return new Response(JSON.stringify({ MediaContainer: { Directory: [] } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    // Plex prefers the query parameter over the header, so this would have
+    // authenticated as whatever the server named.
+    await backend.letters("1", { "X-Plex-Token": "attacker", sort: "hijacked", genre: "5" });
+    expect(seen[0]).not.toContain("attacker");
+    expect(seen[0]).not.toContain("hijacked");
+    expect(seen[0]).toContain("genre=5");
+    vi.unstubAllGlobals();
   });
 });

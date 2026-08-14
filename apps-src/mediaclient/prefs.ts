@@ -28,6 +28,20 @@ export interface Prefs {
 
 export const DEFAULTS: Prefs = { subScale: 1, subPos: 100, subColor: "#ffffff", autoSkip: false };
 
+/** Ranges are the shell's own, from playeropts.js. Out of range means default. */
+function sane(v: Partial<Prefs>): Prefs {
+  const num = (x: unknown, lo: number, hi: number, fallback: number): number =>
+    typeof x === "number" && Number.isFinite(x) && x >= lo && x <= hi ? x : fallback;
+  return {
+    subScale: num(v.subScale, 0.1, 10, DEFAULTS.subScale),
+    subPos: num(v.subPos, 0, 150, DEFAULTS.subPos),
+    subColor: typeof v.subColor === "string" && /^#[0-9a-fA-F]{6}$/.test(v.subColor) ? v.subColor : DEFAULTS.subColor,
+    // Strictly boolean: a stored "yes-please" is truthy, and auto-skip would run
+    // on a value nothing here ever wrote.
+    autoSkip: v.autoSkip === true,
+  };
+}
+
 interface PrefsState extends Prefs {
   load(): Promise<void>;
   set<K extends keyof Prefs>(key: K, value: Prefs[K]): Promise<void>;
@@ -37,8 +51,12 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   ...DEFAULTS,
 
   async load() {
+    // The stored blob is a cast, not a promise. A hand-edited or corrupted entry
+    // otherwise reaches the player verbatim, where the shell refuses each value
+    // in silence and subtitles quietly keep mpv's defaults - and `set` then
+    // writes the whole corrupt bag back.
     const saved = await readJson<Partial<Prefs>>(KEY);
-    if (saved) set({ ...DEFAULTS, ...saved });
+    if (saved) set(sane(saved));
   },
 
   async set(key, value) {
@@ -63,7 +81,15 @@ export function applySubtitleStyle(): void {
   const tv = typeof window !== "undefined" ? window.tvbox : undefined;
   if (!tv?.setPlayerProp) return;
   const { subScale, subPos, subColor } = usePrefs.getState();
-  tv.setPlayerProp("sub-scale", subScale);
-  tv.setPlayerProp("sub-pos", subPos);
-  tv.setPlayerProp("sub-color", subColor);
+  // The shell answers whether it accepted each one. A refusal means the value
+  // never reached mpv, and the subtitles are silently at their defaults - the
+  // shell's own comment says callers must not read that as success.
+  const send = (name: string, value: number | string): void => {
+    void Promise.resolve(tv.setPlayerProp?.(name, value)).then((r) => {
+      if (r && typeof r === "object" && "ok" in r && !r.ok) log.warn(`player refused ${name}`);
+    });
+  };
+  send("sub-scale", subScale);
+  send("sub-pos", subPos);
+  send("sub-color", subColor);
 }

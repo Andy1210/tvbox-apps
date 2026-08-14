@@ -56,6 +56,8 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   const [letters, setLetters] = useState<Letter[]>([]);
   const [view, setView] = useState<LibraryView>({ sort: "titleSort", desc: false, filters: {}, labels: {} });
   const [arranging, setArranging] = useState(false);
+  /** Which letter search may still act. See jumpToLetter. */
+  const jump = useRef(0);
   const [items, setItems] = useState<(MediaItem | null)[]>([]);
   const [total, setTotal] = useState<number | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -244,9 +246,14 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
    */
   const jumpToLetter = (key: string): void => {
     if (!backend) return;
+    // Each press starts a search of about eleven requests, and pressing another
+    // letter meanwhile must not let the first one land: a late answer scrolls
+    // away from the letter last chosen.
+    const mine = ++jump.current;
     void backend
       .letterOffset(libraryId, key, { sort: view.sort, desc: view.desc, filters: view.filters })
       .then((offset) => {
+        if (mine !== jump.current) return;
         const row = Math.floor(offset / COLUMNS);
         // Fetch before scrolling: the window is computed from scrollTop, so the
         // rows land already requested rather than as a screen of placeholders.

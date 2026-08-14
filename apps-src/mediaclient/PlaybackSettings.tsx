@@ -118,7 +118,7 @@ function Group({
     <section className="flex flex-col gap-[1vh]">
       <h3 className="text-[2.2vh] font-semibold text-fg-dim">{title}</h3>
       {note && <p className="max-w-[70vw] text-[1.9vh] text-fg-dim">{note}</p>}
-      <div className="flex flex-wrap items-center gap-[1vw]">{children}</div>
+      <div className="flex flex-wrap items-stretch gap-x-[1vw] gap-y-[1.4vh]">{children}</div>
     </section>
   );
 }
