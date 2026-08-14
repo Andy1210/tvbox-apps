@@ -168,12 +168,13 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     }
     if (!heavy) return; // nothing on this server is big enough to be capped
 
-    const capped = await b.resolveStream(heavy.id, {
-      session: `test-cap-${Date.now()}`,
-      maxBitrateKbps: 2000,
-    });
+    const session = `test-cap-${Date.now()}`;
+    const capped = await b.resolveStream(heavy.id, { session, maxBitrateKbps: 2000 });
     expect(capped.transcoded).toBe(true);
-    await b.endSession(capped.session).catch(() => {});
+    // The session is ours whether or not the decision named one back, so it is
+    // stopped by the id we sent - a probe that leaves one open shows up as a
+    // stream on the server's activity list.
+    await b.endSession(session).catch(() => {});
   });
 
   it("reads markers for an episode that has them", async () => {

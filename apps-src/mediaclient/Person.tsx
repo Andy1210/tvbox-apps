@@ -4,7 +4,7 @@ import { useI18n } from "@sdk";
 import { Row } from "./Row";
 import { Message } from "./Message";
 import { artworkScale } from "./posters";
-import { useFocusFallback, useInitialFocus } from "./focus";
+import { useFocusFallback, useInitialFocus, useScrollToTopOnFirst } from "./focus";
 import { usePlayer } from "./playback/player";
 import { classify, useApp } from "./state";
 import type { CreditSet, MediaItem } from "./backends/types";
@@ -54,7 +54,10 @@ export function Person({ personId, personName }: { personId: string; personName:
 
   const { ref, focusKey } = useFocusable({ focusKey: `person-${personId}`, saveLastFocusedChild: true });
   const firstCredit = credits?.items.find((c) => c.kind === "movie") ?? credits?.items[0];
-  const firstCreditKey = firstCredit ? `${firstCredit.kind === "movie" ? "films" : "series"}-${firstCredit.id}` : undefined;
+  const firstCreditKey = firstCredit
+    ? `${firstCredit.kind === "movie" ? "films" : "series"}-${firstCredit.id}`
+    : undefined;
+  const toTop = useScrollToTopOnFirst(ref);
   useInitialFocus(firstCreditKey, Boolean(credits));
   // Focus is set once; without a fallback anything that unmounts the focused
   // tile afterwards leaves the D-pad dead with only Back working.
@@ -63,7 +66,8 @@ export function Person({ personId, personName }: { personId: string; personName:
   if (failure) return <Message failure={failure} onRetry={() => setReload((n) => n + 1)} />;
   if (!credits) return <Message loading />;
 
-  const poster = (item: MediaItem): string | undefined => backend?.posterUrl(item, 300 * artworkScale(), 450 * artworkScale());
+  const poster = (item: MediaItem): string | undefined =>
+    backend?.posterUrl(item, 300 * artworkScale(), 450 * artworkScale());
   const open = (item: MediaItem): void => go({ name: "item", itemId: item.id });
 
   const films = credits.items.filter((c) => c.kind === "movie");
@@ -71,7 +75,10 @@ export function Person({ personId, personName }: { personId: string; personName:
 
   return (
     <FocusContext.Provider value={focusKey}>
-      <div ref={ref} className="flex h-full flex-col gap-[2.4vh] overflow-y-auto py-[3vh] scroll-pt-[16vh] scroll-pb-[12vh]">
+      <div
+        ref={ref}
+        className="flex h-full flex-col gap-[2.4vh] overflow-y-auto py-[3vh] scroll-pt-[16vh] scroll-pb-[12vh]"
+      >
         <header className="flex flex-col gap-[0.6vh] px-[4vw]">
           <h1 className="text-[3.4vh] font-semibold tracking-tight">{personName}</h1>
           <p className="text-[1.8vh] text-fg-dim">
@@ -81,7 +88,7 @@ export function Person({ personId, personName }: { personId: string; personName:
 
         {credits.items.length === 0 && <Message text={t("person.empty", { name: personName })} />}
 
-        <Row id="films" title={t("person.films")} items={films} posterUrl={poster} onSelect={open} />
+        <Row id="films" onReached={toTop} title={t("person.films")} items={films} posterUrl={poster} onSelect={open} />
         <Row id="series" title={t("person.series")} items={series} posterUrl={poster} onSelect={open} />
 
         {credits.truncated && <p className="px-[4vw] text-[1.7vh] text-fg-dim">{t("person.partial")}</p>}

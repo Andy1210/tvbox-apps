@@ -42,7 +42,11 @@ export function ScrubPreview({
 
   useEffect(() => {
     if (!backend || !partId) return;
-    const url = backend.previewUrl(partId, bucket, Math.round(16 * widthVh), Math.round(9 * widthVh));
+    // vh is a fraction of the viewport, and the server wants pixels - asking
+    // for `16 * widthVh` happened to be right at 1080p and wrong on any other
+    // panel height.
+    const px = Math.round((widthVh / 100) * window.innerHeight);
+    const url = backend.previewUrl(partId, bucket, px, Math.round((px * 9) / 16));
     if (!url) {
       setMissing(true);
       return;

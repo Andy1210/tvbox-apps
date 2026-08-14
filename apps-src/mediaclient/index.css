@@ -14,6 +14,10 @@
   --color-fg: #f4f6fa;
   --color-fg-dim: #8a96a6;
   --color-focus: #ffffff;
+  /* The scrub cursor. It has to read against a white progress bar AND against
+     whatever frame is behind the overlay, so it is a saturated hue rather than
+     another shade of grey. */
+  --color-accent: #ffb43c;
   --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
 }
 

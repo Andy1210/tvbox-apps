@@ -9,23 +9,25 @@ export type Choice = { version: number; audio?: number; subtitle?: number | "non
 /**
  * What the quality column offers.
  *
- * Named by bandwidth rather than "high/medium/low", because the number is the
- * thing someone can actually reason about against their own connection - and
- * because "high" would have to mean something different for a 4K remux than for
- * a 720p file. Original is first and is the default: it is the only entry that
- * can avoid a conversion entirely.
+ * Named for what each one buys, with the bandwidth as the second line. A raw
+ * "720 kbps" is one character from "720p" and will be read as a resolution by
+ * anyone who is not looking for a bitrate; the number still has to be there,
+ * because it is the only thing that can be compared against a connection.
+ *
+ * Original is first and is the default: it is the only entry that can avoid a
+ * conversion entirely.
  */
 /** Offered to the subtitle search. Kept short: a wall of codes is not a menu. */
 export const SEARCH_LANGUAGES = ["hu", "en", "de"];
 
-export const QUALITIES: { key: string; kbps?: number }[] = [
-  { key: "original" },
-  { key: "20 Mbps", kbps: 20_000 },
-  { key: "12 Mbps", kbps: 12_000 },
-  { key: "8 Mbps", kbps: 8_000 },
-  { key: "4 Mbps", kbps: 4_000 },
-  { key: "2 Mbps", kbps: 2_000 },
-  { key: "720 kbps", kbps: 720 },
+export const QUALITIES: { label: string; kbps?: number }[] = [
+  { label: "player.q0" },
+  { label: "player.q1", kbps: 20_000 },
+  { label: "player.q2", kbps: 12_000 },
+  { label: "player.q3", kbps: 8_000 },
+  { label: "player.q4", kbps: 4_000 },
+  { label: "player.q5", kbps: 2_000 },
+  { label: "player.q6", kbps: 720 },
 ];
 
 export interface TrackMenuProps {
@@ -125,120 +127,128 @@ export function TrackMenu({
         <div // A fixed height, not a maximum: the panel would otherwise change size as
           // a search adds rows to one column, and the whole overlay jumps under
           // whatever the person is reading.
-          className="flex h-[64vh] w-[86vw] flex-col gap-[2vh] rounded-[1.4vh] bg-[#0c1219]/95 p-[3vh]">
+          className="flex h-[64vh] w-[86vw] flex-col gap-[2vh] rounded-[1.4vh] bg-[#0c1219]/95 p-[3vh]"
+        >
           <div className="flex flex-1 gap-[2vw] overflow-hidden">
-          {versions.length > 1 && (
-            <Column title={t("tracks.version")}>
-              {versions.map((v) => (
+            {versions.length > 1 && (
+              <Column title={t("tracks.version")}>
+                {versions.map((v) => (
+                  <Option
+                    key={v.index}
+                    focusKey={`ver-${v.index}`}
+                    active={v.index === choice.version}
+                    label={
+                      v.parts > 1
+                        ? `${v.label} · ${t("tracks.part", { n: String(v.partIndex + 1), of: String(v.parts) })}`
+                        : v.label
+                    }
+                    hint={versionHint(v)}
+                    // Changing the file invalidates the track choices made against
+                    // the old one, so they go back to the server's own selection.
+                    onEnter={() => apply({ version: v.index })}
+                  />
+                ))}
+              </Column>
+            )}
+
+            <Column title={t("tracks.audio")}>
+              {audio.length === 0 && <Empty text={t("tracks.noAudio")} />}
+              {audio.map((a) => (
                 <Option
-                  key={v.index}
-                  focusKey={`ver-${v.index}`}
-                  active={v.index === choice.version}
-                  label={v.parts > 1 ? `${v.label} · ${t("tracks.part", { n: String(v.partIndex + 1), of: String(v.parts) })}` : v.label}
-                  hint={versionHint(v)}
-                  // Changing the file invalidates the track choices made against
-                  // the old one, so they go back to the server's own selection.
-                  onEnter={() => apply({ version: v.index })}
+                  key={a.id}
+                  focusKey={`aud-${a.ordinal}`}
+                  active={choice.audio === undefined ? Boolean(a.selected) : choice.audio === a.ordinal}
+                  label={a.label}
+                  onEnter={() => apply({ ...choice, audio: a.ordinal })}
                 />
               ))}
             </Column>
-          )}
 
-          <Column title={t("tracks.audio")}>
-            {audio.length === 0 && <Empty text={t("tracks.noAudio")} />}
-            {audio.map((a) => (
+            <Column title={t("tracks.subtitles")}>
               <Option
-                key={a.id}
-                focusKey={`aud-${a.ordinal}`}
-                active={choice.audio === undefined ? Boolean(a.selected) : choice.audio === a.ordinal}
-                label={a.label}
-                onEnter={() => apply({ ...choice, audio: a.ordinal })}
+                focusKey="sub-off"
+                active={choice.subtitle === "none"}
+                label={t("tracks.subtitlesOff")}
+                onEnter={() => apply({ ...choice, subtitle: "none" })}
               />
-            ))}
-          </Column>
+              {subtitles.map((s) => (
+                <Option
+                  key={s.id}
+                  focusKey={`sub-${s.ordinal}`}
+                  active={choice.subtitle === undefined ? Boolean(s.selected) : choice.subtitle === s.ordinal}
+                  label={s.label}
+                  hint={subtitleHint(s, t)}
+                  onEnter={() => apply({ ...choice, subtitle: s.ordinal })}
+                />
+              ))}
 
-          <Column title={t("tracks.subtitles")}>
-            <Option
-              focusKey="sub-off"
-              active={choice.subtitle === "none"}
-              label={t("tracks.subtitlesOff")}
-              onEnter={() => apply({ ...choice, subtitle: "none" })}
-            />
-            {subtitles.map((s) => (
-              <Option
-                key={s.id}
-                focusKey={`sub-${s.ordinal}`}
-                active={choice.subtitle === undefined ? Boolean(s.selected) : choice.subtitle === s.ordinal}
-                label={s.label}
-                hint={subtitleHint(s, t)}
-                onEnter={() => apply({ ...choice, subtitle: s.ordinal })}
-              />
-            ))}
-
-            {onSearchSubtitles && (
-              <>
-                {/* Above the tracks, not below them. A film with fifteen
+              {onSearchSubtitles && (
+                <>
+                  {/* Above the tracks, not below them. A film with fifteen
                     embedded subtitles would otherwise bury it past the fold of a
                     scrolling column. */}
-                {/* Which language, before looking. A film often has only an
+                  {/* Which language, before looking. A film often has only an
                     English subtitle available, and someone may want that one on
                     purpose - the button used to decide for them, silently, from
                     the interface language. */}
-                {onSearchLanguage && (
-                  <div className="flex flex-wrap gap-[0.6vw] pb-[0.6vh]">
-                    {SEARCH_LANGUAGES.map((code) => (
-                      <FocusButton
-                        key={code}
-                        focusKey={`lang-${code}`}
-                        onEnter={() => onSearchLanguage(code)}
-                        className={`rounded-[0.7vh] px-[1.1vw] py-[0.6vh] text-[1.8vh] uppercase ${
-                          code === searchLanguage ? "bg-white text-black" : "bg-white/10"
-                        }`}
-                      >
-                        {code}
-                      </FocusButton>
-                    ))}
-                  </div>
-                )}
-                <Option
-                  focusKey="sub-search"
-                  active={false}
-                  label={t(searchState === "searching" ? "tracks.searching" : "tracks.search")}
-                  onEnter={onSearchSubtitles}
-                />
-                {searchState === "unavailable" && <Empty text={t("tracks.searchUnavailable")} />}
-                {searchState === "none" && <Empty text={t("tracks.searchNone")} />}
-                {/* Finding them is half the job: each one is pressable, and
-                    pressing it is what actually fetches it onto the item. */}
-                {(found ?? []).map((f) => (
+                  {onSearchLanguage && (
+                    <div className="flex flex-wrap gap-[0.6vw] pb-[0.6vh]">
+                      {SEARCH_LANGUAGES.map((code) => (
+                        <FocusButton
+                          key={code}
+                          focusKey={`lang-${code}`}
+                          onEnter={() => onSearchLanguage(code)}
+                          className={`rounded-[0.7vh] px-[1.1vw] py-[0.6vh] text-[1.8vh] uppercase ${
+                            code === searchLanguage ? "bg-white text-black" : "bg-white/10"
+                          }`}
+                        >
+                          {code}
+                        </FocusButton>
+                      ))}
+                    </div>
+                  )}
                   <Option
-                    key={`found-${f.id}`}
-                    focusKey={`sub-found-${f.id}`}
+                    focusKey="sub-search"
                     active={false}
-                    label={f.label}
-                    hint={t("tracks.download")}
-                    onEnter={() => onDownloadSubtitle?.(f)}
+                    label={t(searchState === "searching" ? "tracks.searching" : "tracks.search")}
+                    onEnter={onSearchSubtitles}
                   />
-                ))}
-              </>
-            )}
-          </Column>
+                  {searchState === "unavailable" && <Empty text={t("tracks.searchUnavailable")} />}
+                  {searchState === "none" && <Empty text={t("tracks.searchNone")} />}
+                  {/* Finding them is half the job: each one is pressable, and
+                    pressing it is what actually fetches it onto the item. */}
+                  {(found ?? []).map((f) => (
+                    <Option
+                      key={`found-${f.id}`}
+                      focusKey={`sub-found-${f.id}`}
+                      active={false}
+                      label={f.label}
+                      hint={t("tracks.download")}
+                      onEnter={() => onDownloadSubtitle?.(f)}
+                    />
+                  ))}
+                </>
+              )}
+            </Column>
 
-          <Column title={t("player.quality")}>
-            {QUALITIES.map((q, i) => (
-              <Option
-                key={q.key}
-                focusKey={`q-${i}`}
-                active={choice.maxBitrateKbps === q.kbps}
-                label={q.kbps ? q.key : t("player.qualityOriginal")}
-                hint={i === 0 ? t("player.qualityHint") : undefined}
-                // A ceiling is baked into the stream when it is built, so this
-                // restarts playback where it stands rather than adjusting
-                // anything that is already running.
-                onEnter={() => apply({ ...choice, maxBitrateKbps: q.kbps })}
-              />
-            ))}
-          </Column>
+            <Column title={t("player.quality")} note={t("player.qualityHint")}>
+              {QUALITIES.map((q, i) => (
+                <Option
+                  key={i}
+                  focusKey={`q-${i}`}
+                  active={choice.maxBitrateKbps === q.kbps}
+                  label={t(q.label)}
+                  // The number under the name, on every row that has one. It used
+                  // to be a single warning parked on "Original" - the one row it
+                  // does not describe.
+                  hint={q.kbps ? (q.kbps >= 1000 ? `${q.kbps / 1000} Mbps` : `${q.kbps} kbps`) : undefined}
+                  // A ceiling is baked into the stream when it is built, so this
+                  // restarts playback where it stands rather than adjusting
+                  // anything that is already running.
+                  onEnter={() => apply({ ...choice, maxBitrateKbps: q.kbps })}
+                />
+              ))}
+            </Column>
           </div>
 
           {/* In the panel rather than floating over the film in a corner. A
@@ -268,14 +278,29 @@ function versionHint(v: MediaVersion): string {
 }
 
 function subtitleHint(s: Track, t: (k: string) => string): string {
-  const bits = [s.forced ? t("tracks.forced") : undefined, s.external ? t("tracks.external") : undefined].filter(Boolean);
+  const bits = [s.forced ? t("tracks.forced") : undefined, s.external ? t("tracks.external") : undefined].filter(
+    Boolean,
+  );
   return bits.join(" · ");
 }
 
-function Column({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
+function Column({
+  title,
+  note,
+  children,
+}: {
+  title: string;
+  note?: string;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  // The width floor is low enough that four columns fit: at 20vw each, four plus
+  // their gaps came to more than the panel is wide, and the last one was clipped
+  // by overflow-hidden - which reads as "there is more to the right" while Right
+  // does nothing.
   return (
-    <section className="no-scrollbar flex min-w-[20vw] flex-1 flex-col gap-[1vh] overflow-y-auto">
-      <h3 className="text-[2vh] font-semibold tracking-tight text-fg-dim">{title}</h3>
+    <section className="no-scrollbar flex min-w-[17vw] flex-1 flex-col gap-[1vh] overflow-y-auto">
+      <h3 className="text-[2.1vh] font-semibold tracking-tight text-fg-dim">{title}</h3>
+      {note && <p className="text-[1.8vh] leading-snug text-fg-dim">{note}</p>}
       <div className="flex flex-col gap-[0.6vh]">{children}</div>
     </section>
   );
