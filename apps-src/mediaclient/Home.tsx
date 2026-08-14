@@ -132,7 +132,7 @@ export function Home(): React.JSX.Element {
   return (
     <>
       <Backdrop item={under} />
-      <div className="flex h-full flex-col gap-[3vh] overflow-y-auto py-[3vh] scroll-pt-[16vh] scroll-pb-[12vh]">
+      <div className="relative z-10 flex h-full flex-col gap-[3vh] overflow-y-auto py-[3vh] scroll-pt-[16vh] scroll-pb-[12vh]">
         {/* One rail at the top holding the libraries AND the two actions.
           Separately, the actions sat far right in a header while the first tile
           sat far left, and spatial navigation resolves Up by geometry - so

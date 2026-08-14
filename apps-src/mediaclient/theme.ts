@@ -66,8 +66,9 @@ export function useTheme(item: MediaItem | null | undefined): void {
         if (!live || !blob || playingUrl !== url) return;
         const a = new Audio(URL.createObjectURL(blob));
         a.loop = true;
-        // Under the room's conversation, not over it.
-        a.volume = 0.35;
+        // Under the room's conversation, not over it - but audible: 0.35 was
+        // measured on a television as almost nothing.
+        a.volume = 0.7;
         audio = a;
         void a.play().catch(() => {
           /* autoplay refused, or the box has no audio out here */
