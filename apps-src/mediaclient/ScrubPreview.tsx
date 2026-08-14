@@ -47,17 +47,17 @@ export function ScrubPreview({
     // panel height.
     const px = Math.round((widthVh / 100) * window.innerHeight);
     const url = backend.previewUrl(partId, bucket, px, Math.round((px * 9) / 16));
-    if (!url) {
-      setMissing(true);
-      return;
-    }
+    if (!url) return; // no part id was already handled above
 
     const mine = ++generation.current;
     const id = setTimeout(() => {
       void loadImage(url, backend.imageHeaders()).then((objectUrl) => {
         if (mine !== generation.current) return;
+        // Per frame, not for good. A single failed fetch used to blank the
+        // preview for the rest of the gesture even though the next frame would
+        // have loaded fine.
+        setMissing(!objectUrl);
         if (objectUrl) setSrc(objectUrl);
-        else setMissing(true);
       });
     }, 120);
 

@@ -13,6 +13,17 @@ import type { Track } from "./backends/types";
 import { usePlayer } from "./playback/player";
 import { ScrubPreview } from "./ScrubPreview";
 
+/**
+ * Where focus rests while the overlay is just showing.
+ *
+ * A real focusable rather than "nothing focused", because spatial navigation
+ * offers no way to clear focus - setFocus with an unknown key leaves the last
+ * one in place - and "nothing" then means "whatever the previous screen left
+ * behind", which is how the overlay ended up routing its arrows to a play
+ * button on a hidden page.
+ */
+const IDLE_KEY = "player-idle";
+
 /** Nudge sizes as a press is held. Held longer means further per press. */
 const STEPS_MS = [10_000, 30_000, 60_000];
 /** The overlay hides itself this long after the last press. */
@@ -64,6 +75,9 @@ export function Player(): React.JSX.Element | null {
   const [foundSubs, setFoundSubs] = useState<Track[]>([]);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const held = useRef({ dir: 0, count: 0 });
+  // Read inside the key handler, which is registered once per film rather than
+  // per render, so it cannot close over the current value.
+  const skippableRef = useRef(false);
 
   const { ref, focusKey } = useFocusable({ focusKey: "player", saveLastFocusedChild: true, isFocusBoundary: true });
 
@@ -108,34 +122,44 @@ export function Player(): React.JSX.Element | null {
 
     const onKey = (e: KeyboardEvent): void => {
       const p = usePlayer.getState();
-      // Which row owns the arrows. On the bar they move the cursor; on the
-      // button row they have to reach the next button, so this handler - which
-      // runs ahead of spatial navigation and stops propagation - must keep its
-      // hands off them there.
-      const onBar = getCurrentFocusKey() === "scrub" || !getCurrentFocusKey();
+      // Three states, and which one it is decides what every key means.
+      //
+      // Nothing focused is the DEFAULT and the common case: the arrows jump ten
+      // seconds, the way a transport control does, and OK pauses. Reaching for
+      // the scene picker is a deliberate step up onto the bar, because scrubbing
+      // by eye is the slower, more careful thing and should not be what a
+      // reflexive press does.
+      const fk = getCurrentFocusKey();
+      const onBar = fk === "scrub";
+      // Anything that is not ours counts as resting too: a key left behind by
+      // the screen that started the film must not be able to act on a press.
+      const idle = !fk || fk === IDLE_KEY || !(onBar || fk.startsWith("pb-") || fk === "skip");
       p.showOverlay(true);
       if (hideTimer.current) clearTimeout(hideTimer.current);
 
       switch (e.key) {
         case "ArrowLeft":
         case "ArrowRight": {
-          if (!onBar) break;
+          if (!idle && !onBar) break; // the button row: spatial navigation's
           e.preventDefault();
           e.stopPropagation();
           const dir = e.key === "ArrowRight" ? 1 : -1;
           if (held.current.dir === dir) held.current.count += 1;
           else held.current = { dir, count: 0 };
           const step = STEPS_MS[Math.min(held.current.count >> 2, STEPS_MS.length - 1)];
-          // The cursor moves; the film does not. Each seek costs a fresh
-          // transcode segment and a rebuffer, so finding a scene by eye used to
-          // mean paying for a dozen of them to arrive at one.
-          p.scrubBy(dir * step);
+          // On the bar the cursor moves and the film does not: a seek costs a
+          // fresh transcode segment and a rebuffer, so finding a scene by eye
+          // would otherwise mean paying for a dozen to arrive at one. Off the
+          // bar it is an ordinary jump, which is what a press expects when
+          // nothing has been chosen.
+          if (onBar) p.scrubBy(dir * step);
+          else p.seekBy(dir * step);
           break;
         }
         case "Enter":
-          // With a button up and focused, OK belongs to it - otherwise one press
-          // would both fire the button and toggle pause.
-          if (!onBar) break;
+          // With a button focused, OK belongs to it - otherwise one press would
+          // both fire the button and toggle pause.
+          if (!idle && !onBar) break;
           e.preventDefault();
           // Committing comes first: while the cursor is out, OK is the only way
           // to go where it is pointing, and pausing there would be an odd
@@ -160,8 +184,26 @@ export function Player(): React.JSX.Element | null {
         case "MediaTrackPrevious":
           p.seekBy(-60_000);
           break;
-        // Up and Down are left alone: they are what moves between the bar and
-        // the row of buttons under it, and that is spatial navigation's job.
+        // Vertical movement is decided here rather than by geometry, for all
+        // three states. Spatial navigation cannot make the first step at all -
+        // resting means nothing is focused, so it has no origin and discards
+        // the press - and once the resting anchor exists as a focusable, it is
+        // also a CANDIDATE, so leaving the rest to geometry meant Up from a
+        // button could land back on it instead of the bar. Three states and two
+        // keys is small enough to state outright.
+        case "ArrowUp":
+          e.preventDefault();
+          e.stopPropagation();
+          if (idle) setFocus("scrub");
+          else if (fk?.startsWith("pb-")) setFocus("scrub");
+          else if (onBar && skippableRef.current) setFocus("skip");
+          break;
+        case "ArrowDown":
+          e.preventDefault();
+          e.stopPropagation();
+          if (idle || fk === "skip") setFocus("scrub");
+          else if (onBar) setFocus("pb-playpause");
+          break;
       }
 
       rearmHide();
@@ -183,6 +225,7 @@ export function Player(): React.JSX.Element | null {
 
   const marker = current ? usePlayer.getState().activeMarker() : null;
   const skippable = Boolean(marker && (marker.type === "intro" || (marker.type === "credits" && !marker.final)));
+  skippableRef.current = skippable;
 
   // Back pauses and keeps the frame; stopping loses where you were, which
   // matters more on a television than on a phone. Only a paused film stops.
@@ -210,24 +253,32 @@ export function Player(): React.JSX.Element | null {
     else void p.stop();
   }, Boolean(current));
 
-  // The bar takes focus off ANYTHING the overlay does not own.
+  // Focus is taken off anything the overlay does not own, and handed to
+  // NOBODY: nothing focused is the overlay's resting state, where the arrows
+  // jump ten seconds and OK pauses.
   //
-  // Playback starts from a screen behind this one, so focus arrives on that
-  // screen's button - and the arrows are routed by what has focus, so it
-  // silently disabled the whole overlay: nothing scrubbed, the buttons could
-  // not be reached, and OK re-fired the play button that was still focused and
-  // restarted the film. Closing the track menu left focus on a track row and
-  // did the same. Keys that no longer exist behave identically, because
-  // spatial navigation walks up to the root and gives up there.
+  // Both halves matter. Playback starts from the screen behind this one, so
+  // focus arrives on that screen's play button - and since the arrows are
+  // routed by what has focus, that silently disabled the whole overlay: nothing
+  // scrubbed, the buttons could not be reached, and OK re-fired the play button
+  // and restarted the film. A key that no longer exists behaves the same way,
+  // because spatial navigation walks up to the root and gives up there, which
+  // is what closing the track menu used to leave behind.
   useEffect(() => {
     if (!current || menu) return;
     const id = setTimeout(() => {
       const key = getCurrentFocusKey();
-      const ours = key === "scrub" || key?.startsWith("pb-") || key === "skip";
-      if (!ours || !doesFocusableExist(key!)) setFocus("scrub");
+      const ours = key === IDLE_KEY || key === "scrub" || key?.startsWith("pb-") || key === "skip";
+      if (!key || !ours || !doesFocusableExist(key)) setFocus(IDLE_KEY);
     }, 0);
     return () => clearTimeout(id);
   }, [current, menu, overlay]);
+
+  // Back to resting when the overlay goes away, so the next press starts from
+  // the same place every time rather than wherever it was left.
+  useEffect(() => {
+    if (!overlay && current) setFocus(IDLE_KEY);
+  }, [overlay, current]);
 
   // The skip button is only reachable if something puts focus on it: Left and
   // Right are taken by scrubbing and nothing else moves focus here.
@@ -327,6 +378,8 @@ export function Player(): React.JSX.Element | null {
           overlay ? "opacity-100" : "pointer-events-none opacity-0"
         }`}
       >
+        <IdleAnchor />
+
         {skippable && (
           <div className="absolute right-[4vw] bottom-[34vh]">
             <FocusButton
@@ -388,6 +441,17 @@ export function Player(): React.JSX.Element | null {
       </div>
     </FocusContext.Provider>
   );
+}
+
+/**
+ * Somewhere for focus to sit while nothing is chosen.
+ *
+ * Invisible and unreachable by the arrows - the handler moves focus on and off
+ * it deliberately - so it never appears in the D-pad's geometry.
+ */
+function IdleAnchor(): React.JSX.Element {
+  const { ref } = useFocusableItem({ focusKey: IDLE_KEY });
+  return <div ref={ref} className="pointer-events-none absolute h-0 w-0" aria-hidden="true" />;
 }
 
 /**

@@ -28,7 +28,8 @@ export function Reviews({ reviews, title }: { reviews: Review[]; title: string }
     const left = el.offsetLeft - pad;
     const right = el.offsetLeft + el.offsetWidth + pad;
     if (left < box.scrollLeft) box.scrollTo({ left, behavior: "smooth" });
-    else if (right > box.scrollLeft + box.clientWidth) box.scrollTo({ left: right - box.clientWidth, behavior: "smooth" });
+    else if (right > box.scrollLeft + box.clientWidth)
+      box.scrollTo({ left: right - box.clientWidth, behavior: "smooth" });
   };
 
   return (
@@ -102,10 +103,7 @@ function Sentiment({ sentiment }: { sentiment?: "fresh" | "rotten" }): React.JSX
   return (
     <svg viewBox="0 0 24 24" className="h-[1.8vh] w-[1.8vh] shrink-0" aria-hidden="true">
       {rotten ? (
-        <path
-          d="M12 3l2 4 4-2-1 4 4 1-3 3 3 3-4 1 1 4-4-2-2 4-2-4-4 2 1-4-4-1 3-3-3-3 4-1-1-4 4 2z"
-          fill="#4a9b3f"
-        />
+        <path d="M12 3l2 4 4-2-1 4 4 1-3 3 3 3-4 1 1 4-4-2-2 4-2-4-4 2 1-4-4-1 3-3-3-3 4-1-1-4 4 2z" fill="#4a9b3f" />
       ) : (
         <>
           <circle cx="12" cy="13" r="8" fill="#e2372a" />

@@ -107,8 +107,7 @@ describe("a check that is still running when the pad is closed", () => {
     // stops accepting digits before anything has been typed into it.
     const pending: (() => void)[] = [];
     useApp.setState({
-      chooseProfile: () =>
-        new Promise<void>((_, reject) => pending.push(() => reject(new Error("401")))),
+      chooseProfile: () => new Promise<void>((_, reject) => pending.push(() => reject(new Error("401")))),
     } as never);
 
     render(<Profiles />);

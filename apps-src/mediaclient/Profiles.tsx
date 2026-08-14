@@ -204,7 +204,13 @@ function Face({ profile, onEnter }: { profile: Profile; onEnter: () => void }): 
         ].join(" ")}
       >
         {image && !broken ? (
-          <img src={image} alt="" decoding="async" onError={() => setBroken(true)} className="h-full w-full object-cover" />
+          <img
+            src={image}
+            alt=""
+            decoding="async"
+            onError={() => setBroken(true)}
+            className="h-full w-full object-cover"
+          />
         ) : (
           <span className="text-[4vh] text-fg-dim">{initials}</span>
         )}

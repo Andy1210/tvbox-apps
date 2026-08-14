@@ -208,7 +208,14 @@ export async function listHomeUsers(
   accountToken: string,
 ): Promise<{ id: string; name: string; thumb?: string; pinRequired: boolean }[]> {
   const body = await request<{
-    users?: { id?: number | string; uuid?: string; title?: string; username?: string; thumb?: string; protected?: boolean }[];
+    users?: {
+      id?: number | string;
+      uuid?: string;
+      title?: string;
+      username?: string;
+      thumb?: string;
+      protected?: boolean;
+    }[];
   }>(PLEX_TV, "api/v2/home/users", id, { token: accountToken });
 
   return (body.users ?? [])

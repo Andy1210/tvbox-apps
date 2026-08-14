@@ -2,21 +2,23 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { act, render } from "@testing-library/react";
 import { configureI18n } from "@sdk";
 import { Player } from "../Player";
-import { usePlayer } from "../playback/player";
+import { usePlayer, __wirePlayerEventsForTest } from "../playback/player";
 import { useApp } from "../state";
 import { setupRemote, remote, setFocus, getCurrentFocusKey, flushFocus } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaItem } from "../backends/types";
 
-// The overlay has to own focus, and this is not cosmetic.
+// The overlay has three states, and which one it is in decides what every key
+// means: nothing focused (arrows jump ten seconds, OK pauses), the bar (arrows
+// move a cursor, OK goes there), the button row (spatial navigation).
 //
-// Playback starts from a screen behind this one, so focus arrives sitting on
-// that screen's play button. The overlay routes the arrows by what has focus -
-// the bar scrubs, the button row navigates - so a foreign key silently disabled
-// the whole thing: nothing scrubbed, the buttons could not be reached, and OK
-// re-fired the play button that still had focus and restarted the film from the
-// beginning. Closing the audio menu left focus on a track row and did the same.
+// Nothing focused is the resting state, and getting there is not automatic.
+// Playback starts from the screen behind this one, so focus arrives sitting on
+// THAT screen's play button - which silently disabled the whole overlay:
+// nothing scrubbed, the buttons could not be reached, and OK re-fired the play
+// button and restarted the film. Closing the audio menu left focus on a track
+// row and did the same.
 //
 // Nothing errors in that state and the overlay draws correctly, which is why it
 // survived a careful read and had to be found on a sofa.
@@ -56,17 +58,52 @@ async function settle(): Promise<void> {
 
 describe("the playback overlay", () => {
   it("takes focus off the screen that started the film", async () => {
-    // What arriving from the detail page looks like: its play button still has
-    // focus when the overlay mounts.
-    render(<Player />);
+    // The real sequence: the detail page's play button has focus, OK starts the
+    // film, and the overlay mounts underneath that focus.
     await act(async () => setFocus("detail-play"));
+    render(<Player />);
     await settle();
 
+    // Resting, not on the bar: the arrows must jump rather than scrub, and OK
+    // must not reach the play button that started the film.
+    expect(getCurrentFocusKey()).toBe("player-idle");
+  });
+
+  it("jumps rather than scrubs while nothing is focused", async () => {
+    render(<Player />);
+    await settle();
+
+    await remote.right();
+
+    // A real seek, and no cursor: this is what a reflexive press should do.
+    expect(usePlayer.getState().scrubMs).toBeNull();
+    expect(usePlayer.getState().seekTargetMs).toBe(610_000);
+  });
+
+  it("moves between resting, the bar and the buttons in one press each", async () => {
+    // Every vertical move is decided by the handler rather than by geometry.
+    // Spatial navigation cannot make the first step at all - resting means
+    // nothing is focused, so it has no origin - and once the resting anchor is
+    // a focusable it is also a candidate, so leaving the rest to geometry let
+    // Up from a button land back on it instead of the bar.
+    render(<Player />);
+    await settle();
+    expect(getCurrentFocusKey()).toBe("player-idle");
+
+    await remote.up();
+    expect(getCurrentFocusKey()).toBe("scrub");
+
+    await remote.down();
+    expect(getCurrentFocusKey()).toBe("pb-playpause");
+
+    await remote.up();
     expect(getCurrentFocusKey()).toBe("scrub");
   });
 
-  it("scrubs on Left and Right rather than seeking", async () => {
+  it("scrubs on Left and Right once the bar has focus", async () => {
     render(<Player />);
+    await settle();
+    await remote.up();
     await settle();
     expect(getCurrentFocusKey()).toBe("scrub");
 
@@ -74,7 +111,7 @@ describe("the playback overlay", () => {
 
     // The cursor moved; the film did not. That distinction is the whole point:
     // a seek costs a transcode segment and a rebuffer, so hunting for a scene
-    // used to mean paying for one per press.
+    // would otherwise mean paying for one per press.
     expect(usePlayer.getState().scrubMs).toBeGreaterThan(600_000);
     expect(usePlayer.getState().seekTargetMs).toBeNull();
   });
@@ -82,6 +119,7 @@ describe("the playback overlay", () => {
   it("commits on OK and cancels on Back", async () => {
     render(<Player />);
     await settle();
+    await remote.up();
 
     await remote.right();
     const aimedAt = usePlayer.getState().scrubMs!;
@@ -103,6 +141,8 @@ describe("the playback overlay", () => {
   it("does not hide the overlay while a cursor is armed", async () => {
     render(<Player />);
     await settle();
+    await remote.up();
+    await settle();
 
     await remote.right();
     expect(usePlayer.getState().scrubMs).not.toBeNull();
@@ -114,5 +154,49 @@ describe("the playback overlay", () => {
     });
 
     expect(usePlayer.getState().overlay).toBe(true);
+  });
+});
+
+describe("a seek that has been committed", () => {
+  it("settles when the player lands past it, in either direction", async () => {
+    // Driven through the REAL bridge event path, because the failure is in how
+    // the reducer treats a report, and a copy of the rule in a test would agree
+    // with itself no matter what the player does.
+    //
+    // The player reports its OLD position until a seek lands, so the target is
+    // held to stop the bar jumping backwards. Releasing it on a window alone was
+    // wrong both ways: a forward seek that lands on the next keyframe a few
+    // seconds beyond the target never reports inside the window again, so the
+    // bar froze at the target while the film played on; and testing "past the
+    // target" without the direction clears it on the first stale report of a
+    // BACKWARD seek, which snaps it back.
+    let emit: ((ev: { type: string; ms?: number }) => void) | undefined;
+    (window as unknown as { tvbox: unknown }).tvbox = {
+      player: { play: () => {}, seek: () => {}, stop: () => {} },
+      onPlayer: (cb: (ev: { type: string; ms?: number }) => void) => {
+        emit = cb;
+        return () => {};
+      },
+    };
+    __wirePlayerEventsForTest();
+    expect(emit).toBeDefined();
+
+    const report = (ms: number): void => emit!({ type: "position", ms });
+
+    // Forward from 100s to 600s.
+    usePlayer.setState({ positionMs: 100_000 });
+    usePlayer.getState().seekTo(600_000);
+    report(100_500); // still where it was
+    expect(usePlayer.getState().seekTargetMs).toBe(600_000);
+    report(603_000); // landed on the next keyframe, past the target
+    expect(usePlayer.getState().seekTargetMs).toBeNull();
+
+    // Backward from 600s to 100s. Every stale report is already past it.
+    usePlayer.setState({ positionMs: 600_000 });
+    usePlayer.getState().seekTo(100_000);
+    report(600_500);
+    expect(usePlayer.getState().seekTargetMs).toBe(100_000);
+    report(97_000);
+    expect(usePlayer.getState().seekTargetMs).toBeNull();
   });
 });

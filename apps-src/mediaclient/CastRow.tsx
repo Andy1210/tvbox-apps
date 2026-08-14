@@ -31,14 +31,18 @@ export function CastRow({
     const left = el.offsetLeft - pad;
     const right = el.offsetLeft + el.offsetWidth + pad;
     if (left < box.scrollLeft) box.scrollTo({ left, behavior: "smooth" });
-    else if (right > box.scrollLeft + box.clientWidth) box.scrollTo({ left: right - box.clientWidth, behavior: "smooth" });
+    else if (right > box.scrollLeft + box.clientWidth)
+      box.scrollTo({ left: right - box.clientWidth, behavior: "smooth" });
   };
 
   return (
     <FocusContext.Provider value={focusKey}>
       <section ref={ref} className="flex flex-col gap-[1vh]">
         <h2 className="px-[4vw] text-[2vh] font-semibold tracking-tight">{title}</h2>
-        <div ref={scroller} className="no-scrollbar flex gap-[1.2vw] overflow-x-auto scroll-smooth px-[4vw] py-[9vh] -my-[5vh]">
+        <div
+          ref={scroller}
+          className="no-scrollbar flex gap-[1.2vw] overflow-x-auto scroll-smooth px-[4vw] py-[9vh] -my-[5vh]"
+        >
           {roles.map((role) => (
             <Face key={role.id} role={role} onEnter={() => onSelect(role)} onFocusedEl={scrollTo} />
           ))}
@@ -57,7 +61,10 @@ function Face({
   onEnter: () => void;
   onFocusedEl: (el: HTMLElement) => void;
 }): React.JSX.Element {
-  const { ref, focused } = useFocusableItem({ focusKey: `cast-${role.id}`, onEnterPress: onEnter }, { block: "nearest" });
+  const { ref, focused } = useFocusableItem(
+    { focusKey: `cast-${role.id}`, onEnterPress: onEnter },
+    { block: "nearest" },
+  );
   const backend = useApp((s) => s.backend);
   const el = useRef<HTMLDivElement | null>(null);
   const [src, setSrc] = useState<string | null>(null);
@@ -98,7 +105,8 @@ function Face({
         ref(node);
       }}
       onClick={onEnter}
-      className="flex w-[11vh] shrink-0 flex-col items-center gap-[0.6vh] transition-transform duration-150"
+      // Wider than the portrait it holds, so a full name has somewhere to go.
+      className="flex w-[16vh] shrink-0 flex-col items-center gap-[0.6vh]"
       style={{ transform: focused ? "scale(1.06)" : undefined }}
     >
       <div
@@ -119,8 +127,15 @@ function Face({
           <span className="text-[2.6vh] text-fg-dim">{initials}</span>
         )}
       </div>
-      <div className="w-full truncate text-center text-[1.7vh]">{role.name}</div>
-      {role.character && <div className="w-full truncate text-center text-[1.7vh] text-fg-dim">{role.character}</div>}
+      {/* Two lines each, at fixed heights: a Hungarian full name rarely fits one
+          line at this width, and letting either grow would leave the faces on a
+          ragged baseline and move the row under the D-pad's own measurements. */}
+      <div className="line-clamp-2 h-[5vh] w-full text-center text-[1.8vh] leading-[1.4]">{role.name}</div>
+      {role.character && (
+        <div className="line-clamp-2 h-[4.6vh] w-full text-center text-[1.7vh] leading-[1.4] text-fg-dim">
+          {role.character}
+        </div>
+      )}
     </div>
   );
 }

@@ -49,6 +49,8 @@ interface PlayerState {
   buffering: boolean;
   /** Set while a seek is in flight, so the bar shows where it is going. */
   seekTargetMs: number | null;
+  /** Where the film was when the seek was sent, so its direction is known. */
+  seekFromMs: number | null;
   /**
    * Where the scrub cursor sits, or null when nobody is scrubbing.
    *
@@ -97,6 +99,8 @@ interface PlayerState {
 }
 
 let scheduler: PlaybackScheduler | null = null;
+/** A restart is in flight. See changeTracks. */
+let restarting = false;
 let unsubscribePlayer: (() => void) | null = null;
 let currentBackend: MediaBackend | null = null;
 let lifecycleWired = false;
@@ -108,6 +112,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   durationMs: 0,
   buffering: false,
   seekTargetMs: null,
+  seekFromMs: null,
   scrubMs: null,
   overlay: false,
   error: null,
@@ -166,7 +171,8 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       durationMs: item.durationMs ?? 0,
       buffering: true,
       seekTargetMs: null,
-  scrubMs: null,
+      seekFromMs: null,
+      scrubMs: null,
       overlay: true,
       error: null,
     });
@@ -213,6 +219,10 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     const s = get();
     const cur = s.current;
     if (!cur) return;
+    // A restart is a stop, a network round trip and a start. A second press
+    // during that window started its own, and the first one's transcode was
+    // left running on the server with nothing left to stop it.
+    if (restarting) return;
 
     const sameVersion = choice.version === cur.choice.version;
     // A ceiling is decided when the stream is built, so changing it means
@@ -221,7 +231,11 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // move.
     const sameQuality = choice.maxBitrateKbps === cur.choice.maxBitrateKbps;
     const localSwitch = sameVersion && sameQuality && !cur.decision.transcoded;
-    const at = s.positionMs;
+    // seekTargetMs first: a committed scrub is where the film is GOING, and the
+    // bridge has not reported back yet when a restart follows straight after -
+    // so restarting on positionMs threw the jump away and resumed where the
+    // person had just left.
+    const at = s.seekTargetMs ?? s.positionMs;
 
     if (localSwitch) {
       set({ current: { ...cur, choice } });
@@ -235,7 +249,11 @@ export const usePlayer = create<PlayerState>((set, get) => ({
           .setTracks(cur.item.id, choice.version, {
             audioId: choice.audio !== undefined ? v?.audio[choice.audio]?.id : undefined,
             subtitleId:
-              choice.subtitle === "none" ? "none" : choice.subtitle !== undefined ? v?.subtitles[choice.subtitle]?.id : undefined,
+              choice.subtitle === "none"
+                ? "none"
+                : choice.subtitle !== undefined
+                  ? v?.subtitles[choice.subtitle]?.id
+                  : undefined,
           })
           .catch((e: unknown) => log.warn("could not remember track choice", e));
       }
@@ -249,12 +267,21 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // carries the OLD tracks while the menu shows the new ones selected - and on
     // a converted stream that is the only path there is, because the tracks were
     // baked in when it started.
-    await get().play(currentBackend, { ...cur.item, viewOffsetMs: at }, {
-      version: choice.version,
-      audio: choice.audio,
-      maxBitrateKbps: choice.maxBitrateKbps,
-      subtitle: choice.subtitle,
-    });
+    restarting = true;
+    try {
+      await get().play(
+        currentBackend,
+        { ...cur.item, viewOffsetMs: at },
+        {
+          version: choice.version,
+          audio: choice.audio,
+          maxBitrateKbps: choice.maxBitrateKbps,
+          subtitle: choice.subtitle,
+        },
+      );
+    } finally {
+      restarting = false;
+    }
   },
 
   togglePause() {
@@ -293,7 +320,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   seekTo(ms) {
     // Shown immediately and reconciled when the player reports back, so the bar
     // never appears to jump backwards after a press.
-    set({ seekTargetMs: ms, overlay: true });
+    set({ seekTargetMs: ms, seekFromMs: get().positionMs, overlay: true });
     bridge()?.seek?.(Math.floor(ms / 1000));
     void scheduler?.flush("seek");
   },
@@ -310,6 +337,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       state: "stopped",
       positionMs: 0,
       seekTargetMs: null,
+      seekFromMs: null,
       scrubMs: null,
       overlay: false,
       buffering: false,
@@ -363,10 +391,24 @@ function wirePlayerEvents(set: Setter, get: () => PlayerState): void {
       case "position": {
         const ms = ev.ms ?? 0;
         const target = get().seekTargetMs;
-        // A seek is settled once the player reports somewhere near where it was
-        // sent; until then its own position is still the old one.
-        const settled = target === null || Math.abs(ms - target) < 2_000;
-        set({ positionMs: ms, seekTargetMs: settled ? null : target });
+        // A seek is settled once the player reports where it was sent - within
+        // a window, or anywhere PAST the target in the direction it was sent.
+        // Until then its own position is still the old one, so the bar would
+        // jump backwards without this.
+        //
+        // The direction is the half a window alone missed. A forward seek that
+        // lands a few seconds beyond the target, on the next keyframe, never
+        // reports inside the window again - so the target stuck forever and the
+        // bar and the clock froze at it while the film played on. Testing
+        // "past" without the direction is just as wrong the other way: on a
+        // backward seek every stale position is already past it, so the target
+        // would clear on the first report and the bar would snap back.
+        const from = get().seekFromMs;
+        const settled =
+          target === null ||
+          Math.abs(ms - target) < 2_000 ||
+          (from === null || target >= from ? ms >= target : ms <= target);
+        set({ positionMs: ms, seekTargetMs: settled ? null : target, seekFromMs: settled ? null : from });
         break;
       }
       case "duration":
@@ -438,4 +480,12 @@ function wireLifecycle(): void {
     // startup reconciliation; nothing to do here but note it.
     log.info("visible again");
   });
+}
+
+/** Wire the bridge's player events without starting playback. Tests only. */
+export function __wirePlayerEventsForTest(): void {
+  wirePlayerEvents(
+    (partial) => usePlayer.setState(partial),
+    () => usePlayer.getState(),
+  );
 }

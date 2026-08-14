@@ -16,8 +16,16 @@ const PAGE = 100;
 // mistake rather than as spacing.
 /** Poster height. The tile's own width follows from it at 2:3. */
 const TILE_VH = 26;
-/** Clearance between one row's tile and the next row's top. */
-const ROW_GAP_VH = 5;
+/**
+ * Clearance between one row's tile and the next row's top.
+ *
+ * Sized against what a tile really occupies: 26vh of poster, a 0.8vh gap and a
+ * caption of TWO lines at 1.8vh and line-height 1.5, i.e. 32.2vh. Spatial
+ * navigation drops a row from the candidate set the moment the one above it
+ * measures taller than the pitch, so this margin is the whole reason Down moves
+ * one row rather than two. grid-nav.test.tsx holds it to the same arithmetic.
+ */
+const ROW_GAP_VH = 8;
 const COLUMNS = 7;
 /** Rows kept mounted above and below the viewport. */
 const OVERSCAN = 2;
@@ -62,12 +70,6 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
 
   // Row height in pixels: tiles are sized in vh, so this has to follow the
   // window rather than be a constant.
-  // The pitch has to clear the tile, with room to spare. A tile is 26vh of
-  // poster plus a 0.8vh gap plus a 1.8vh caption at line-height 1.5, i.e.
-  // 29.5vh - and spatial navigation drops a row from the candidate set the
-  // moment the one above it measures taller than the gap between them. At 30vh
-  // that margin was 5.4px on a 1080p panel, which a caption of two lines or a
-  // slightly larger font would eat silently. ROW_GAP_VH is what keeps it honest.
   const rowHeight = useMemo(() => Math.round(viewport * ((TILE_VH + ROW_GAP_VH) / 100)), [viewport]);
 
   useEffect(() => {
@@ -108,7 +110,8 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
         setTotal((prev) => res.total ?? prev ?? res.items.length);
         setItems((prev) => {
           const size = res.total ?? Math.max(prev.length, page * PAGE + res.items.length);
-          const next = prev.length === size ? [...prev] : [...prev, ...Array<null>(Math.max(0, size - prev.length)).fill(null)];
+          const next =
+            prev.length === size ? [...prev] : [...prev, ...Array<null>(Math.max(0, size - prev.length)).fill(null)];
           next.length = size;
           res.items.forEach((it, i) => (next[page * PAGE + i] = it));
           return next;
@@ -156,7 +159,8 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
 
   const { ref: gridRef, focusKey } = useFocusable({ focusKey: `grid-${libraryId}`, saveLastFocusedChild: true });
 
-  const poster = (item: MediaItem): string | undefined => backend?.posterUrl(item, 300 * artworkScale(), 450 * artworkScale());
+  const poster = (item: MediaItem): string | undefined =>
+    backend?.posterUrl(item, 300 * artworkScale(), 450 * artworkScale());
 
   // Nothing focuses itself, so the first tile has to be told to take it - and a
   // press arriving after the grid was cleared for a letter change has to land
@@ -262,7 +266,10 @@ function LetterStrip({
   const { ref, focusKey } = useFocusable({ focusKey: "letters", saveLastFocusedChild: true });
   return (
     <FocusContext.Provider value={focusKey}>
-      <div className="no-scrollbar flex flex-col items-stretch gap-[0.5vh] overflow-y-auto py-[2vh] pr-[1.5vw] pl-[0.5vw]" ref={ref}>
+      <div
+        className="no-scrollbar flex flex-col items-stretch gap-[0.5vh] overflow-y-auto py-[2vh] pr-[1.5vw] pl-[0.5vw]"
+        ref={ref}
+      >
         <FocusButton
           focusKey="letter-all"
           onEnter={() => onPick(null)}
