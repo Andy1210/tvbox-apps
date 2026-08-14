@@ -36,13 +36,12 @@
     "retry": "Try again"
   },
   "library": {
-    "all": "All",
     "empty": "This library is empty.",
-    "emptyLetter": "Nothing under this letter.",
     "arrange": "Sort and filter",
     "sort": "Sort",
     "filter": "Filter",
-    "clearFilters": "Clear filters"
+    "clearFilters": "Clear filters",
+    "emptyFiltered": "Nothing matches this filter."
   },
   "detail": {
     "play": "Play",
@@ -108,7 +107,13 @@
     "off": "off",
     "autologinOnHint": "The box starts as {who} without asking.",
     "autologinOffHint": "The box asks who is watching each time it starts.",
-    "switchUser": "Switch user"
+    "switchUser": "Switch user",
+    "playback": "Playback",
+    "subSize": "Subtitle size",
+    "subPos": "Subtitle position",
+    "subColor": "Subtitle colour",
+    "autoSkip": "Skip intro and credits",
+    "autoSkipHint": "Skips on its own when this is on. The marker is the server's guess, and a wrong one jumps past the opening of an episode."
   },
   "tracks": {
     "version": "Version",

@@ -12,6 +12,7 @@ import { TrackMenu, type Choice } from "./TrackMenu";
 import type { Track } from "./backends/types";
 import { usePlayer } from "./playback/player";
 import { ScrubPreview } from "./ScrubPreview";
+import { applySubtitleStyle, usePrefs } from "./prefs";
 
 /**
  * Where focus rests while the overlay is just showing.
@@ -226,6 +227,20 @@ export function Player(): React.JSX.Element | null {
   const marker = current ? usePlayer.getState().activeMarker() : null;
   const skippable = Boolean(marker && (marker.type === "intro" || (marker.type === "credits" && !marker.final)));
   skippableRef.current = skippable;
+
+  // Skip without asking, when that is switched on. Off by default: a marker is
+  // the server's guess, and one that is a minute out jumps past the opening of
+  // an episode with nothing to say what happened.
+  const autoSkip = usePrefs((s) => s.autoSkip);
+  useEffect(() => {
+    if (autoSkip && skippable && !menu) usePlayer.getState().skipMarker();
+  }, [autoSkip, skippable, menu]);
+
+  // The style is per file in mpv, so it is pushed again whenever a stream
+  // starts rather than only when it is changed in Settings.
+  useEffect(() => {
+    if (current) applySubtitleStyle();
+  }, [current]);
 
   // Back pauses and keeps the frame; stopping loses where you were, which
   // matters more on a television than on a phone. Only a paused film stops.

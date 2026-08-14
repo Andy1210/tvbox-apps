@@ -21,6 +21,7 @@ import type {
 } from "../types";
 
 export interface PlexMetadata {
+  titleSort?: string;
   ratingKey?: string | number;
   key?: string;
   type?: string;
@@ -148,6 +149,7 @@ export function toItem(m: PlexMetadata): MediaItem {
     parentId: m.parentRatingKey !== undefined ? String(m.parentRatingKey) : undefined,
     seriesId: m.grandparentRatingKey !== undefined ? String(m.grandparentRatingKey) : undefined,
     seriesThumb: m.grandparentThumb,
+    sortTitle: m.titleSort,
     year: m.year,
     thumb,
     art: m.art,

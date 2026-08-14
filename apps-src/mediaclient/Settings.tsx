@@ -2,6 +2,7 @@ import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-naviga
 import { FocusButton, useI18n } from "@sdk";
 import { useInitialFocus } from "./focus";
 import { useApp } from "./state";
+import { usePrefs, type Prefs } from "./prefs";
 
 /**
  * Which server, which account, and how to leave.
@@ -56,6 +57,8 @@ export function Settings(): React.JSX.Element {
           </p>
         </div>
 
+        <Playback />
+
         <div className="mt-[2vh] flex gap-[1.2vw]">
           <FocusButton
             focusKey="settings-switch"
@@ -82,6 +85,60 @@ function Field({ label, value }: { label: string; value: string }): React.JSX.El
     <div className="flex gap-[1.4vw]">
       <dt className="w-[18vw] text-fg-dim">{label}</dt>
       <dd>{value}</dd>
+    </div>
+  );
+}
+
+/**
+ * How playback looks and behaves, as opposed to who is watching.
+ *
+ * Each row cycles through a short list rather than offering a slider: a D-pad
+ * has no gesture for a continuous value, and three or four steps is all anyone
+ * adjusts subtitle size by.
+ */
+function Playback(): React.JSX.Element {
+  const { t } = useI18n();
+  const p = usePrefs();
+
+  const cycle = <K extends "subScale" | "subPos" | "subColor">(key: K, steps: Prefs[K][]): void => {
+    const i = steps.findIndex((v) => v === p[key]);
+    void p.set(key, steps[(i + 1) % steps.length]);
+  };
+
+  const row = "rounded-[1vh] bg-white/12 px-[2.4vw] py-[1.3vh] text-[2.1vh]";
+
+  return (
+    <div className="flex flex-col gap-[1vh]">
+      <h2 className="text-[2.3vh] font-semibold tracking-tight text-fg-dim">{t("settings.playback")}</h2>
+      <div className="flex flex-wrap gap-[1vw]">
+        <FocusButton
+          focusKey="settings-subscale"
+          onEnter={() => cycle("subScale", [0.8, 1, 1.25, 1.5, 2])}
+          className={row}
+        >
+          {`${t("settings.subSize")} · ${Math.round(p.subScale * 100)}%`}
+        </FocusButton>
+        <FocusButton focusKey="settings-subpos" onEnter={() => cycle("subPos", [100, 90, 80, 70])} className={row}>
+          {`${t("settings.subPos")} · ${p.subPos}`}
+        </FocusButton>
+        <FocusButton
+          focusKey="settings-subcolor"
+          onEnter={() => cycle("subColor", ["#ffffff", "#ffe680", "#c8c8c8"])}
+          className={row}
+        >
+          <span
+            className="mr-[0.6vw] inline-block h-[1.6vh] w-[1.6vh] rounded-full align-middle"
+            style={{ background: p.subColor }}
+          />
+          {t("settings.subColor")}
+        </FocusButton>
+        <FocusButton focusKey="settings-autoskip" onEnter={() => void p.set("autoSkip", !p.autoSkip)} className={row}>
+          {`${t("settings.autoSkip")} · ${t(p.autoSkip ? "settings.on" : "settings.off")}`}
+        </FocusButton>
+      </div>
+      {/* Says what it costs, because the failure is silent and looks like a bug:
+          a marker that is a minute out jumps past the opening of an episode. */}
+      <p className="max-w-[60vw] text-[1.9vh] text-fg-dim">{t("settings.autoSkipHint")}</p>
     </div>
   );
 }

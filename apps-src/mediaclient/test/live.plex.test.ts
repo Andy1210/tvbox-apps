@@ -213,6 +213,27 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     expect(stripTotal).toBeLessThanOrEqual(all.total ?? Number.MAX_SAFE_INTEGER);
   });
 
+  it("lands a letter jump on that letter, not near it", async () => {
+    // The strip scrolls rather than filters, so what matters is the OFFSET. The
+    // obvious implementation - summing the bucket sizes - is what this replaces:
+    // measured on this library, 14 of 29 buckets landed on the previous letter,
+    // because the strip and the sort disagree about accented initials. So the
+    // check is the title at the offset, not that a number came back.
+    const b = backend();
+    const lib = (await b.libraries())[0];
+    const strip = await b.letters(lib.id);
+    const usable = strip.filter((l) => l.size > 0 && /^[A-Z]$/.test(l.title));
+    expect(usable.length).toBeGreaterThan(5);
+
+    for (const l of [usable[1], usable[Math.floor(usable.length / 2)], usable[usable.length - 1]]) {
+      const offset = await b.letterOffset(lib.id, l.key, { sort: "titleSort" });
+      const at = await b.libraryPage(lib.id, { offset, limit: 1, sort: "titleSort" });
+      const title = at.items[0]?.sortTitle ?? at.items[0]?.title ?? "";
+      const initial = title.trim()[0]?.normalize("NFD")[0]?.toUpperCase();
+      expect(initial).toBe(l.title.toUpperCase());
+    }
+  });
+
   it("reads markers for an episode that has them", async () => {
     const b = backend();
     const libs = await b.libraries();

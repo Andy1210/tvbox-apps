@@ -239,6 +239,37 @@ export class PlexBackend implements MediaBackend {
       }));
   }
 
+  /**
+   * Binary search for the first item at or past a letter.
+   *
+   * Eleven single-row requests on a library of 1,700, against a summed offset
+   * that is simply wrong. The comparison is the strip's OWN order rather than
+   * the alphabet's, because this server puts two Hungarian letters after Z.
+   */
+  async letterOffset(libraryId: string, letterKey: string, q: Omit<PageQuery, "offset" | "limit">): Promise<number> {
+    const keys = (await this.letters(libraryId, q.filters)).map((l) => l.key);
+    const target = keys.indexOf(letterKey);
+    if (target <= 0) return 0;
+
+    const first = await this.libraryPage(libraryId, { ...q, offset: 0, limit: 1 });
+    const total = first.total ?? 0;
+    if (!total) return 0;
+
+    const at = async (i: number): Promise<number> => {
+      const p = await this.libraryPage(libraryId, { ...q, offset: i, limit: 1 });
+      return bucketIndex(p.items[0]?.sortTitle ?? p.items[0]?.title ?? "", keys);
+    };
+
+    let lo = 0;
+    let hi = total - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if ((await at(mid)) < target) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
   async filterValues(libraryId: string, filter: string): Promise<SortOption[]> {
     const c = container<MetadataContainer>(await this.req(`library/sections/${libraryId}/${filter}`));
     return (c.Directory ?? [])
@@ -776,4 +807,24 @@ export class PlexBackend implements MediaBackend {
       accountId: m.accountID !== undefined ? String(m.accountID) : undefined,
     }));
   }
+}
+
+/**
+ * Which A-Z bucket a title falls in, as a position in the strip's own order.
+ *
+ * The rule is the server's, verified against every bucket on this library: take
+ * the first character, drop its diacritics, uppercase it. The strip's keys are
+ * checked BEFORE folding, because this server lists two Hungarian letters as
+ * buckets of their own after Z - folding those to O and U first would search for
+ * them in the wrong half of the list.
+ */
+function bucketIndex(title: string, keys: string[]): number {
+  const t = (title ?? "").trim();
+  if (!t) return keys.indexOf("#");
+  const ch = t[0].toUpperCase();
+  const exact = keys.indexOf(ch);
+  if (exact >= 0) return exact;
+  const folded = ch.normalize("NFD")[0].toUpperCase();
+  const i = keys.indexOf(folded);
+  return i >= 0 ? i : keys.indexOf("#");
 }

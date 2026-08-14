@@ -56,7 +56,6 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   const [letters, setLetters] = useState<Letter[]>([]);
   const [view, setView] = useState<LibraryView>({ sort: "titleSort", desc: false, filters: {}, labels: {} });
   const [arranging, setArranging] = useState(false);
-  const [letter, setLetter] = useState<string | null>(null);
   const [items, setItems] = useState<(MediaItem | null)[]>([]);
   const [total, setTotal] = useState<number | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -106,7 +105,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
       const mine = generation.current;
       try {
         const q = { offset: page * PAGE, limit: PAGE, sort: view.sort, desc: view.desc, filters: view.filters };
-        const res = letter ? await backend.letterPage(libraryId, letter, q) : await backend.libraryPage(libraryId, q);
+        const res = await backend.libraryPage(libraryId, q);
         if (mine !== generation.current) return;
         answered.current.add(page);
 
@@ -127,7 +126,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
         pending.current.delete(page);
       }
     },
-    [backend, fail, letter, libraryId, view],
+    [backend, fail, libraryId, view],
   );
 
   // Changing letter, order or filter is a new list: drop what was there rather
@@ -218,17 +217,36 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
       <LibraryFilters
         libraryId={libraryId}
         view={view}
-        onApply={(next) => {
-          setView(next);
-          // A new list means the letter no longer points anywhere known, and a
-          // filtered library often has no items under it at all.
-          setLetter(null);
-        }}
+        // A new order or filter is a new list, so the grid resets to the top on
+        // its own; the strip needs nothing, because it holds no state now.
+        onApply={setView}
         onClose={() => setArranging(false)}
       />
     );
 
   const narrowed = Object.keys(view.filters).length;
+
+  /**
+   * Take the grid to a letter.
+   *
+   * The strip is an index into the list, not a filter: it moves the view and
+   * leaves the library whole, so what is above and below a letter stays
+   * reachable by scrolling - which is what someone expects from an alphabet
+   * down the side of a grid.
+   */
+  const jumpToLetter = (key: string): void => {
+    if (!backend) return;
+    void backend
+      .letterOffset(libraryId, key, { sort: view.sort, desc: view.desc, filters: view.filters })
+      .then((offset) => {
+        const row = Math.floor(offset / COLUMNS);
+        // Fetch before scrolling: the window is computed from scrollTop, so the
+        // rows land already requested rather than as a screen of placeholders.
+        void loadPage(Math.floor(offset / PAGE));
+        scroller.current?.scrollTo({ top: row * rowHeight, behavior: "smooth" });
+      })
+      .catch((e) => log.warn("letter jump failed", e));
+  };
 
   return (
     <FocusContext.Provider value={focusKey}>
@@ -264,7 +282,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
           >
             {total === 0 && (
               <div className="flex h-full items-center justify-center text-[2.2vh] text-fg-dim">
-                {letter ? t("library.emptyLetter") : t("library.empty")}
+                {Object.keys(view.filters).length ? t("library.emptyFiltered") : t("library.empty")}
               </div>
             )}
             {/* One tall spacer carries the scrollbar; only the visible rows are
@@ -275,54 +293,34 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
             </div>
           </div>
 
-          {letters.length > 1 && (
-            <LetterStrip letters={letters} active={letter} onPick={setLetter} allLabel={t("library.all")} />
-          )}
+          {letters.length > 1 && <LetterStrip letters={letters} onPick={jumpToLetter} />}
         </div>
       </div>
     </FocusContext.Provider>
   );
 }
 
-function LetterStrip({
-  letters,
-  active,
-  onPick,
-  allLabel,
-}: {
-  letters: Letter[];
-  active: string | null;
-  onPick: (key: string | null) => void;
-  allLabel: string;
-}): React.JSX.Element {
+function LetterStrip({ letters, onPick }: { letters: Letter[]; onPick: (key: string) => void }): React.JSX.Element {
   const { ref, focusKey } = useFocusable({ focusKey: "letters", saveLastFocusedChild: true });
   return (
     <FocusContext.Provider value={focusKey}>
       <div
-        className="no-scrollbar flex flex-col items-stretch gap-[0.5vh] overflow-y-auto py-[2vh] pr-[1.5vw] pl-[0.5vw]"
+        // Every letter at once, and no scrolling. A strip you have to scroll
+        // through is slower than scrolling the grid it is meant to shortcut -
+        // so the letters shrink to fit the height instead, which they can
+        // because each is one character.
+        className="flex h-full flex-col items-stretch justify-center gap-[0.2vh] py-[1vh] pr-[1vw] pl-[0.4vw]"
         ref={ref}
       >
-        <FocusButton
-          focusKey="letter-all"
-          onEnter={() => onPick(null)}
-          className={`rounded-[0.8vh] px-[1.2vw] py-[0.7vh] text-center text-[1.8vh] ${
-            active === null ? "bg-white/20" : "bg-white/5"
-          }`}
-        >
-          {allLabel}
-        </FocusButton>
         {letters.map((l) => (
           <FocusButton
             key={l.key}
             focusKey={`letter-${l.key}`}
             onEnter={() => onPick(l.key)}
-            // Sized by its content with real padding on both axes. A fixed
-            // narrow width squeezed the "all" label out of its own box and left
-            // every letter looking like bare text rather than something to
-            // press.
-            className={`rounded-[0.8vh] px-[1.2vw] py-[0.7vh] text-center text-[1.9vh] tabular-nums ${
-              active === l.key ? "bg-white/20" : "bg-white/5"
-            }`}
+            // A bare character, not a button-shaped box: thirty of those made a
+            // second column down the side of the screen. Focus still fills, as
+            // it does everywhere else.
+            className="rounded-[0.5vh] px-[0.6vw] text-center text-[1.9vh] leading-[1.35]"
           >
             {l.title}
           </FocusButton>
