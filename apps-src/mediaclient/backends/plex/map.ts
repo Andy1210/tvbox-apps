@@ -5,7 +5,20 @@
 // on-deck list and the assistant's recommendations, so getting one wrong is a
 // data bug rather than a display bug.
 
-import type { Chapter, Extra, ItemDetail, ItemKind, Library, MediaItem, Marker, Review, Role, Score } from "../types";
+import type {
+  Chapter,
+  Extra,
+  ItemDetail,
+  ItemKind,
+  Library,
+  MediaItem,
+  MediaVersion,
+  Marker,
+  Review,
+  Role,
+  Score,
+  Track,
+} from "../types";
 
 export interface PlexMetadata {
   ratingKey?: string | number;
@@ -246,6 +259,7 @@ export function toDetail(m: PlexMetadata): ItemDetail {
     chapters: (m.Chapter ?? []).map(toChapter).filter((c) => c.endMs > c.startMs),
     logo,
     guids: Object.keys(guids).length ? guids : undefined,
+    versions: toVersions(m),
   };
 }
 
@@ -315,4 +329,161 @@ export function rollUpEpisodes(items: MediaItem[]): MediaItem[] {
     });
   }
   return out;
+}
+
+// ---- versions and tracks ----------------------------------------------
+
+export interface PlexStream {
+  id?: number | string;
+  streamType?: number;
+  index?: number;
+  language?: string;
+  languageTag?: string;
+  languageCode?: string;
+  displayTitle?: string;
+  extendedDisplayTitle?: string;
+  title?: string;
+  codec?: string;
+  channels?: number;
+  forced?: boolean;
+  selected?: boolean;
+  key?: string;
+}
+
+export interface PlexPart {
+  id?: number | string;
+  key?: string;
+  file?: string;
+  size?: number;
+  duration?: number;
+  Stream?: PlexStream[];
+}
+
+export interface PlexMediaEntry {
+  id?: number | string;
+  title?: string;
+  videoResolution?: string;
+  videoCodec?: string;
+  audioCodec?: string;
+  audioChannels?: number;
+  bitrate?: number;
+  duration?: number;
+  Part?: PlexPart[];
+}
+
+const AUDIO = 2;
+const SUBTITLE = 3;
+
+/** "2.0", "5.1", … from a channel count, which is how people read audio. */
+function channelLabel(n: number | undefined): string {
+  if (!n) return "";
+  if (n === 1) return "mono";
+  if (n === 2) return "2.0";
+  if (n === 6) return "5.1";
+  if (n === 8) return "7.1";
+  return `${n}ch`;
+}
+
+export function toTrack(s: PlexStream, ordinal: number, kind: "audio" | "subtitle"): Track {
+  const language = s.language || s.languageTag || undefined;
+  // The server's own label first: it already reads well ("Magyar (AC3 5.1)"),
+  // and composing one from the codec is the fallback, not the preference.
+  const composed = [language, kind === "audio" ? channelLabel(s.channels) : "", s.codec?.toUpperCase()]
+    .filter(Boolean)
+    .join(" · ");
+  return {
+    ordinal,
+    id: String(s.id ?? ordinal),
+    kind,
+    language,
+    label: s.extendedDisplayTitle || s.displayTitle || s.title || composed || `#${ordinal + 1}`,
+    forced: s.forced === true,
+    selected: s.selected === true,
+    // An external subtitle has its own key; an embedded one is inside the file.
+    external: kind === "subtitle" && Boolean(s.key),
+  };
+}
+
+/**
+ * Compose a version's label.
+ *
+ * Servers leave `Media.title` empty in practice, so there is nothing to show
+ * unless one is built. What distinguishes two copies of the same film in a real
+ * library is, in order: the LANGUAGE (a household keeps the same film dubbed and
+ * original as two whole files, not two tracks), then the resolution, then how
+ * big it is. Codec is last because it is the least useful thing to choose on.
+ */
+export function versionLabel(m: PlexMediaEntry, audio: Track[], distinguishBy: Set<string>): string {
+  const bits: string[] = [];
+
+  if (distinguishBy.has("language")) {
+    const langs = [...new Set(audio.map((a) => a.language).filter(Boolean))];
+    bits.push(langs.length ? langs.join("/") : "?");
+  }
+  if (distinguishBy.has("resolution")) {
+    const r = m.videoResolution;
+    // "sdp" and "sd" are the server's way of saying it does not know; a number
+    // is a resolution and reads better with a p after it.
+    bits.push(!r || r === "sd" || r === "sdp" ? "SD" : /^\d+$/.test(r) ? `${r}p` : r.toUpperCase());
+  }
+  if (distinguishBy.has("size")) {
+    const size = (m.Part ?? [])[0]?.size;
+    if (size) bits.push(`${(size / 1e9).toFixed(1)} GB`);
+  }
+  if (distinguishBy.has("codec") && m.videoCodec) bits.push(m.videoCodec.toUpperCase());
+
+  return m.title || bits.join(" · ") || "?";
+}
+
+/**
+ * Every file the library holds for a title.
+ *
+ * The labels only mention what actually differs between them: naming the
+ * resolution on two versions that share one is noise, and the thing a person is
+ * choosing between should be the thing the label says.
+ */
+export function toVersions(m: PlexMetadata & { Media?: PlexMediaEntry[] }): MediaVersion[] {
+  const media = m.Media ?? [];
+  if (media.length === 0) return [];
+
+  const tracksFor = (entry: PlexMediaEntry): { audio: Track[]; subtitles: Track[] } => {
+    const streams = (entry.Part ?? [])[0]?.Stream ?? [];
+    const audio: Track[] = [];
+    const subtitles: Track[] = [];
+    for (const s of streams) {
+      if (s.streamType === AUDIO) audio.push(toTrack(s, audio.length, "audio"));
+      else if (s.streamType === SUBTITLE) subtitles.push(toTrack(s, subtitles.length, "subtitle"));
+    }
+    return { audio, subtitles };
+  };
+
+  const parsed = media.map(tracksFor);
+
+  // Which fields actually differ. With one version nothing does, so its label
+  // stays short.
+  const distinguishBy = new Set<string>();
+  if (media.length > 1) {
+    const key = (fn: (i: number) => string): boolean => new Set(media.map((_, i) => fn(i))).size > 1;
+    if (key((i) => parsed[i].audio.map((a) => a.language ?? "?").join(","))) distinguishBy.add("language");
+    if (key((i) => media[i].videoResolution ?? "")) distinguishBy.add("resolution");
+    if (key((i) => String(media[i].videoCodec ?? ""))) distinguishBy.add("codec");
+    // Size is the tiebreaker when nothing else separates them, so two copies are
+    // never both labelled the same thing.
+    if (distinguishBy.size === 0) distinguishBy.add("size");
+  }
+
+  return media.map((entry, index) => ({
+    index,
+    partId: (entry.Part ?? [])[0]?.id !== undefined ? String((entry.Part ?? [])[0]?.id) : undefined,
+    label: versionLabel(entry, parsed[index].audio, distinguishBy),
+    resolution: entry.videoResolution,
+    videoCodec: entry.videoCodec,
+    audioCodec: entry.audioCodec,
+    audioChannels: entry.audioChannels,
+    bitrateKbps: entry.bitrate,
+    sizeBytes: (entry.Part ?? [])[0]?.size,
+    durationMs: entry.duration,
+    audio: parsed[index].audio,
+    subtitles: parsed[index].subtitles,
+  }));
 }

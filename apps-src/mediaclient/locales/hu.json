@@ -65,8 +65,8 @@
     "skipCredits": "Stáblista átugrása",
     "buffering": "Pufferelés…",
     "converting": "Átalakítás ehhez a boxhoz",
-    "hint": "Balra/Jobbra: ugrás · OK: szünet · Vissza: szünet",
-    "hintPaused": "OK: folytatás · Vissza: leállítás"
+    "hint": "Balra/Jobbra: ugrás · OK: szünet · Le: hang és felirat · Vissza: szünet",
+    "hintPaused": "OK: folytatás · Le: hang és felirat · Vissza: leállítás"
   },
   "search": {
     "title": "Keresés",
@@ -83,5 +83,19 @@
     "profile": "Profil",
     "owner": "A fiók tulajdonosa",
     "signOut": "Kijelentkezés"
+  },
+  "tracks": {
+    "version": "Verzió",
+    "audio": "Hang",
+    "subtitles": "Felirat",
+    "subtitlesOff": "Kikapcsolva",
+    "noAudio": "Nincs hangsáv",
+    "close": "Bezárás",
+    "forced": "kényszerített",
+    "external": "külön fájl",
+    "search": "Felirat keresése",
+    "searching": "Keresés…",
+    "searchUnavailable": "Ezen a szerveren nincs beállítva feliratszolgáltató.",
+    "searchNone": "Nincs találat."
   }
 }

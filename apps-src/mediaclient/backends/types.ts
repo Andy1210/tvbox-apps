@@ -105,6 +105,50 @@ export interface Extra {
   thumb?: string;
 }
 
+/** One selectable audio or subtitle track of a version. */
+export interface Track {
+  /** 0-based ordinal WITHIN its type - what the box's player speaks. */
+  ordinal: number;
+  /** The backend's own id, for telling the server which one was chosen. */
+  id: string;
+  kind: "audio" | "subtitle";
+  /** ISO-ish language name as the server gives it, when it gives one. */
+  language?: string;
+  /** What to show: the server's own label, or something composed from the codec. */
+  label: string;
+  /** Burned into the picture; cannot be turned off. */
+  forced?: boolean;
+  /** The server's current choice. */
+  selected?: boolean;
+  /** A subtitle that lives beside the file rather than inside it. */
+  external?: boolean;
+}
+
+/**
+ * One of several files the library holds for the same title.
+ *
+ * Not a quality ladder: a household's second copy is as often a different
+ * language as it is a different resolution - the same film in Hungarian and in
+ * English as two whole files rather than two tracks. So the label carries
+ * language first when the versions differ in it.
+ */
+export interface MediaVersion {
+  index: number;
+  /** The file itself; the server addresses track changes by this. */
+  partId?: string;
+  /** Composed here: servers leave their own version title empty in practice. */
+  label: string;
+  resolution?: string;
+  videoCodec?: string;
+  audioCodec?: string;
+  audioChannels?: number;
+  bitrateKbps?: number;
+  sizeBytes?: number;
+  durationMs?: number;
+  audio: Track[];
+  subtitles: Track[];
+}
+
 /** A chapter, with the still the server generated for it. */
 export interface Chapter {
   index: number;
@@ -133,6 +177,8 @@ export interface ItemDetail extends MediaItem {
   logo?: string;
   /** External ids, e.g. { imdb: "tt3165612" }. */
   guids?: Record<string, string>;
+  /** Every file the library holds for this title. At least one. */
+  versions: MediaVersion[];
 }
 
 export interface PersonRef {
@@ -168,6 +214,8 @@ export interface StreamDecision {
   subFile?: string;
   /** When the server burns subtitles in, `sub` must be "no". */
   subtitlesBurnedIn: boolean;
+  /** Which version this decision is for. */
+  version: number;
   /** Transcode session id, when one was started. */
   session?: string;
   /** How the server classified this connection; "wan" is bandwidth-capped. */
@@ -255,7 +303,24 @@ export interface MediaBackend {
   artUrl(path: string): string;
 
   // --- playback ---
-  resolveStream(id: string, opts: { session: string; panel?: { width: number; height: number } | null }): Promise<StreamDecision>;
+  resolveStream(
+    id: string,
+    opts: {
+      session: string;
+      panel?: { width: number; height: number } | null;
+      /** Which file to play, when the library holds more than one. */
+      version?: number;
+      /** 0-based ordinals within their type. */
+      audio?: number;
+      subtitle?: number | "none";
+    },
+  ): Promise<StreamDecision>;
+  /** Tell the server which tracks were chosen, so it remembers next time. */
+  setTracks(itemId: string, version: number, choice: { audioId?: string; subtitleId?: string | "none" }): Promise<void>;
+  /** Subtitles the server can fetch for this item, if it has a provider set up. */
+  searchSubtitles(itemId: string, language: string): Promise<Track[]>;
+  /** Download one of them onto the item. */
+  addSubtitle(itemId: string, subtitleId: string): Promise<void>;
   markers(id: string): Promise<Marker[]>;
   trickplay(id: string): Promise<TrickplayIndex | null>;
   keepAlive(session: string): Promise<void>;

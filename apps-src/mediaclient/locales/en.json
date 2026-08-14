@@ -65,8 +65,8 @@
     "skipCredits": "Skip credits",
     "buffering": "Buffering…",
     "converting": "Converting for this box",
-    "hint": "Left/Right: jump · OK: pause · Back: pause",
-    "hintPaused": "OK: carry on · Back: stop"
+    "hint": "Left/Right: jump · OK: pause · Down: audio and subtitles · Back: pause",
+    "hintPaused": "OK: carry on · Down: audio and subtitles · Back: stop"
   },
   "search": {
     "title": "Search",
@@ -83,5 +83,19 @@
     "profile": "Profile",
     "owner": "Account owner",
     "signOut": "Sign out"
+  },
+  "tracks": {
+    "version": "Version",
+    "audio": "Audio",
+    "subtitles": "Subtitles",
+    "subtitlesOff": "Off",
+    "noAudio": "No audio tracks",
+    "close": "Close",
+    "forced": "forced",
+    "external": "separate file",
+    "search": "Look for subtitles",
+    "searching": "Looking…",
+    "searchUnavailable": "This server has no subtitle service set up.",
+    "searchNone": "Nothing found."
   }
 }
