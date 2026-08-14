@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, useI18n } from "@sdk";
 import { Row } from "./Row";
 import { Message } from "./Message";
 import { artworkScale } from "./posters";
-import { useFocusFallback, useInitialFocus } from "./focus";
+import { useFocusFallback, useInitialFocus, useScrollToTopOnFirst } from "./focus";
 import { usePlayer } from "./playback/player";
 import { usePrefs } from "./prefs";
 import { Hero } from "./Hero";
@@ -38,6 +38,11 @@ export function Home(): React.JSX.Element {
   const playing = usePlayer((s) => s.current !== null);
   const [reload, setReload] = useState(0);
   const [under, setUnder] = useState<MediaItem | null>(null);
+  const scroller = useRef<HTMLDivElement | null>(null);
+  // The rail is the top of the page, so reaching it takes the page there. The
+  // hero and the rail are both above the rows, and nothing else up there is
+  // focusable - without this, scrolling back was one-way.
+  const toTop = useScrollToTopOnFirst(scroller);
   const [data, setData] = useState<Loaded | null>(null);
 
   useEffect(() => {
@@ -133,7 +138,10 @@ export function Home(): React.JSX.Element {
     <>
       {/* Above the rows and inside the scroller, so it slides away as someone
           goes down rather than eating the top of every screenful. */}
-      <div className="relative z-10 flex h-full flex-col gap-[3vh] overflow-y-auto pb-[3vh] scroll-pt-[16vh] scroll-pb-[12vh]">
+      <div
+        ref={scroller}
+        className="relative z-10 flex h-full flex-col gap-[3vh] overflow-y-auto pb-[3vh] scroll-pt-[16vh] scroll-pb-[12vh]"
+      >
         {/* One rail at the top holding the libraries AND the two actions.
           Separately, the actions sat far right in a header while the first tile
           sat far left, and spatial navigation resolves Up by geometry - so
@@ -145,6 +153,7 @@ export function Home(): React.JSX.Element {
         <h1 className="px-[4vw] text-[2.2vh] font-semibold tracking-tight opacity-70">{t("app.name")}</h1>
 
         <TopRow
+          onReachTop={toTop}
           libraries={data.libraries}
           onLibrary={(l) => go({ name: "library", libraryId: l.id, title: l.title })}
           onSearch={() => go({ name: "search" })}
@@ -210,11 +219,13 @@ export function Home(): React.JSX.Element {
 }
 
 function TopRow({
+  onReachTop,
   libraries,
   onLibrary,
   onSearch,
   onSettings,
 }: {
+  onReachTop: () => void;
   libraries: Library[];
   onLibrary: (l: Library) => void;
   onSearch: () => void;
@@ -249,6 +260,7 @@ function TopRow({
 
         <FocusButton
           focusKey="nav-search"
+          onFocused={onReachTop}
           onEnter={onSearch}
           className="shrink-0 rounded-[1vh] bg-white/10 px-[2vw] py-[1.1vh] text-[2.2vh]"
         >
@@ -256,6 +268,7 @@ function TopRow({
         </FocusButton>
         <FocusButton
           focusKey="nav-settings"
+          onFocused={onReachTop}
           onEnter={onSettings}
           className="shrink-0 rounded-[1vh] bg-white/10 px-[2vw] py-[1.1vh] text-[2.2vh]"
         >

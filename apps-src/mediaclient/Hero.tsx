@@ -74,30 +74,33 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
   const sub = item.seriesTitle ? item.title : null;
 
   return (
-    <section className="relative h-[42vh] shrink-0 overflow-hidden">
-      {/* The tint, under everything, changing with the artwork. */}
+    <>
+      {/* The tint and the artwork are FIXED, so they are the page's background
+          rather than one band's - the rows scroll over them and the screen keeps
+          its colour all the way down. Only the words below are in flow. */}
       <div
-        className="absolute inset-0 transition-colors duration-500"
+        className="pointer-events-none fixed inset-0 z-0 transition-colors duration-500"
         style={{ background: accent ?? "transparent" }}
         aria-hidden="true"
       />
 
       {art && (
         <div
-          className="absolute top-0 right-0 h-full w-[58vw]"
+          className="pointer-events-none fixed top-0 right-0 z-0 h-screen w-[58vw]"
           aria-hidden="true"
           style={{
-            // Masked, not cropped: an ellipse that fades out well before the
-            // edges, so the picture has no border to notice.
-            maskImage: "radial-gradient(ellipse 70% 80% at 78% 45%, #000 35%, transparent 78%)",
-            WebkitMaskImage: "radial-gradient(ellipse 70% 80% at 78% 45%, #000 35%, transparent 78%)",
+            // A circle, not an ellipse: an ellipse stretched to the box takes
+            // the shape of the box, which is the thing the mask exists to hide.
+            // Sized in vh so it stays round whatever the panel's aspect is.
+            maskImage: "radial-gradient(circle 62vh at 72% 42%, #000 45%, transparent 82%)",
+            WebkitMaskImage: "radial-gradient(circle 62vh at 72% 42%, #000 45%, transparent 82%)",
           }}
         >
           <img src={art} alt="" className="h-full w-full object-cover" />
         </div>
       )}
 
-      <div className="relative z-10 flex h-full w-[46vw] flex-col justify-center gap-[1.2vh] px-[4vw]">
+      <section className="relative z-10 flex h-[42vh] w-[46vw] shrink-0 flex-col justify-center gap-[1.2vh] px-[4vw]">
         <TitleArt title={title} logo={detail?.logo} />
         {sub && <p className="text-[2.1vh] text-fg-dim">{sub}</p>}
         {detail?.summary && (
@@ -110,7 +113,7 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
             {t("detail.cast")}: {cast.join(", ")}
           </p>
         )}
-      </div>
-    </section>
+      </section>
+    </>
   );
 }
