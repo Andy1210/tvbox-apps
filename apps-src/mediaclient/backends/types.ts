@@ -60,6 +60,13 @@ export interface PageQuery {
   desc?: boolean;
   /** Filter key to chosen value, from `filterOptions` / `filterValues`. */
   filters?: Record<string, string>;
+  /**
+   * What to list. Absent means the library's own items.
+   *
+   * "collections" is the same list under a different lens, which is why it
+   * pages, sorts, filters and buckets by letter exactly as the items do.
+   */
+  of?: "collections";
 }
 
 /** One way to order a library, as the server itself describes it. */
@@ -319,7 +326,11 @@ export interface MediaBackend {
   recentlyAdded(libraryId?: string, kind?: string): Promise<MediaItem[]>;
   libraryPage(libraryId: string, q: PageQuery): Promise<Page<MediaItem>>;
   /** Buckets for the A-Z strip, in the backend's own order. */
-  letters(libraryId: string, filters?: Record<string, string>): Promise<{ key: string; title: string; size: number }[]>;
+  letters(
+    libraryId: string,
+    filters?: Record<string, string>,
+    of?: "collections",
+  ): Promise<{ key: string; title: string; size: number }[]>;
 
   /**
    * How this library can be ordered and narrowed.

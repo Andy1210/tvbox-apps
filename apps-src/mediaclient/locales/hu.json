@@ -26,7 +26,12 @@
     "empty": "Ezen a szerveren még nincs semmi.",
     "search": "Keresés",
     "settings": "Beállítások",
-    "playlists": "Lejátszási listák"
+    "playlists": "Lejátszási listák",
+    "row": {
+      "ondeck": "Folytasd, ahol abbahagytad",
+      "recent": "Újdonságok",
+      "playlists": "Lejátszási listák"
+    }
   },
   "error": {
     "unreachable": "A szerver nem érhető el. Lehet, hogy ki van kapcsolva, vagy a box nincs a hálózaton.",
@@ -123,7 +128,13 @@
     "posHigh": "Feljebb",
     "posMiddle": "Középtájt",
     "playbackOpen": "Lejátszás beállításai",
-    "playbackHint": "Felirat mérete, helye és színe, meg az intro átugrása."
+    "playbackHint": "Felirat mérete, helye és színe, meg az intro átugrása.",
+    "homeRows": "Kezdőoldal sorai",
+    "homeRowsHint": "Sorrend és elrejtés. A lejátszási listák alapból legalul vannak.",
+    "moveUp": "Feljebb",
+    "moveDown": "Lejjebb",
+    "rowShown": "Látszik",
+    "rowHidden": "Rejtve"
   },
   "tracks": {
     "version": "Verzió",

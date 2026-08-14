@@ -6,6 +6,7 @@ import { Message } from "./Message";
 import { artworkScale } from "./posters";
 import { useFocusFallback, useInitialFocus } from "./focus";
 import { usePlayer } from "./playback/player";
+import { usePrefs } from "./prefs";
 import { classify, useApp } from "./state";
 import type { Library, MediaItem } from "./backends/types";
 import { log } from "./redact";
@@ -29,6 +30,8 @@ export function Home(): React.JSX.Element {
   const { t } = useI18n();
   const backend = useApp((s) => s.backend);
   const go = useApp((s) => s.go);
+  const homeRows = usePrefs((s) => s.homeRows);
+  const hiddenRows = usePrefs((s) => s.hiddenRows);
   const fail = useApp((s) => s.fail);
   const failure = useApp((s) => s.failure);
   const playing = usePlayer((s) => s.current !== null);
@@ -145,31 +148,49 @@ export function Home(): React.JSX.Element {
 
       {nothing && <Message text={t("home.empty")} />}
 
-      <Row
-        id="ondeck"
-        title={t("home.continue")}
-        items={data.onDeck}
-        posterUrl={deckPoster}
-        onSelect={open}
-        heightVh={24}
-      />
+      {/* Ordered by the household, not by us. A row switched off is not
+          rendered at all rather than rendered empty, and one with nothing in it
+          is skipped for the same reason: a row that is blank on most boxes
+          teaches people to scroll past that part of the screen. */}
+      {homeRows
+        .filter((id) => !hiddenRows.includes(id))
+        .map((id) => {
+          if (id === "ondeck")
+            return data.onDeck.length ? (
+              <Row
+                key="ondeck"
+                id="ondeck"
+                title={t("home.continue")}
+                items={data.onDeck}
+                posterUrl={deckPoster}
+                onSelect={open}
+                heightVh={24}
+              />
+            ) : null;
 
-      {/* Only when the account has any. A row that is empty on most boxes is a
-          row that teaches people to scroll past that part of the screen. */}
-      {data.playlists.length > 0 && (
-        <Row id="playlists" title={t("home.playlists")} items={data.playlists} posterUrl={poster} onSelect={open} />
-      )}
+          if (id === "playlists")
+            return data.playlists.length ? (
+              <Row
+                key="playlists"
+                id="playlists"
+                title={t("home.playlists")}
+                items={data.playlists}
+                posterUrl={poster}
+                onSelect={open}
+              />
+            ) : null;
 
-      {data.recent.map(({ library, items }) => (
-        <Row
-          key={library.id}
-          id={`recent-${library.id}`}
-          title={t("home.recentIn", { library: library.title })}
-          items={items}
-          posterUrl={poster}
-          onSelect={open}
-        />
-      ))}
+          return data.recent.map(({ library, items }) => (
+            <Row
+              key={library.id}
+              id={`recent-${library.id}`}
+              title={t("home.recentIn", { library: library.title })}
+              items={items}
+              posterUrl={poster}
+              onSelect={open}
+            />
+          ));
+        })}
     </div>
   );
 }

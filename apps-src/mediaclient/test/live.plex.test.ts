@@ -253,7 +253,15 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     const b = backend();
     const lib = (await b.libraries())[0];
 
+    // The A-Z strip works on collections because the server buckets them too -
+    // measured, 27 buckets summing to exactly the 461 collections.
+    const cLetters = await b.letters(lib.id, undefined, "collections");
     const page = await b.collections(lib.id, { offset: 0, limit: 5 });
+    expect(cLetters.reduce((n, l) => n + l.size, 0)).toBe(page.total);
+    const jump = await b.letterOffset(lib.id, "C", { sort: "titleSort", of: "collections" });
+    const at = await b.libraryPage(lib.id, { offset: jump, limit: 1, sort: "titleSort", of: "collections" });
+    expect((at.items[0]?.sortTitle ?? at.items[0]?.title ?? "").trim()[0].toUpperCase()).toBe("C");
+
     // Paged, not fetched whole: this server holds 461, which is a grid rather
     // than a row.
     expect(page.total).toBeGreaterThan(10);

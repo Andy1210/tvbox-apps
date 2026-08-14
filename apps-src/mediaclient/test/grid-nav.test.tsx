@@ -150,3 +150,35 @@ describe("a screen's focus guard", () => {
     }
   });
 });
+
+describe("home row preferences", () => {
+  it("reconciles an order stored by another build", async () => {
+    // The stored order is a cast, and it outlives the code that wrote it: an
+    // older build's list is missing any row added since, and a newer build's
+    // may name one this code has never heard of. Rebuilding rather than
+    // trusting is what stops a new row being invisible to everyone who had ever
+    // opened this screen - and what stops a stranger's id reaching the renderer.
+    const { sane, DEFAULTS } = await import("../prefs");
+
+    // Playlists last by default: an account often has none, and where there is
+    // one it is something you go looking for.
+    expect(DEFAULTS.homeRows[DEFAULTS.homeRows.length - 1]).toBe("playlists");
+
+    // An older build knew only two rows. The third is appended, not lost.
+    expect(sane({ homeRows: ["recent", "ondeck"] }).homeRows).toEqual(["recent", "ondeck", "playlists"]);
+
+    // A newer build's row, and outright rubbish, are dropped.
+    expect(sane({ homeRows: ["playlists", "somethingelse", "ondeck"] } as never).homeRows).toEqual([
+      "playlists",
+      "ondeck",
+      "recent",
+    ]);
+
+    // Nothing stored at all still gives every row, in the default order.
+    expect(sane({}).homeRows).toEqual(DEFAULTS.homeRows);
+
+    // Hidden rows are held to the same list, so an unknown id cannot hide a row
+    // that does not exist and quietly desynchronise the two.
+    expect(sane({ hiddenRows: ["playlists", "nope"] } as never).hiddenRows).toEqual(["playlists"]);
+  });
+});

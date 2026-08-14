@@ -97,7 +97,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     if (!backend) return;
     let live = true;
     backend
-      .letters(libraryId, view.filters)
+      .letters(libraryId, view.filters, mode === "collections" ? "collections" : undefined)
       .then((l) => live && setLetters(l))
       .catch(() => {
         /* the strip is an accelerator; the grid works without it */
@@ -105,7 +105,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     return () => {
       live = false;
     };
-  }, [backend, libraryId, view.filters]);
+  }, [backend, libraryId, view.filters, mode]);
 
   // Only once the order is not the default: naming it on the button needs the
   // server's own word for it, and asking for that on every library open would
@@ -331,7 +331,12 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     // away from the letter last chosen.
     const mine = ++jump.current;
     void backend
-      .letterOffset(libraryId, key, { sort: view.sort, desc: view.desc, filters: view.filters })
+      .letterOffset(libraryId, key, {
+        sort: view.sort,
+        desc: view.desc,
+        filters: view.filters,
+        of: mode === "collections" ? "collections" : undefined,
+      })
       .then((offset) => {
         if (mine !== jump.current) return;
         const row = Math.floor(offset / COLUMNS);
@@ -417,7 +422,10 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
               title's initial, which is monotonic in that order and in no other -
               under "date added" the search returns a meaningless offset and the
               grid lands somewhere arbitrary, with nothing to say why. */}
-          {mode === "items" && letters.length > 1 && view.sort === "titleSort" && !view.desc && (
+          {/* Collections bucket by letter exactly as the items do - the server
+              answers firstCharacter for them too - so the strip works in both
+              modes without a second implementation. */}
+          {letters.length > 1 && view.sort === "titleSort" && !view.desc && (
             <LetterStrip letters={letters} onPick={jumpToLetter} active={activeLetter} />
           )}
         </div>
