@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect, beforeEach } from "vitest";
 import { act, render } from "@testing-library/react";
 import { configureI18n } from "@sdk";
@@ -123,5 +125,28 @@ describe("the library grid", () => {
     const el = container.firstElementChild as HTMLElement;
     expect(el.className).not.toMatch(/\bscale-/);
     expect(el.getAttribute("style") ?? "").not.toMatch(/transform/);
+  });
+});
+
+describe("a screen's focus guard", () => {
+  it("names every key the screen owns", () => {
+    // The guard snaps focus back to the grid whenever the focused key is not
+    // one it recognises - which is what makes a screen survive a modal closing
+    // under it. The cost is that it must be told about every NEW focusable: the
+    // sort-and-filter button was reachable and then instantly lost, so OK
+    // arrived at the grid and opened the first film.
+    //
+    // Read out of the source rather than asserted against a copy, because a
+    // copy would keep passing after the predicate changed.
+    const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Library.tsx"), "utf8");
+    const guard = /useFocusFallback\(\s*"cell-0",\s*\(key\) =>([\s\S]*?)\),/.exec(src)?.[1] ?? "";
+    expect(guard).toBeTruthy();
+
+    // Every focusKey prefix the file hands to a focusable.
+    const prefixes = new Set([...src.matchAll(/focusKey=\{?["`]([a-z]+)-/g)].map((m) => m[1]));
+    expect(prefixes.size).toBeGreaterThan(1);
+    for (const p of prefixes) {
+      expect(guard, `focus guard does not accept "${p}-" keys`).toContain(`"${p}-"`);
+    }
   });
 });

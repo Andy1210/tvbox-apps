@@ -62,7 +62,10 @@ describe("PROBE: prefs round trip", () => {
 
     await usePrefs.getState().load();
     const s = usePrefs.getState();
-    console.log("loaded prefs ->", JSON.stringify({ subScale: s.subScale, subPos: s.subPos, subColor: s.subColor, autoSkip: s.autoSkip }));
+    console.log(
+      "loaded prefs ->",
+      JSON.stringify({ subScale: s.subScale, subPos: s.subPos, subColor: s.subColor, autoSkip: s.autoSkip }),
+    );
 
     applySubtitleStyle();
     console.log("sent to setPlayerProp ->", JSON.stringify(sent));

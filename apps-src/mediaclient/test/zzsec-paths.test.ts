@@ -107,7 +107,14 @@ describe("PROBE: server-controlled path segments", () => {
         n += 1;
         const s = String(url);
         const body = s.includes("firstCharacter")
-          ? { MediaContainer: { Directory: [{ key: "A", title: "A", size: 1 }, { key: "Z", title: "Z", size: 1 }] } }
+          ? {
+              MediaContainer: {
+                Directory: [
+                  { key: "A", title: "A", size: 1 },
+                  { key: "Z", title: "Z", size: 1 },
+                ],
+              },
+            }
           : { MediaContainer: { Metadata: [{ ratingKey: "1", title: "A", type: "movie" }], totalSize: 2_000_000_000 } };
         return { ok: true, status: 200, text: async () => JSON.stringify(body) } as unknown as Response;
       }),
