@@ -83,7 +83,11 @@ export function Row({
         <h2 className="px-[4vw] text-[2vh] font-semibold tracking-tight">{title}</h2>
         <div
           ref={scroller}
-          className="no-scrollbar flex gap-[1.2vw] overflow-x-auto scroll-smooth px-[4vw] py-[9vh] -my-[5vh]"
+          // No scroll-smooth. This row does its own scrolling and says how, but the
+          // browser also brings a focused tile into view - and that call names no
+          // behaviour, so the CSS decided for it and animated a jump of forty
+          // episodes end to end.
+          className="no-scrollbar flex gap-[1.2vw] overflow-x-auto px-[4vw] py-[9vh] -my-[5vh]"
         >
           {items.map((item, i) => (
             <Tile
