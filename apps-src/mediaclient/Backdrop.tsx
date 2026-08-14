@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { loadImage } from "./posters";
 import { useApp } from "./state";
+import { log } from "./redact";
 import type { MediaItem } from "./backends/types";
 
 /**
@@ -30,7 +31,11 @@ export function Backdrop({ item }: { item?: MediaItem | null }): React.JSX.Eleme
     if (!url) return;
     let live = true;
     void loadImage(url, backend.imageHeaders()).then((objectUrl) => {
-      if (live && objectUrl) setSrc(objectUrl);
+      if (!live) return;
+      // A null answer here used to be silent, which made a backdrop that never
+      // appeared indistinguishable from one the item does not have.
+      if (objectUrl) setSrc(objectUrl);
+      else log.warn("backdrop did not load");
     });
     return () => {
       live = false;
@@ -40,7 +45,11 @@ export function Backdrop({ item }: { item?: MediaItem | null }): React.JSX.Eleme
   if (!src) return null;
 
   return (
-    <div className="pointer-events-none fixed inset-0 -z-10" aria-hidden="true">
+    // z-0 with the page content explicitly above it, rather than a negative
+    // index. A fixed element paints above ordinary in-flow content, so it needs
+    // a layer of its own and the content needs one too - a negative index left
+    // the outcome to whichever ancestor happened to form a stacking context.
+    <div className="pointer-events-none fixed inset-0 z-0" aria-hidden="true">
       <img src={src} alt="" className="h-full w-full object-cover" />
       {/* Dark enough that body text keeps its contrast wherever the art is
           light. The horizontal pass keeps the left column - where every screen

@@ -195,7 +195,7 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
       )}
       <div
         ref={ref}
-        className="flex h-full flex-col gap-[2.4vh] overflow-y-auto py-[3vh] scroll-pt-[16vh] scroll-pb-[12vh]"
+        className="relative z-10 flex h-full flex-col gap-[2.4vh] overflow-y-auto py-[3vh] scroll-pt-[16vh] scroll-pb-[12vh]"
       >
         <header className="flex flex-col gap-[1.2vh] px-[4vw]">
           <TitleArt title={shown.seriesTitle ?? shown.title} logo={shown.logo} />
