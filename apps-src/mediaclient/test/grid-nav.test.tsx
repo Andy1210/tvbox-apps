@@ -283,3 +283,37 @@ describe("how the grid moves", () => {
     expect(tile).not.toContain("behavior:");
   });
 });
+
+describe("holding an arrow", () => {
+  it("stops animating for the duration of the hold, and animates again after it", () => {
+    // The browser gives every focus change its own eased scroll with a duration
+    // nobody can set, so a held arrow piles restarts on top of each other and
+    // the grid stutters instead of travelling. The behaviour is therefore
+    // decided per press - and BEFORE the press moves anything, which is why the
+    // listener is capture phase: it has to run ahead of spatial navigation
+    // rather than race the tile's own effect.
+    const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Library.tsx"), "utf8");
+
+    // Capture phase, or the decision lands after the scroll it was meant to
+    // decide.
+    expect(src).toMatch(/addEventListener\("keydown",\s*onKey,\s*true\)/);
+    // Instant inside a burst; empty string, not "smooth" - it has to fall back
+    // to the class so the two never disagree about what smooth means.
+    expect(src).toContain('el.style.scrollBehavior = now - lastStep.current < BURST_MS ? "auto" : ""');
+    // And only the vertical arrows: sideways travel inside a row is the row's
+    // own business.
+    expect(src).toContain('if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;');
+  });
+
+  it("uses a threshold above the remote's repeat rate", () => {
+    // Below the repeat interval the burst is never detected and every row of a
+    // hold animates again; far above it, two deliberate presses are mistaken for
+    // a hold and neither animates.
+    const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Library.tsx"), "utf8");
+    const m = /const BURST_MS = (\d+);/.exec(src);
+    expect(m, "the threshold is named, not inline").toBeTruthy();
+    const ms = Number(m![1]);
+    expect(ms).toBeGreaterThan(120);
+    expect(ms).toBeLessThan(400);
+  });
+});
