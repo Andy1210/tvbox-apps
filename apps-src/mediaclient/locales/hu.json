@@ -159,7 +159,10 @@
     "download": "Letöltés",
     "part": "{n}. rész / {of}",
     "title": "Hang és felirat",
-    "subOffset": "Felirat eltolás"
+    "subOffset": "Felirat eltolás",
+    "searchLanguage": "Keresés nyelve",
+    "searchResults": "Találatok",
+    "back": "Vissza"
   },
   "profiles": {
     "title": "Ki néz?",

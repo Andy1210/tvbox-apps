@@ -72,7 +72,7 @@ export function Player(): React.JSX.Element | null {
   const siblings = usePlayer((s) => s.siblings);
   const subDelaySec = usePlayer((s) => s.subDelaySec);
 
-  const [menu, setMenu] = useState<null | "version" | "audio" | "subtitles" | "quality">(null);
+  const [menu, setMenu] = useState<null | "version" | "audio" | "subtitles" | "quality" | "search">(null);
   // Which language the subtitle search asks for. Seeded from the interface, but
   // changeable: a film often has only an English subtitle, and someone may want
   // that one on purpose.
@@ -379,6 +379,12 @@ export function Player(): React.JSX.Element | null {
   useBackspace(() => {
     // Back closes the menu first: it is a layer over the film, and leaving it
     // open while the film pauses underneath would be two things at once.
+    // The search is a screen of its own inside the menu, so Back leaves it
+    // before it leaves the menu - one press, one layer.
+    if (menu === "search") {
+      setMenu("subtitles");
+      return;
+    }
     if (menu) {
       setMenu(null);
       return;
@@ -514,7 +520,10 @@ export function Player(): React.JSX.Element | null {
         versions={current.detail.versions}
         current={current.choice as Choice}
         onChoose={(next) => void usePlayer.getState().changeTracks(next)}
-        initial={menu}
+        // Which column the overlay's button asked for. The search is a layer of
+        // its own, not a column, so it names the one it came from - which is
+        // also where Back puts the cursor on the way out.
+        initial={menu === "search" ? "subtitles" : menu}
         onClose={() => setMenu(null)}
         searchLanguage={searchLang}
         onSearchLanguage={(code) => {
@@ -524,6 +533,9 @@ export function Player(): React.JSX.Element | null {
           setFoundSubs([]);
           setSearchState("idle");
         }}
+        onOpenSearch={backend ? () => setMenu("search") : undefined}
+        searchOpen={menu === "search"}
+        onCloseSearch={() => setMenu("subtitles")}
         onNudgeSubDelay={(delta) => usePlayer.getState().nudgeSubDelay(delta)}
         subDelaySec={subDelaySec}
         onSearchSubtitles={backend ? () => void searchSubtitles() : undefined}

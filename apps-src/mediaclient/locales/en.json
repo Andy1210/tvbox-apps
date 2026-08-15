@@ -159,7 +159,10 @@
     "download": "Download",
     "part": "part {n} of {of}",
     "title": "Audio and subtitles",
-    "subOffset": "Subtitle offset"
+    "subOffset": "Subtitle offset",
+    "searchLanguage": "Search in",
+    "searchResults": "Results",
+    "back": "Back"
   },
   "profiles": {
     "title": "Who is watching?",

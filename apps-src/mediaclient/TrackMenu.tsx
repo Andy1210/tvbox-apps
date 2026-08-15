@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
+import { useEffect, useRef, useState } from "react";
+import { FocusContext, doesFocusableExist, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, useFocusableItem, useI18n } from "@sdk";
 import { useFocusFallback, useInitialFocus } from "./focus";
 import type { MediaVersion, Track } from "./backends/types";
@@ -42,6 +42,12 @@ export interface TrackMenuProps {
   onNudgeSubDelay?: (deltaSec: number) => void;
   /** The shift currently in force, for the row to show. */
   subDelaySec?: number;
+  /** Open the search, which is a screen of its own. Absent when unsupported. */
+  onOpenSearch?: () => void;
+  /** Whether that screen is the one showing. */
+  searchOpen?: boolean;
+  /** Leave the search and come back to the tracks. */
+  onCloseSearch?: () => void;
   /** Look for subtitles the server could fetch. Absent when unsupported. */
   onSearchSubtitles?: () => void;
   /** What the search turned up, for the user to choose from. */
@@ -75,6 +81,9 @@ export function TrackMenu({
   onChoose,
   onNudgeSubDelay,
   subDelaySec,
+  onOpenSearch,
+  searchOpen,
+  onCloseSearch,
   onClose,
   onSearchSubtitles,
   found,
@@ -114,8 +123,38 @@ export function TrackMenu({
               ? `aud-${audio[0].ordinal}`
               : "sub-off";
   useInitialFocus(firstKey, true);
+
+  /**
+   * The cursor follows the layer that is showing.
+   *
+   * Opening the search replaces every key on screen, and this component does
+   * not remount - so the one-shot initial focus has long since fired and the
+   * cursor was left on `sub-search`, which the search view does not render.
+   * norigin leaves a key it does not know exactly where it is, so the remote
+   * would have gone dead on the screen it had just opened.
+   *
+   * Deferred by a timeout for the reason `useInitialFocus` documents: a
+   * setFocus in a sibling effect of the same commit can run before that
+   * commit's focusables have registered.
+   */
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
+    const id = setTimeout(() => {
+      const want = searchOpen ? `lang-${searchLanguage ?? SEARCH_LANGUAGES[0]}` : "sub-search";
+      setFocus(doesFocusableExist(want) ? want : "tracks-close");
+    }, 0);
+    return () => clearTimeout(id);
+  }, [searchOpen, searchLanguage]);
+
   useFocusFallback(
-    firstKey,
+    // In the search, the tracks' own keys are not on screen - so recovering to
+    // one would be the same dead cursor this layer was given a focus effect to
+    // avoid.
+    searchOpen ? "sub-search" : firstKey,
     (k) =>
       k.startsWith("ver-") ||
       k.startsWith("aud-") ||
@@ -130,6 +169,61 @@ export function TrackMenu({
     onChoose(next);
   };
 
+  if (searchOpen) {
+    return (
+      <FocusContext.Provider value={focusKey}>
+        <div ref={ref} className="absolute inset-0 flex items-end justify-center bg-black/70 pb-[6vh]">
+          <div className="flex h-[64vh] w-[86vw] flex-col gap-[2vh] rounded-[1.4vh] bg-[#0c1219]/95 p-[3vh]">
+            <div className="flex flex-1 gap-[3vw] overflow-hidden">
+              <Column title={t("tracks.searchLanguage")}>
+                {SEARCH_LANGUAGES.map((code) => (
+                  <Option
+                    key={code}
+                    focusKey={`lang-${code}`}
+                    active={code === searchLanguage}
+                    label={code.toUpperCase()}
+                    onEnter={() => onSearchLanguage?.(code)}
+                  />
+                ))}
+                <Option
+                  focusKey="sub-search"
+                  active={false}
+                  label={t(searchState === "searching" ? "tracks.searching" : "tracks.search")}
+                  onEnter={() => onSearchSubtitles?.()}
+                />
+              </Column>
+
+              <Column title={t("tracks.searchResults")}>
+                {searchState === "unavailable" && <Empty text={t("tracks.searchUnavailable")} />}
+                {searchState === "none" && <Empty text={t("tracks.searchNone")} />}
+                {/* Finding them is half the job: each one is pressable, and
+                    pressing it is what actually fetches it onto the item. */}
+                {(found ?? []).map((f) => (
+                  <Option
+                    key={`found-${f.id}`}
+                    focusKey={`sub-found-${f.id}`}
+                    active={false}
+                    label={f.label}
+                    hint={t("tracks.download")}
+                    onEnter={() => onDownloadSubtitle?.(f)}
+                  />
+                ))}
+              </Column>
+            </div>
+
+            <FocusButton
+              focusKey="tracks-close"
+              onEnter={() => onCloseSearch?.()}
+              className="self-center rounded-[1vh] bg-white/12 px-[3vw] py-[1vh] text-[2vh]"
+            >
+              {t("tracks.back")}
+            </FocusButton>
+          </div>
+        </div>
+      </FocusContext.Provider>
+    );
+  }
+
   return (
     <FocusContext.Provider value={focusKey}>
       <div ref={ref} className="absolute inset-0 flex items-end justify-center bg-black/70 pb-[6vh]">
@@ -138,7 +232,10 @@ export function TrackMenu({
           // whatever the person is reading.
           className="flex h-[64vh] w-[86vw] flex-col gap-[2vh] rounded-[1.4vh] bg-[#0c1219]/95 p-[3vh]"
         >
-          <div className="flex flex-1 gap-[2vw] overflow-hidden">
+          {/* The gap is wider than it looks: each column reserves room around
+              itself for the focused row's 4% growth and takes it back with a
+              negative margin, so 3vw here is the 2vw that shows. */}
+          <div className="flex flex-1 gap-[3vw] overflow-hidden">
             {versions.length > 1 && (
               <Column title={t("tracks.version")}>
                 {versions.map((v) => (
@@ -197,52 +294,18 @@ export function TrackMenu({
                 />
               ))}
 
-              {onSearchSubtitles && (
-                <>
-                  {/* Above the tracks, not below them. A film with fifteen
-                    embedded subtitles would otherwise bury it past the fold of a
-                    scrolling column. */}
-                  {/* Which language, before looking. A film often has only an
-                    English subtitle available, and someone may want that one on
-                    purpose - the button used to decide for them, silently, from
-                    the interface language. */}
-                  {onSearchLanguage && (
-                    <div className="flex flex-wrap gap-[0.6vw] pb-[0.6vh]">
-                      {SEARCH_LANGUAGES.map((code) => (
-                        <FocusButton
-                          key={code}
-                          focusKey={`lang-${code}`}
-                          onEnter={() => onSearchLanguage(code)}
-                          className={`rounded-[0.7vh] px-[1.1vw] py-[0.6vh] text-[1.8vh] uppercase ${
-                            code === searchLanguage ? "bg-white text-black" : "bg-white/10"
-                          }`}
-                        >
-                          {code}
-                        </FocusButton>
-                      ))}
-                    </div>
-                  )}
-                  <Option
-                    focusKey="sub-search"
-                    active={false}
-                    label={t(searchState === "searching" ? "tracks.searching" : "tracks.search")}
-                    onEnter={onSearchSubtitles}
-                  />
-                  {searchState === "unavailable" && <Empty text={t("tracks.searchUnavailable")} />}
-                  {searchState === "none" && <Empty text={t("tracks.searchNone")} />}
-                  {/* Finding them is half the job: each one is pressable, and
-                    pressing it is what actually fetches it onto the item. */}
-                  {(found ?? []).map((f) => (
-                    <Option
-                      key={`found-${f.id}`}
-                      focusKey={`sub-found-${f.id}`}
-                      active={false}
-                      label={f.label}
-                      hint={t("tracks.download")}
-                      onEnter={() => onDownloadSubtitle?.(f)}
-                    />
-                  ))}
-                </>
+              {/* One row, and the whole search lives behind it. Everything it
+                  needs - three language chips, the button, an error line and a
+                  list of results - is noise on a column whose job is to say
+                  which subtitle is on, and it is noise on every film that
+                  already has the right subtitle. */}
+              {onOpenSearch && (
+                <Option
+                  focusKey="sub-search"
+                  active={false}
+                  label={t(searchState === "searching" ? "tracks.searching" : "tracks.search")}
+                  onEnter={onOpenSearch}
+                />
               )}
             </Column>
 
@@ -312,8 +375,15 @@ function Column({
   // their gaps came to more than the panel is wide, and the last one was clipped
   // by overflow-hidden - which reads as "there is more to the right" while Right
   // does nothing.
+  //
+  // Padding on BOTH axes with matching negative margins, so the column does not
+  // move. A focused row grows 4% and carries a shadow, and this element
+  // scrolls - `overflow-y: auto` clips the X axis too, since an axis that is
+  // not `visible` forces the other one to compute as `auto`. So the focused row
+  // was sliced down both sides, and at the top and bottom of the scroll as
+  // well. The same trick the home rail uses for the same reason.
   return (
-    <section className="no-scrollbar flex min-w-[17vw] flex-1 flex-col gap-[1vh] overflow-y-auto">
+    <section className="no-scrollbar -mx-[0.5vw] -my-[1vh] flex min-w-[17vw] flex-1 flex-col gap-[1vh] overflow-y-auto px-[0.5vw] py-[1vh]">
       <h3 className="text-[2.1vh] font-semibold tracking-tight text-fg-dim">{title}</h3>
       {note && <p className="text-[1.8vh] leading-snug text-fg-dim">{note}</p>}
       <div className="flex flex-col gap-[0.6vh]">{children}</div>
