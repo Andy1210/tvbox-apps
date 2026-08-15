@@ -94,3 +94,40 @@ describe("the ends of a rail", () => {
     expect(getCurrentFocusKey()).toBe("solo-e0");
   });
 });
+
+describe("a rail and the page it sits on", () => {
+  it("asks the page to follow the cursor down", async () => {
+    // The page still scrolls vertically, and it used to get that for free: a
+    // tile's own scrollIntoView moved the rail sideways and the page downwards
+    // in one call. Turning the tile's scrolling off - so it would stop fighting
+    // the transform that moves the rail - took the vertical half with it, and
+    // the home screen stopped following the cursor past the first row.
+    //
+    // It has to be the SECTION and not the tile: a tile lives inside a clip
+    // that is not a scroller, so asking the browser to reveal it can only be
+    // answered by moving something we move ourselves.
+    const calls: { el: Element; opts: unknown }[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element, opts?: unknown) {
+      calls.push({ el: this, opts });
+    } as typeof original;
+
+    try {
+      const { container } = render(row());
+      await settle();
+      placeRow(tiles(container, items.length));
+      await flushFocus();
+
+      await act(async () => setFocus("children-s1-e2"));
+      await settle();
+
+      expect(calls.length, "something asked to be revealed").toBeGreaterThan(0);
+      expect(
+        calls.every((c) => c.el.tagName === "SECTION"),
+        "only the section, never a tile",
+      ).toBe(true);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+});

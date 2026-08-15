@@ -199,3 +199,21 @@ describe("where a moving rail is cut", () => {
     expect(clip![1]).toMatch(/p[tb]-/);
   });
 });
+
+describe("what a rail thinks it can see", () => {
+  it("is the content box, not clientWidth", () => {
+    // `clientWidth` includes padding. The clip carries a small horizontal
+    // padding as room for the focus ring, and counting that as usable width
+    // made the rail believe it could see 1.6vw more than it can - it
+    // under-scrolled by exactly that, so the last tile arrived cropped by about
+    // two ring widths on the right, while the left looked correct.
+    //
+    // The asymmetry is the tell: an error in the width only shows at the end
+    // you scroll towards.
+    const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Row.tsx"), "utf8");
+    expect(src, "the padding is subtracted").toContain("box.clientWidth - parseFloat(style.paddingLeft)");
+    expect(src).toContain("parseFloat(style.paddingRight)");
+    // And the bare form is not used as a viewport anywhere.
+    expect(src).not.toMatch(/viewport:\s*box\.clientWidth\b/);
+  });
+});

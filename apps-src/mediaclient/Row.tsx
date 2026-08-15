@@ -64,6 +64,7 @@ export function Row({
   onArrowFromFirst,
   countdownFor,
 }: RowProps): React.JSX.Element | null {
+  const section = useRef<HTMLElement | null>(null);
   const window_ = useRef<HTMLDivElement>(null);
   const layer = useRef<HTMLDivElement | null>(null);
   // The rail moves itself with a composited transform rather than being
@@ -74,14 +75,32 @@ export function Row({
   const onFocusChild = useCallback(
     (el: HTMLElement) => {
       onReached?.();
+      // The PAGE still scrolls vertically, and it used to get that for free:
+      // a tile's own scrollIntoView moved the rail sideways and the page
+      // downwards in one call. Turning the tile's scrolling off to stop it
+      // fighting the transform took the vertical half with it, and the home
+      // screen stopped following the cursor past the first row.
+      //
+      // The section rather than the tile, because the tile lives inside a clip
+      // that is not a scroller: asking the browser to reveal it can only be
+      // answered by moving something we are moving ourselves.
+      section.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+
       const box = window_.current;
       if (!box) return;
       // A tile's worth of run-up on the leading side, so the rail looks like it
       // continues rather than ending at the focus ring.
       const pad = el.offsetWidth * 0.6;
+      // The CONTENT width, not clientWidth - which includes padding. The clip
+      // carries a small horizontal padding as room for the focus ring, and
+      // counting it as usable width made the rail believe it could see 1.6vw
+      // more than it can: it under-scrolled by exactly that, and the last tile
+      // came up cropped by about two ring widths on the right.
+      const style = getComputedStyle(box);
+      const viewport = box.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
       const to = nearest({
         at: mover.at,
-        viewport: box.clientWidth,
+        viewport,
         start: el.offsetLeft,
         size: el.offsetWidth,
         padStart: pad,
@@ -133,7 +152,10 @@ export function Row({
   return (
     <FocusContext.Provider value={focusKey}>
       <section
-        ref={ref}
+        ref={(node) => {
+          section.current = node;
+          (ref as React.MutableRefObject<HTMLElement | null>).current = node;
+        }}
         // shrink-0, because a row is a flex item in a column that scrolls: with
         // several of them taller than the box, flexbox squashes each one rather
         // than letting the box scroll - and what survives is the middle, so the
