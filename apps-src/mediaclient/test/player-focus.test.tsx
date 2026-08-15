@@ -366,7 +366,15 @@ describe("the chapter strip", () => {
     });
   };
 
-  it("is not there until Down asks for it, and opens where the film is", async () => {
+  /** Down from the transport buttons, which is the request for the strip. */
+  const openStrip = async (): Promise<void> => {
+    await act(async () => setFocus("pb-playpause"));
+    await flushFocus();
+    await remote.down();
+    await settle();
+  };
+
+  it("is not there until Down from the buttons asks for it", async () => {
     // Tall enough to matter over a running film, so it is asked for rather than
     // dismissed - and it opens pointing at the chapter being played, not at the
     // start of the film, which is never where anyone is.
@@ -376,48 +384,29 @@ describe("the chapter strip", () => {
 
     expect(doesFocusableExist("chapters"), "closed until it is asked for").toBe(false);
 
+    // The bar still goes to the buttons, and only the buttons open the strip.
     await act(async () => setFocus("scrub"));
     await flushFocus();
-    await remote.down();
-    await settle();
-
-    // 700_000 is inside the second chapter.
-    expect(getCurrentFocusKey()).toBe("ch-2-600000");
-  });
-
-  it("goes down to the buttons and comes back up to where it was", async () => {
-    withChapters();
-    render(<Player />);
-    await settle();
-    await act(async () => setFocus("scrub"));
-    await flushFocus();
-    await remote.down();
-    await settle();
-
     await remote.down();
     await settle();
     expect(getCurrentFocusKey()).toBe("pb-playpause");
 
-    // Still open, so Up belongs to it rather than to the bar - otherwise the
-    // strip would sit on screen with no way back into it.
-    await remote.up();
+    await remote.down();
     await settle();
+    // 700_000 is inside the second chapter.
     expect(getCurrentFocusKey()).toBe("ch-2-600000");
   });
 
-  it("closes on the way back up to the bar", async () => {
+  it("closes on the way back up to the buttons", async () => {
     withChapters();
     render(<Player />);
     await settle();
-    await act(async () => setFocus("scrub"));
-    await flushFocus();
-    await remote.down();
-    await settle();
+    await openStrip();
 
     await remote.up();
     await settle();
-    expect(getCurrentFocusKey()).toBe("scrub");
-    expect(doesFocusableExist("chapters"), "the strip is out only while you are in it or below it").toBe(false);
+    expect(getCurrentFocusKey()).toBe("pb-playpause");
+    expect(doesFocusableExist("chapters"), "out only while the cursor is in it").toBe(false);
   });
 
   it("does not seek when the arrows are choosing a chapter", async () => {
@@ -427,10 +416,7 @@ describe("the chapter strip", () => {
     withChapters();
     render(<Player />);
     await settle();
-    await act(async () => setFocus("scrub"));
-    await flushFocus();
-    await remote.down();
-    await settle();
+    await openStrip();
 
     usePlayer.setState({ seekTargetMs: null });
     await remote.right();
@@ -438,10 +424,30 @@ describe("the chapter strip", () => {
     expect(usePlayer.getState().seekTargetMs, "an arrow on the strip is not a seek").toBeNull();
   });
 
-  it("goes straight to the buttons on a film with none", async () => {
+  it("goes where the chapter starts, and puts the strip away", async () => {
+    withChapters();
     render(<Player />);
     await settle();
-    await act(async () => setFocus("scrub"));
+    await openStrip();
+
+    // Read off the focused tile rather than assumed: which one Right lands on
+    // is geometry, and this harness places no rectangles. What is being tested
+    // is that OK goes to the chapter under the cursor, whichever that is.
+    await remote.right();
+    await settle();
+    const startMs = Number(String(getCurrentFocusKey()).split("-").at(-1));
+    expect(Number.isFinite(startMs)).toBe(true);
+
+    await remote.ok();
+    await settle();
+    expect(usePlayer.getState().seekTargetMs).toBe(startMs);
+    expect(doesFocusableExist("chapters"), "the press was a destination, not a browse").toBe(false);
+  });
+
+  it("does nothing on a film with no chapters", async () => {
+    render(<Player />);
+    await settle();
+    await act(async () => setFocus("pb-playpause"));
     await flushFocus();
     await remote.down();
     await settle();

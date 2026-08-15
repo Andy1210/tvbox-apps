@@ -14,8 +14,9 @@ import type { Chapter } from "./backends/types";
  * cursor uses answers for that, which is why this costs no new server support.
  *
  * It is not on screen by default. It is tall, and the overlay's job while a
- * film is playing is to get out of the way; going DOWN from the bar is the
- * request for it, and until then the bar sits where it always does.
+ * film is playing is to get out of the way; going DOWN from the transport
+ * buttons is the request for it. It opens UNDER them, so the whole overlay
+ * lifts and the buttons stay in the order they were reached in.
  */
 function clock(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
