@@ -255,13 +255,17 @@ describe("a row inside a scrolling column", () => {
 });
 
 describe("how the grid moves", () => {
-  it("keeps the measurement next to the decision", () => {
-    // Animating a row was tried, removed on the numbers, and tried again on a
-    // lighter grid. Whatever it ends up being, the measurement stays in the
-    // file - so the next person to change it argues with data rather than with
-    // an opinion.
+  it("does not animate, and carries the measurement that decided it", () => {
+    // Tried, measured, removed; tried again on a 40% lighter grid in case the
+    // cost was one bad frame rather than the whole animation; still a stutter
+    // in the room. Both attempts are in the file so the next person argues with
+    // data. The class list is what is asserted, not the file - the comment
+    // above it names the thing it is not doing.
     const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Library.tsx"), "utf8");
-    expect(src, "the numbers stay next to the class list").toContain("111-118 ms");
+    const classes = src.match(/className="no-scrollbar relative flex-1[^"]*"/g) ?? [];
+    expect(classes.length, "the grid scroller is still identifiable").toBe(1);
+    expect(classes[0]).not.toContain("scroll-smooth");
+    expect(src, "the numbers stay next to the decision").toContain("111-118 ms");
 
     // The explicit scrolls say `instant` whether or not the arrows animate: it
     // is what they always were, and inheriting is what broke them once.
@@ -272,17 +276,12 @@ describe("how the grid moves", () => {
 
   it("renders a window a television actually needs", () => {
     // Three rows fit on screen. At OVERSCAN 2 that meant 7-8 rows and up to 56
-    // tiles, every one of them reconciled when the window moves - which happens
-    // once per row of travel, in the middle of a scroll.
+    // tiles, every one reconciled when the window moves - once per row of
+    // travel. This survived the animation being removed because it was never
+    // about the animation.
     const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Library.tsx"), "utf8");
     const over = Number(/const OVERSCAN = (\d+);/.exec(src)?.[1]);
-    const cols = Number(/const COLUMNS = (\d+);/.exec(src)?.[1]);
     expect(over, "one row of margin is the floor - below it a fast hold has no lead at all").toBe(1);
-    expect(cols).toBe(6);
-
-    // What that comes to, stated so a change to either number is visible here.
-    const rowsWorst = Math.ceil((100 + 34) / 34) - 0 + 2 * over;
-    expect(rowsWorst * cols).toBeLessThanOrEqual(36);
   });
 
   it("re-renders only when the window changes", () => {

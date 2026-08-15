@@ -28,11 +28,11 @@ const TILE_VH = 26;
  */
 const ROW_GAP_VH = 8;
 /**
- * Six, not seven. A row is what a scroll has to move and repaint, so its width
- * in tiles is a cost as well as a layout - and at 26vh tall the seventh was
- * making the grid denser than a television needs.
+ * Seven. Six was tried as a way to make the scroll animation affordable, and it
+ * did not - so the density is a look decision again, and this is the look it
+ * had.
  */
-const COLUMNS = 6;
+const COLUMNS = 7;
 /** Rows kept mounted above and below the viewport. */
 /**
  * Rows kept in the DOM beyond the visible ones, each side.
@@ -491,22 +491,32 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
             // Vertical padding, because the focus ring is drawn OUTSIDE the
             // tile's box and this element clips: without it the top row's ring
             // loses its upper edge against the scroller's own boundary.
-            // Animated again, on a grid that is now about 40% fewer tiles.
-            // Measured on the box before that change, per row moved:
+            // No animation, and this is settled rather than untried. Measured on
+            // the box with injected key presses and /proc sampling, per row:
             //
             //   animated   renderer 73-85 ms   GPU process 111-118 ms
             //   instant    renderer 34-47 ms   GPU process  18-23 ms
             //
-            // Those totals cannot say whether the animation is uniformly heavy
-            // or whether one frame in it is - the window shifts once per row,
-            // and that reconcile plus a row of image decodes lands inside the
-            // animation. Fewer tiles makes exactly that frame cheaper, which is
-            // why it is worth asking the room again rather than settling it
-            // from the totals.
+            // Then tried a second time on a grid with about 40% fewer tiles, in
+            // case the cost was one bad frame - the window shift and a row of
+            // image decodes both land inside the animation - rather than the
+            // whole of it. It still read as a stutter in the room, so it is the
+            // whole of it: a row here moves 34% of the screen, and every frame
+            // of that movement re-rasters what a jump rasters once.
             //
-            // Everything that is not travel overrides this with
-            // `behavior: "instant"` - the letter jump and the reset below.
-            className="no-scrollbar relative flex-1 scroll-smooth overflow-y-auto px-[3vw] pt-[1.2vh] pb-[2vh] scroll-pt-[4vh] scroll-pb-[6vh]"
+            // A jump cut is the honest answer for THIS scroller, which is not
+            // the same as for this hardware: Plex's own client animates its
+            // grid on the same box, at the same output, and reads as smooth. So
+            // the cost is something this implementation does and that one does
+            // not - most likely that a native scroll of a virtualised list
+            // re-rasters, where moving the content with a composited transform
+            // would not, and that the window shifts DOM in the middle of every
+            // animation.
+            //
+            // That is the shape of a fix rather than a fix, and it is a real
+            // change: the grid would move itself instead of being scrolled.
+            // Until then this stays a jump cut, because a stutter is worse.
+            className="no-scrollbar relative flex-1 overflow-y-auto px-[3vw] pt-[1.2vh] pb-[2vh] scroll-pt-[4vh] scroll-pb-[6vh]"
           >
             {total === 0 && (
               <div className="flex h-full items-center justify-center text-[2.2vh] text-fg-dim">
