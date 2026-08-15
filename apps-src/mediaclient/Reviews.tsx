@@ -16,7 +16,17 @@ import type { Review } from "./backends/types";
  * as faint praise and be filed as positive, or the reverse.
  */
 export function Reviews({ reviews, title }: { reviews: Review[]; title: string }): React.JSX.Element | null {
-  const { ref, focusKey } = useFocusable({ focusKey: "reviews", trackChildren: true, saveLastFocusedChild: true });
+  // Same rule: the hook is above the early return, so on an item with no
+  // reviews the container stayed registered with no node and Up from Play
+  // landed on it - nothing highlighted, and the press to recover eaten by the
+  // fallback, whose predicate lists "review-" and does not match "reviews".
+  // Season screens are the normal case: episodes carry no reviews.
+  const { ref, focusKey } = useFocusable({
+    focusKey: "reviews",
+    trackChildren: true,
+    saveLastFocusedChild: true,
+    focusable: reviews.length > 0,
+  });
   const scroller = useRef<HTMLDivElement>(null);
 
   if (reviews.length === 0) return null;

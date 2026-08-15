@@ -62,7 +62,13 @@ export function Search(): React.JSX.Element {
       });
   }, [backend, query, fail]);
 
-  const { ref, focusKey } = useFocusable({ focusKey: "search", saveLastFocusedChild: true });
+  // Not a place the arrows may land while the failure screen is up. The hook
+  // runs above the early return that swaps this screen for the error, so the
+  // container stays registered with no node and a zero-sized box at the page
+  // origin - and it answers no OK. Detail, Library and Person were given this;
+  // this screen has the identical shape and was missed, which is the screen a
+  // household reaches by typing while the server is down.
+  const { ref, focusKey } = useFocusable({ focusKey: "search", saveLastFocusedChild: true, focusable: !failure });
   // Only when the keyboard is closed: it owns focus while it is open.
   useInitialFocus("search-edit", !typing);
 

@@ -84,6 +84,13 @@ const PART_PATH = /^\/library\/parts\/\d+\/\d+\/[^/\\?#]*$/;
  */
 const STREAM_PATH = /^\/library\/streams\/\d+$/;
 /**
+ * What an artwork path may be, measured over 80 items on this server.
+ *
+ * The token travels as a header on these, so an unbounded path lets the server
+ * pick the endpoint - see `artUrl`.
+ */
+const ART_PATH = /^\/library\/(metadata|media)\/\d+\/[A-Za-z][A-Za-z0-9]*\/\d+$/;
+/**
  * A path the server may send us back to.
  *
  * Bounded because it comes from the server and becomes a request URL: a section
@@ -614,6 +621,27 @@ export class PlexBackend implements MediaBackend {
     });
   }
 
+  /**
+   * A chapter's own still, scaled.
+   *
+   * Through the photo transcoder rather than the raw path, for both of the
+   * reasons `previewUrl` is: the raw one answers with the full frame - measured,
+   * 1,664,355 bytes of 1280x720 JPEG for sixteen chapters, against 154,768 for
+   * the same sixteen at tile size - and the value comes from the SERVER, so as a
+   * query parameter it cannot steer which endpoint is called, the way a path
+   * handed to `artUrl` can.
+   */
+  chapterThumbUrl(thumb: string, w: number, h: number): string | undefined {
+    if (!thumb) return undefined;
+    return buildUrl(this.base, "photo/:/transcode", {
+      width: Math.round(w),
+      height: Math.round(h),
+      minSize: 1,
+      upscale: 0,
+      url: thumb,
+    });
+  }
+
   backdropUrl(item: MediaItem, w: number, h: number): string | undefined {
     if (!item.art) return undefined;
     return buildUrl(this.base, "photo/:/transcode", {
@@ -694,6 +722,18 @@ export class PlexBackend implements MediaBackend {
       log.warn("artwork URL points off the server; dropped");
       return undefined;
     }
+    // The origin is not the whole bound. This URL is fetched with the account
+    // token as a header, so the server also chooses WHICH of its own endpoints
+    // the box calls - `/library/media/1/chapterImages/../../../../:/scrobble?key=1`
+    // resolves to a state-changing GET that the server accepts. Measured over 80
+    // items, every relative value that reaches here is one of two shapes:
+    // `/library/metadata/<n>/clearLogo/<n>` and `/library/media/<n>/chapterImages/<n>`.
+    // Everything else this function is handed is an absolute off-origin URL,
+    // which the check above already drops.
+    if (!ART_PATH.test(url.pathname) || url.search || url.hash) {
+      log.warn("artwork URL is not an artwork path; dropped");
+      return undefined;
+    }
     return url.toString();
   }
 
@@ -761,7 +801,7 @@ export class PlexBackend implements MediaBackend {
     const common = {
       hasMDE: 1,
       path: `/library/metadata/${id}`,
-      mediaIndex: chosen?.index ?? version,
+      mediaIndex: chosen?.mediaIndex ?? version,
       partIndex: chosen?.partIndex ?? 0,
       protocol: "hls",
       // directPlay is what the ceiling has to overrule, and it outranks it:

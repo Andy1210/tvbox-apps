@@ -11,6 +11,7 @@ import { getIdentity, deviceName, type Identity } from "./identity";
 import { readJson, writeJson, removeRaw } from "./storage";
 import { clearImages } from "./posters";
 import { resetPlayer } from "./playback/player";
+import { useChosenVersion } from "./chosenVersion";
 import { log } from "./redact";
 
 const SESSION_KEY = "session";
@@ -197,6 +198,12 @@ export const useApp = create<State>((set, get) => ({
     // previous account's posters until the cache turns over.
     clearImages();
     resetPlayer();
+    // The remembered version of a title goes too. It is a household fact rather
+    // than a personal one, so a PROFILE switch keeps it - but a rating key is a
+    // per-SERVER id and they collide across servers, so another account signing
+    // in would silently open a title on a version chosen from a library where
+    // that number meant something else.
+    useChosenVersion.getState().clear();
     set({ session: null, backend: null, screen: { name: "login" }, history: [], failure: null });
   },
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { FocusContext, doesFocusableExist, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
-import { FocusButton, useFocusableItem, useI18n } from "@sdk";
+import { FocusButton, useI18n } from "@sdk";
 import { useFocusFallback, useInitialFocus } from "./focus";
 import type { MediaVersion, Track } from "./backends/types";
 
@@ -54,7 +54,7 @@ export interface TrackMenuProps {
   found?: Track[];
   /** Fetch one onto the item. */
   onDownloadSubtitle?: (t: Track) => void;
-  searchState?: "idle" | "searching" | "unavailable" | "none";
+  searchState?: "idle" | "searching" | "unavailable" | "none" | "added";
   /** Which language the search should ask for, and how to change it. */
   searchLanguage?: string;
   onSearchLanguage?: (code: string) => void;
@@ -196,6 +196,7 @@ export function TrackMenu({
               <Column title={t("tracks.searchResults")}>
                 {searchState === "unavailable" && <Empty text={t("tracks.searchUnavailable")} />}
                 {searchState === "none" && <Empty text={t("tracks.searchNone")} />}
+                {searchState === "added" && <Empty text={t("tracks.searchAdded")} />}
                 {/* Finding them is half the job: each one is pressable, and
                     pressing it is what actually fetches it onto the item. */}
                 {(found ?? []).map((f) => (
@@ -238,11 +239,14 @@ export function TrackMenu({
           <div className="flex flex-1 gap-[3vw] overflow-hidden">
             {versions.length > 1 && (
               <Column title={t("tracks.version")}>
-                {versions.map((v) => (
+                {/* The array position, not the version's own index: one media
+                    entry with two parts makes them different, and both rows
+                    then claimed the same focus key. */}
+                {versions.map((v, i) => (
                   <Option
-                    key={v.index}
-                    focusKey={`ver-${v.index}`}
-                    active={v.index === choice.version}
+                    key={i}
+                    focusKey={`ver-${i}`}
+                    active={i === choice.version}
                     label={
                       v.parts > 1
                         ? `${v.label} · ${t("tracks.part", { n: String(v.partIndex + 1), of: String(v.parts) })}`
@@ -251,7 +255,7 @@ export function TrackMenu({
                     hint={versionHint(v)}
                     // Changing the file invalidates the track choices made against
                     // the old one, so they go back to the server's own selection.
-                    onEnter={() => apply({ version: v.index })}
+                    onEnter={() => apply({ version: i })}
                   />
                 ))}
               </Column>
@@ -271,12 +275,6 @@ export function TrackMenu({
             </Column>
 
             <Column title={t("tracks.subtitles")}>
-              {/* At the TOP of the column, not under the tracks: it applies to
-                  whichever subtitle is on, and a film with fifteen embedded
-                  tracks would otherwise bury it past the fold. */}
-              {onNudgeSubDelay && (
-                <Offset value={subDelaySec ?? 0} onNudge={onNudgeSubDelay} label={t("tracks.subOffset")} />
-              )}
               <Option
                 focusKey="sub-off"
                 active={choice.subtitle === "none"}
@@ -299,6 +297,17 @@ export function TrackMenu({
                   list of results - is noise on a column whose job is to say
                   which subtitle is on, and it is noise on every film that
                   already has the right subtitle. */}
+              {/* LAST in the column, and that is a correction. First, it was
+                  what a sideways press from the audio column landed on - and
+                  because its own Left and Right were swallowed to adjust the
+                  value, the Quality column became unreachable from that
+                  direction while every press shifted the subtitles a quarter
+                  second. A setting is reached by going down a column; it must
+                  not stand in the way of crossing one. */}
+              {onNudgeSubDelay && (
+                <Offset value={subDelaySec ?? 0} onNudge={onNudgeSubDelay} label={t("tracks.subOffset")} />
+              )}
+
               {onOpenSearch && (
                 <Option
                   focusKey="sub-search"
@@ -398,14 +407,14 @@ function Empty({ text }: { text: string }): React.JSX.Element {
 /**
  * Shift the subtitles in time.
  *
- * Left and Right adjust rather than moving between columns, which is the one
- * place in this menu where that is true - and it is the right trade: an offset
- * is found by nudging until the line lands on the mouth, and a pair of buttons
- * would mean a press per step with the value two columns away from the eye.
- * Up and Down still leave, so it is a detour and not a trap.
+ * Two buttons rather than a row that eats Left and Right. Swallowing the arrows
+ * read well on paper - an offset is found by nudging until the line lands on
+ * the mouth - but it made the row a wall: with it standing between the audio and
+ * quality columns, crossing the menu sideways was impossible and every attempt
+ * moved the subtitles instead. Buttons cost a press per step and take none away.
  *
- * OK sets it back to zero. A row that answers OK with nothing is a dead press,
- * and returning to zero is the only other thing this row can mean.
+ * The value sits between them, so what changes is between the two things that
+ * change it.
  */
 const STEP_SEC = 0.25;
 
@@ -419,21 +428,6 @@ function Offset({
   label: string;
 }): React.JSX.Element {
   const { locale } = useI18n();
-  const { ref, focused } = useFocusableItem({
-    focusKey: "sub-offset",
-    onArrowPress: (direction: string) => {
-      if (direction === "left") {
-        onNudge(-STEP_SEC);
-        return false;
-      }
-      if (direction === "right") {
-        onNudge(STEP_SEC);
-        return false;
-      }
-      return true;
-    },
-    onEnterPress: () => onNudge(-value),
-  });
 
   // Signed and to two places, so a change of a quarter second is visible - and
   // formatted for the locale, because a Hungarian television writes 0,25.
@@ -444,20 +438,25 @@ function Offset({
   }).format(value);
 
   return (
-    <div
-      ref={ref}
-      className={`flex items-center justify-between rounded-[0.8vh] px-[1.2vw] py-[0.9vh] ${
-        focused ? "bg-white text-black" : "bg-white/5"
-      }`}
-    >
-      <span className="text-[2.4vh]">{label}</span>
-      <span className="flex items-center gap-[0.8vw] text-[2.4vh] tabular-nums">
-        {/* Triangles, not words: they say which key moves the value, and the
-            row is only reachable with a remote that has those two keys. */}
-        <span aria-hidden="true">&#9666;</span>
-        <span className="min-w-[4.2vw] text-center">{shown}s</span>
-        <span aria-hidden="true">&#9656;</span>
-      </span>
+    <div className="flex flex-col gap-[0.4vh] rounded-[0.8vh] bg-white/5 px-[1.2vw] py-[0.9vh]">
+      <span className="text-[2vh] text-fg-dim">{label}</span>
+      <div className="flex items-center justify-between gap-[0.6vw]">
+        <FocusButton
+          focusKey="sub-offset-down"
+          onEnter={() => onNudge(-STEP_SEC)}
+          className="rounded-[0.6vh] bg-white/10 px-[1vw] py-[0.4vh] text-[2.2vh] leading-none"
+        >
+          &#8722;
+        </FocusButton>
+        <span className="text-[2.4vh] tabular-nums">{shown}s</span>
+        <FocusButton
+          focusKey="sub-offset-up"
+          onEnter={() => onNudge(STEP_SEC)}
+          className="rounded-[0.6vh] bg-white/10 px-[1vw] py-[0.4vh] text-[2.2vh] leading-none"
+        >
+          +
+        </FocusButton>
+      </div>
     </div>
   );
 }

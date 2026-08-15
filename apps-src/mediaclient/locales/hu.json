@@ -162,7 +162,8 @@
     "subOffset": "Felirat eltolás",
     "searchLanguage": "Keresés nyelve",
     "searchResults": "Találatok",
-    "back": "Vissza"
+    "back": "Vissza",
+    "searchAdded": "Hozzáadva ehhez a filmhez"
   },
   "profiles": {
     "title": "Ki néz?",

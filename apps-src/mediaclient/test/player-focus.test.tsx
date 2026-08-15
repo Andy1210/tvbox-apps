@@ -352,7 +352,7 @@ describe("the chapter strip", () => {
           extras: [],
           reviews: [],
           scores: [],
-          versions: [{ index: 0, label: "1080p", partId: "1", audio: [], subtitles: [] }],
+          versions: [{ mediaIndex: 0, label: "1080p", partId: "1", audio: [], subtitles: [] }],
           chapters: [
             { index: 1, startMs: 0, endMs: 600_000 },
             { index: 2, startMs: 600_000, endMs: 1_200_000 },
@@ -452,5 +452,78 @@ describe("the chapter strip", () => {
     await remote.down();
     await settle();
     expect(getCurrentFocusKey()).toBe("pb-playpause");
+  });
+});
+
+describe("the chapter strip, once it is open", () => {
+  const withChapters = (): void => {
+    usePlayer.setState({
+      current: {
+        item,
+        decision: { url: "http://x/s.m3u8", session: "s", transcoded: false },
+        markers: [{ type: "intro", startMs: 700_000, endMs: 800_000 }],
+        detail: {
+          id: "m1",
+          kind: "movie",
+          title: "Film",
+          roles: [],
+          extras: [],
+          reviews: [],
+          scores: [],
+          versions: [{ mediaIndex: 0, label: "1080p", partId: "1", audio: [], subtitles: [] }],
+          chapters: [
+            { index: 1, startMs: 0, endMs: 600_000 },
+            { index: 2, startMs: 600_000, endMs: 1_200_000 },
+          ],
+        },
+        choice: { version: 0 },
+      } as never,
+      positionMs: 650_000,
+      overlay: true,
+    });
+  };
+
+  const open = async (): Promise<void> => {
+    await act(async () => setFocus("pb-playpause"));
+    await flushFocus();
+    await remote.down();
+    await settle();
+  };
+
+  it("keeps the cursor when a marker comes into range", async () => {
+    // The overlay re-checks "is this focus ours" whenever the skip button
+    // appears or goes away, and a chapter tile was not on that list - so a
+    // marker starting mid-browse threw the cursor to the resting anchor while
+    // the strip stayed drawn. From rest the arrows seek the film.
+    withChapters();
+    render(<Player />);
+    await settle();
+    await open();
+    expect(String(getCurrentFocusKey()).startsWith("ch-")).toBe(true);
+
+    // The playhead moves into the marker, which is what re-runs the check.
+    await act(async () => usePlayer.setState({ positionMs: 720_000 }));
+    await settle();
+
+    expect(String(getCurrentFocusKey()), "a marker must not take the cursor off the strip").toMatch(/^ch-/);
+  });
+
+  it("does not close itself under the cursor", async () => {
+    // Browsing thumbnails is not idling. The overlay hides after four seconds
+    // of no input and took the strip with it, dropping focus to rest - so the
+    // next Right jumped the film ten seconds instead of moving a chapter.
+    withChapters();
+    render(<Player />);
+    await settle();
+    await open();
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 4_600));
+    });
+    await settle();
+
+    expect(usePlayer.getState().overlay, "the overlay stays up while the strip is out").toBe(true);
+    expect(doesFocusableExist("chapters")).toBe(true);
+    expect(String(getCurrentFocusKey())).toMatch(/^ch-/);
   });
 });

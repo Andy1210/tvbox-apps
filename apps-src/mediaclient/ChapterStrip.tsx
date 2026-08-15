@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { useFocusableItem } from "@sdk";
-import { loadImage } from "./posters";
+import { artworkScale, loadImage } from "./posters";
 import { useApp } from "./state";
 import type { Chapter } from "./backends/types";
 
@@ -48,7 +48,11 @@ export function ChapterStrip({
 }): React.JSX.Element {
   // Which one is playing, so the strip opens pointing at where you are rather
   // than at the beginning of the film.
-  const at = chapters.findIndex((c) => positionMs >= c.startMs && positionMs < c.endMs);
+  // The last chapter that has STARTED, not the one whose range contains the
+  // playhead: a list can have gaps, and 8% of the films here that carry
+  // chapters carry only a "Credits" entry near the end - so a range test says
+  // "nowhere" for most of the running time.
+  const at = chapters.reduce((best, c, i) => (positionMs >= c.startMs ? i : best), -1);
   const here = chapters[at >= 0 ? at : 0];
 
   // A container with a KEY, so the overlay can send focus here without knowing
@@ -107,11 +111,12 @@ function ChapterTile({
     // The chapter's own thumbnail where the file carries one; the preview index
     // otherwise. Most files here carry neither a useful name nor a thumb, so
     // the index is the common path rather than the fallback.
-    const px = Math.round((TILE_VH / 100) * window.innerHeight * (16 / 9));
+    const px = Math.round((TILE_VH / 100) * window.innerHeight * (16 / 9) * artworkScale());
+    const h = Math.round((px * 9) / 16);
     const url = chapter.thumb
-      ? backend.artUrl(chapter.thumb)
+      ? backend.chapterThumbUrl(chapter.thumb, px, h)
       : partId
-        ? backend.previewUrl(partId, chapter.startMs, px, Math.round((px * 9) / 16))
+        ? backend.previewUrl(partId, chapter.startMs, px, h)
         : undefined;
     if (!url) return;
     void loadImage(url, backend.imageHeaders()).then((objectUrl) => {
@@ -127,19 +132,21 @@ function ChapterTile({
       ref={ref}
       type="button"
       className={`shrink-0 overflow-hidden rounded-[0.8vh] text-left transition-[outline] ${
-        focused ? "outline outline-[0.3vh] outline-white" : "outline-0"
+        focused ? "outline outline-[0.4vh] outline-white" : "outline-0"
       }`}
       style={{ width: `${(TILE_VH * 16) / 9}vh` }}
     >
       <div className="relative bg-white/10" style={{ height: `${TILE_VH}vh` }}>
         {src && <img src={src} alt="" className="h-full w-full object-cover" />}
-        {/* Where the film is now. The strip is a list of places, and without
-            this the only thing saying which one you are in is the bar above. */}
-        {playing && <div className="absolute inset-0 ring-[0.3vh] ring-inset ring-white/90" />}
+        {/* Where the film is now. A BAR along the bottom rather than a ring:
+            focus is a white outline around the whole tile, and a white ring
+            inside it is the same language at the same weight - side by side the
+            two read as one thing. A bar cannot be mistaken for a border. */}
+        {playing && <div className="absolute inset-x-0 bottom-0 h-[0.7vh] bg-white" />}
       </div>
       <div className="bg-black/70 px-[0.5vw] py-[0.3vh]">
-        <div className="truncate text-[1.5vh]">{chapter.title || clock(chapter.startMs)}</div>
-        {chapter.title ? <div className="text-[1.3vh] text-white/70 tabular-nums">{clock(chapter.startMs)}</div> : null}
+        <div className="truncate text-[1.9vh]">{chapter.title || clock(chapter.startMs)}</div>
+        {chapter.title ? <div className="text-[1.7vh] text-white/70 tabular-nums">{clock(chapter.startMs)}</div> : null}
       </div>
     </button>
   );

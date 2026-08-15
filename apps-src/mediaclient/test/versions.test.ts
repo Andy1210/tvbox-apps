@@ -42,7 +42,7 @@ describe("versions", () => {
     const [only] = toVersions(item([media({ langs: ["magyar"] })]));
     // With no choice to make, a label describing the file is noise.
     expect(only.label).toBe("?");
-    expect(only.index).toBe(0);
+    expect(only.mediaIndex).toBe(0);
   });
 
   it("names the language when that is what differs", () => {
@@ -157,5 +157,37 @@ describe("tracks", () => {
   it("composes a label when the server gives no display title", () => {
     const [v] = toVersions(withTracks);
     expect(v.audio[0].label).toBe("magyar · 5.1 · AC3");
+  });
+});
+
+describe("a title held as one media with two parts", () => {
+  it("gives each row its own place in the list", () => {
+    // Five films on this server are stored this way: one media entry, two
+    // parts. `versions` is one row per FILE, so the array runs 0,1 while the
+    // media index reads 0,0 - and the UI keyed its chips on the media index, so
+    // both claimed one focus key and the second disc could not be reached with
+    // a remote at all. It also ticked both rows, played part 1 for both, and
+    // stored nothing in the version memory, which reads index 0 as "forget".
+    const v = toVersions({
+      Media: [
+        {
+          id: 1,
+          Part: [
+            { id: 108049, Stream: [] },
+            { id: 108050, Stream: [] },
+          ],
+        },
+      ],
+    } as never);
+
+    expect(v.length).toBe(2);
+    expect(
+      v.map((x) => x.mediaIndex),
+      "one media entry, so both rows carry its index",
+    ).toEqual([0, 0]);
+    expect(v.map((x) => x.partIndex)).toEqual([0, 1]);
+    // The array position is what every lookup uses, and it is what the chips
+    // must pass: versions[1] has to be the second FILE.
+    expect(v[1].partId).toBe("108050");
   });
 });

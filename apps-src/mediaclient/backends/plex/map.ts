@@ -571,7 +571,7 @@ export function toVersions(m: PlexMetadata & { Media?: PlexMediaEntry[] }): Medi
   }
 
   return media.map((x, index) => ({
-    index: m.Media?.indexOf(x.entry) ?? 0,
+    mediaIndex: m.Media?.indexOf(x.entry) ?? 0,
     partIndex: x.partIndex,
     parts: x.parts,
     partId: x.part.id !== undefined ? String(x.part.id) : undefined,

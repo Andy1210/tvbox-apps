@@ -25,17 +25,17 @@ const { useChosenVersion, rememberedVersion } = await import("../chosenVersion")
 beforeEach(() => {
   store.data.clear();
   store.writes = 0;
-  useChosenVersion.setState({ chosen: {} });
+  useChosenVersion.setState({ chosen: new Map() });
 });
 
 describe("the remembered version", () => {
   it("survives a restart", async () => {
     useChosenVersion.getState().remember("jurassic", 2);
     await Promise.resolve();
-    expect(store.data.get("chosen-versions")).toEqual({ jurassic: 2 });
+    expect(store.data.get("chosen-versions")).toEqual([["jurassic", 2]]);
 
     // A fresh start reads it back.
-    useChosenVersion.setState({ chosen: {} });
+    useChosenVersion.setState({ chosen: new Map() });
     await useChosenVersion.getState().load();
     expect(rememberedVersion("jurassic", 3)).toBe(2);
   });
@@ -55,32 +55,36 @@ describe("the remembered version", () => {
     // The first version is what the app picks anyway, so an entry for it changes
     // nothing and takes a slot from a real choice.
     useChosenVersion.getState().remember("a", 0);
-    expect(useChosenVersion.getState().chosen).toEqual({});
+    expect(useChosenVersion.getState().chosen.size).toBe(0);
 
     useChosenVersion.getState().remember("a", 1);
-    expect(useChosenVersion.getState().chosen).toEqual({ a: 1 });
+    expect([...useChosenVersion.getState().chosen]).toEqual([["a", 1]]);
     useChosenVersion.getState().remember("a", 0);
-    expect(useChosenVersion.getState().chosen, "going back to the first is a choice to forget").toEqual({});
+    expect(useChosenVersion.getState().chosen.size, "going back to the first is a choice to forget").toBe(0);
   });
 
   it("keeps the newest and drops what has not been touched", () => {
-    // Nothing ever removes an entry, so without a cap a library of 1,693 films
-    // grows a permanent record of every one ever started - and this file is read
-    // at startup before anything can be shown.
-    for (let i = 0; i < 320; i++) useChosenVersion.getState().remember(`film-${i}`, 1);
-    const kept = Object.keys(useChosenVersion.getState().chosen);
+    // Numeric ids, because that is what a Plex rating key IS - and it is the
+    // whole bug: a decimal integer string is an ARRAY INDEX key on a plain
+    // object, so `Object.keys` returns them numerically ascending whatever
+    // order they were written in. The first version of this test used
+    // "film-0"-style ids, which are not integer keys and therefore DO keep
+    // insertion order, so it passed against a map that evicted the lowest
+    // rating key - the oldest title in the library - instead of the least
+    // recently chosen.
+    for (let i = 0; i < 320; i++) useChosenVersion.getState().remember(String(90000 + i), 1);
+    const kept = [...useChosenVersion.getState().chosen.keys()];
     expect(kept.length).toBe(300);
-    expect(kept).toContain("film-319");
-    expect(kept).not.toContain("film-0");
+    expect(kept).toContain("90319");
+    expect(kept).not.toContain("90000");
 
-    // Choosing again makes a title the newest, so the next batch pushes out what
-    // was ahead of it rather than it. Fewer than the cap, or the batch alone
-    // fills the map and the assertion would prove nothing about age.
-    useChosenVersion.getState().remember("film-20", 2);
-    for (let i = 400; i < 400 + 250; i++) useChosenVersion.getState().remember(`film-${i}`, 1);
-    const after = Object.keys(useChosenVersion.getState().chosen);
-    expect(after, "re-choosing made it the newest").toContain("film-20");
-    expect(after, "and the ones ahead of it went first").not.toContain("film-100");
+    // A LOW rating key chosen last must survive a batch of high ones. Ordered
+    // by key rather than by age, this is the entry that goes first.
+    useChosenVersion.getState().remember("301", 2);
+    for (let i = 0; i < 250; i++) useChosenVersion.getState().remember(String(80000 + i), 1);
+    const after = [...useChosenVersion.getState().chosen.keys()];
+    expect(after, "the one chosen a moment ago must not be the one dropped").toContain("301");
+    expect(after, "and what was ahead of it went first").not.toContain("90100");
   });
 
   it("refuses a stored value that is not a version index", async () => {
@@ -89,7 +93,7 @@ describe("the remembered version", () => {
     // against no part at all.
     store.data.set("chosen-versions", { ok: 3, neg: -1, frac: 1.5, str: "2", huge: 1e9, "": 4, zero: 0 });
     await useChosenVersion.getState().load();
-    expect(useChosenVersion.getState().chosen).toEqual({ ok: 3 });
+    expect([...useChosenVersion.getState().chosen]).toEqual([["ok", 3]]);
   });
 });
 
@@ -109,10 +113,10 @@ describe("the detail screen", () => {
     setupRemote();
 
     const versions = [
-      { index: 0, label: "1080p 3D", partId: "1", parts: 1, partIndex: 0, audio: [], subtitles: [] },
-      { index: 1, label: "SD", partId: "2", parts: 1, partIndex: 0, audio: [], subtitles: [] },
+      { mediaIndex: 0, label: "1080p 3D", partId: "1", parts: 1, partIndex: 0, audio: [], subtitles: [] },
+      { mediaIndex: 1, label: "SD", partId: "2", parts: 1, partIndex: 0, audio: [], subtitles: [] },
     ];
-    useChosenVersion.setState({ chosen: { jw: 1 } });
+    useChosenVersion.setState({ chosen: new Map([["jw", 1]]) });
     useApp.setState({
       backend: {
         kind: "plex",
@@ -153,5 +157,66 @@ describe("the detail screen", () => {
       (e) => (e.textContent ?? "").includes("·") && (e.textContent ?? "").length < 40,
     );
     expect(play?.textContent, "the button should offer the remembered file").toContain("SD");
+  });
+});
+
+describe("the version chips", () => {
+  it("give every file its own focus key", async () => {
+    // A film on two discs is one media entry and two rows. Keyed on the media
+    // index both chips claimed "detail-version-0", so the remote could not
+    // reach the second disc, both rows ticked, and Play started part 1 either
+    // way. Keyed on the array position they are separate things.
+    const { render, act } = await import("@testing-library/react");
+    const { configureI18n } = await import("@sdk");
+    const { doesFocusableExist } = await import("@noriginmedia/norigin-spatial-navigation");
+    const { Detail } = await import("../Detail");
+    const { useApp } = await import("../state");
+    const { setupRemote, flushFocus } = await import("./remote");
+    const en = (await import("../locales/en.json")).default;
+    const hu = (await import("../locales/hu.json")).default;
+    configureI18n({ hu, en }, { fallback: "en" });
+    setupRemote();
+
+    const versions = [
+      { mediaIndex: 0, partIndex: 0, parts: 2, label: "SD · 1/2", partId: "108049", audio: [], subtitles: [] },
+      { mediaIndex: 0, partIndex: 1, parts: 2, label: "SD · 2/2", partId: "108050", audio: [], subtitles: [] },
+    ];
+    useApp.setState({
+      backend: {
+        kind: "plex",
+        item: async () => ({
+          id: "46594",
+          kind: "movie",
+          title: "A döntő szavazat",
+          roles: [],
+          extras: [],
+          reviews: [],
+          scores: [],
+          chapters: [],
+          versions,
+        }),
+        children: async () => [],
+        posterUrl: () => undefined,
+        artUrl: () => undefined,
+        backdropUrl: () => undefined,
+        themeUrl: () => undefined,
+        imageHeaders: () => ({}),
+        markers: async () => [],
+      } as never,
+      screen: { name: "item", itemId: "46594" },
+      history: [],
+      failure: null,
+    });
+
+    render(<Detail itemId="46594" />);
+    for (let i = 0; i < 3; i++) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await flushFocus();
+    }
+
+    expect(doesFocusableExist("detail-version-0"), "the first disc").toBe(true);
+    expect(doesFocusableExist("detail-version-1"), "the second disc must be reachable too").toBe(true);
   });
 });

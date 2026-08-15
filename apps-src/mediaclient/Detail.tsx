@@ -433,9 +433,16 @@ export function Detail({
 
           <Scores scores={shown.scores} />
 
-          {/* Keyed on the item, so switching episodes builds a fresh one rather
+          {/* Rendered even with no text, and that is the point rather than an
+              oversight: a fixed height stops "two lines then six", but an
+              episode with NO synopsis removed the box entirely and moved
+              everything under it by ~11vh - which is the jump this was added to
+              stop. Whole seasons here are like that: 14 of Nodame Cantabile's
+              23 episodes carry no summary.
+
+              Keyed on the item, so switching episodes builds a fresh one rather
               than carrying the previous synopsis's opened state onto it. */}
-          {shown.summary && <Summary key={shown.id} text={shown.summary} />}
+          <Summary key={shown.id} text={shown.summary ?? ""} />
 
           {/* Not on a collection or a playlist: measured, resolveStream answers
               400 for both, so the button accepted OK and did nothing - and it
@@ -512,18 +519,22 @@ export function Detail({
           {detail.versions.length > 1 && (
             <div className="mt-[0.6vh] flex flex-wrap items-center gap-[0.8vw]">
               <span className="text-[1.7vh] text-fg-dim">{t("tracks.version")}</span>
-              {detail.versions.map((v) => (
+              {/* Keyed on the ARRAY POSITION, not on the version's own index -
+                  they are different numbers whenever one media entry holds two
+                  parts, and a film on two discs gave both chips the same focus
+                  key, so the second could not be reached with a remote. */}
+              {detail.versions.map((v, i) => (
                 <FocusButton
-                  key={v.index}
-                  focusKey={`detail-version-${v.index}`}
+                  key={i}
+                  focusKey={`detail-version-${i}`}
                   onEnter={() => {
-                    setVersion(v.index);
+                    setVersion(i);
                     // Remembered against the item, so the next time this title
                     // is opened it is already on the file this household
                     // actually watches - the 1080p copy of a film is sometimes
                     // a 3D encode, and picking round it every time is the app
                     // asking a question it has already been answered.
-                    useChosenVersion.getState().remember(detail.id, v.index);
+                    useChosenVersion.getState().remember(detail.id, i);
                   }}
                   // A check, not a ring and not a fill. A white ring is what
                   // focus looks like on every poster in this app, so a ringed
@@ -533,7 +544,7 @@ export function Detail({
                   // thing left that survives the chip turning solid white.
                   className="rounded-[0.8vh] bg-white/8 px-[1.4vw] py-[0.8vh] text-[1.8vh]"
                 >
-                  <span className="inline-block w-[1.4vw] shrink-0 text-center">{v.index === version ? "✓" : ""}</span>
+                  <span className="inline-block w-[1.4vw] shrink-0 text-center">{i === version ? "✓" : ""}</span>
                   {v.parts > 1
                     ? `${v.label} · ${t("tracks.part", { n: String(v.partIndex + 1), of: String(v.parts) })}`
                     : v.label}

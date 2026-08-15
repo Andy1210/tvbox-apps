@@ -87,7 +87,7 @@ export function Player(): React.JSX.Element | null {
     setSearchState("idle");
     setMenu(null);
   }, [current?.item.id]);
-  const [searchState, setSearchState] = useState<"idle" | "searching" | "unavailable" | "none">("idle");
+  const [searchState, setSearchState] = useState<"idle" | "searching" | "unavailable" | "none" | "added">("idle");
   const [foundSubs, setFoundSubs] = useState<Track[]>([]);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const held = useRef({ dir: 0, count: 0 });
@@ -102,6 +102,8 @@ export function Player(): React.JSX.Element | null {
    * thing to be asked for, not a thing to be dismissed.
    */
   const [chapters, setChapters] = useState(false);
+  const chaptersRef = useRef(false);
+  chaptersRef.current = chapters;
   const hasChaptersRef = useRef(false);
 
   const { ref, focusKey } = useFocusable({ focusKey: "player", saveLastFocusedChild: true, isFocusBoundary: true });
@@ -115,7 +117,7 @@ export function Player(): React.JSX.Element | null {
       if (hideTimer.current) clearTimeout(hideTimer.current);
       // Not while a cursor is out: hiding it leaves the film looking untouched
       // while OK still means "jump to a place you can no longer see".
-      if (usePlayer.getState().state === "playing" && usePlayer.getState().scrubMs === null) {
+      if (usePlayer.getState().state === "playing" && usePlayer.getState().scrubMs === null && !chaptersRef.current) {
         hideTimer.current = setTimeout(() => usePlayer.getState().showOverlay(false), IDLE_HIDE_MS);
       }
     };
@@ -140,7 +142,11 @@ export function Player(): React.JSX.Element | null {
     const rearmHide = (): void => {
       if (hideTimer.current) clearTimeout(hideTimer.current);
       const p = usePlayer.getState();
-      if (p.state === "playing" && p.scrubMs === null) {
+      // Browsing chapters is not idling. Without this the strip closed under the
+      // cursor after four seconds of looking at the pictures - which is what
+      // looking at pictures takes - and dropped focus to rest, so the next Right
+      // jumped the film ten seconds instead of moving to the next chapter.
+      if (p.state === "playing" && p.scrubMs === null && !chaptersRef.current) {
         hideTimer.current = setTimeout(() => usePlayer.getState().showOverlay(false), IDLE_HIDE_MS);
       }
     };
@@ -318,6 +324,11 @@ export function Player(): React.JSX.Element | null {
    */
   useEffect(() => {
     if (!chapters) return;
+    // The hide armed by the press that OPENED the strip is still running, and
+    // exempting the strip inside `rearmHide` only covers the next press - so
+    // without this the overlay took the strip down four seconds later with the
+    // cursor still in it.
+    if (hideTimer.current) clearTimeout(hideTimer.current);
     const id = setTimeout(() => setFocus("chapters"), 0);
     return () => clearTimeout(id);
   }, [chapters]);
@@ -425,7 +436,12 @@ export function Player(): React.JSX.Element | null {
     if (!current || menu) return;
     const id = setTimeout(() => {
       const key = getCurrentFocusKey();
-      const ours = key === IDLE_KEY || key === "scrub" || key?.startsWith("pb-") || key === "skip";
+      // `ch-` is in here for the same reason the others are: this effect re-runs
+      // when a marker comes into range, and a chapter tile that is not on the
+      // list is treated as somebody else's focus and thrown back to rest - with
+      // the strip still drawn, highlighted a moment ago, answering nothing.
+      const ours =
+        key === IDLE_KEY || key === "scrub" || key?.startsWith("pb-") || key?.startsWith("ch-") || key === "skip";
       if (!key || !ours || !doesFocusableExist(key)) setFocus(IDLE_KEY);
     }, 0);
     return () => clearTimeout(id);
@@ -498,7 +514,12 @@ export function Player(): React.JSX.Element | null {
     const downloadSubtitle = async (track: Track): Promise<void> => {
       try {
         await backend!.addSubtitle(current.item.id, track.id);
+        // Says so, rather than emptying the column and running a round trip in
+        // silence. "none" is the state that renders a line; the results are
+        // gone either way, and a list that vanishes with no word reads as the
+        // press having failed.
         setFoundSubs([]);
+        setSearchState("added");
         // The item now has a track it did not have; without refetching, the
         // column would keep showing the old list and the download would look
         // like it did nothing.

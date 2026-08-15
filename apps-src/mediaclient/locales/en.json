@@ -162,7 +162,8 @@
     "subOffset": "Subtitle offset",
     "searchLanguage": "Search in",
     "searchResults": "Results",
-    "back": "Back"
+    "back": "Back",
+    "searchAdded": "Added to this title"
   },
   "profiles": {
     "title": "Who is watching?",
