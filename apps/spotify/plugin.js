@@ -245,6 +245,7 @@ module.exports = (host) => {
   // SECURITY.md already puts that inside the trust boundary — nor any process
   // running as this user, since both can read the daemon's environment.
   const eventKey = crypto.randomBytes(24).toString("hex");
+  let lastKeylessLog = 0;
   function fromOurDaemon(k) {
     const a = Buffer.from(String(k || ""));
     const b = Buffer.from(eventKey);
@@ -616,7 +617,17 @@ module.exports = (host) => {
         // Anything on this origin can post an event; only our daemon can say who
         // the box belongs to. A forged one would otherwise strand the transport
         // controls on a box "somebody else is driving".
-        host.log("spotify: ignored an event naming an account without the daemon key");
+        //
+        // Logged at most once a minute. The other way to get here is a librespot
+        // that outlived the shell that started it (its environment holds the old
+        // key), and that one keeps sending: unthrottled it would write a line per
+        // player event, for as long as that daemon lives. The box still works -
+        // with no owner named, the device lists answer instead.
+        const now = Date.now();
+        if (now - lastKeylessLog > 60000) {
+          lastKeylessLog = now;
+          host.log("spotify: ignoring events that name an account without the daemon key");
+        }
         delete ev.user_name;
       }
       delete ev.key;
