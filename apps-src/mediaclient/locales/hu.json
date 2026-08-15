@@ -67,7 +67,7 @@
     "runtimeM": "{m} p",
     "markWatched": "Jelöld nézettnek",
     "markUnwatched": "Jelöld nem nézettnek",
-    "inThis": "Ebben",
+    "inThis": "Tartalma",
     "emptyCollection": "Ebben a gyűjteményben nincs semmi.",
     "emptyPlaylist": "Ez a lejátszási lista üres."
   },
@@ -83,15 +83,11 @@
     "skipCredits": "Stáblista átugrása",
     "buffering": "Pufferelés…",
     "converting": "Átalakítás ehhez a boxhoz",
-    "hint": "Nyilakkal keresd meg a jelenetet · Le: gombok · Vissza: szünet",
-    "hintScrub": "A film még megy. OK: ugorj ide · Vissza vagy Le: mégse",
     "play": "Lejátszás",
     "pause": "Szünet",
     "tracks": "Hang és felirat",
     "quality": "Minőség",
     "qualityHint": "Válassz kisebbet, ha akadozik a kép. A szerver ilyenkor átalakítja a filmet.",
-    "hintPaused": "OK: folytasd · Le: gombok · Vissza: leállítás",
-    "hintButtons": "Balra-jobbra: válassz · OK: használd · Fel: idősáv",
     "q0": "Eredeti",
     "q1": "Nagyon jó",
     "q2": "Jó",
@@ -105,7 +101,7 @@
   "search": {
     "title": "Keresés",
     "placeholder": "Írj be egy címet",
-    "nothing": "Nincs találat erre: „{query}\".",
+    "nothing": "Nincs találat erre: „{query}”.",
     "episodes": "Epizódok"
   },
   "settings": {
@@ -142,7 +138,7 @@
     "moveDown": "Lejjebb",
     "rowShown": "Látszik",
     "rowHidden": "Rejtve",
-    "rowVisible": "Sor",
+    "rowVisible": "Mutasd",
     "themeMusic": "Sorozatok főcímzenéje",
     "themeMusicHint": "A sorozat saját zenéje szól, amíg nézegeted. Kétszer megy le, aztán elhallgat."
   },

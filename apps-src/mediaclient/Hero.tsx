@@ -134,7 +134,7 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
 
           {art && (
             <div
-              className="pointer-events-none fixed top-0 right-0 h-[62vh] w-[58vw]"
+              className="pointer-events-none fixed top-0 right-0 h-[68vh] w-[58vw]"
               aria-hidden="true"
               style={{
                 // A circle, not an ellipse: an ellipse stretched to the box takes
