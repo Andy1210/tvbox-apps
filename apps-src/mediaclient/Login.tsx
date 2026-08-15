@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
+import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, Osk, useI18n } from "@sdk";
 import { beginDeviceLogin } from "./backends/plex/auth";
 import { beginQuickConnect, quickConnectAvailable, serverInfo } from "./backends/jellyfin/auth";
 import { normaliseAddress } from "./backends/jellyfin/address";
 import { deviceName, getIdentity } from "./identity";
-import { useInitialFocus } from "./focus";
+import { useFocusFallback } from "./focus";
 import { useApp } from "./state";
 import { readJson, writeJson } from "./storage";
 import { log } from "./redact";
@@ -103,6 +104,12 @@ export function Login(): React.JSX.Element {
           });
         }
         if (!live) return;
+        // A login without a code is not a login. Nothing else checks it, and
+        // the code screen reads the value character by character for the screen
+        // reader - so an answer from a proxy, a captive portal or a server
+        // having a bad day took the whole screen down with it rather than
+        // saying anything.
+        if (!login?.code || !login.url) throw new Error("the server answered without a code");
 
         setPhase({ name: "waiting", code: login.code, url: login.url });
         // Plex answers with a bare host and path; Jellyfin with a whole URL.
@@ -143,15 +150,32 @@ export function Login(): React.JSX.Element {
 
   const done = phase.name === "expired" || phase.name === "failed";
   const waiting = phase.name === "waiting" || phase.name === "starting" || phase.name === "checking";
-  // The retry only exists once the code has died, and nothing else on this
-  // screen is pressable - so it has to be given focus the moment it appears, or
-  // the first screen a new box shows has a button that ignores the remote.
-  useInitialFocus("login-retry", done);
-  useInitialFocus("login-plex", phase.name === "choosing" && !server);
-  // And while a code is up, the only pressable thing is the way back to the
-  // chooser - which has to be reachable, or a box that signed out is stuck with
-  // whatever server it picked once.
-  useInitialFocus("login-other", waiting && !done);
+  const choosing = phase.name === "choosing" && !server;
+
+  /**
+   * What the remote is pointing at, decided per screen rather than per mount.
+   *
+   * This component is five screens in a row - chooser, keyboard, code, expired,
+   * failed - and `useInitialFocus` fires ONCE in a component's life, which is
+   * right for a screen that loads once and wrong here: coming back to the
+   * chooser from the code screen left focus on a button that unmounts in the
+   * same commit, so the remote did nothing at all. Nothing errors, and a mouse
+   * still works, which is how it reached a television.
+   */
+  const wants = choosing ? "login-plex" : done ? "login-retry" : server ? "login-other" : undefined;
+  useEffect(() => {
+    if (!wants) return;
+    // The timeout is not a guess: `useFocusable` registers during its own
+    // effect, so a setFocus in a sibling effect of the same commit finds
+    // nothing there.
+    const t = setTimeout(() => setFocus(wants), 0);
+    return () => clearTimeout(t);
+  }, [wants]);
+  // And a backstop, because the failure mode of getting this wrong is a dead
+  // remote rather than a visible fault: any nav key with focus gone or on
+  // something that is not this screen's puts it back. Off while the keyboard is
+  // up, which owns focus itself.
+  useFocusFallback(wants, (k) => k.startsWith("login-"), phase.name !== "address");
 
   if (phase.name === "address") {
     return (
