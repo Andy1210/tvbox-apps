@@ -142,11 +142,16 @@ export function Login(): React.JSX.Element {
   };
 
   const done = phase.name === "expired" || phase.name === "failed";
+  const waiting = phase.name === "waiting" || phase.name === "starting" || phase.name === "checking";
   // The retry only exists once the code has died, and nothing else on this
   // screen is pressable - so it has to be given focus the moment it appears, or
   // the first screen a new box shows has a button that ignores the remote.
   useInitialFocus("login-retry", done);
   useInitialFocus("login-plex", phase.name === "choosing" && !server);
+  // And while a code is up, the only pressable thing is the way back to the
+  // chooser - which has to be reachable, or a box that signed out is stuck with
+  // whatever server it picked once.
+  useInitialFocus("login-other", waiting && !done);
 
   if (phase.name === "address") {
     return (
@@ -247,22 +252,27 @@ export function Login(): React.JSX.Element {
                 {t("login.changeAddress")}
               </FocusButton>
             )}
-            {/* The way back out of a wrong choice. Without it a box that picked
-                the wrong server has no route to the other one that does not go
-                through reinstalling the app. */}
-            <FocusButton
-              focusKey="login-other"
-              onEnter={() => {
-                setServer(null);
-                setServerName(null);
-                setPhase({ name: "choosing" });
-              }}
-              className="rounded-[1vh] bg-white/10 px-[3vw] py-[1.6vh] text-[2.2vh]"
-            >
-              {t("login.otherServer")}
-            </FocusButton>
           </div>
         </>
+      )}
+
+      {/* The way back out of a choice, wherever the screen has got to.
+          Signing out leaves the chosen server remembered - a box signs back
+          into the same one nearly every time - so without this the code screen
+          was a dead end: no way to pick the other server until the code
+          expired. */}
+      {server && (waiting || done) && (
+        <FocusButton
+          focusKey="login-other"
+          onEnter={() => {
+            setServer(null);
+            setServerName(null);
+            setPhase({ name: "choosing" });
+          }}
+          className="rounded-[1vh] bg-white/10 px-[3vw] py-[1.4vh] text-[2vh] text-fg-dim"
+        >
+          {t("login.otherServer")}
+        </FocusButton>
       )}
     </div>
   );

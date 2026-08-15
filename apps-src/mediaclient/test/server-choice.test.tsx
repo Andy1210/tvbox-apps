@@ -130,3 +130,41 @@ describe("an address as somebody types it", () => {
     expect(normaliseAddress("http://")).toBe("");
   });
 });
+
+describe("changing the server after a sign-out", () => {
+  /** A Jellyfin server that answers everything the code screen asks for. */
+  function stubServer(): void {
+    vi.stubGlobal("fetch", async (url: string) => {
+      const u = String(url);
+      const body = u.includes("/QuickConnect/Enabled")
+        ? "true"
+        : u.includes("/QuickConnect/Initiate")
+          ? JSON.stringify({ Authenticated: false, Secret: "s", Code: "123456" })
+          : u.includes("/QuickConnect/Connect")
+            ? JSON.stringify({ Authenticated: false, Secret: "s", Code: "123456" })
+            : JSON.stringify({ ServerName: "Lucy", Version: "10.11.11", Id: "srv" });
+      return new Response(body, { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+  }
+
+  it("can be reached while the code is on screen, not only after it fails", async () => {
+    // Signing out leaves the remembered server in place - which is right, a box
+    // signs back into the same server nearly every time. But the way BACK was
+    // only on the failure screen, so after a sign-out the code screen was a dead
+    // end until the code expired: no way to pick the other server at all.
+    store.set("server", JSON.stringify({ kind: "jellyfin", baseUrl: "http://192.168.1.19:8096" }));
+    stubServer();
+
+    const { Login } = await import("../Login");
+    const { container } = render(<Login />);
+    await waitFor(() => expect(container.textContent).toContain("123456"));
+
+    await setFocus("login-other");
+    await act(async () => {
+      await remote.ok();
+    });
+
+    await waitFor(() => expect(container.textContent).toContain(en.login.chooseServer));
+    vi.unstubAllGlobals();
+  });
+});
