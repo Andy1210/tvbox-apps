@@ -73,6 +73,15 @@ interface PlayerState {
       audio?: number;
       subtitle?: number | "none";
       maxBitrateKbps?: number;
+      /**
+       * The list this was started FROM, if any.
+       *
+       * A playlist is a running order, and it wins over what an item happens to
+       * belong to: an episode played from a playlist is followed by the next
+       * thing in the PLAYLIST, not by the next episode of its series - and a
+       * film, which belongs to nothing, gets a next at all.
+       */
+      queue?: MediaItem[];
     },
   ): Promise<void>;
   /** Switch version, audio or subtitles without losing the place. */
@@ -104,6 +113,8 @@ interface PlayerState {
    * season it was started from.
    */
   siblings: { prev?: MediaItem; next?: MediaItem };
+  /** The list playback is following, when it was started from one. */
+  queue?: MediaItem[];
   playSibling(which: "prev" | "next"): void;
   /**
    * The episode that will start by itself, and when.
@@ -149,7 +160,9 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   playSibling(which) {
     const item = get().siblings[which];
     if (!item || !currentBackend) return;
-    void get().play(currentBackend, item, { resume: false });
+    // The queue travels with the move, or stepping once through a playlist
+    // would land on an item that no longer knows it is in one.
+    void get().play(currentBackend, item, { resume: false, queue: get().queue });
   },
 
   async play(backend, item, opts) {
@@ -170,11 +183,22 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // not the others.
     set({ siblings: {} });
     get().cancelUpNext();
-    if (item.kind === "episode" && item.parentId) {
+
+    const queue = opts?.queue;
+    const inQueue = queue ? queue.findIndex((q) => q.id === item.id) : -1;
+    set({ queue });
+    if (inQueue >= 0 && queue) {
+      set({ siblings: { prev: queue[inQueue - 1], next: queue[inQueue + 1] } });
+    } else if (item.kind === "episode" && item.parentId) {
+      // No list to follow, so the series is the list: this is the carry-on
+      // watching route, and a search result, and a person's credits.
+      const started = item.id;
       void backend
         .children(item.parentId)
         .then((kids) => {
-          const at = kids.findIndex((k) => k.id === item.id);
+          // The answer can land after somebody has moved on.
+          if (get().current?.item.id !== started) return;
+          const at = kids.findIndex((k) => k.id === started);
           if (at >= 0) set({ siblings: { prev: kids[at - 1], next: kids[at + 1] } });
         })
         .catch(() => {
