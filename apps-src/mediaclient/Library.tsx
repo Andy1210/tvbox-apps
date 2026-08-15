@@ -45,6 +45,21 @@ interface Letter {
  * placeholders come into range; and there is an A-Z strip, because scrolling to
  * S with a D-pad is not a thing anyone will do twice.
  */
+/**
+ * Whether two scroll positions produce the same set of rendered rows.
+ *
+ * Both edges, not just the top: the bottom edge crosses a row boundary at a
+ * different offset whenever the viewport is not a whole number of rows, so
+ * quantising on the top alone would hold the last row back by up to one row.
+ */
+function sameWindow(a: number, b: number, rowHeight: number, viewport: number): boolean {
+  if (rowHeight <= 0) return a === b;
+  return (
+    Math.floor(a / rowHeight) === Math.floor(b / rowHeight) &&
+    Math.ceil((a + viewport) / rowHeight) === Math.ceil((b + viewport) / rowHeight)
+  );
+}
+
 export function Library({ libraryId, title }: { libraryId: string; title: string }): React.JSX.Element {
   const { t } = useI18n();
   const backend = useApp((s) => s.backend);
@@ -440,7 +455,18 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
               scroller.current = node;
               (gridRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
             }}
-            onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+            // Only when the WINDOW changes, not on every scroll event. The two
+            // rows below are the whole use of `scrollTop`, and they move a row
+            // at a time - but a scroll event fires per frame, so an animated
+            // scroll re-rendered the entire grid about thirty times per press
+            // instead of once. That is what made a smooth scroll feel worse
+            // than an instant one on a Pi: the animation was fine, the work
+            // underneath it was not. Returning the previous value tells React
+            // there is nothing to do.
+            onScroll={(e) => {
+              const top = e.currentTarget.scrollTop;
+              setScrollTop((prev) => (sameWindow(prev, top, rowHeight, viewport) ? prev : top));
+            }}
             // scroll-padding for the same reason the other screens have it: the
             // bottom row would otherwise land flush against the edge, which is
             // inside TV overscan on some sets.
