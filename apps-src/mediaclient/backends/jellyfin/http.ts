@@ -78,6 +78,32 @@ export class JellyfinHttpError extends Error {
   }
 }
 
+/**
+ * How long any one request may take.
+ *
+ * Nothing here is a long poll - the Plex backend has one and this protocol has
+ * none - so a request that has not answered in this long is a server that has
+ * gone away mid-connection, which TCP alone will sit on for minutes. A screen
+ * waiting on that shows a spinner with no end.
+ */
+const REQUEST_TIMEOUT_MS = 15_000;
+
+/** The caller's signal and the clock, whichever gives up first. */
+function bounded(signal?: AbortSignal): AbortSignal | undefined {
+  const A = AbortSignal as unknown as {
+    any?: (s: AbortSignal[]) => AbortSignal;
+    timeout?: (ms: number) => AbortSignal;
+  };
+  if (typeof A.timeout !== "function") return signal;
+  try {
+    const clock = A.timeout(REQUEST_TIMEOUT_MS);
+    if (!signal) return clock;
+    return typeof A.any === "function" ? A.any([signal, clock]) : signal;
+  } catch {
+    return signal;
+  }
+}
+
 export interface RequestOpts {
   method?: "GET" | "POST" | "PUT" | "DELETE";
   headers?: Record<string, string>;
@@ -123,7 +149,7 @@ export async function request<T>(
       method: opts.method || "GET",
       headers,
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-      signal: opts.signal,
+      signal: bounded(opts.signal),
     });
   } catch (e) {
     // A network failure and a refusal look the same to the caller, but only one

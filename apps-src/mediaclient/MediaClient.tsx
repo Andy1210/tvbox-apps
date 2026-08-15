@@ -68,6 +68,13 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   const picking = screen.name === "profiles" || screen.name === "login" || screen.name === "boot";
   useEffect(() => {
     if (!session || !identity || picking) return;
+    // Plex's protocol, not a general one: `player/proxy/poll` is a Plex route,
+    // and this loop reads a 401 as "signed out". Pointed at a Jellyfin server it
+    // would poll a path that does not exist, forever - and the day that server
+    // answered 401 instead of 404 it would sign the household out of it. A
+    // session with no `kind` is a Plex one written before there was a second
+    // backend, so it keeps the loop.
+    if (session.kind === "jellyfin") return;
     return startCompanion({
       baseUrl: session.baseUrl,
       token: session.token,

@@ -198,3 +198,44 @@ describe("changing the server after a sign-out", () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe("the remote control protocol", () => {
+  /** Every URL the app asks for while it is up. */
+  function watchFetch(): string[] {
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      seen.push(String(url));
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    return seen;
+  }
+
+  async function runWith(kind: Session["kind"]): Promise<string[]> {
+    const seen = watchFetch();
+    const { MediaClient } = await import("../MediaClient");
+    const { useApp } = await import("../state");
+    const { render, act } = await import("@testing-library/react");
+    useApp.setState({ session: session({ kind }), identity, screen: { name: "home" }, history: [], failure: null });
+    render(<MediaClient onExit={() => {}} />);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    vi.unstubAllGlobals();
+    return seen;
+  }
+
+  it("is not started against a Jellyfin server", async () => {
+    // `player/proxy/poll` is a Plex route, and this loop reads a 401 as "signed
+    // out" - so pointed at a Jellyfin server it polls a path that does not
+    // exist forever, and the day that server answers 401 instead of 404 it
+    // signs the household out of it.
+    const seen = await runWith("jellyfin");
+    expect(seen.some((u) => u.includes("/player/proxy/poll"))).toBe(false);
+  });
+
+  it("is started for a session written before there was a second backend", async () => {
+    // No `kind` means Plex, and Plex is what this protocol is.
+    const seen = await runWith(undefined);
+    expect(seen.some((u) => u.includes("/player/proxy/poll"))).toBe(true);
+  });
+});
