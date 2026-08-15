@@ -102,6 +102,8 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   const [sortNames, setSortNames] = useState<Record<string, string>>({});
   /** Which letter search may still act. See jumpToLetter. */
   const jump = useRef(0);
+  /** The letter last pressed, until the cursor moves off it. See activeLetter. */
+  const [pressedLetter, setPressedLetter] = useState<string | null>(null);
   const [items, setItems] = useState<(MediaItem | null)[]>([]);
   const [total, setTotal] = useState<number | null>(null);
   /**
@@ -163,7 +165,6 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
   }, [measure]);
-
   useEffect(() => {
     if (!backend) return;
     let live = true;
@@ -239,6 +240,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     setItems([]);
     setTotal(null);
     setScrollTop(0);
+    setPressedLetter(null);
     // A different list, not a move within one: there is nothing to follow from
     // the old position to the new one.
     mover.to(0, false);
@@ -272,6 +274,8 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
       });
       mover.to(to, true);
       setScrollTop((prev) => (sameWindow(prev, to, rowHeight, viewport) ? prev : to));
+      // Moving by hand hands the mark back to whatever is on screen.
+      setPressedLetter(null);
     },
     [mover, viewport, windowH, rowHeight, rows],
   );
@@ -309,6 +313,26 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     saveLastFocusedChild: true,
     focusable: !failure,
   });
+
+  /**
+   * Hold the grid, and measure it as it arrives.
+   *
+   * Measured from the ref rather than only in an effect because the screen
+   * returns its loading state first: on mount there is no grid to measure, and
+   * nothing would run again once there is one.
+   *
+   * The callback is memoised because React re-attaches an INLINE ref on every
+   * render, which would force a layout per render for a number that changes
+   * about never.
+   */
+  const attachGrid = useCallback(
+    (node: HTMLDivElement | null) => {
+      scroller.current = node;
+      (gridRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
+      if (node) measure();
+    },
+    [measure, gridRef],
+  );
 
   const poster = (item: MediaItem): string | undefined =>
     backend?.posterUrl(item, 300 * artworkScale(), 450 * artworkScale());
@@ -450,8 +474,16 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
    * jump and keeps confirming while someone scrolls by hand - without it the
    * letter pressed looks exactly like the other twenty-eight and nothing on
    * screen says the press did anything.
+   *
+   * The letter pressed wins until the cursor moves, for two reasons. The row
+   * this reads is the first MOUNTED one, which is a row of overscan above the
+   * first visible one, so every item before the letter's own belongs to the
+   * letter before it - the mark was always one early. And in a library that
+   * fits on screen the grid cannot move at all, so the mark is the whole of the
+   * feedback: without this, pressing Z there changed nothing anywhere.
    */
   const activeLetter = ((): string | null => {
+    if (pressedLetter) return pressedLetter;
     const first = items[firstRow * COLUMNS];
     const t = (first?.sortTitle ?? first?.title ?? "").trim();
     if (!t) return null;
@@ -501,6 +533,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
         const to = maxOffset(row);
         mover.to(to, false);
         setScrollTop(to);
+        setPressedLetter(key);
       })
       .catch((e) => log.warn("letter jump failed", e));
   };
@@ -555,14 +588,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
 
         <div className="flex flex-1 overflow-hidden">
           <div
-            ref={(node) => {
-              scroller.current = node;
-              (gridRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
-              // Measured here rather than only in an effect: the screen returns
-              // its loading state first, so on mount there is no grid to
-              // measure and nothing would run again once there is one.
-              if (node) measure();
-            }}
+            ref={attachGrid}
             // Only when the WINDOW changes, not on every scroll event. The two
             // rows below are the whole use of `scrollTop`, and they move a row
             // at a time - but a scroll event fires per frame, so an animated

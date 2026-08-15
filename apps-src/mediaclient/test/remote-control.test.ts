@@ -54,7 +54,7 @@ beforeEach(() => {
     onPlayer: () => () => {},
     panel: { width: 1920, height: 1080 },
   };
-  useApp.setState({ backend: backend() as never });
+  useApp.setState({ backend: backend() as never, screen: { name: "home" }, history: [] });
 });
 
 afterEach(() => {
@@ -208,7 +208,7 @@ describe("a command from a controller", () => {
     // picker on screen.
     const slow = backend({
       item: async (id: string) => {
-        useApp.setState({ backend: backend() as never });
+        useApp.setState({ backend: backend() as never, screen: { name: "home" }, history: [] });
         return {
           id,
           kind: "movie",
@@ -242,5 +242,54 @@ describe("a command from a controller", () => {
 
     expect(played[0]?.startSec).toBe(5);
     expect(usePlayer.getState().positionMs).toBe(5000);
+  });
+
+  it("does not answer OK for a repeat command that started nothing", async () => {
+    // A play that fails before it tears the previous film down leaves `current`
+    // holding the OLD one - so a command naming the film already on screen
+    // matched it and was answered OK while nothing had happened.
+    await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "1" },
+    });
+    expect(usePlayer.getState().current?.item.id).toBe("27467");
+    (globalThis as unknown as { tvbox: { play?: unknown } }).tvbox.play = undefined;
+
+    const res = await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "2" },
+    });
+
+    expect(res).toMatchObject({ ok: false });
+  });
+  it("will not start a film while the profile picker is up", async () => {
+    // Opening the picker changes the SCREEN; the backend is replaced only when
+    // somebody is chosen, which is after the film would have started. So a
+    // command already in flight played as the previous person, reported their
+    // progress, and said nothing to anyone - the loop's teardown had already
+    // made the answer silent.
+    useApp.setState({
+      backend: backend({
+        item: async (id: string) => {
+          useApp.setState({ screen: { name: "profiles" } });
+          return {
+            id,
+            kind: "movie",
+            title: "Film",
+            versions: [{ mediaIndex: 0, label: "1080p", partId: "1", audio: [], subtitles: [] }],
+            roles: [],
+            extras: [],
+          };
+        },
+      }) as never,
+    });
+
+    const res = await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "1" },
+    });
+
+    expect(res).toMatchObject({ ok: false });
+    expect(played.length, "nothing may play as the person who is being replaced").toBe(0);
   });
 });

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { PlexBackend } from "../backends/plex/backend";
-import { redact, redactHeaders } from "../redact";
+import { redact, redactHeaders, redactString } from "../redact";
 import type { Session } from "../backends/types";
 
 // The account token is admin-level, and a media server wants it on every
@@ -255,5 +255,26 @@ describe("everything the credential is attached to", () => {
     const out = await backend.resolveStream("1", { session: "s" });
     expect(out.url).toContain("/library/parts/55784/1457113393/file.mkv");
     vi.unstubAllGlobals();
+  });
+});
+
+describe("a token with no query string in front of it", () => {
+  // The redactor keyed on `?`, `&` or `;` before the parameter name, which is
+  // where a URL puts it - and one of these strings does not go to a log file.
+  // The Companion refusal reason is handed to the controller by the server byte
+  // for byte, so whatever a message happens to quote travels with it.
+  it("is redacted at the start of a message, after a space, and as a header", () => {
+    expect(redactString("X-Plex-Token=abc123SECRETvalue failed")).not.toContain("abc123SECRETvalue");
+    expect(redactString("rejected: X-Plex-Token=abc123SECRETvalue")).not.toContain("abc123SECRETvalue");
+    expect(redactString("Authorization: Bearer abc123SECRETvalue")).not.toContain("abc123SECRETvalue");
+    expect(redactString("apikey=abc123SECRETvalue")).not.toContain("abc123SECRETvalue");
+  });
+
+  it("still redacts the query-string form, and leaves ordinary words alone", () => {
+    expect(redactString("http://s:32400/x?X-Plex-Token=abc123SECRETvalue")).not.toContain("abc123SECRETvalue");
+    // `token` unanchored would eat the word wherever it appears in prose, and
+    // these messages are meant to be readable.
+    expect(redactString("the token expired")).toBe("the token expired");
+    expect(redactString("nothing is playing")).toBe("nothing is playing");
   });
 });

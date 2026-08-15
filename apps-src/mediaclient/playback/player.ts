@@ -137,9 +137,13 @@ interface PlayerState {
    *
    * Resolves when the move has been attempted, so a caller that has to answer
    * for it - the remote control protocol has to - can check what happened
-   * instead of reporting success before anything was tried.
+   * instead of reporting success before anything was tried. It answers with the
+   * item it actually started, because `siblings` can be replaced while the
+   * previous item is still being torn down: a caller holding its own snapshot
+   * would then check the wrong episode and report a failure that never
+   * happened.
    */
-  playSibling(which: "prev" | "next"): Promise<void>;
+  playSibling(which: "prev" | "next"): Promise<MediaItem | undefined>;
   /**
    * The episode that will start by itself, and when.
    *
@@ -193,10 +197,11 @@ export const usePlayer = create<PlayerState>((set, get) => ({
 
   async playSibling(which) {
     const item = get().siblings[which];
-    if (!item || !currentBackend) return;
+    if (!item || !currentBackend) return undefined;
     // The queue travels with the move, or stepping once through a playlist
     // would land on an item that no longer knows it is in one.
     await get().play(currentBackend, item, { resume: false, queue: get().queue });
+    return item;
   },
 
   async play(backend, item, opts) {

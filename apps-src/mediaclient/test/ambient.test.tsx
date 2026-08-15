@@ -163,4 +163,37 @@ describe("the screensaver over the media client", () => {
 
     expect(requests.length).toBe(0);
   });
+  it("does not fire straight away when the window comes back after a long hide", async () => {
+    // The interval cannot keep the stamp fresh while hidden: Chromium throttles
+    // a hidden renderer to about one wake a minute and freezes it after a
+    // while. Measured on the box before the fix - a minute configured, twenty
+    // seconds delivered, because the first tick after coming back compared
+    // against a stamp from before the screensaver.
+    //
+    // Fake timers tick a hidden window exactly on schedule, which is why the
+    // test above passes either way: the throttling is modelled here by moving
+    // the clock WITHOUT running the timers.
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    await renderOnHome();
+
+    visibility.mockReturnValue("hidden");
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    // Seven minutes pass with no tick at all - the frozen renderer.
+    vi.setSystemTime(Date.now() + 7 * 60_000);
+
+    visibility.mockReturnValue("visible");
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await idle(1);
+    expect(requests.length, "the count starts again when the window returns").toBe(0);
+
+    // And it still fires once the person really has left it alone - just past
+    // the threshold from the RETURN, not from before the screensaver.
+    await idle(IDLE_MINUTES - 0.5);
+    expect(requests.length).toBe(1);
+    visibility.mockRestore();
+  });
 });
