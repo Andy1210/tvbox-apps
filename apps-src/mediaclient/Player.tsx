@@ -460,7 +460,9 @@ export function Player(): React.JSX.Element | null {
           <FocusButton
             focusKey="skip"
             onEnter={() => usePlayer.getState().skipMarker()}
-            className="rounded-[1vh] bg-black/70 px-[2.4vw] py-[1.4vh] text-[2.2vh] font-semibold [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]"
+            // No text shadow: this one has its own opaque ground, unlike the
+            // title and the clock, which are written straight over the film.
+            className="rounded-[1vh] bg-black/70 px-[2.4vw] py-[1.4vh] text-[2.2vh] font-semibold"
           >
             {t(marker!.type === "intro" ? "player.skipIntro" : "player.skipCredits")}
           </FocusButton>
