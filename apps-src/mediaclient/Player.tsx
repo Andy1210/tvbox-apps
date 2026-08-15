@@ -432,6 +432,13 @@ export function Player(): React.JSX.Element | null {
         // column would keep showing the old list and the download would look
         // like it did nothing.
         const fresh = await backend!.item(current.item.id);
+        // `current` here is the one captured when this handler was made, and a
+        // subtitle search goes out to a provider - seconds, during which an
+        // episode can end and the next one take its place. Writing the captured
+        // value back then restores the PREVIOUS film's item, decision and track
+        // choice over the running one, or resurrects a `current` after playback
+        // stopped, which leaves the page hidden with nothing playing.
+        if (usePlayer.getState().current?.item.id !== current.item.id) return;
         usePlayer.setState({ current: { ...current, detail: fresh } });
       } catch {
         setSearchState("unavailable");
