@@ -191,7 +191,6 @@ export interface PlayerState {
   shuffle: boolean;
   repeat: Repeat;
   device?: string; // the Spotify Connect device this answer is about, "" if not the box
-  account?: string; // whose account the box is playing as
   // The box is being driven by an account this box has not linked, so there is
   // no player of ours to read and no command of ours that could reach it.
   otherAccount?: boolean;
@@ -212,7 +211,6 @@ export async function playerState(): Promise<PlayerState> {
       shuffle: !!j.shuffle,
       repeat: (["off", "context", "track"].includes(j.repeat) ? j.repeat : "off") as Repeat,
       device: String(j.device || ""),
-      account: String(j.account || ""),
       otherAccount: !!j.other_account,
     };
   } catch {

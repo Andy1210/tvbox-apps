@@ -6,7 +6,7 @@
   "changelog": [
     {
       "version": "1.2.0",
-      "notes": "When you cast from your phone, the TV follows your account: the buttons on the TV now stop and skip the music that is actually playing on the box, instead of reaching whichever account was linked last."
+      "notes": "When you cast from your phone, the TV follows your account: the buttons on the TV now stop and skip the music that is actually playing on the box, instead of reaching whichever account was linked last. The play button always plays on the box, so pressing it while that account is listening on a phone moves the music here."
     },
     {
       "version": "1.1.0",

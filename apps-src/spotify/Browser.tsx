@@ -169,6 +169,21 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
     const id = setTimeout(() => setErr(""), 6000);
     return () => clearTimeout(id);
   }, [err]);
+  // The box changed hands while this screen was up, so these rows belong to
+  // somebody else's library now. Dropped rather than relabelled: the header would
+  // otherwise name one account over another's tracks, and pressing one of them
+  // sends that account's context to the new owner's player, which refuses it.
+  const shownFor = useRef(account);
+  useEffect(() => {
+    if (shownFor.current === account) return;
+    shownFor.current = account;
+    wanted.current = "";
+    setLiked(null);
+    setPlaylists(null);
+    setPlTracks(null);
+    setOpenPl(null);
+    setResults(null);
+  }, [account]);
   useEffect(() => {
     if (tab === "liked" && liked === null) fetchLiked().then(setLiked);
   }, [tab, liked]);

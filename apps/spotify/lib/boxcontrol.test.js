@@ -105,9 +105,13 @@ function serve({ boxOn, player, boxId }) {
 }
 
 // A cast is librespot telling us it changed hands; the id is the same string the
-// Web API calls that user's id.
+// Web API calls that user's id. `true` is the trust flag plugin.js passes for an
+// event carrying the daemon's key.
 function castFrom(user) {
-  bridge.handleEvent({ player_event: "session_connected", user_name: user });
+  bridge.handleEvent({ player_event: "session_connected", user_name: user }, true);
+}
+function disconnected(trusted) {
+  bridge.handleEvent({ player_event: "session_disconnected" }, trusted !== false);
 }
 // Back to a box nobody has cast to. `clear()` rather than a disconnect event,
 // because a disconnect does NOT unown the box (see spotify.js) — the daemon
@@ -337,7 +341,6 @@ test("the player behind the toggles is the box's, and says so only while the box
   assert.equal(s.device, "tvbox-test");
   assert.equal(s.shuffle, true);
   assert.equal(s.repeat, "track");
-  assert.equal(s.account, "Two");
   assert.ok(
     seen.some((r) => r.path === "/v1/me/player" && r.bearer === "at-r2"),
     "asked the account holding the box",
@@ -471,7 +474,7 @@ test("a guest who cast once and went home does not lock the TV out of its own bo
   castFrom("someone-elses-account");
   assert.equal((await api.control("pause")).error, "box_other_account", "while their session is up, it is theirs");
 
-  bridge.handleEvent({ player_event: "session_disconnected" }); // they stopped and left
+  disconnected(); // they stopped and left
 
   // The name is still the last thing librespot said, and it must not go on
   // refusing every press - nor block the adoption that gets the box back.
@@ -486,9 +489,31 @@ test("a forged event cannot un-name the box's owner either", async () => {
 
   // plugin.js strips `user_name` from an event that does not carry the daemon's
   // key, so what arrives here is a session_connected naming nobody.
-  bridge.handleEvent({ player_event: "session_connected" });
+  bridge.handleEvent({ player_event: "session_connected" }, false);
 
   assert.equal(bridge.sessionUser(), "u2", "the owner is what the daemon last said, not what a forger left out");
+});
+
+test("a forged disconnect cannot hand a stranger's live cast to the TV", async () => {
+  reset("u1");
+  serve({ boxOn: "" });
+  castFrom("someone-elses-account"); // a guest is casting right now
+  assert.equal((await api.play({ uris: ["spotify:track:x"] })).error, "box_other_account");
+
+  // Anything on this box's origin can post an event. Said without the daemon's
+  // key, "the session ended" would make the box read as free - and a free box is
+  // the one the play path may ADOPT, which restarts librespot into the
+  // household's account and ends the guest's cast.
+  bridge.handleEvent({ player_event: "session_disconnected" }, false);
+
+  assert.equal(
+    (await api.play({ uris: ["spotify:track:x"] })).error,
+    "box_other_account",
+    "still theirs, and still not adoptable",
+  );
+
+  disconnected(); // ...and when the daemon says it, the box is free again
+  assert.equal((await api.play({ uris: ["spotify:track:x"] })).error, "box_not_found");
 });
 
 test("an activation is a new device id, even when the same account activates again", async () => {
@@ -577,7 +602,7 @@ test("a disconnect gives the box back to the device lists rather than to the las
   reset("u1");
   serve({ boxOn: "u1" });
   castFrom("u2"); // u2 held it...
-  bridge.handleEvent({ player_event: "session_disconnected" }); // ...and dropped it
+  disconnected(); // ...and dropped it
   seen = [];
 
   const r = await api.control("pause");
@@ -594,7 +619,7 @@ test("removing the account holding the box is not a dead end either", async () =
   await api.control("pause");
 
   api.removeAccount("u2"); // Settings -> Accounts -> remove, or a refresh that 401s
-  bridge.handleEvent({ player_event: "session_disconnected" });
+  disconnected();
   serve({ boxOn: "" }); // and with it gone, nothing of ours can see the box
 
   assert.deepEqual(

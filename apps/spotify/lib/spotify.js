@@ -181,7 +181,13 @@ function applyPos(ev) {
   const p = Number(ev.position_ms);
   if (Number.isFinite(p)) state.position_ms = p;
 }
-function handleEvent(ev) {
+// `trusted` says the event came from the daemon this process started (plugin.js
+// checks the key). Only the two session events read it, and they read it for the
+// same reason: between them they decide whether the box is somebody's right now,
+// which is what stands between a stranger's live cast and a play from the TV
+// taking the box off them. The rest of an event draws a screen and has never been
+// authenticated.
+function handleEvent(ev, trusted) {
   const e = String(ev.player_event || "").toLowerCase();
   const now = Date.now();
   switch (e) {
@@ -197,7 +203,7 @@ function handleEvent(ev) {
     // activation follows a respawn, and the respawned daemon is a new device id
     // under the same name — one Spotify accepts and quietly does nothing with.
     case "session_connected":
-      if (!ev.user_name) return;
+      if (!trusted || !ev.user_name) return;
       sessionLive = true; // somebody's session is up, whoever they are
       sessionUser = String(ev.user_name);
       fireSessionUser();
@@ -208,8 +214,11 @@ function handleEvent(ev) {
       // owner's NAME is left alone: forgetting it here would drop the fast path
       // every time the music paused its way out of the room. What does end is the
       // session, and that is what decides whether a name we cannot use may hold
-      // the TV's buttons.
-      if (e === "session_disconnected") sessionLive = false;
+      // the TV's buttons — so it is lowered only by the daemon. Anyone on this
+      // origin can post one of these, and a forged one would say a box somebody
+      // is casting to is free: the play path adopts a free box, i.e. restarts
+      // librespot into the household's account, and the guest's session is gone.
+      if (e === "session_disconnected" && trusted) sessionLive = false;
       reset();
       casting = false;
       notify();

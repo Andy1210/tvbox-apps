@@ -613,7 +613,8 @@ module.exports = (host) => {
     },
     "POST /event": (req, res, ctx) => {
       const ev = ctx.body || {};
-      if (ev.user_name && !fromOurDaemon(ev.key)) {
+      const trusted = fromOurDaemon(ev.key);
+      if (ev.user_name && !trusted) {
         // Anything on this origin can post an event; only our daemon can say who
         // the box belongs to. A forged one would otherwise strand the transport
         // controls on a box "somebody else is driving".
@@ -631,7 +632,7 @@ module.exports = (host) => {
         delete ev.user_name;
       }
       delete ev.key;
-      spotify.handleEvent(ev);
+      spotify.handleEvent(ev, trusted);
       // The same events, raw: autoplay needs the event NAME (a context running out
       // is an end_of_track with nothing after it), which the rendered SSE state
       // does not carry.

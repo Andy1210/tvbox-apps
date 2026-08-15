@@ -754,11 +754,16 @@ async function boxOwner(needDevice) {
     }
     if (devId) return { state: "ours", account: named, devId };
   }
-  // Nobody named, but the last press already paid for a listing and the answer is
-  // still warm. Without this the sweep below runs on every /player poll — one
-  // listing per linked account, every twenty seconds, on the path the comment
-  // above calls the common one.
-  const cached = !named && cachedBoxOwner();
+  // Nobody named, but a recent read already paid for a listing. Without this the
+  // sweep below runs on every /player poll — one listing per linked account,
+  // every twenty seconds, on the path the comment above calls the common one.
+  //
+  // Reads only. A handover whose event was lost (the hook swallows a failed post)
+  // leaves this pointing at the previous account for up to the TTL, and a
+  // COMMAND sent there goes to a device id that no longer exists — which Spotify
+  // accepts and quietly does nothing with, i.e. a button that reports success.
+  // A press is a human-paced event and can afford to ask.
+  const cached = !named && !needDevice && cachedBoxOwner();
   if (cached) return cached;
   let found = null;
   try {
@@ -907,9 +912,16 @@ async function play({ contextUri, uris, offset, collection, keepActive }) {
   // we cannot address (a listing that failed, a 429) or by one we have not linked
   // says so instead: neither is a reason to take the box off somebody, and the
   // paused-cast case slips past adoption's is_playing guard.
-  if (found.state === "other") return { ok: false, error: "box_other_account" };
-  if (found.state === "unreachable" || (found.account && !found.devId)) return { ok: false, error: "box_unreachable" };
-  if (!found.account) return { ok: false, error: "box_not_found" };
+  // A refusal is not a play, so it must not go on suppressing the follow: a
+  // continuation that never started would otherwise keep the launcher off a real
+  // cast for the rest of the window.
+  const refuse = (error) => {
+    if (keepActive) suppressFollowUntil = 0;
+    return { ok: false, error };
+  };
+  if (found.state === "other") return refuse("box_other_account");
+  if (found.state === "unreachable" || (found.account && !found.devId)) return refuse("box_unreachable");
+  if (!found.account) return refuse("box_not_found");
   const { account: target, devId } = found;
   const q = `?device_id=${encodeURIComponent(devId)}`;
   const pos = Number(offset) > 0 ? Math.floor(Number(offset)) : 0;
@@ -934,14 +946,23 @@ async function play({ contextUri, uris, offset, collection, keepActive }) {
     if (r) console.warn("[spotify-api] context play refused (" + r.status + "); falling back to track uris");
     r = await attempt({ uris: (uris || []).slice(0, URIS_MAX) });
   }
-  if (!r) return { ok: false, error: "nothing to play" };
+  if (!r) return refuse("nothing to play");
   // Controls follow the playing account - but only when a person asked for this
   // playback. `keepActive` is for a play that starts on its own (autoplay):
   // switching the household's active account from a background timer would
   // silently change whose library the TV browses, with nothing on screen having
   // happened.
   if (r.ok && !keepActive) switchActiveTo(target.id, true);
-  return { ok: r.ok, error: r.ok ? "" : "HTTP " + r.status + " " + (r.body || "").slice(0, 80) };
+  if (!r.ok && keepActive) suppressFollowUntil = 0;
+  // WHICH account this went out as. Autoplay has to be able to stop the music it
+  // just started, and the account it guessed from boxPlayerState is not
+  // necessarily the one resolved here - a pause sent as the wrong one is
+  // refused, and the music it was cancelling keeps playing.
+  return {
+    ok: r.ok,
+    error: r.ok ? "" : "HTTP " + r.status + " " + (r.body || "").slice(0, 80),
+    account: target.id,
+  };
 }
 
 // Transport controls for the box. Two things decide where a press lands, and
@@ -1089,7 +1110,7 @@ async function playerState() {
     // this box's settings while the box is the device. Reported otherwise, the
     // TV would show a phone's shuffle as its own.
     const isBox = device.trim().toLowerCase() === spotifyBridge.deviceName().trim().toLowerCase();
-    if (!isBox) return { ...idle, account: owner.account.name || "" };
+    if (!isBox) return idle;
     return {
       ok: true,
       connected: true,
@@ -1098,7 +1119,6 @@ async function playerState() {
       shuffle: !!(p && p.shuffle_state),
       repeat: REPEAT_STATES.includes(p && p.repeat_state) ? p.repeat_state : "off",
       device,
-      account: owner.account.name || "",
     };
   } catch (e) {
     return { ...unknown, error: String(e.message || e) };

@@ -88,6 +88,15 @@ export function Spotify({ onExit }: { onExit: () => void }) {
   useEffect(() => {
     if (view === "now" || view === "browse") authStatus().then(setAuth);
   }, [view]);
+  // ...and re-read it while Browse is open, because the handover happens without
+  // anybody touching this screen. Naming the account is only worth doing if the
+  // name is the one whose rows are on display: stale, it is a false claim, and
+  // pressing a row would send that account's context to the new owner's player.
+  useEffect(() => {
+    if (view !== "browse") return;
+    const id = setInterval(() => void authStatus().then(setAuth), 10000);
+    return () => clearInterval(id);
+  }, [view]);
 
   // Not enabled yet: offer the one-tap enable screen, with a Settings entry so
   // the device name / account can be prepared first if desired.

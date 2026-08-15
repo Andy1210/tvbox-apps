@@ -208,11 +208,15 @@ function createAutoplay({ api, play, isEnabled, log, graceMs }) {
         if (cancelled()) {
           say("called off while starting; stopping it again");
           try {
-            // The same account the play went out as. A pause sent as the active
-            // one would reach a different player and leave this music running.
-            await api.control("pause", undefined, st.accountId);
+            // The account the play actually went out as, which play() reports -
+            // not the one this timer guessed from the player state a moment
+            // earlier. They differ whenever the box was resolved by a sweep, and
+            // a pause sent as the wrong account is refused outright, leaving the
+            // music somebody just cancelled still playing.
+            const stopped = await api.control("pause", undefined, r.account || st.accountId);
+            if (!stopped || !stopped.ok) say("could not stop it again: " + ((stopped && stopped.error) || "?"));
           } catch (e) {
-            /* nothing more to try */
+            say("could not stop it again: " + (e.message || e));
           }
           return;
         }

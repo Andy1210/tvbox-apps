@@ -366,7 +366,11 @@ export function NowPlaying({
             underneath is somebody's album art and amber prose on a bright photo
             is not readable from a sofa. */}
         {connected && (ctrlErr || player?.otherAccount) && (
-          <div className="absolute bottom-[3vh] left-1/2 -translate-x-1/2 z-30 max-w-[70vw] rounded-[1.4vh] bg-black/70 px-[2.4vw] py-[1.2vh] text-center text-[2.1vh] text-warn">
+          // left+right rather than a centred max-width: a shrink-to-fit box that
+          // starts at the middle of the screen has 50vw to work with, so the long
+          // messages (the Development Mode one is 190 characters) wrapped to four
+          // lines and grew up into the controls.
+          <div className="absolute bottom-[3vh] left-[15vw] right-[15vw] z-30 rounded-[1.4vh] bg-black/70 px-[2.4vw] py-[1.2vh] text-center text-[2.1vh] text-warn">
             {ctrlErr || t("spotify.otherAccount")}
           </div>
         )}
@@ -449,7 +453,10 @@ export function NowPlaying({
                   )}
                 </div>
               ) : null}
-              {connected && onThisBox && (repeat !== "off" || player?.shuffle) && (
+              {/* Hidden while a message is up: the strip is anchored to the
+                  bottom of the screen and this is the last thing above it, so the
+                  two share the same few vh and the backdrop would cover it. */}
+              {connected && onThisBox && !ctrlErr && !player?.otherAccount && (repeat !== "off" || player?.shuffle) && (
                 <div className="flex items-center gap-[1.2vw] text-[1.6vh] text-[#1DB954] mt-[0.2vh]">
                   {player?.shuffle && <span>{t("spotify.shuffle")}</span>}
                   {repeat !== "off" && <span>{t("spotify.repeat_" + repeat)}</span>}
