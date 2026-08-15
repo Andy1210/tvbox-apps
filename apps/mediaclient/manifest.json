@@ -5,8 +5,12 @@
     "hu": "Média",
     "en": "Media"
   },
-  "version": "0.51.1",
+  "version": "0.51.2",
   "changelog": [
+    {
+      "version": "0.51.2",
+      "notes": "The remote works on the server chooser again. Coming back to it from the code screen left nothing highlighted, and a screen with nothing highlighted ignores every press."
+    },
     {
       "version": "0.51.1",
       "notes": "After signing out you can pick the other server again. The choice is still remembered, so signing back into the same one asks nothing - but the way to the other one is now on the code screen too, instead of only appearing once the code had failed."

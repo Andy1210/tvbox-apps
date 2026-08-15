@@ -3,7 +3,7 @@ import { act, render, waitFor } from "@testing-library/react";
 import { configureI18n } from "@sdk";
 import { backendFor } from "../backends/factory";
 import { normaliseAddress } from "../backends/jellyfin/address";
-import { setupRemote, setFocus, remote } from "./remote";
+import { setupRemote, setFocus, remote, getCurrentFocusKey } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { Session } from "../backends/types";
@@ -165,6 +165,15 @@ describe("changing the server after a sign-out", () => {
     });
 
     await waitFor(() => expect(container.textContent).toContain(en.login.chooseServer));
+
+    // And the chooser has to be POINTED AT, not merely drawn. Spatial
+    // navigation never focuses anything by itself, so a screen nothing has
+    // focus on discards every press - the remote is dead and nothing errors.
+    await waitFor(() => expect(getCurrentFocusKey()).toBe("login-plex"));
+    await act(async () => {
+      await remote.ok();
+    });
+    await waitFor(() => expect(JSON.parse(store.get("server")!).kind).toBe("plex"));
     vi.unstubAllGlobals();
   });
 });
