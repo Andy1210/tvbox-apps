@@ -64,8 +64,17 @@ const FILTER_KEY = /^[A-Za-z][A-Za-z0-9_.]{0,40}$/;
 const COLLECTION_TYPE = 18;
 /** What a theme path looks like. Verified against every one this server offers. */
 const THEME_PATH = /^\/library\/metadata\/\d+\/theme\/\d+$/;
-/** What a playable part path looks like. Measured against this server's own. */
-const PART_PATH = /^\/library\/parts\/\d+\/\d+\/[^?#]*$/;
+/**
+ * What a playable part path looks like. Measured against this server's own.
+ *
+ * The last segment excludes `/` and `\` as well as `?` and `#`, so the tail is
+ * a file name and not a path: `[^?#]*` let `..` and a backslash through, which
+ * kept the URL on the server - a relative path cannot change a host - but aimed
+ * it at any endpoint on it, e.g. `/library/parts/1/2/../../../../:/scrobble`.
+ * That URL carries the token in its query and is handed to the mpv process, so
+ * "somewhere on the server" is not the bound this is here to state.
+ */
+const PART_PATH = /^\/library\/parts\/\d+\/\d+\/[^/\\?#]*$/;
 /**
  * A path the server may send us back to.
  *
@@ -653,18 +662,31 @@ export class PlexBackend implements MediaBackend {
    * An off-origin URL is dropped rather than fetched without the header. A
    * missing logo is a cosmetic loss; deciding per-URL whether to attach the
    * credential is a rule that gets forgotten at the next call site.
+   *
+   * The origin is read off the RESOLVED url, never off the string. Deciding
+   * "is this absolute?" with a pattern and then resolving with `new URL` means
+   * two parsers reading one value, and they disagree: the URL parser strips
+   * leading and trailing spaces and every tab, CR and LF ANYWHERE in the input
+   * before it parses. So "\thttps://elsewhere/x" is not absolute to a pattern
+   * and is absolute to the parser - it skipped the check and came back out of
+   * `buildUrl` as the host it named. Resolving first collapses the two readings
+   * into one, and covers the case-, protocol-relative- and scheme- variants of
+   * the same trick without a rule for each.
    */
   artUrl(path: string): string | undefined {
-    if (/^https?:\/\//i.test(path)) {
-      try {
-        if (new URL(path).origin === new URL(this.session.baseUrl).origin) return path;
-      } catch {
-        return undefined;
-      }
+    let url: URL;
+    try {
+      // The leading slash is stripped before resolving, as it always was, so a
+      // base that carries a path keeps it.
+      url = new URL(path.replace(/^\//, ""), this.base.endsWith("/") ? this.base : this.base + "/");
+    } catch {
+      return undefined;
+    }
+    if (url.origin !== new URL(this.session.baseUrl).origin) {
       log.warn("artwork URL points off the server; dropped");
       return undefined;
     }
-    return buildUrl(this.base, path.replace(/^\//, ""));
+    return url.toString();
   }
 
   // ---- playback ---------------------------------------------------------

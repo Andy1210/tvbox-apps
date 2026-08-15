@@ -144,7 +144,24 @@ describe("everything the credential is attached to", () => {
     // admin-level credential to whatever host the metadata named. What matters
     // is the ORIGIN of everything imageHeaders() is handed to.
     const ours = "http://192.168.1.10:32400";
-    const off = ["https://attacker.example.com/x", "http://192.168.1.99:32400/x", "//attacker.example.com/x"];
+    // The whitespace forms are here because the check used to be a pattern on
+    // the raw string while the resolution was `new URL`, and those two parsers
+    // read different values: the URL parser strips leading and trailing spaces
+    // and every tab, CR and LF anywhere in the input before parsing. So a tab
+    // in front of the scheme made the string "not absolute" to the pattern and
+    // absolute to the parser, and the off-origin check was skipped entirely.
+    const off = [
+      "https://attacker.example.com/x",
+      "http://192.168.1.99:32400/x",
+      "//attacker.example.com/x",
+      "\thttps://attacker.example.com/x",
+      " https://attacker.example.com/x",
+      "\nhttps://attacker.example.com/x",
+      "\rhttps://attacker.example.com/x",
+      "ht\ttps://attacker.example.com/x",
+      "\t//attacker.example.com/x",
+      "HTTPS://attacker.example.com/x",
+    ];
 
     for (const bad of off) {
       const art = backend.artUrl(bad);
@@ -179,5 +196,40 @@ describe("everything the credential is attached to", () => {
       theme: "/library/metadata/61161/theme/1784859962",
     });
     expect(ok).toContain("/library/metadata/61161/theme/1784859962");
+  });
+
+  it("will not let a part key reach another endpoint", async () => {
+    // This URL is the one the token has to travel in, because the player is a
+    // separate process that cannot send headers - so it ends up in mpv's argv
+    // and its log. Bounding it to the server is not enough: a relative path
+    // cannot change the host, so `..` kept the origin and aimed a tokened,
+    // state-changing GET at any endpoint on it.
+    const decision = (key: string): string =>
+      JSON.stringify({
+        MediaContainer: {
+          Metadata: [{ Media: [{ Part: [{ decision: "directplay", key }] }] }],
+        },
+      });
+
+    let body = "";
+    vi.stubGlobal(
+      "fetch",
+      async () => new Response(body, { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+
+    for (const bad of [
+      "/library/parts/1/2/../../../../:/scrobble",
+      "/library/parts/1/2/\\..\\..",
+      "/library/parts/1/2/sub/dir.mkv",
+    ]) {
+      body = decision(bad);
+      await expect(backend.resolveStream("1", { session: "s" })).rejects.toThrow();
+    }
+
+    // The real shape this server sends still plays.
+    body = decision("/library/parts/55784/1457113393/file.mkv");
+    const out = await backend.resolveStream("1", { session: "s" });
+    expect(out.url).toContain("/library/parts/55784/1457113393/file.mkv");
+    vi.unstubAllGlobals();
   });
 });
