@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
-import { useI18n, useBackspace, useConfigStore, FocusButton } from "@sdk";
+import { useI18n, useBackspace, useConfigStore, FocusButton, tvbox } from "@sdk";
 import { NowPlaying } from "./NowPlaying";
 import { SpotifySettings } from "./SpotifySettings";
 import { Browser } from "./Browser";
+import { useSpotifyStore } from "./stores/spotify";
 import { authStatus, setSpotifyEnabled, type AuthStatus } from "./api";
 
 // Opt-in screen shown until Spotify Connect is enabled on this box. The
@@ -97,6 +98,43 @@ export function Spotify({ onExit }: { onExit: () => void }) {
     const id = setInterval(() => void authStatus().then(setAuth), 10000);
     return () => clearInterval(id);
   }, [view]);
+
+  // The box's screensaver, over this app. While an app is in front the launcher's
+  // window is hidden and its idle timer is suppressed there on purpose - so
+  // nothing would ever come up over this screen, and "nothing is playing" is a
+  // static picture the box would hold all night. So we ask, on the same delay the
+  // person chose for the launcher, and only from the screen that has nothing to
+  // show: not while music is playing (that screen IS what to show), and not in
+  // the library or the settings, where somebody is in the middle of something.
+  //
+  // The keys land in this window, so this is where the counting has to happen -
+  // and the shell refuses the request unless this app really is the one on
+  // screen. Absent on a shell that predates the request, where it no-ops.
+  const ambient = useConfigStore((s) => s.config?.ambient);
+  const playing = useSpotifyStore((s) => !!s.state?.is_playing);
+  useEffect(() => {
+    const minutes = ambient?.idleMinutes ?? 0;
+    if (!ambient?.enabled || minutes <= 0 || view !== "now" || playing) return;
+    let last = Date.now();
+    const bump = () => {
+      last = Date.now();
+    };
+    window.addEventListener("keydown", bump, true);
+    window.addEventListener("pointermove", bump, true);
+    const id = setInterval(() => {
+      // A hidden window is not the screen anybody is looking at, and it receives
+      // none of the keys that would reset this - so its time does not count.
+      if (document.visibilityState !== "visible") return bump();
+      if (Date.now() - last < minutes * 60000) return;
+      last = Date.now(); // asked; start counting again rather than asking every tick
+      tvbox().ambient?.request();
+    }, 5000);
+    return () => {
+      window.removeEventListener("keydown", bump, true);
+      window.removeEventListener("pointermove", bump, true);
+      clearInterval(id);
+    };
+  }, [ambient?.enabled, ambient?.idleMinutes, view, playing]);
 
   // Not enabled yet: offer the one-tap enable screen, with a Settings entry so
   // the device name / account can be prepared first if desired.
