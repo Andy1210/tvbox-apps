@@ -30,9 +30,22 @@ const MAX_ENTRIES = 240;
  */
 export function artworkScale(): number {
   try {
-    const panel = window.tvbox?.panel;
-    if (!panel?.height || !window.innerHeight) return 1;
-    return Math.min(2, Math.max(1, panel.height / window.innerHeight));
+    // Device pixels per CSS pixel, which is exactly what an image request should
+    // be scaled by - and it is right whichever way the box is set up, without
+    // having to know which.
+    //
+    // It used to be `panel.height / window.innerHeight`, and on this hardware
+    // that is two different things: `panel` is the television's NATIVE mode
+    // (3840x2160 here) while the UI is deliberately capped at 1080p, so it
+    // returned 2. The framebuffer is 1080p either way - the compositor scans
+    // out 1080p and the TV upscales - so those extra pixels are decoded,
+    // uploaded as texture, and then thrown away by the downscale.
+    //
+    // Measured on the box: a poster was fetched at 600x900 for a tile drawn at
+    // 187x281, ten times the pixels that reach the screen, and the renderer
+    // spent about 100 ms of main thread per row of seven while scrolling.
+    const dpr = typeof window !== "undefined" ? window.devicePixelRatio : 1;
+    return Math.min(2, Math.max(1, Number.isFinite(dpr) && dpr > 0 ? dpr : 1));
   } catch {
     return 1;
   }
