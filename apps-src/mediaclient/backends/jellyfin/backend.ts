@@ -247,7 +247,12 @@ export class JellyfinBackend implements MediaBackend {
   private itemsQuery(libraryId: string, q: PageQuery): Record<string, string | number | boolean | undefined> {
     return {
       userId: this.userId,
-      parentId: libraryId,
+      // Box sets live in a folder of their own, so a query for them scoped to a
+      // film library answers with nothing - and nothing is what an empty grid
+      // looks like when it is working. The rule belongs here rather than in
+      // `collections()` alone, or the A-Z strip and every page after the first
+      // ask the wrong question.
+      parentId: q.of === "collections" ? undefined : libraryId,
       recursive: true,
       includeItemTypes: q.of === "collections" ? "BoxSet" : "Movie,Series",
       startIndex: q.offset,
@@ -408,7 +413,7 @@ export class JellyfinBackend implements MediaBackend {
     const res = await this.req<ItemsResponse>("Items", {
       query: {
         userId: this.userId,
-        parentId: libraryId,
+        parentId: of === "collections" ? undefined : libraryId,
         recursive: true,
         includeItemTypes: of === "collections" ? "BoxSet" : "Movie,Series",
         limit: 0,
@@ -681,6 +686,7 @@ export class JellyfinBackend implements MediaBackend {
     // them the row was simply a lie.
     const chosenSub =
       typeof opts.subtitle === "number" ? subs.find((t) => t.ordinal === opts.subtitle) : undefined;
+    if (info.PlaySessionId) this.stoppedItems.set(info.PlaySessionId, id);
     this.playing = { session: info.PlaySessionId, itemId: id, started: false, stopped: false };
     return {
       url,
@@ -690,7 +696,11 @@ export class JellyfinBackend implements MediaBackend {
       subtitlesBurnedIn: false,
       // The position of the file that IS playing, so the versions array can be
       // indexed with it.
-      version: opts.partId ? Math.max(0, sources.indexOf(source)) : (opts.version ?? 0),
+      // Found by id rather than by object: after a transcode is asked for a
+      // second time the source is a NEW object from that answer, so looking it
+      // up in the first answer's array returned -1 and the version reported as
+      // 0 - a file chosen deliberately, reported as the default one.
+      version: opts.partId ? Math.max(0, sources.findIndex((s3) => s3.Id === chosen.Id)) : (opts.version ?? 0),
       session: info.PlaySessionId,
       location: this.session.location,
       transcoded,
@@ -763,6 +773,11 @@ export class JellyfinBackend implements MediaBackend {
    * it issued - a stop with no item is a stop it cannot attribute, and its own
    * log says so ("PlaybackStopped reported with null media info").
    */
+  /** Sessions already stopped, so a late teardown says nothing twice. */
+  private stoppedSessions = new Set<string>();
+  /** What each session was playing, for a stop that arrives after the next
+   *  film has been set up. */
+  private stoppedItems = new Map<string, string>();
   /** Counted strips, per library and filter set. See `letters`. */
   private letterCache = new Map<string, Letter[]>();
   private playing: { session?: string; itemId?: string; started: boolean; stopped: boolean } = {
@@ -788,11 +803,20 @@ export class JellyfinBackend implements MediaBackend {
    * calls this, and the second one was the line in the log.
    */
   async endSession(session: string): Promise<void> {
-    if (this.playing.stopped && this.playing.session === session) return;
-    this.playing.stopped = true;
+    // Per SESSION, not per backend: a stop for the film that just ended can
+    // arrive after `resolveStream` has already set up the next one, and a flag
+    // shared between them marked the NEW session stopped while sending the old
+    // one with the new film's id.
+    if (this.stoppedSessions.has(session)) return;
+    this.stoppedSessions.add(session);
+    if (this.playing.session === session) this.playing.stopped = true;
+    const itemId = this.playing.session === session ? this.playing.itemId : this.stoppedItems.get(session);
+    // Without an item the server accepts the stop and cannot attribute it - its
+    // own log says so - and an `undefined` here is dropped by JSON entirely,
+    // which is the same thing said more quietly.
     await this.req("Sessions/Playing/Stopped", {
       method: "POST",
-      body: { PlaySessionId: session, ItemId: this.playing.itemId },
+      body: itemId ? { PlaySessionId: session, ItemId: itemId } : { PlaySessionId: session },
     }).catch((e) => log.warn("could not end the session", e));
   }
 

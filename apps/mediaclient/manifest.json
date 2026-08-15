@@ -5,8 +5,12 @@
     "hu": "Média",
     "en": "Media"
   },
-  "version": "0.53.1",
+  "version": "0.54.0",
   "changelog": [
+    {
+      "version": "0.54.0",
+      "notes": "A Jellyfin box no longer runs Plex's remote-control protocol in the background against it. Collections and the A-Z strip ask the right question on Jellyfin, a film chosen deliberately is reported as the one playing, and a request to a server that has gone away gives up instead of waiting for minutes."
+    },
     {
       "version": "0.53.1",
       "notes": "The Jellyfin sort and filter names follow the language the box is set to, instead of always being Hungarian."
