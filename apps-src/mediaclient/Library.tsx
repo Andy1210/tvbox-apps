@@ -168,7 +168,9 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     setItems([]);
     setTotal(null);
     setScrollTop(0);
-    scroller.current?.scrollTo({ top: 0 });
+    // A different list, not a move within one: there is nothing to follow from
+    // the old scroll position to the new one.
+    scroller.current?.scrollTo({ top: 0, behavior: "instant" });
     void loadPage(0);
   }, [loadPage]);
 
@@ -375,10 +377,14 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
         // Fetch before scrolling: the window is computed from scrollTop, so the
         // rows land already requested rather than as a screen of placeholders.
         void loadPage(Math.floor(offset / PAGE));
-        // Instant, not smooth. A jump to "S" in a library of 1,700 crosses most
-        // of the list, and animating that distance is a second of scenery on the
-        // way to somewhere the person already chose.
-        scroller.current?.scrollTo({ top: row * rowHeight });
+        // Instant, not smooth, and now stated rather than inherited: the
+        // scroller animates by default so the arrows feel like a surface, and
+        // this would have inherited that. A jump to "S" in a library of 1,700
+        // crosses most of the list, and animating that distance is a second of
+        // scenery on the way to somewhere the person already chose - through a
+        // window that is rebuilt on every frame of it, because the grid is
+        // virtualised on `scrollTop`.
+        scroller.current?.scrollTo({ top: row * rowHeight, behavior: "instant" });
       })
       .catch((e) => log.warn("letter jump failed", e));
   };
@@ -441,7 +447,15 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
             // Vertical padding, because the focus ring is drawn OUTSIDE the
             // tile's box and this element clips: without it the top row's ring
             // loses its upper edge against the scroller's own boundary.
-            className="no-scrollbar relative flex-1 overflow-y-auto px-[3vw] pt-[1.2vh] pb-[2vh] scroll-pt-[4vh] scroll-pb-[6vh]"
+            // `scroll-smooth` is for the arrows only, and it reaches them
+            // without a line of JavaScript: a tile's own scrollIntoView has no
+            // behaviour of its own, so it inherits this. One row at a time is a
+            // short distance, and animating it is what makes the grid feel like
+            // a surface being moved rather than a series of jump cuts.
+            //
+            // Everything that is not travel overrides it explicitly with
+            // `behavior: "instant"` - see the letter jump and the reset below.
+            className="no-scrollbar relative flex-1 scroll-smooth overflow-y-auto px-[3vw] pt-[1.2vh] pb-[2vh] scroll-pt-[4vh] scroll-pb-[6vh]"
           >
             {total === 0 && (
               <div className="flex h-full items-center justify-center text-[2.2vh] text-fg-dim">

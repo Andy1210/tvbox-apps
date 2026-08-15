@@ -253,3 +253,33 @@ describe("a row inside a scrolling column", () => {
     }
   });
 });
+
+describe("how the grid moves", () => {
+  it("animates the arrows and jumps the letters", () => {
+    // Two different gestures that both end in a scroll. Moving a row is travel -
+    // animating it is what makes the grid read as a surface rather than a series
+    // of jump cuts. A letter is a destination somebody already chose, and a jump
+    // to "S" in a library of 1,700 crosses most of the list; animating that is a
+    // second of scenery, through a window the virtualiser rebuilds on every
+    // frame of it.
+    //
+    // Asserted on the source, because the difference lives in CSS inheritance:
+    // a tile's own scrollIntoView passes no behaviour, so it takes the
+    // scroller's - which means the only thing separating the two gestures is
+    // that the jumps say `instant` and the arrows say nothing at all.
+    const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Library.tsx"), "utf8");
+
+    expect(src, "the scroller animates by default, which is what the arrows inherit").toContain("scroll-smooth");
+
+    // Every explicit scroll on this screen is a destination, so every one of
+    // them has to opt out of that.
+    const scrolls = src.match(/scroller\.current\?\.scrollTo\(\{[^}]*\}\)/g) ?? [];
+    expect(scrolls.length, "the explicit scrolls are still here").toBeGreaterThanOrEqual(2);
+    for (const call of scrolls) expect(call, call).toContain('behavior: "instant"');
+
+    // And a tile must not name a behaviour of its own, or it would stop
+    // inheriting and the arrows would go back to jump cuts.
+    const tile = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Tile.tsx"), "utf8");
+    expect(tile).not.toContain("behavior:");
+  });
+});
