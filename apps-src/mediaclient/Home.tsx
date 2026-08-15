@@ -170,7 +170,14 @@ export function Home(): React.JSX.Element {
           // the title above it, so a small padding parked the tile at the top
           // and pushed "Carry on watching" off the screen - and with it the
           // captions at the bottom of the same row.
-          className="no-scrollbar flex flex-1 flex-col gap-[2vh] overflow-y-auto pb-[2vh] scroll-pt-[11vh] scroll-pb-[6vh]"
+          // scroll-pt is exactly what puts the focused row's own top at the top
+          // of the view: its heading is 3vh, the gap under it 1vh, and the row's
+          // padding nets 2vh. More than that leaves a gap above it - and the
+          // row before it shows through as a stripe of half a caption.
+          //
+          // The mask is the belt to that brace: a row entering from above fades
+          // rather than appearing as a line of text with its top cut off.
+          className="no-scrollbar flex flex-1 flex-col gap-[2vh] overflow-y-auto pb-[2vh] scroll-pt-[6vh] scroll-pb-[6vh] [mask-image:linear-gradient(to_bottom,transparent_0,#000_2.5vh)]"
         >
           {/* Ordered by the household, not by us. A row switched off is not
           rendered at all rather than rendered empty, and one with nothing in it
