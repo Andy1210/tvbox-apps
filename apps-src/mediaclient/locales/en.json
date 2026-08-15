@@ -3,9 +3,6 @@
     "name": "English",
     "tag": "en-GB"
   },
-  "app": {
-    "name": "Media"
-  },
   "common": {
     "loading": "Loading…",
     "done": "Back",
