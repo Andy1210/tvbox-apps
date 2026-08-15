@@ -35,6 +35,8 @@ export function Search(): React.JSX.Element {
   const [typing, setTyping] = useState(true);
   const [results, setResults] = useState<MediaItem[] | null>(null);
   const [searching, setSearching] = useState(false);
+  /** Bumped by "try again", so a failed search can be run a second time. */
+  const [attempt, setAttempt] = useState(0);
   const generation = useRef(0);
 
   useEffect(() => {
@@ -42,6 +44,9 @@ export function Search(): React.JSX.Element {
     const q = query.trim();
     if (!q) {
       setResults(null);
+      // And the spinner goes with it: clearing the box while a search was in
+      // flight otherwise left it turning over an empty screen for ever.
+      setSearching(false);
       return;
     }
 
@@ -60,7 +65,7 @@ export function Search(): React.JSX.Element {
         setSearching(false);
         fail(classify(e));
       });
-  }, [backend, query, fail]);
+  }, [backend, query, fail, attempt]);
 
   // Not a place the arrows may land while the failure screen is up. The hook
   // runs above the early return that swaps this screen for the error, so the
@@ -86,7 +91,10 @@ export function Search(): React.JSX.Element {
     );
   }
 
-  if (failure) return <Message failure={failure} onRetry={() => setQuery((q) => `${q}`)} />;
+  // A counter, not the query: `setQuery(q => `${q}`)` produces an equal string,
+  // React bails out of the render, and the effect never re-fires - so "try
+  // again" did nothing at all after a failed search.
+  if (failure) return <Message failure={failure} onRetry={() => setAttempt((n) => n + 1)} />;
 
   const poster = (item: MediaItem): string | undefined =>
     backend?.posterUrl(item, 300 * artworkScale(), 450 * artworkScale());

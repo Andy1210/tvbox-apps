@@ -5,8 +5,12 @@
     "hu": "Média",
     "en": "Media"
   },
-  "version": "0.54.1",
+  "version": "0.54.2",
   "changelog": [
+    {
+      "version": "0.54.2",
+      "notes": "Try again after a failed search actually searches again. Clearing the search box stops the spinner. And a tile scrolling into place no longer shows the previous film's poster under the new film's title."
+    },
     {
       "version": "0.54.1",
       "notes": "Artwork keeps loading on a flaky network - a few stalled requests used to hold every slot for the rest of the evening - and nothing is fetched with the previous account's credentials after somebody signs out."

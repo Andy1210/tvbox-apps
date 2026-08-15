@@ -86,7 +86,12 @@ export function Tile({
   );
   const el = useRef<HTMLDivElement | null>(null);
   const backend = useApp((s) => s.backend);
-  const [src, setSrc] = useState<string | null>(null);
+  // The poster is held WITH the url it belongs to. A grid recycles a tile as it
+  // scrolls, and holding the blob alone meant the previous film's poster stayed
+  // on screen under the new film's title until the next one arrived - and stayed
+  // for good on an item that has no artwork at all.
+  const [art, setArt] = useState<{ url: string; src: string } | null>(null);
+  const src = art && art.url === posterUrl ? art.src : null;
   const [broken, setBroken] = useState(false);
   const pct = progress(item);
   const watched = !pct && (item.viewCount ?? 0) > 0;
@@ -114,7 +119,7 @@ export function Tile({
     setBroken(false);
     void loadImage(posterUrl, backend.imageHeaders()).then((url) => {
       if (!live) return;
-      if (url) setSrc(url);
+      if (url) setArt({ url: posterUrl, src: url });
       else setBroken(true);
     });
     return () => {
