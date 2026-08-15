@@ -165,19 +165,28 @@ describe("the coordinates a mover is driven with", () => {
 
 describe("where a moving rail is cut", () => {
   it("is cut at the inset, not at the screen edge", () => {
-    // `overflow` clips at the PADDING box, so a rail that carries its own
-    // horizontal inset stays visible inside that inset - a tile sliding out of
-    // the row ran all the way to the screen edge instead of disappearing at the
-    // margin. The inset therefore sits on a wrapper OUTSIDE the clipping
-    // element.
+    // `overflow` clips at the PADDING box, so a rail that carried its own 4vw
+    // inset on the element that clips stayed visible through those 4vw - a tile
+    // sliding out ran to the screen edge instead of disappearing at the margin.
+    // The inset lives on a wrapper outside the clip now.
     const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Row.tsx"), "utf8");
-    const clip = /className="no-scrollbar overflow-hidden([^"]*)"/.exec(src);
+    const clip = /className="no-scrollbar ([^"]*overflow-hidden[^"]*)"/.exec(src);
     expect(clip, "the clipping element is still identifiable").toBeTruthy();
-    expect(clip![1], "no horizontal inset on the element that clips").not.toMatch(/px-|pl-|pr-/);
-    // The vertical padding stays inside it, and for the opposite reason: it is
-    // the room a focus ring needs, and a ring drawn outside the tile's box is
-    // exactly what the clip would cut.
-    expect(clip![1]).toContain("py-");
+    const cls = clip![1];
+
+    // The inset is not on it.
+    expect(cls, "the 4vw inset belongs outside the clip").not.toContain("px-[4vw]");
+
+    // What horizontal padding it does carry is the focus ring's allowance, and
+    // it must be cancelled by a matching negative margin or the rail moves.
+    // Both axes, because the ring is drawn outside the tile's box on all four
+    // sides - losing the horizontal half is what cut the first and last tile's
+    // edges when the inset moved out.
+    const pad = /px-\[([\d.]+)vw\]/.exec(cls);
+    expect(pad, "the ring needs horizontal room inside the clip").toBeTruthy();
+    expect(Number(pad![1]), "an allowance, not an inset").toBeLessThan(2);
+    expect(cls).toContain(`-mx-[${pad![1]}vw]`);
+    expect(cls, "and the vertical half, for the same reason").toMatch(/py-\[[\d.]+vh\]/);
   });
 
   it("keeps the grid's own padding inside its clip, which is not a contradiction", () => {
