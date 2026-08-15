@@ -135,7 +135,11 @@ function Action({
   );
 }
 
-export function Browser({ onBack, onPlayed }: { onBack: () => void; onPlayed: () => void }) {
+// `account` is whose library this is. It is shown because it can change without
+// anybody choosing it here: the box follows whichever linked account is casting
+// to it, so the Liked Songs on this screen can be the other person's, and until
+// the name was on it nothing said so.
+export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onPlayed: () => void; account?: string }) {
   const { t } = useI18n();
   const { ref, focusKey } = useFocusable({ focusKey: "sp-browser" });
   const [tab, setTab] = useState<Tab>("liked");
@@ -165,6 +169,21 @@ export function Browser({ onBack, onPlayed }: { onBack: () => void; onPlayed: ()
     const id = setTimeout(() => setErr(""), 6000);
     return () => clearTimeout(id);
   }, [err]);
+  // The box changed hands while this screen was up, so these rows belong to
+  // somebody else's library now. Dropped rather than relabelled: the header would
+  // otherwise name one account over another's tracks, and pressing one of them
+  // sends that account's context to the new owner's player, which refuses it.
+  const shownFor = useRef(account);
+  useEffect(() => {
+    if (shownFor.current === account) return;
+    shownFor.current = account;
+    wanted.current = "";
+    setLiked(null);
+    setPlaylists(null);
+    setPlTracks(null);
+    setOpenPl(null);
+    setResults(null);
+  }, [account]);
   useEffect(() => {
     if (tab === "liked" && liked === null) fetchLiked().then(setLiked);
   }, [tab, liked]);
@@ -320,6 +339,9 @@ export function Browser({ onBack, onPlayed }: { onBack: () => void; onPlayed: ()
           {tabBtn("playlists", t("spotify.playlists"))}
           {tabBtn("search", t("spotify.search"))}
           {openPl && <div className="text-[1.9vh] text-fg-dim truncate ml-[1vw] self-center">· {openPl.name}</div>}
+          {account && (
+            <div className="text-[1.8vh] text-fg-dim truncate ml-auto self-center max-w-[26vw]">{account}</div>
+          )}
         </Tabs>
 
         {/* LIKED */}

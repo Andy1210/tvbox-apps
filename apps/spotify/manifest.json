@@ -2,8 +2,12 @@
   "id": "spotify",
   "manifestVersion": 1,
   "name": "Spotify",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "changelog": [
+    {
+      "version": "1.2.0",
+      "notes": "When you cast from your phone, the TV follows your account: the buttons on the TV now stop and skip the music that is actually playing on the box, instead of reaching whichever account was linked last. The play button always plays on the box, so pressing it while that account is listening on a phone moves the music here."
+    },
     {
       "version": "1.1.0",
       "notes": "Big playlists open quickly and stay usable: jump anywhere in the list including straight to the end, search inside it, and sort by title or artist. Track numbers show where you are. Shuffle and repeat buttons on the player, and shuffle-all on a playlist. Picking a track now plays the playlist from there, so what comes next follows the playlist. Liked Songs is no longer cut off at 200. Optional autoplay keeps similar music going when a playlist ends, and stops on its own."
@@ -42,9 +46,7 @@
     "hu": "A box Spotify Connect hangszóróvá válik: nyisd meg a Spotify-t a telefonodon vagy gépeden, és válaszd ki a boxot lejátszási eszköznek. Opcionális fiók-funkciók (ingyenes API-kulcsok) képernyős keresést, lejátszási listákat és kedvelt számokat adnak."
   },
   "requires": {
-    "bin": [
-      "librespot"
-    ],
+    "bin": ["librespot"],
     "download": [
       {
         "bin": "librespot",
@@ -61,8 +63,6 @@
   "runtime": {
     "serve": "local",
     "entry": "index.html",
-    "capabilities": [
-      "nav"
-    ]
+    "capabilities": ["nav"]
   }
 }
