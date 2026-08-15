@@ -69,6 +69,14 @@ interface PlayerState {
     item: MediaItem,
     opts?: {
       resume?: boolean;
+      /**
+       * Start here, in ms, whatever the server remembers.
+       *
+       * A controller's offset is an instruction, not a hint: using `resume` as
+       * well started the film at the item's own view offset and only then
+       * seeked, which begins a transcode in the wrong place.
+       */
+      startMs?: number;
       version?: number;
       audio?: number;
       subtitle?: number | "none";
@@ -257,7 +265,11 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       return;
     }
 
-    const resumeFrom = opts?.resume === false ? 0 : (item.viewOffsetMs ?? 0);
+    // An explicit start wins over both: a controller that names an offset has
+    // said where to begin, and the server's own resume point is then simply a
+    // different answer to a question nobody asked.
+    const resumeFrom =
+      opts?.startMs !== undefined ? opts.startMs : opts?.resume === false ? 0 : (item.viewOffsetMs ?? 0);
     // Seconds, and only when it is worth it: resuming a film four seconds in is
     // more surprising than starting it.
     const startSec = resumeFrom > 10_000 ? Math.floor(resumeFrom / 1000) : 0;

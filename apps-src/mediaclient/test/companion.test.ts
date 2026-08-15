@@ -55,7 +55,12 @@ describe("the companion poll", () => {
       polls += 1;
       return polls > 1 ? held(init) : xml('<MediaContainer size="0" />');
     });
-    const stop = startCompanion({ baseUrl: "http://s:32400", token: "t", id: ID, onCommand: () => {} });
+    const stop = startCompanion({
+      baseUrl: "http://s:32400",
+      token: "t",
+      id: ID,
+      onCommand: () => ({ ok: true as const }),
+    });
     await new Promise((r) => setTimeout(r, 10));
     stop();
 
@@ -92,7 +97,15 @@ describe("the companion poll", () => {
       return xml("");
     });
 
-    const stop = startCompanion({ baseUrl: "http://s:32400", token: "t", id: ID, onCommand: (c) => void seen.push(c) });
+    const stop = startCompanion({
+      baseUrl: "http://s:32400",
+      token: "t",
+      id: ID,
+      onCommand: (c) => {
+        seen.push(c);
+        return { ok: true as const };
+      },
+    });
     // Past the floor the loop keeps between polls, so the SECOND one has gone
     // out - that is where the acknowledged command id is visible.
     await new Promise((r) => setTimeout(r, 400));
@@ -104,7 +117,11 @@ describe("the companion poll", () => {
     expect(new URL(answer!.url).searchParams.get("commandID")).toBe("7");
     expect(answer!.init!.method).toBe("POST");
 
-    // And the next poll says how far it has got, or the server sends it again.
+    // The next poll carries the number, but only as bookkeeping: measured, the
+    // server DISCARDS the poll's commandID, keeps its own per-controller
+    // sequence and never resends an unacknowledged command. So this asserts
+    // what the client does, not a property of the server - the earlier comment
+    // here claimed the server would resend, and it does not.
     const second = calls.filter((c) => c.url.includes("/proxy/poll"))[1];
     expect(new URL(second.url).searchParams.get("commandID")).toBe("7");
   });
@@ -147,7 +164,12 @@ describe("the companion poll", () => {
       polls += 1;
       return polls > 1 ? held(init) : xml('<MediaContainer size="0" />');
     });
-    const stop = startCompanion({ baseUrl: "http://s:32400", token: "t", id: ID, onCommand: () => {} });
+    const stop = startCompanion({
+      baseUrl: "http://s:32400",
+      token: "t",
+      id: ID,
+      onCommand: () => ({ ok: true as const }),
+    });
     await new Promise((r) => setTimeout(r, 10));
     stop();
     const after = calls.length;

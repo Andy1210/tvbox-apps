@@ -1,0 +1,140 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { runCompanionCommand } from "../playback/remoteControl";
+import { usePlayer, resetPlayer } from "../playback/player";
+import { useApp } from "../state";
+import { __lifecycle } from "../lifecycle";
+import type { StreamDecision } from "../backends/types";
+
+/**
+ * What a command from a phone or from the assistant actually does.
+ *
+ * The shape of the arguments is the whole of the first test, and it is not a
+ * detail: the server does NOT forward a controller's query arguments under
+ * their own names. It prefixes each with `query` and capitalises, so `key`
+ * arrives as `queryKey`. Reading the plain name got undefined for every
+ * argument that mattered - playMedia did nothing at all - and the loop answered
+ * 200 regardless, so the assistant said the film was playing. 144 tests passed
+ * over that, because none of them was this one.
+ */
+
+const played: { url: string; startSec?: number }[] = [];
+
+function backend(over: Record<string, unknown> = {}): unknown {
+  return {
+    kind: "plex",
+    item: async (id: string) => ({
+      id,
+      kind: "movie",
+      title: `Item ${id}`,
+      versions: [{ mediaIndex: 0, label: "1080p", partId: "1", audio: [], subtitles: [] }],
+      roles: [],
+      extras: [],
+    }),
+    resolveStream: async (): Promise<StreamDecision> =>
+      ({ url: "http://s/f.mkv", audio: "auto", sub: "no", session: "s", transcoded: false, version: 0 }) as never,
+    markers: async () => [],
+    children: async () => [],
+    reportProgress: async () => {},
+    keepAlive: async () => {},
+    endSession: async () => {},
+    ...over,
+  };
+}
+
+beforeEach(() => {
+  played.length = 0;
+  __lifecycle.reset();
+  (globalThis as { window?: unknown }).window = globalThis;
+  (globalThis as unknown as { tvbox: unknown }).tvbox = {
+    play: (url: string, _s: unknown, startSec?: number) => played.push({ url, startSec }),
+    stop: () => {},
+    pause: () => {},
+    resume: () => {},
+    seek: () => {},
+    onPlayer: () => () => {},
+    panel: { width: 1920, height: 1080 },
+  };
+  useApp.setState({ backend: backend() as never });
+});
+
+afterEach(() => {
+  resetPlayer();
+  vi.useRealTimers();
+});
+
+describe("a command from a controller", () => {
+  it("reads the argument names the server really sends", async () => {
+    // Captured verbatim from the live server after the assistant sent its own
+    // playMedia: every argument is `query`-prefixed and CamelCased.
+    const res = await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: {
+        queryKey: "/library/metadata/27467",
+        queryOffset: "754000",
+        queryContainerKey: "/playQueues/20396",
+        queryType: "video",
+        commandID: "1",
+      },
+    });
+
+    expect(res, "the command must be honoured, not refused").toEqual({ ok: true });
+    expect(usePlayer.getState().current?.item.id).toBe("27467");
+    expect(played.length, "something actually started").toBe(1);
+  });
+
+  it("starts where the controller said, not where the server left off", async () => {
+    // `resume` used the item's own view offset and only then seeked, which
+    // begins a transcode in the wrong place and leaves the bar pointing
+    // somewhere the film never went.
+    useApp.setState({
+      backend: backend({
+        item: async (id: string) => ({
+          id,
+          kind: "movie",
+          title: "Film",
+          viewOffsetMs: 3_600_000,
+          versions: [{ mediaIndex: 0, label: "1080p", partId: "1", audio: [], subtitles: [] }],
+          roles: [],
+          extras: [],
+        }),
+      }) as never,
+    });
+
+    await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/1", queryOffset: "754000", commandID: "1" },
+    });
+
+    expect(played[0]?.startSec, "the controller's offset wins over the resume point").toBe(754);
+  });
+
+  it("refuses what it cannot do, rather than answering OK", async () => {
+    // The server proxies this answer to the controller verbatim and the
+    // assistant reads the code. Answering OK for something that did not happen
+    // is how a house says a film is playing over a launcher.
+    expect(await runCompanionCommand({ path: "/player/playback/pause", params: {} })).toEqual({
+      ok: false,
+      reason: expect.stringContaining("nothing is playing"),
+    });
+    expect(await runCompanionCommand({ path: "/player/playback/skipNext", params: {} })).toMatchObject({ ok: false });
+    expect(await runCompanionCommand({ path: "/player/mirror/details", params: {} })).toMatchObject({ ok: false });
+    expect(
+      await runCompanionCommand({ path: "/player/playback/playMedia", params: { queryKey: "/nope" } }),
+    ).toMatchObject({ ok: false });
+  });
+
+  it("will not start a film while the app is not on screen", async () => {
+    // The shell refuses to start the player for an app that is not in front,
+    // and it refuses SILENTLY - the bridge discards the result. So this played
+    // nothing, reported success, and left the box publishing "playing" over the
+    // launcher.
+    __lifecycle.release("hidden");
+    const res = await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "1" },
+    });
+
+    expect(res).toMatchObject({ ok: false });
+    expect(played.length, "nothing may be sent to the shared player").toBe(0);
+  });
+});

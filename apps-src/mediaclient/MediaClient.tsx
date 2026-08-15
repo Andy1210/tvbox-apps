@@ -61,15 +61,24 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
    */
   const session = useApp((s) => s.session);
   const identity = useApp((s) => s.identity);
+  // Not while the profile picker is up. The session and the backend are set in
+  // the same call that shows it, so the loop would otherwise start holding the
+  // PREVIOUS person's token - and a command would play as them, history and
+  // all, without passing the picker or its PIN.
+  const picking = screen.name === "profiles" || screen.name === "login" || screen.name === "boot";
   useEffect(() => {
-    if (!session || !identity) return;
+    if (!session || !identity || picking) return;
     return startCompanion({
       baseUrl: session.baseUrl,
       token: session.token,
       id: { clientId: identity.clientId, deviceName: deviceName(identity.host) },
       onCommand: runCompanionCommand,
+      // A rejected credential is what everything else in this app calls
+      // "signed out"; swallowing it here left the box polling with a dead
+      // token and nothing on screen.
+      onUnauthorized: () => useApp.getState().fail({ kind: "signed-out" }),
     });
-  }, [session, identity]);
+  }, [session, identity, picking]);
 
   useEffect(() => installNavSounds(), []);
   // Through the store rather than a one-shot fetch, so turning the setting off
