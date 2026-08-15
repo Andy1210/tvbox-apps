@@ -119,6 +119,12 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
    * the television while somebody types it into a phone - the one screen where
    * minutes without a press mean attention rather than absence.
    *
+   * The profile picker is NOT excluded, though it also asks for something: it
+   * shows nothing that has to be read off the screen, the window is hidden
+   * rather than closed, and a key brings it back with the PIN half-typed
+   * exactly as it was. A box left on the picker all night is the still picture
+   * this exists to prevent.
+   *
    * Absent on a shell older than this feature, where the call is simply not
    * there.
    */
@@ -133,6 +139,14 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
     };
     window.addEventListener("keydown", bump, true);
     window.addEventListener("pointermove", bump, true);
+    // The return edge is not optional. A hidden renderer's timers are throttled
+    // to roughly one wake a minute and frozen outright after a while, so the
+    // interval below cannot keep the stamp fresh while the screensaver is up:
+    // the first tick after coming back compared against a minutes-old stamp and
+    // asked again about twenty seconds later, whatever the person had
+    // configured. Measured on the box at a one-minute setting: 60 s asked for,
+    // 20 s delivered. The launcher's own idle timer carries the same guard.
+    document.addEventListener("visibilitychange", bump);
     const id = setInterval(() => {
       // A hidden window is not what anybody is looking at, and it receives none
       // of the keys that would reset this, so its time does not count.
@@ -144,6 +158,7 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
     return () => {
       window.removeEventListener("keydown", bump, true);
       window.removeEventListener("pointermove", bump, true);
+      document.removeEventListener("visibilitychange", bump);
       clearInterval(id);
     };
   }, [ambient?.enabled, ambient?.idleMinutes, playing, waitingToSignIn]);

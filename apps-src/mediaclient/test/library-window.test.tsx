@@ -32,6 +32,17 @@ setupRemote();
 const WINDOW_H = 1080;
 /** What the header leaves for the grid on the box, measured there. */
 const GRID_H = 983;
+/**
+ * The clip's own vertical padding, pt-[1.2vh] and pb-[2vh] at this height.
+ *
+ * Placed explicitly because happy-dom resolves a class to no padding at all:
+ * without it the subtraction under test is multiplied by zero and the numbers
+ * below would agree with a version that never did it.
+ */
+const PAD_TOP = 13;
+const PAD_BOTTOM = 22;
+/** What is actually visible: `overflow` clips at the padding box. */
+const VIEWPORT = GRID_H - PAD_TOP - PAD_BOTTOM;
 /** Must match Library.tsx. */
 const TILE_VH = 26;
 const ROW_GAP_VH = 8;
@@ -80,6 +91,8 @@ function sizeGrid(container: HTMLElement, height: number): HTMLElement {
   const clip = layer?.parentElement;
   if (!clip) throw new Error("the grid's clip is not in the tree");
   Object.defineProperty(clip, "clientHeight", { value: height, configurable: true });
+  clip.style.paddingTop = `${PAD_TOP}px`;
+  clip.style.paddingBottom = `${PAD_BOTTOM}px`;
   return clip;
 }
 
@@ -111,8 +124,7 @@ describe("the library's window", () => {
     await pressLetterZ(container);
     await waitFor(() => expect(offsetOf(container)).toBeGreaterThan(0));
 
-    const end = rows * rowHeight - GRID_H;
-    expect(offsetOf(container)).toBe(end);
+    expect(offsetOf(container)).toBe(rows * rowHeight - VIEWPORT);
     // Not the window's height: that is the old bug, and it is 97 px away.
     expect(offsetOf(container)).not.toBe(rows * rowHeight - WINDOW_H);
     expect(clip.clientHeight).toBe(GRID_H);
@@ -133,7 +145,33 @@ describe("the library's window", () => {
     // what leaves the screen mostly black because there is nothing below it.
     const unclamped = Math.floor(LAST_LETTER_OFFSET / COLUMNS) * rowHeight;
     expect(offsetOf(container)).toBeLessThan(unclamped);
-    expect(offsetOf(container)).toBe(rows * rowHeight - GRID_H);
+    expect(offsetOf(container)).toBe(rows * rowHeight - VIEWPORT);
+  });
+
+  it("marks the letter that was pressed, even when the grid cannot move", async () => {
+    // The strip reads the first MOUNTED row, which is a row of overscan above
+    // the first visible one, so the mark was always a letter early. And in a
+    // library that fits on screen the grid does not move at all - there the
+    // mark is the whole of the feedback, and it stayed on the first letter
+    // while the press appeared to do nothing.
+    const { container } = render(<Library libraryId="1" title="Movies" />);
+    await waitFor(() => expect(container.querySelector("[style*='will-change']")).toBeTruthy());
+    sizeGrid(container, GRID_H);
+    await act(async () => {
+      window.dispatchEvent(new Event("resize"));
+    });
+
+    await pressLetterZ(container);
+    await waitFor(() => expect(offsetOf(container)).toBeGreaterThan(0));
+
+    // `font-bold` is the mark and `text-fg-dim` is every other letter. The
+    // first version of this assertion accepted either, because `text-fg\b`
+    // matches `text-fg-dim` too - so it passed against the bug.
+    const letters = Array.from(container.querySelectorAll<HTMLElement>("div")).filter(
+      (d) => d.children.length === 0 && /^[A-Z#]$/.test(d.textContent?.trim() ?? ""),
+    );
+    const marked = letters.filter((d) => /font-bold/.test(d.className));
+    expect(marked.map((d) => d.textContent?.trim())).toEqual(["Z"]);
   });
 });
 

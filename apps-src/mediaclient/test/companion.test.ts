@@ -274,4 +274,34 @@ describe("the companion poll", () => {
 
     expect(calls.some((c) => c.url.includes("/proxy/response"))).toBe(false);
   });
+  it("does not put a control character inside the answer's XML", async () => {
+    // Measured against the live server: it forwards the attribute verbatim, and
+    // a NUL cannot be represented in XML 1.0 at all - not even as a character
+    // reference - so the controller is handed a document nothing on the other
+    // end has to accept.
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      if (String(url).includes("/proxy/poll")) {
+        if (calls.filter((c) => c.url.includes("/proxy/poll")).length > 1) return held(init);
+        return xml('<MediaContainer size="1"><Command path="/player/playback/pause" commandID="9" /></MediaContainer>');
+      }
+      return xml("");
+    });
+
+    const stop = startCompanion({
+      baseUrl: "http://s:32400",
+      token: "t",
+      id: ID,
+      onCommand: () => ({ ok: false as const, reason: "before\u0000\u0008\u001b after" }),
+    });
+    await new Promise((r) => setTimeout(r, 400));
+    stop();
+
+    const answer = calls.find((c) => c.url.includes("/proxy/response"));
+    expect(answer).toBeTruthy();
+    const body = String(answer!.init!.body);
+    expect(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(body), "no C0 control in the answer").toBe(false);
+    expect(body).toContain("before");
+    expect(body).toContain("after");
+  });
 });

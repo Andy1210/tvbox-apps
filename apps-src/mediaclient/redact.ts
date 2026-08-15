@@ -38,6 +38,18 @@ function scrub(s: string): string {
     // already concatenated.
     out = out.replace(new RegExp(`([?&;]${p}=)[^&;\\s"']*`, "gi"), "$1<redacted>");
   }
+  // And the same names where no query string put them there. A `?` or `&` in
+  // front was the whole test, so `X-Plex-Token=…` at the start of a message, or
+  // after a space, went through untouched - and one of these strings is handed
+  // to a third party rather than merely logged. `token` alone is deliberately
+  // not in this second pass: unanchored it would redact the word wherever it
+  // appears in prose.
+  for (const p of ["x-plex-token", "plextoken", "auth_token", "authtoken", "access_token", "accesstoken", "api_key", "apikey"]) {
+    out = out.replace(new RegExp(`\\b(${p}[=:]\\s*)[^&;\\s"']+`, "gi"), "$1<redacted>");
+  }
+  // `Authorization: Bearer <token>` is a header, not a parameter, and reaches a
+  // message whenever one is quoted back.
+  out = out.replace(/\b(bearer\s+)[\w.\-+/=]+/gi, "$1<redacted>");
   return out;
 }
 

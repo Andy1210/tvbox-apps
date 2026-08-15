@@ -102,6 +102,30 @@ describe("a rail whose list is replaced", () => {
     expect(offsetOf(container)).toBe(0);
   });
 
+  it("goes back for a new list that kept the same top hit", async () => {
+    // Refining a search - "star" to "star wars" - routinely keeps the first
+    // result and replaces everything behind it. Deciding on the first id alone
+    // read that as the same list, so the rail opened part-way into results
+    // nobody had looked at.
+    const { container, rerender } = render(
+      <Row id="search-films" title="Films" items={list("a", 12)} posterUrl={() => undefined} onSelect={() => {}} />,
+    );
+    size(container, 12);
+    await settle();
+    await setFocus("search-films-a11");
+    await settle();
+    expect(offsetOf(container)).toBeGreaterThan(0);
+
+    const refined = [list("a", 1)[0], ...list("z", 11)];
+    rerender(
+      <Row id="search-films" title="Films" items={refined} posterUrl={() => undefined} onSelect={() => {}} />,
+    );
+    size(container, 12);
+    await settle();
+
+    expect(offsetOf(container)).toBe(0);
+  });
+
   it("keeps its place when the same list only grows", async () => {
     const { container, rerender } = render(
       <Row id="row-episodes" title="Episodes" items={list("e", 12)} posterUrl={() => undefined} onSelect={() => {}} />,

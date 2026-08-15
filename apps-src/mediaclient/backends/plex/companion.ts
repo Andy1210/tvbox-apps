@@ -97,6 +97,8 @@ export function startCompanion(opts: {
   const once = runOnce();
   let commandId = 0;
   let backoff = RETRY_MS;
+  /** Whether the oversize refusal has already been said. */
+  let oversize = false;
 
   const headers = (): Record<string, string> => ({
     ...plexHeaders(opts.id, { "X-Plex-Token": opts.token }),
@@ -175,10 +177,16 @@ export function startCompanion(opts: {
         // inside the body that was refused, so all this can do is say why and
         // let the poll come round again.
         if (answer.over) {
-          log.warn("companion poll answered more than this player will read; ignored");
-          await sleep(MIN_POLL_MS);
+          // Backed off like any other failed poll, and said once. A server
+          // answering oversize does it every time, so at the poll floor this
+          // would be four log lines a second for as long as the box is on.
+          if (!oversize) log.warn("companion poll answered more than this player will read; ignored");
+          oversize = true;
+          await sleep(backoff);
+          backoff = Math.min(RETRY_MAX_MS, backoff * 2);
           continue;
         }
+        oversize = false;
         for (const cmd of parse(answer.text)) {
           const id = cmd.params.commandID;
           // Kept although THIS server ignores it: measured, PMS discards the
@@ -285,10 +293,18 @@ function base(url: string): string {
 function runOnce(limit = 256): { add(path: string): boolean } {
   const seen = new Set<string>();
   return {
-    add(path: string): boolean {
+    add(rawPath: string): boolean {
+      // Bounded, because the KEY is chosen by the server: 256 entries of an
+      // arbitrarily long path is a cap on the count and none on the memory -
+      // measured at 60 KB a path, 26 MiB. Two paths sharing a 256-character
+      // prefix are treated as one, which costs at most a command not run and
+      // needs a path far longer than any this protocol uses.
+      const path = rawPath.length > 256 ? rawPath.slice(0, 256) : rawPath;
       if (seen.has(path)) return false;
       // Full: the oldest is forgotten rather than the newest refused, because
-      // refusing would make the loop run an old command again on the next poll.
+      // refusing would drop a command that has never run. The cost is that a
+      // path can run a second time after 256 distinct ones - which needs a
+      // server sending unnumbered commands, and PMS numbers every one.
       if (seen.size >= limit) seen.delete(seen.values().next().value as string);
       seen.add(path);
       return true;
@@ -306,7 +322,14 @@ function runOnce(limit = 256): { add(path: string): boolean } {
  */
 async function boundedText(res: Response, max: number): Promise<{ text: string; over: boolean }> {
   const declared = Number(res.headers?.get?.("content-length") ?? "");
-  if (Number.isFinite(declared) && declared > max) return { text: "", over: true };
+  if (Number.isFinite(declared) && declared > max) {
+    // Cancelled, not merely abandoned: this path returns before the reader
+    // exists, so nothing else would ever close the body - and the loop asks
+    // again immediately, so an unclosed one per poll is a leak with a clock on
+    // it.
+    void (res as { body?: ReadableStream<Uint8Array> | null }).body?.cancel().catch(() => {});
+    return { text: "", over: true };
+  }
   const body = (res as { body?: ReadableStream<Uint8Array> | null }).body;
   // No stream to read: everything this runs on has one, so this is the shape a
   // test double takes. Bounded by the length check above and by the guard here.
@@ -345,9 +368,18 @@ async function withTimeout<T>(work: Promise<T> | T, ms: number): Promise<T> {
   }
 }
 
-/** An attribute value goes into XML the server hands on verbatim. */
+/**
+ * An attribute value goes into XML the server hands on verbatim.
+ *
+ * Control characters are dropped rather than escaped: most of C0 cannot be
+ * represented in XML 1.0 at all, not even as a character reference, and the
+ * server forwards whatever it is given - measured, a NUL in a reason reached
+ * the controller inside the attribute, which is a document no conforming parser
+ * on the other end has to accept.
+ */
 function escapeAttr(v: string): string {
-  return v.replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  // eslint-disable-next-line no-control-regex
+  return v.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ").replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }
 
 function sleep(ms: number): Promise<void> {
