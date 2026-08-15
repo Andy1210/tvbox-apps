@@ -267,12 +267,10 @@ export function Player(): React.JSX.Element | null {
             p.cancelScrub();
             setFocus("pb-playpause");
           } else if (fk?.startsWith("pb-") && hasChaptersRef.current) {
-            // Down from the buttons is the request for the chapters. Opening
-            // and focusing in one press, because a row that appears without
-            // taking the cursor costs a second press to reach and reads as the
-            // first press having done nothing.
+            // Down from the buttons is the request for the chapters. Only the
+            // opening happens here; the cursor is sent after they exist - see
+            // the effect below.
             setChapters(true);
-            setFocus("chapters");
           }
           break;
       }
@@ -301,6 +299,27 @@ export function Player(): React.JSX.Element | null {
   useEffect(() => {
     if (!overlay) setChapters(false);
   }, [overlay]);
+
+  /**
+   * The cursor follows the strip onto the screen, not into the gap before it.
+   *
+   * `setFocus` from the key handler ran against a strip that did not exist yet:
+   * the state change had not been rendered, and `useFocusable` registers in its
+   * own effect after that. norigin leaves a focus key it does not know in
+   * place, so the cursor sat on "chapters" - which starts with neither "ch-"
+   * nor "pb-", so the overlay read it as RESTING and the next arrows seeked the
+   * film instead of moving between thumbnails. The strip was on screen and the
+   * remote was pointing somewhere else.
+   *
+   * A timeout rather than a plain effect, for the same reason `useInitialFocus`
+   * uses one: a setFocus in a sibling effect of the same commit can still run
+   * before the focusables of that commit have registered.
+   */
+  useEffect(() => {
+    if (!chapters) return;
+    const id = setTimeout(() => setFocus("chapters"), 0);
+    return () => clearTimeout(id);
+  }, [chapters]);
 
   const marker = current ? usePlayer.getState().activeMarker() : null;
   const skippable = Boolean(marker && (marker.type === "intro" || (marker.type === "credits" && !marker.final)));
