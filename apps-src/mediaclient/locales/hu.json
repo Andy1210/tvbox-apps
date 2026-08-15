@@ -15,7 +15,19 @@
     "waiting": "Ez a képernyő magától továbblép, amint beírtad.",
     "expired": "A kód lejárt, mielőtt beírtad volna. Kérj újat, és próbáld meg ismét.",
     "failed": "Nem sikerült elérni a fiókodat. Ellenőrizd, hogy a box a hálózaton van-e, aztán próbáld újra.",
-    "retry": "Új kód kérése"
+    "retry": "Új kód kérése",
+    "chooseServer": "Melyik szerverre lépjünk be?",
+    "plexName": "Plex",
+    "jellyfinName": "Jellyfin",
+    "address": "A Jellyfin szerver címe",
+    "addressHint": "Például: 192.168.1.19:8096",
+    "checking": "Kapcsolódás a szerverhez…",
+    "found": "{name} · Jellyfin {version}",
+    "notFound": "Ezen a címen nem válaszol Jellyfin szerver. Ellenőrizd a címet, és próbáld újra.",
+    "quickConnectOff": "Ezen a Jellyfin szerveren ki van kapcsolva a Quick Connect, enélkül pedig a box nem tud kód nélkül belépni. Kapcsold be a szerver beállításaiban, aztán próbáld újra.",
+    "instructionJellyfin": "A telefonodon vagy a gépeden nyisd meg a(z) {url} címet, lépj be, és írd be ezt a kódot:",
+    "otherServer": "Másik szerver",
+    "changeAddress": "Cím módosítása"
   },
   "home": {
     "continue": "Folytasd, ahol abbahagytad",

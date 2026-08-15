@@ -6,8 +6,8 @@
 
 import { create } from "zustand";
 import type { MediaBackend, MediaItem, Session } from "./backends/types";
-import { PlexBackend } from "./backends/plex/backend";
-import { getIdentity, deviceName, type Identity } from "./identity";
+import { backendFor } from "./backends/factory";
+import { getIdentity, type Identity } from "./identity";
 import { readJson, writeJson, removeRaw } from "./storage";
 import { clearImages } from "./posters";
 import { resetPlayer } from "./playback/player";
@@ -127,7 +127,7 @@ export const useApp = create<State>((set, get) => ({
     // but the household still cannot be listed, and the way out is the sign-in
     // button the 401 puts on the picker.
     if (!saved.accountToken) saved.accountToken = saved.token;
-    const backend = new PlexBackend(saved, { clientId: identity.clientId, deviceName: deviceName(identity.host) });
+    const backend = backendFor(saved, identity);
     // On by default: a television that asks who is watching every single evening
     // is a television nobody uses. Off is for a household that shares one box
     // and does not want last night's viewer to inherit tonight's watch state.
@@ -167,7 +167,7 @@ export const useApp = create<State>((set, get) => ({
     resetPlayer();
     set({
       session: named,
-      backend: new PlexBackend(named, { clientId: identity!.clientId, deviceName: deviceName(identity!.host) }),
+      backend: backendFor(named, identity!),
       screen: { name: "home" },
       history: [],
       failure: null,
@@ -182,7 +182,7 @@ export const useApp = create<State>((set, get) => ({
 
   async signIn(session) {
     const identity = get().identity ?? (await getIdentity());
-    const backend = new PlexBackend(session, { clientId: identity.clientId, deviceName: deviceName(identity.host) });
+    const backend = backendFor(session, identity);
     const w = await writeJson(SESSION_KEY, session);
     if (!w.ok) log.warn("session not persisted; this sign-in will not survive a restart");
     set({ identity, session, backend, screen: { name: "home" }, history: [], failure: null });

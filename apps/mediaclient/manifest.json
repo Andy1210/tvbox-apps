@@ -5,8 +5,12 @@
     "hu": "Média",
     "en": "Media"
   },
-  "version": "0.50.1",
+  "version": "0.51.0",
   "changelog": [
+    {
+      "version": "0.51.0",
+      "notes": "The app can now sign into a Jellyfin server as well as a Plex one: it asks which at sign-in, and for Jellyfin you type the server's address once and approve a six-digit code in Jellyfin's own web page - no password on the television. Everything the box was already signed into keeps working exactly as it did."
+    },
     {
       "version": "0.50.1",
       "notes": "The screensaver now waits the whole time you asked for after it has been up a while - it was coming back about twenty seconds after the first button press. The A-Z strip marks the letter you pressed, which in a small library is the only sign the press did anything. A new search that happens to keep its top result opens at the beginning like any other. And a film asked for by voice can no longer start as whoever was signed in a moment ago while the profile picker is on screen."
