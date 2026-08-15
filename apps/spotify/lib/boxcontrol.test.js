@@ -407,6 +407,15 @@ test("music starting is enough to follow the box, with no session event at all",
   serve({ boxOn: "" });
   assert.equal(await api.followBox(), false);
   assert.equal(api.listAccounts().find((a) => a.active).id, "u1");
+
+  // ...and a name left over from the PREVIOUS session is not believed either:
+  // this runs because music started, which is the moment the owner changes, and
+  // the event that would have said so is the thing that can go missing.
+  reset("u1");
+  serve({ boxOn: "u2" });
+  castFrom("u1"); // stale: u1 held the box before this cast
+  assert.equal(await api.followBox(), true);
+  assert.equal(api.listAccounts().find((a) => a.active).id, "u2");
 });
 
 test("a respawned daemon is a new device id, and the old one is not reused", async () => {

@@ -827,7 +827,12 @@ function boxSignedInAs(userId) {
 // with a box that was not its. Music starting is the other moment worth asking
 // at, and the device lists answer it.
 async function followBox() {
-  const owner = await boxOwner(false);
+  // The CHECKED path, unlike the reads: this runs when music started, which is
+  // exactly the moment the owner may have changed, and the whole reason it exists
+  // is that the event announcing that can go missing. Believing a session user
+  // here without asking the device lists would keep the launcher on the account
+  // that held the box before the cast this is reacting to.
+  const owner = await boxOwner(true);
   return !!(owner.account && switchActiveTo(owner.account.id));
 }
 // What THE BOX is doing, which is a different question from what the active
