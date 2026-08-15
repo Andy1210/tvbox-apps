@@ -19,8 +19,13 @@
 module.exports.setup = function setup(ctx) {
   const panel = (ctx && ctx.panel) || null;
 
-  // Merge rather than assign: `window.tvbox` is the capability surface the
-  // preload already exposed, and replacing it would drop player/storage.
+  // A NEW object carrying the old one's contents, which is not the same thing as
+  // merging into it: the surface the preload exposed through contextBridge
+  // cannot be extended, so a property cannot simply be added to it. Every reader
+  // in this app and in the SDK looks `window.tvbox` up at call time rather than
+  // holding it, which is what makes replacing it safe - the values it already
+  // carried (player, storage, nav) are copied over, and dropping those is the
+  // failure this is written to avoid.
   if (typeof window !== "undefined") {
     window.tvbox = Object.assign({}, window.tvbox, {
       // { width, height } of the connected panel, or null when the shell could
