@@ -75,6 +75,15 @@ export function Player(): React.JSX.Element | null {
   // changeable: a film often has only an English subtitle, and someone may want
   // that one on purpose.
   const [searchLang, setSearchLang] = useState((locale ?? "en").slice(0, 2));
+
+  // Cleared when the film changes. The results and the "searching" state lived
+  // on across a change of item, so the next film's subtitle panel opened
+  // showing what was found for the last one - and offered to download it.
+  useEffect(() => {
+    setFoundSubs([]);
+    setSearchState("idle");
+    setMenu(null);
+  }, [current?.item.id]);
   const [searchState, setSearchState] = useState<"idle" | "searching" | "unavailable" | "none">("idle");
   const [foundSubs, setFoundSubs] = useState<Track[]>([]);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -173,6 +182,18 @@ export function Player(): React.JSX.Element | null {
           // With a button focused, OK belongs to it - otherwise one press would
           // both fire the button and toggle pause.
           if (!idle && !onBar) break;
+          // From rest, OK BRINGS THE OVERLAY UP rather than pausing. Pausing is
+          // the first thing a stray press does otherwise, and the controls are
+          // what someone reaching for the remote actually wants; the pause
+          // button is right there, already focused, so it is still one more
+          // press away.
+          if (idle && p.scrubMs === null) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!p.overlay) p.showOverlay(true);
+            setFocus("pb-playpause");
+            break;
+          }
           e.preventDefault();
           // Committing comes first: while the cursor is out, OK is the only way
           // to go where it is pointing, and pausing there would be an odd
@@ -317,6 +338,14 @@ export function Player(): React.JSX.Element | null {
       p.cancelScrub();
       return;
     }
+    // Then the overlay. Back means "undo the last thing I opened", and with the
+    // controls up that is the controls - pausing the film instead is an answer
+    // to a question nobody asked.
+    if (p.overlay) {
+      p.showOverlay(false);
+      setFocus(IDLE_KEY);
+      return;
+    }
     if (p.state === "playing") p.togglePause();
     else void p.stop();
   }, Boolean(current));
@@ -438,15 +467,6 @@ export function Player(): React.JSX.Element | null {
   // otherwise there is no way to tell how far you have wandered, or to get back.
   const playedPct = durationMs > 0 ? Math.min(100, ((seekTargetMs ?? positionMs) / durationMs) * 100) : 0;
   const partId = current.detail?.versions[current.choice.version]?.partId;
-  const onButtons = Boolean(getCurrentFocusKey()?.startsWith("pb-"));
-  const hintKey =
-    scrubMs !== null
-      ? "player.hintScrub"
-      : onButtons
-        ? "player.hintButtons"
-        : state === "paused"
-          ? "player.hintPaused"
-          : "player.hint";
 
   return (
     <FocusContext.Provider value={focusKey}>
@@ -513,7 +533,6 @@ export function Player(): React.JSX.Element | null {
               markers={current.markers}
               scrubbing={scrubMs !== null}
               partId={partId}
-              hintKey={hintKey}
             />
 
             <ButtonRow
@@ -559,7 +578,6 @@ function ScrubBar({
   markers,
   scrubbing,
   partId,
-  hintKey,
 }: {
   shown: number;
   pct: number;
@@ -568,9 +586,7 @@ function ScrubBar({
   markers: { type: string; startMs: number; endMs: number }[];
   scrubbing: boolean;
   partId?: string;
-  hintKey: string;
 }): React.JSX.Element {
-  const { t } = useI18n();
   // No scroll options: the overlay does not scroll, and asking the browser to
   // bring this into view drags the transparent page under the video.
   const { ref, focused } = useFocusableItem({ focusKey: "scrub" });
@@ -655,7 +671,6 @@ function ScrubBar({
           focus decides that, so a single fixed sentence was wrong in three of
           the four states - it still described jumping on Left and Right, which
           is the behaviour this screen no longer has. */}
-      <p className="text-[2vh] text-white/85 [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]">{t(hintKey)}</p>
     </div>
   );
 }
@@ -685,10 +700,13 @@ function ButtonRow({
   const { t } = useI18n();
   // Opaque enough to read against any frame, and above the 10-foot floor of
   // 2.22vh at 1080p.
-  const cls = "rounded-[1vh] bg-black/55 px-[2vw] py-[1.3vh] text-[2.4vh]";
+  // One shape for all of them, and big enough to be a target from a sofa. The
+  // transport three sit together in the middle, which is where a player puts
+  // them and where the cursor already is when the overlay opens.
+  const cls = "flex items-center justify-center rounded-full bg-black/55 px-[2vw] py-[1.4vh] text-[2.4vh]";
 
   return (
-    <div className="flex items-center gap-[1vw]">
+    <div className="flex items-center justify-center gap-[1.2vw]">
       {/* Episode stepping first, so the three transport controls sit together
           in the order a remote's own keys do. Only when there is one: a button
           that highlights and does nothing is worse than no button. */}

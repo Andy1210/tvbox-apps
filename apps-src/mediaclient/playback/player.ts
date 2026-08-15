@@ -131,6 +131,15 @@ let scheduler: PlaybackScheduler | null = null;
 /** A restart is in flight. See changeTracks. */
 let restarting = false;
 let upNextTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * Which play() call is current.
+ *
+ * The sibling lookup races the decision, and `current` cannot be the referee:
+ * it is set after three round trips while children() takes one, so checking
+ * against it rejected the legitimate answer nearly every time - and the routes
+ * that rely on the lookup lost their prev/next buttons entirely.
+ */
+let playToken = 0;
 /** Long enough to read the title, short enough not to be a wait. */
 const UP_NEXT_MS = 5_000;
 let unsubscribePlayer: (() => void) | null = null;
@@ -176,6 +185,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     await get().stop();
 
     currentBackend = backend;
+    playToken += 1;
     // The episodes either side, worked out HERE rather than by whoever pressed
     // play. A film can be started from a season screen, a carry-on-watching
     // row, a search result or a person's credits, and only one of those knew
@@ -192,12 +202,13 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     } else if (item.kind === "episode" && item.parentId) {
       // No list to follow, so the series is the list: this is the carry-on
       // watching route, and a search result, and a person's credits.
+      const mine = playToken;
       const started = item.id;
       void backend
         .children(item.parentId)
         .then((kids) => {
           // The answer can land after somebody has moved on.
-          if (get().current?.item.id !== started) return;
+          if (mine !== playToken) return;
           const at = kids.findIndex((k) => k.id === started);
           if (at >= 0) set({ siblings: { prev: kids[at - 1], next: kids[at + 1] } });
         })
@@ -543,6 +554,10 @@ async function handleFinished(reason: string | undefined, get: () => PlayerState
   const ranOut = !reason && nearEnd;
 
   const next = s.siblings.next;
+  // Whose ending this is. stop() below waits on two round trips, and the
+  // overlay is still up meanwhile - so "next episode" pressed over the closing
+  // credits starts something, and the countdown armed afterwards replaced it.
+  const mine = playToken;
   await get().stop();
 
   if (!ranOut) {
@@ -554,7 +569,7 @@ async function handleFinished(reason: string | undefined, get: () => PlayerState
   // itself, after a countdown anyone can stop. The screen underneath is the
   // season, so the countdown is drawn on the episode it is about to play -
   // there is nothing to invent, only something to point at.
-  if (!next) return;
+  if (!next || mine !== playToken) return;
   const backend = currentBackend;
   usePlayer.setState({ upNext: { item: next, at: Date.now() + UP_NEXT_MS } });
   if (upNextTimer) clearTimeout(upNextTimer);

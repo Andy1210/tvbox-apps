@@ -128,3 +128,35 @@ describe("what comes next", () => {
     expect(queue[first + 1]?.id).toBe("e7");
   });
 });
+
+describe("what Play starts", () => {
+  it("is an episode, never a season or a show", async () => {
+    // Neither a show nor a season is something the server can resolve a stream
+    // for - both answer 400 - so a Play button on either accepted OK and did
+    // nothing. On 256 series screens that was the INITIAL cursor position.
+    const { __toPlayableForTest } = await import("../Detail");
+
+    const ep = (id: string, over = {}) => ({ id, kind: "episode" as const, title: id, ...over });
+    const season = { id: "s1", kind: "season" as const, title: "S1" } as never;
+    const show = { id: "sh1", kind: "show" as const, title: "Show" } as never;
+    const film = { id: "f1", kind: "movie" as const, title: "Film" } as never;
+
+    // A show's children are seasons, so there is nothing here to start.
+    expect(__toPlayableForTest(show, [season])).toBeUndefined();
+
+    // An episode already in progress wins: skipping past a half-watched one is
+    // not what pressing play means.
+    expect(
+      __toPlayableForTest(season, [ep("e1", { viewCount: 1 }), ep("e2", { viewOffsetMs: 300_000 }), ep("e3")])?.id,
+    ).toBe("e2");
+
+    // Otherwise the first unwatched.
+    expect(__toPlayableForTest(season, [ep("e1", { viewCount: 1 }), ep("e2")])?.id).toBe("e2");
+
+    // An empty season has nothing, which is what keeps the button off it.
+    expect(__toPlayableForTest(season, [])).toBeUndefined();
+
+    // A film is itself.
+    expect(__toPlayableForTest(film, [])?.id).toBe("f1");
+  });
+});

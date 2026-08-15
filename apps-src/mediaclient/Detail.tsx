@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { FocusContext, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
-import { FocusButton, useI18n } from "@sdk";
+import { FocusContext, doesFocusableExist, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
+import { FocusButton, useBackspace, useI18n } from "@sdk";
 import { Row } from "./Row";
 import { Message } from "./Message";
 import { artworkScale } from "./posters";
@@ -166,6 +166,17 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
           : "detail-back"
         : "detail-play";
   useInitialFocus(first, Boolean(detail));
+
+  // A countdown arrives on a screen that never unmounted - the browse tree is
+  // hidden during playback, not thrown away - so the one-shot initial focus has
+  // long since fired. The episode about to start is pointed at explicitly.
+  useEffect(() => {
+    if (!upNext) return;
+    const key = `children-${itemId}-${upNext.item.id}`;
+    if (!doesFocusableExist(key)) return;
+    const id = setTimeout(() => setFocus(key), 0);
+    return () => clearTimeout(id);
+  }, [upNext, itemId]);
   // Returning from playback unmounts the player, which held focus - without a
   // fallback the detail page comes back with the D-pad dead.
   useFocusFallback(
@@ -195,6 +206,13 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
    * phase so it sees the press before anything else acts on it, and the
    * re-render each second is what draws the number down.
    */
+  // Back is the key someone reaches for to escape a countdown, and it was the
+  // one key that did not cancel it: the SDK installs a single capture-phase
+  // listener at app start and calls stopImmediatePropagation, so a listener
+  // added later on the same target never runs. Registered through the SDK's own
+  // stack instead, which is the only thing that sees Back.
+  useBackspace(() => usePlayer.getState().cancelUpNext(), Boolean(upNext));
+
   useEffect(() => {
     if (!upNext) return;
     const cancel = (): void => usePlayer.getState().cancelUpNext();
@@ -205,6 +223,11 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
       clearInterval(id);
     };
   }, [upNext]);
+
+  // Leaving this screen takes the countdown with it. The timer is module state
+  // in the player, so navigating away - or the screen being replaced - left it
+  // armed with nothing on screen to say so and nothing able to cancel it.
+  useEffect(() => () => usePlayer.getState().cancelUpNext(), []);
 
   // Before the early returns, as hooks must be. `detail` is null while loading,
   // which is simply no theme yet.
@@ -231,7 +254,14 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
     backend?.posterUrl(item, 400 * artworkScale(), 225 * artworkScale());
   const resumable = (detail.viewOffsetMs ?? 0) > 0;
   /** A group is a list of things to play, not a thing to play. */
-  const playable = detail.kind !== "collection" && detail.kind !== "playlist";
+  // A group is a list of things to play, not a thing to play - and a show is a
+  // list of seasons, which are lists too. An empty season has nothing to start
+  // either, and a button that accepts OK and does nothing is worse than none.
+  const playable =
+    detail.kind !== "collection" &&
+    detail.kind !== "playlist" &&
+    detail.kind !== "show" &&
+    Boolean(toPlayable(detail, children));
   /**
    * What Play starts.
    *
@@ -240,10 +270,22 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
    * episode nobody has finished, which is what someone pressing it wants. On a
    * film it is the film.
    */
+  /**
+   * What Play starts.
+   *
+   * Neither a show nor a season is something the server can resolve a stream
+   * for - both answer 400 - so Play means an EPISODE. On a season that is the
+   * one in progress if there is one, because skipping past a half-watched
+   * episode is not what pressing play means; otherwise the first unwatched. On
+   * a show the children are seasons, so there is nothing here to start: the
+   * button is left off, as it is on a collection.
+   */
   const toPlay =
-    detail.kind === "season" || detail.kind === "show"
-      ? (children.find((c) => !(c.viewCount ?? 0) && !(c.viewOffsetMs ?? 0)) ?? children[0])
-      : detail;
+    detail.kind === "season"
+      ? (children.find((c) => (c.viewOffsetMs ?? 0) > 0) ?? children.find((c) => !(c.viewCount ?? 0)) ?? children[0])
+      : detail.kind === "show"
+        ? undefined
+        : detail;
   /**
    * What the page is describing.
    *
@@ -432,8 +474,16 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
             // and the cursor left the screen.
             onArrowFromFirst={(dir) => {
               if (dir !== "up") return true;
-              setFocus(playable ? "detail-play" : "detail-lang");
-              return false;
+              // Whatever this screen actually has above the row. Aiming at a
+              // button that is not rendered leaves the app with no origin and
+              // swallows the press.
+              for (const key of ["detail-play", "detail-lang", "detail-watched", "lib-arrange"]) {
+                if (doesFocusableExist(key)) {
+                  setFocus(key);
+                  return false;
+                }
+              }
+              return true;
             }}
             countdownFor={
               upNext ? { id: upNext.item.id, seconds: Math.max(0, Math.ceil((upNext.at - Date.now()) / 1000)) } : null
@@ -516,4 +566,15 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
 /** Whether an item is a thing to play rather than a list of them. */
 function playableKind(d: ItemDetail): boolean {
   return d.kind !== "collection" && d.kind !== "playlist";
+}
+
+/** What Play would start on this screen, or nothing. Mirrors `toPlay`. */
+export function __toPlayableForTest(d: ItemDetail, kids: MediaItem[]): MediaItem | undefined {
+  return toPlayable(d, kids);
+}
+
+function toPlayable(d: ItemDetail, kids: MediaItem[]): MediaItem | undefined {
+  if (d.kind === "show") return undefined;
+  if (d.kind !== "season") return d;
+  return kids.find((c) => (c.viewOffsetMs ?? 0) > 0) ?? kids.find((c) => !(c.viewCount ?? 0)) ?? kids[0];
 }

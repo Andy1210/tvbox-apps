@@ -741,12 +741,12 @@ export class PlexBackend implements MediaBackend {
     // Chosen tracks are told to the server before the decision, so the stream it
     // builds already carries them - a transcode started with the wrong audio
     // cannot be corrected without starting over.
-    // Subtitles OFF unless somebody asked for them. Saying nothing is not
-    // neutral: the server remembers whatever was selected for this item last
-    // time - by another client, or by its own auto-select - and turns it back
-    // on, so a film started clean came up with subtitles nobody chose. "none"
-    // is the only value that means off.
-    if (chosen) {
+    // Only when somebody chose something. Writing on every start overwrote
+    // whatever another client - a phone, the web app, another member of the
+    // household - had selected for that item, and it is not what decides what
+    // is on screen anyway: on the direct-play path the player gets the original
+    // file, so "off" is something the PLAYER is told, above.
+    if (chosen && (opts.audio !== undefined || opts.subtitle !== undefined)) {
       const audioId = opts.audio !== undefined ? chosen.audio[opts.audio]?.id : undefined;
       const subtitleId =
         opts.subtitle === undefined || opts.subtitle === "none"
@@ -795,7 +795,12 @@ export class PlexBackend implements MediaBackend {
       return {
         url: buildUrl(this.base, part.key.replace(/^\//, ""), { "X-Plex-Token": this.session.token }),
         audio: "auto",
-        sub: burned ? "no" : "auto",
+        // "no", not "auto", unless somebody chose a subtitle. On the direct-play
+        // path the player is handed the ORIGINAL file, so what the server
+        // remembers is irrelevant - and mpv's "auto" turns on whichever track
+        // carries the container's default flag, which 20 of 40 films here have.
+        // The shell's own comment says the same: saying nothing is not off.
+        sub: burned ? "no" : opts.subtitle !== undefined && opts.subtitle !== "none" ? opts.subtitle : "no",
         subtitlesBurnedIn: burned,
         session: opts.session,
         location: this.session.location,
@@ -815,7 +820,7 @@ export class PlexBackend implements MediaBackend {
         "X-Plex-Token": this.session.token,
       }),
       audio: "auto",
-      sub: burned ? "no" : "auto",
+      sub: burned ? "no" : opts.subtitle !== undefined && opts.subtitle !== "none" ? opts.subtitle : "no",
       subtitlesBurnedIn: burned,
       session: opts.session,
       location: this.session.location,

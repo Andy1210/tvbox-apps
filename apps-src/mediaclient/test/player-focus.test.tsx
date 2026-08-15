@@ -245,3 +245,30 @@ describe("the skip button", () => {
     expect(getCurrentFocusKey()).toBeTruthy();
   });
 });
+
+describe("the overlay's own controls", () => {
+  it("comes up on OK rather than pausing, and Back closes it", async () => {
+    // A stray OK used to pause the film. What someone reaching for the remote
+    // wants is the controls - and the pause button is the one already focused
+    // when they arrive, so pausing is still one press away.
+    render(<Player />);
+    await settle();
+    usePlayer.setState({ overlay: false });
+
+    await remote.ok();
+    await settle();
+    expect(usePlayer.getState().state).toBe("playing");
+    expect(usePlayer.getState().overlay).toBe(true);
+    expect(getCurrentFocusKey()).toBe("pb-playpause");
+
+    // Back undoes the last thing opened - the controls - rather than pausing.
+    await remote.back();
+    await settle();
+    expect(usePlayer.getState().overlay).toBe(false);
+    expect(usePlayer.getState().state).toBe("playing");
+
+    // With them closed, Back is what it always was.
+    await remote.back();
+    expect(usePlayer.getState().state).toBe("paused");
+  });
+});

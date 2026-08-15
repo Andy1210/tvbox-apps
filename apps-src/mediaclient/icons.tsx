@@ -7,6 +7,12 @@
  *
  * They inherit `currentColor`, so a focused button - which turns its text dark -
  * takes the icon with it.
+ *
+ * The end bar on the steppers is deliberately thick. At 2px it was the only
+ * thing separating "next episode" from a plain forward triangle, and 2px at
+ * three metres on a 55" 1080p panel is about 1.5 arc-minutes - the eye's limit.
+ * Left and Right in the resting state really do seek, so the two have to be
+ * told apart.
  */
 export function PlayIcon({ className = "h-[2.6vh] w-[2.6vh]" }: { className?: string }): React.JSX.Element {
   return (
@@ -28,7 +34,7 @@ export function PauseIcon({ className = "h-[2.6vh] w-[2.6vh]" }: { className?: s
 export function NextIcon({ className = "h-[2.6vh] w-[2.6vh]" }: { className?: string }): React.JSX.Element {
   return (
     <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
-      <path d="M5 5l10 7-10 7zM17 5h2v14h-2z" />
+      <path d="M4 5l10 7-10 7zM16.5 5h3.5v14h-3.5z" />
     </svg>
   );
 }
@@ -36,7 +42,7 @@ export function NextIcon({ className = "h-[2.6vh] w-[2.6vh]" }: { className?: st
 export function PreviousIcon({ className = "h-[2.6vh] w-[2.6vh]" }: { className?: string }): React.JSX.Element {
   return (
     <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
-      <path d="M19 5L9 12l10 7zM5 5h2v14H5z" />
+      <path d="M20 5L10 12l10 7zM4 5h3.5v14H4z" />
     </svg>
   );
 }
