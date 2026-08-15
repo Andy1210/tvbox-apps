@@ -1,6 +1,7 @@
 import { useFocusable, FocusContext } from "@noriginmedia/norigin-spatial-navigation";
-import { useCallback, useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import { Tile } from "./Tile";
+import { createMover, nearest } from "./moveTo";
 import type { MediaItem } from "./backends/types";
 
 export interface RowProps {
@@ -63,27 +64,35 @@ export function Row({
   onArrowFromFirst,
   countdownFor,
 }: RowProps): React.JSX.Element | null {
-  const scroller = useRef<HTMLDivElement>(null);
+  const window_ = useRef<HTMLDivElement>(null);
+  // The rail moves itself with a composited transform rather than being
+  // scrolled - the same reason the library grid does, measured there: a native
+  // scroll of this content re-rasters per frame what a transform simply moves.
+  const mover = useMemo(() => createMover("x"), []);
 
   const onFocusChild = useCallback(
     (el: HTMLElement) => {
       onReached?.();
-      const box = scroller.current;
+      const box = window_.current;
       if (!box) return;
-      // Keep a tile's worth of run-up visible on the leading side so the rail
-      // looks like it continues rather than ending at the focus ring.
+      // A tile's worth of run-up on the leading side, so the rail looks like it
+      // continues rather than ending at the focus ring.
       const pad = el.offsetWidth * 0.6;
-      const left = el.offsetLeft - pad;
-      const right = el.offsetLeft + el.offsetWidth + pad;
+      const to = nearest({
+        at: mover.at,
+        viewport: box.clientWidth,
+        start: el.offsetLeft,
+        size: el.offsetWidth,
+        padStart: pad,
+        padEnd: pad,
+        max: box.scrollWidth,
+      });
       // Instant when the jump is more than a screen: arriving on episode 40
       // otherwise animates the whole way there, which reads as the app hanging
       // rather than as a transition.
-      const far = Math.abs(left - box.scrollLeft) > box.clientWidth;
-      const behavior = far ? "auto" : "smooth";
-      if (left < box.scrollLeft) box.scrollTo({ left, behavior });
-      else if (right > box.scrollLeft + box.clientWidth) box.scrollTo({ left: right - box.clientWidth, behavior });
+      mover.to(to, Math.abs(to - mover.at) <= box.clientWidth);
     },
-    [onReached],
+    [onReached, mover],
   );
 
   const { ref, focusKey } = useFocusable({ focusKey: `row-${id}`, trackChildren: true, saveLastFocusedChild: true });
@@ -102,31 +111,33 @@ export function Row({
       >
         <h2 className="shrink-0 px-[4vw] text-[2vh] font-semibold tracking-tight">{title}</h2>
         <div
-          ref={scroller}
-          // No scroll-smooth. This row does its own scrolling and says how, but the
-          // browser also brings a focused tile into view - and that call names no
-          // behaviour, so the CSS decided for it and animated a jump of forty
-          // episodes end to end.
-          className="no-scrollbar flex gap-[1.2vw] overflow-x-auto px-[4vw] py-[6vh] -my-[4vh]"
+          ref={window_}
+          // Clips; it does not scroll. Everything in it is carried by the layer
+          // below, which the compositor moves.
+          className="no-scrollbar overflow-hidden px-[4vw] py-[6vh] -my-[4vh]"
         >
-          {items.map((item, i) => (
-            <Tile
-              key={item.id || `${id}-${i}`}
-              item={item}
-              posterUrl={posterUrl(item)}
-              focusKey={`${id}-${item.id || i}`}
-              heightVh={heightVh}
-              aspect={aspect}
-              captionLines={captionLines}
-              onEnter={() => onSelect(item)}
-              onArrowPress={onArrowFromFirst}
-              countdown={countdownFor?.id === item.id ? countdownFor.seconds : undefined}
-              onFocusedEl={(el) => {
-                onFocusChild(el);
-                onFocusItem?.(item);
-              }}
-            />
-          ))}
+          <div ref={(node) => mover.attach(node)} style={{ willChange: "transform" }} className="flex gap-[1.2vw]">
+            {items.map((item, i) => (
+              <Tile
+                key={item.id || `${id}-${i}`}
+                item={item}
+                posterUrl={posterUrl(item)}
+                focusKey={`${id}-${item.id || i}`}
+                heightVh={heightVh}
+                aspect={aspect}
+                captionLines={captionLines}
+                onEnter={() => onSelect(item)}
+                onArrowPress={onArrowFromFirst}
+                countdown={countdownFor?.id === item.id ? countdownFor.seconds : undefined}
+                // The rail moves itself; the browser must not also scroll it.
+                selfScroll={false}
+                onFocusedEl={(el) => {
+                  onFocusChild(el);
+                  onFocusItem?.(item);
+                }}
+              />
+            ))}
+          </div>
         </div>
       </section>
     </FocusContext.Provider>
