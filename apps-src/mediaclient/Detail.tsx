@@ -8,6 +8,7 @@ import { CastRow } from "./CastRow";
 import { Scores } from "./Scores";
 import { Reviews } from "./Reviews";
 import { TitleArt } from "./TitleArt";
+import { Summary } from "./Summary";
 import { LanguagePicker } from "./LanguagePicker";
 import { Backdrop } from "./Backdrop";
 import { useTheme } from "./theme";
@@ -426,7 +427,9 @@ export function Detail({
 
           <Scores scores={shown.scores} />
 
-          {shown.summary && <p className="max-w-[62vw] text-[2vh] leading-relaxed">{shown.summary}</p>}
+          {/* Keyed on the item, so switching episodes builds a fresh one rather
+              than carrying the previous synopsis's opened state onto it. */}
+          {shown.summary && <Summary key={shown.id} text={shown.summary} />}
 
           {/* Not on a collection or a playlist: measured, resolveStream answers
               400 for both, so the button accepted OK and did nothing - and it
