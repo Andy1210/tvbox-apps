@@ -48,7 +48,7 @@ describe("trying a failed search again", () => {
       search: async () => {
         calls += 1;
         if (calls === 1) {
-          useApp.getState().fail({ kind: "offline" });
+          useApp.getState().fail({ kind: "unreachable" });
           throw new Error("server said no");
         }
         return [item(1)];
