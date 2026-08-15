@@ -65,6 +65,7 @@ export function Row({
   countdownFor,
 }: RowProps): React.JSX.Element | null {
   const window_ = useRef<HTMLDivElement>(null);
+  const layer = useRef<HTMLDivElement | null>(null);
   // The rail moves itself with a composited transform rather than being
   // scrolled - the same reason the library grid does, measured there: a native
   // scroll of this content re-rasters per frame what a transform simply moves.
@@ -85,7 +86,10 @@ export function Row({
         size: el.offsetWidth,
         padStart: pad,
         padEnd: pad,
-        max: box.scrollWidth,
+        // The moved layer's own width, not the window's scroll width: the
+        // window no longer scrolls, so what bounds the travel is how wide the
+        // thing being moved is.
+        max: layer.current?.scrollWidth ?? box.clientWidth,
       });
       // Instant when the jump is more than a screen: arriving on episode 40
       // otherwise animates the whole way there, which reads as the app hanging
@@ -116,7 +120,19 @@ export function Row({
           // below, which the compositor moves.
           className="no-scrollbar overflow-hidden px-[4vw] py-[6vh] -my-[4vh]"
         >
-          <div ref={(node) => mover.attach(node)} style={{ willChange: "transform" }} className="flex gap-[1.2vw]">
+          {/* `relative` is load-bearing, not spacing. A tile's offsetLeft is
+              measured against the nearest POSITIONED ancestor, and the maths
+              above moves THIS layer - so without it the two are in different
+              coordinate spaces, and the rail lurched back and forth with the
+              cursor landing off screen. */}
+          <div
+            ref={(node) => {
+              layer.current = node;
+              mover.attach(node);
+            }}
+            style={{ willChange: "transform" }}
+            className="relative flex gap-[1.2vw]"
+          >
             {items.map((item, i) => (
               <Tile
                 key={item.id || `${id}-${i}`}
