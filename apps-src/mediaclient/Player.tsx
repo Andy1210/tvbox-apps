@@ -13,6 +13,7 @@ import type { Track } from "./backends/types";
 import { usePlayer } from "./playback/player";
 import { ScrubPreview } from "./ScrubPreview";
 import { NextIcon, PauseIcon, PlayIcon, PreviousIcon } from "./icons";
+import { episodeNumber } from "./Tile";
 import { applySubtitleStyle, usePrefs } from "./prefs";
 
 /**
@@ -250,6 +251,36 @@ export function Player(): React.JSX.Element | null {
   const skippable = Boolean(marker && (marker.type === "intro" || (marker.type === "credits" && !marker.final)));
   skippableRef.current = skippable;
 
+  /**
+   * The skip button announces itself, then gets out of the way.
+   *
+   * It has to be visible without the overlay - that was the bug it was moved
+   * out for - but an intro can run two minutes, and a button parked over the
+   * picture for all of it is the opposite complaint. Three seconds is long
+   * enough to see and press; after that it comes back with the overlay, which
+   * is one press away.
+   */
+  const [announcing, setAnnouncing] = useState(false);
+  /**
+   * The skip button leaving takes the cursor with it.
+   *
+   * It unmounts when the marker passes, when three seconds are up, or when the
+   * overlay hides - and focus stays on a key that no longer exists, so every
+   * press after that is discarded. Sending the cursor back to rest is the whole
+   * fix; it is the same failure as every other disappearing focusable in this
+   * app, on the one that disappears BY DESIGN.
+   */
+  const showSkip = skippable && (announcing || overlay);
+  useEffect(() => {
+    if (!skippable) {
+      setAnnouncing(false);
+      return;
+    }
+    setAnnouncing(true);
+    const id = setTimeout(() => setAnnouncing(false), 3_000);
+    return () => clearTimeout(id);
+  }, [skippable, marker?.startMs]);
+
   // Skip without asking, when that is switched on. Off by default: a marker is
   // the server's guess, and one that is a minute out jumps past the opening of
   // an episode with nothing to say what happened.
@@ -309,7 +340,11 @@ export function Player(): React.JSX.Element | null {
       if (!key || !ours || !doesFocusableExist(key)) setFocus(IDLE_KEY);
     }, 0);
     return () => clearTimeout(id);
-  }, [current, menu, overlay]);
+    // showSkip is in here because the skip button disappears BY DESIGN - three
+    // seconds after a marker starts, when the marker passes, when the overlay
+    // hides - and without it the cursor stayed on a key that no longer existed
+    // and every press after that was discarded.
+  }, [current, menu, overlay, showSkip]);
 
   // Back to resting when the overlay goes away, so the next press starts from
   // the same place every time rather than wherever it was left.
@@ -332,9 +367,11 @@ export function Player(): React.JSX.Element | null {
     // overlay sits by default, so requiring the bar meant the button appeared
     // with the cursor nowhere near it and OK did something else.
     const at = getCurrentFocusKey();
-    if (skippable && !menu && usePlayer.getState().scrubMs === null && (!at || at === IDLE_KEY || at === "scrub"))
+    // Only while it is on screen. Focusing a button nobody can see means the
+    // next OK does something invisible.
+    if (showSkip && !menu && usePlayer.getState().scrubMs === null && (!at || at === IDLE_KEY || at === "scrub"))
       setFocus("skip");
-  }, [skippable, menu]);
+  }, [showSkip, menu]);
 
   if (!current) return null;
 
@@ -418,8 +455,8 @@ export function Player(): React.JSX.Element | null {
           inside it - so during an intro, which is exactly when it is wanted, it
           was gone before anyone looked up. Bottom right, where a television
           puts this. */}
-      {skippable && (
-        <div className="absolute right-[4vw] bottom-[6vh] z-20">
+      {showSkip && (
+        <div className="absolute right-[4vw] bottom-[6vh] z-20 transition-opacity duration-200">
           <FocusButton
             focusKey="skip"
             onEnter={() => usePlayer.getState().skipMarker()}
@@ -450,7 +487,10 @@ export function Player(): React.JSX.Element | null {
               </h2>
               {current.item.seriesTitle && (
                 <span className="text-[2.1vh] text-white/80 [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]">
-                  {current.item.title}
+                  {/* The number before the name. Halfway through a series it is
+                      the thing being checked - "which one is this" - and the
+                      name on its own does not answer it. */}
+                  {[episodeNumber(current.item), current.item.title].filter(Boolean).join(" · ")}
                 </span>
               )}
               {buffering && (

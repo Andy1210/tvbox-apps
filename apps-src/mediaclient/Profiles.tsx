@@ -184,7 +184,12 @@ function Face({ profile, onEnter }: { profile: Profile; onEnter: () => void }): 
     // linked rather than loaded.
     if (!profile.thumb || absolute || !backend || tried.current) return;
     tried.current = true;
-    void loadImage(profile.thumb, backend.imageHeaders()).then((url) => url && setSrc(url));
+    // Through artUrl, so a relative path resolves against the SERVER. Handed to
+    // fetch as it stands, it resolved against the box's own shell origin - which
+    // answers with its web page, and takes the token with it.
+    const src = backend.artUrl(profile.thumb);
+    if (!src) return;
+    void loadImage(src, backend.imageHeaders()).then((url) => url && setSrc(url));
   }, [profile.thumb, absolute, backend]);
 
   const initials = profile.name.slice(0, 2).toUpperCase();

@@ -64,6 +64,8 @@ const FILTER_KEY = /^[A-Za-z][A-Za-z0-9_.]{0,40}$/;
 const COLLECTION_TYPE = 18;
 /** What a theme path looks like. Verified against every one this server offers. */
 const THEME_PATH = /^\/library\/metadata\/\d+\/theme\/\d+$/;
+/** What a playable part path looks like. Measured against this server's own. */
+const PART_PATH = /^\/library\/parts\/\d+\/\d+\/[^?#]*$/;
 /**
  * A path the server may send us back to.
  *
@@ -776,10 +778,20 @@ export class PlexBackend implements MediaBackend {
     const burned = (media?.Part?.[0]?.Stream ?? []).some((s) => s.streamType === 3 && s.decision === "burn");
 
     if (decision === "directplay" && part?.key) {
-      // The part key is used exactly as given: it carries a timestamp segment
-      // between the id and the filename, and a reconstructed path without it is
-      // a 404. The token has to be in the URL here because the player is a
-      // separate process that cannot send headers.
+      // The part key is used as given - it carries a timestamp segment between
+      // the id and the filename, and a reconstructed path without it is a 404 -
+      // but it is BOUNDED first, and this is the one place where that matters
+      // most. The token has to be in the URL here, because the player is a
+      // separate process that cannot send headers; the URL is then handed to
+      // that process, which will fetch any host and any scheme. An absolute
+      // value in `part.key` overrides the base entirely, so an unbounded one
+      // put the account token in a query string on a machine of the server's
+      // choosing - in clear, in mpv's argv, and past the redactor, which only
+      // knows about headers.
+      //
+      // Same bug as artUrl and themeUrl, third call site. The rule is not "bound
+      // these three functions" but "bound everything the token is attached to".
+      if (!PART_PATH.test(part.key)) throw new Error("part key is not a media path");
       return {
         url: buildUrl(this.base, part.key.replace(/^\//, ""), { "X-Plex-Token": this.session.token }),
         audio: "auto",
@@ -915,7 +927,12 @@ export class PlexBackend implements MediaBackend {
     if (choice.subtitleId === "none") query.subtitleStreamID = 0;
     else if (choice.subtitleId) query.subtitleStreamID = choice.subtitleId;
 
-    await request(this.base, `library/parts/${part}`, this.id, {
+    // Encoded, and held to what an id is. 0.24.0 made this fire on EVERY
+    // playback rather than only when somebody chose a track, so a part id of
+    // "../:/prefs?..." would be a settings write with the household's admin
+    // token behind it.
+    if (!/^\d+$/.test(part)) throw new Error("not a part id");
+    await request(this.base, `library/parts/${encodeURIComponent(part)}`, this.id, {
       method: "PUT",
       token: this.session.token,
       query,

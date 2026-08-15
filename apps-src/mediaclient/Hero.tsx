@@ -22,8 +22,9 @@ import { log } from "./redact";
  * so it has no edge to notice - it thins into the background instead of sitting
  * in a frame.
  *
- * The background tint is computed from the artwork, because this server does
- * not supply one: measured, 0 of 1,693 films carry Plex's own accent colours.
+ * The background tint comes from the server's own corner colours where it has
+ * them - 1,668 of this library's 1,693 films - and is computed from the artwork
+ * only where it does not. See the note beside `tint` below.
  */
 export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | null {
   const { t } = useI18n();

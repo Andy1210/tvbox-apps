@@ -572,6 +572,11 @@ function wireLifecycle(): void {
   lifecycleWired = true;
 
   onRelease(() => {
+    // Before anything else: the shell HIDES the window rather than destroying
+    // it, and no keypress reaches a hidden app - so a countdown armed when
+    // somebody pressed Home would start a film over the launcher five seconds
+    // later, with nothing able to cancel it.
+    usePlayer.getState().cancelUpNext();
     const s = usePlayer.getState();
     if (!s.current) return;
     // Synchronous-ish and best effort: the page may be frozen immediately after,
@@ -595,4 +600,18 @@ export function __wirePlayerEventsForTest(): void {
     (partial) => usePlayer.setState(partial),
     () => usePlayer.getState(),
   );
+}
+
+/**
+ * Forget everything about playback.
+ *
+ * Called when the identity behind it changes. The backend the countdown
+ * captured is module state and outlives a sign-out, so without this a timer
+ * armed by one person could start a film as - and for - the next.
+ */
+export function resetPlayer(): void {
+  usePlayer.getState().cancelUpNext();
+  void usePlayer.getState().stop();
+  currentBackend = null;
+  usePlayer.setState({ siblings: {}, queue: undefined, upNext: null });
 }
