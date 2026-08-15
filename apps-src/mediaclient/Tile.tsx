@@ -27,6 +27,8 @@ export interface TileProps {
   captionLines?: 2 | 3;
   /** Intercept an arrow before spatial navigation resolves it. */
   onArrowPress?: (direction: string) => boolean;
+  /** Seconds until this one starts by itself. Drawn over the poster. */
+  countdown?: number;
 }
 
 /** How far through the item, 0-1, or null when it was never started. */
@@ -67,6 +69,7 @@ export function Tile({
   aspect = 2 / 3,
   captionLines = 2,
   onArrowPress,
+  countdown,
 }: TileProps): React.JSX.Element {
   // scrollIntoView scrolls BOTH axes - `inline` defaults to "nearest" - so a
   // row gets its vertical scrolling from here and then supersedes the horizontal
@@ -135,6 +138,15 @@ export function Tile({
         ].join(" ")}
         style={{ height: `${heightVh}vh` }}
       >
+        {/* Over the poster, not beside it: the countdown is about THIS episode,
+            and a number anywhere else is a number about the screen. */}
+        {countdown !== undefined && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/55">
+            <span className="text-[6vh] font-semibold tabular-nums [text-shadow:0_0.2vh_0.8vh_rgba(0,0,0,0.9)]">
+              {countdown}
+            </span>
+          </div>
+        )}
         {src && !broken ? (
           <img
             src={src}

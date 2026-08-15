@@ -38,6 +38,8 @@ export interface RowProps {
    * the screen says where Up goes instead of letting geometry decide.
    */
   onArrowFromFirst?: (direction: string) => boolean;
+  /** Item id to a countdown, for the one about to start by itself. */
+  countdownFor?: { id: string; seconds: number } | null;
 }
 
 /**
@@ -59,6 +61,7 @@ export function Row({
   onReached,
   onFocusItem,
   onArrowFromFirst,
+  countdownFor,
 }: RowProps): React.JSX.Element | null {
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -117,6 +120,7 @@ export function Row({
               captionLines={captionLines}
               onEnter={() => onSelect(item)}
               onArrowPress={onArrowFromFirst}
+              countdown={countdownFor?.id === item.id ? countdownFor.seconds : undefined}
               onFocusedEl={(el) => {
                 onFocusChild(el);
                 onFocusItem?.(item);
