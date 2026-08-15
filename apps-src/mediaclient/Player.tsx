@@ -102,8 +102,6 @@ export function Player(): React.JSX.Element | null {
    */
   const [chapters, setChapters] = useState(false);
   const hasChaptersRef = useRef(false);
-  const chaptersOpenRef = useRef(false);
-  chaptersOpenRef.current = chapters;
 
   const { ref, focusKey } = useFocusable({ focusKey: "player", saveLastFocusedChild: true, isFocusBoundary: true });
 
@@ -244,12 +242,13 @@ export function Player(): React.JSX.Element | null {
           e.stopPropagation();
           if (idle) setFocus("scrub");
           else if (onChapter) {
-            // Closed on the way out. The strip exists while you are in it or
-            // below it, so "only when navigating down" stays true for the next
-            // press as well as the first.
+            // Closed on the way out. It is open only while the cursor is in it,
+            // so leaving upwards puts the overlay back to the two rows it has
+            // the rest of the time rather than leaving a strip of thumbnails
+            // over the film two rows below the cursor.
             setChapters(false);
-            setFocus("scrub");
-          } else if (fk?.startsWith("pb-")) setFocus(chaptersOpenRef.current ? "chapters" : "scrub");
+            setFocus("pb-playpause");
+          } else if (fk?.startsWith("pb-")) setFocus("scrub");
           else if (onBar && skippableRef.current) setFocus("skip");
           // From the skip button itself Up has nowhere to go, and the press is
           // already consumed - so it goes back to the bar rather than sitting
@@ -266,15 +265,15 @@ export function Player(): React.JSX.Element | null {
             // the resting anchor - jumped the film instead of doing what the
             // button said.
             p.cancelScrub();
-            // Down from the bar is the request for the chapters. Opening and
-            // focusing in one press, because a row that appears and does not
-            // take the cursor costs a second press to reach and reads as the
-            // press having done nothing.
-            if (hasChaptersRef.current) {
-              setChapters(true);
-              setFocus("chapters");
-            } else setFocus("pb-playpause");
-          } else if (onChapter) setFocus("pb-playpause");
+            setFocus("pb-playpause");
+          } else if (fk?.startsWith("pb-") && hasChaptersRef.current) {
+            // Down from the buttons is the request for the chapters. Opening
+            // and focusing in one press, because a row that appears without
+            // taking the cursor costs a second press to reach and reads as the
+            // first press having done nothing.
+            setChapters(true);
+            setFocus("chapters");
+          }
           break;
       }
 
@@ -591,20 +590,6 @@ export function Player(): React.JSX.Element | null {
               partId={partId}
             />
 
-            {/* Between the bar and the buttons, which is what "pushes the bar
-                up": the button row stays where it has always been - a remote is
-                driven from muscle memory - and the space is taken from above.
-                Closed unless it was asked for, so an ordinary press does not
-                get a strip of thumbnails over the film. */}
-            {chapters && chapterList.length > 0 && (
-              <ChapterStrip
-                chapters={chapterList}
-                partId={partId}
-                positionMs={seekTargetMs ?? positionMs}
-                onPick={(ms) => usePlayer.getState().seekTo(ms)}
-              />
-            )}
-
             <ButtonRow
               paused={state === "paused"}
               canChooseTracks={Boolean(current.detail)}
@@ -616,6 +601,26 @@ export function Player(): React.JSX.Element | null {
               onTracks={() => setMenu("audio")}
               onQuality={() => setMenu("quality")}
             />
+
+            {/* UNDER the buttons, which is what pushes the bar up: the overlay
+                is anchored to the bottom of the screen, so a row added at the
+                end lifts the title, the bar and the buttons together and the
+                strip takes the space it needs from the picture. Closed unless
+                it was asked for - it is tall, and the overlay's job over a
+                running film is to get out of the way. */}
+            {chapters && chapterList.length > 0 && (
+              <ChapterStrip
+                chapters={chapterList}
+                partId={partId}
+                positionMs={seekTargetMs ?? positionMs}
+                onPick={(ms) => {
+                  usePlayer.getState().seekTo(ms);
+                  // Done with it: the press was a destination, not a browse.
+                  setChapters(false);
+                  setFocus("pb-playpause");
+                }}
+              />
+            )}
           </div>
         </div>
       </div>
