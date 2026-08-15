@@ -96,38 +96,42 @@ describe("the ends of a rail", () => {
 });
 
 describe("a rail and the page it sits on", () => {
-  it("asks the page to follow the cursor down", async () => {
+  it("brings its row to the top of the view, and leaves it alone once there", async () => {
     // The page still scrolls vertically, and it used to get that for free: a
     // tile's own scrollIntoView moved the rail sideways and the page downwards
     // in one call. Turning the tile's scrolling off - so it would stop fighting
     // the transform that moves the rail - took the vertical half with it, and
     // the home screen stopped following the cursor past the first row.
     //
-    // It has to be the SECTION and not the tile: a tile lives inside a clip
-    // that is not a scroller, so asking the browser to reveal it can only be
-    // answered by moving something we move ourselves.
-    const calls: { el: Element; opts: unknown }[] = [];
-    const original = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = function (this: Element, opts?: unknown) {
-      calls.push({ el: this, opts });
-    } as typeof original;
+    // It is computed rather than handed to `scrollIntoView`, because "nearest"
+    // aligns whichever edge is closer: going down that parks the row at the
+    // BOTTOM of the view, with the row above still showing a row and a half of
+    // itself.
+    const { container } = render(row());
+    await settle();
+    placeRow(tiles(container, items.length));
 
-    try {
-      const { container } = render(row());
-      await settle();
-      placeRow(tiles(container, items.length));
-      await flushFocus();
+    // A scroller around it, with the page's own scroll padding.
+    const section = container.querySelector("section")!;
+    const scroller = section.parentElement!;
+    Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 3000 });
+    Object.defineProperty(scroller, "clientHeight", { configurable: true, value: 1000 });
+    scroller.style.scrollPaddingTop = "50px";
+    scroller.scrollTop = 0;
+    scroller.getBoundingClientRect = () => ({ top: 0, bottom: 1000 }) as DOMRect;
 
-      await act(async () => setFocus("children-s1-e2"));
-      await settle();
+    // Below the fold: the row comes to the top, under the padding.
+    section.getBoundingClientRect = () => ({ top: 900, bottom: 1400 }) as DOMRect;
+    await act(async () => setFocus("children-s1-e1"));
+    await flushFocus();
+    expect(scroller.scrollTop, "the row's top lands under the scroll padding").toBe(850);
 
-      expect(calls.length, "something asked to be revealed").toBeGreaterThan(0);
-      expect(
-        calls.every((c) => c.el.tagName === "SECTION"),
-        "only the section, never a tile",
-      ).toBe(true);
-    } finally {
-      Element.prototype.scrollIntoView = original;
-    }
+    // Already in view: nothing moves, which is what stops a sideways press from
+    // nudging the page.
+    scroller.scrollTop = 0;
+    section.getBoundingClientRect = () => ({ top: 100, bottom: 600 }) as DOMRect;
+    await act(async () => setFocus("children-s1-e2"));
+    await flushFocus();
+    expect(scroller.scrollTop).toBe(0);
   });
 });

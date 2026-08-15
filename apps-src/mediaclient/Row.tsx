@@ -72,6 +72,33 @@ export function Row({
   // scroll of this content re-rasters per frame what a transform simply moves.
   const mover = useMemo(() => createMover("x"), []);
 
+  /**
+   * Put this row at the top of the page's view, unless it is already in it.
+   *
+   * The scroll padding is read from the scroller rather than assumed: it is
+   * what keeps the first row clear of the rail above it, and duplicating the
+   * number here is how the two drift.
+   */
+  const revealRow = useCallback(() => {
+    const sec = section.current;
+    if (!sec) return;
+    let sc: HTMLElement | null = sec.parentElement;
+    while (sc && sc.scrollHeight <= sc.clientHeight) sc = sc.parentElement;
+    if (!sc) return;
+
+    const style = getComputedStyle(sc);
+    const padTop = parseFloat(style.scrollPaddingTop) || 0;
+    const padBottom = parseFloat(style.scrollPaddingBottom) || 0;
+    const row = sec.getBoundingClientRect();
+    const view = sc.getBoundingClientRect();
+    const top = view.top + padTop;
+    const bottom = view.bottom - padBottom;
+    // Already in view, so nothing moves - which is what stops a sideways press
+    // from nudging the page.
+    if (row.top >= top && row.bottom <= bottom) return;
+    sc.scrollTop += row.top - top;
+  }, []);
+
   const onFocusChild = useCallback(
     (el: HTMLElement) => {
       onReached?.();
@@ -84,7 +111,13 @@ export function Row({
       // The section rather than the tile, because the tile lives inside a clip
       // that is not a scroller: asking the browser to reveal it can only be
       // answered by moving something we are moving ourselves.
-      section.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      //
+      // And computed rather than handed to `scrollIntoView`, because "nearest"
+      // aligns whichever edge is closer - going down that parks the row at the
+      // BOTTOM of the view, with the row above still showing a row and a half
+      // of itself. A row is brought to the top of the view or not moved at all,
+      // which is the only placement that reads the same in both directions.
+      revealRow();
 
       const box = window_.current;
       if (!box) return;

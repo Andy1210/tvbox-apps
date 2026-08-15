@@ -175,19 +175,20 @@ export function Home(): React.JSX.Element {
 
         <div
           ref={scroller}
-          // scroll-pt has to clear the row's HEADING, not just the tile. The
-          // browser brings the focused tile into view and knows nothing about
-          // the title above it, so a small padding parked the tile at the top
-          // and pushed "Carry on watching" off the screen - and with it the
-          // captions at the bottom of the same row.
-          // scroll-pt is exactly what puts the focused row's own top at the top
-          // of the view: its heading is 3vh, the gap under it 1vh, and the row's
-          // padding nets 2vh. More than that leaves a gap above it - and the
-          // row before it shows through as a stripe of half a caption.
+          // scroll-pt clears the mask below, and nothing more. It used to be
+          // 8.5vh because the BROWSER brought the focused tile into view and
+          // knew nothing about the heading above it, so this number stood in
+          // for the heading's own height. A row now places itself and reveals
+          // its whole section, heading included, so the same 8.5vh would be
+          // counted twice - and the row above showed through as a row and a
+          // half of itself.
+          //
+          // Read by Row rather than assumed there: it is what keeps the first
+          // row clear of the rail, and two copies of a number like this drift.
           //
           // The mask is the belt to that brace: a row entering from above fades
           // rather than appearing as a line of text with its top cut off.
-          className="no-scrollbar flex flex-1 flex-col gap-[2vh] overflow-y-auto pt-[2.5vh] pb-[2vh] scroll-pt-[8.5vh] scroll-pb-[6vh] [mask-image:linear-gradient(to_bottom,transparent_0,#000_2.5vh)]"
+          className="no-scrollbar flex flex-1 flex-col gap-[2vh] overflow-y-auto pt-[2.5vh] pb-[2vh] scroll-pt-[2.5vh] scroll-pb-[6vh] [mask-image:linear-gradient(to_bottom,transparent_0,#000_2.5vh)]"
         >
           {/* Ordered by the household, not by us. A row switched off is not
           rendered at all rather than rendered empty, and one with nothing in it
