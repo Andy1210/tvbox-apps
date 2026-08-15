@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { installNavSounds, setSoundsEnabled, setSoundsSuppressed, useBackspace, useConfigStore } from "@sdk";
+import { installNavSounds, setSoundsEnabled, setSoundsSuppressed, tvbox, useBackspace, useConfigStore } from "@sdk";
 import { Detail } from "./Detail";
 import { Home } from "./Home";
 import { Library } from "./Library";
@@ -103,6 +103,50 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   useEffect(() => {
     void boot();
   }, [boot]);
+
+  /**
+   * The box's screensaver, over this app.
+   *
+   * The launcher owns the ambient screen and its window is hidden while an app
+   * is in front, so its idle timer cannot arm behind this one - a media client
+   * left on a poster grid is a still picture the box would hold all night. The
+   * keys land in this window, so this is where the counting has to be, on the
+   * same delay the person chose for the launcher.
+   *
+   * Not while anything is loaded in the player, paused included: the shell
+   * refuses then anyway, because reaching the launcher would END mpv rather
+   * than hide it. And not on the sign-in screen, which is a code being read off
+   * the television while somebody types it into a phone - the one screen where
+   * minutes without a press mean attention rather than absence.
+   *
+   * Absent on a shell older than this feature, where the call is simply not
+   * there.
+   */
+  const ambient = useConfigStore((s) => s.config?.ambient);
+  const waitingToSignIn = screen.name === "login";
+  useEffect(() => {
+    const minutes = ambient?.idleMinutes ?? 0;
+    if (!ambient?.enabled || minutes <= 0 || playing || waitingToSignIn) return;
+    let last = Date.now();
+    const bump = (): void => {
+      last = Date.now();
+    };
+    window.addEventListener("keydown", bump, true);
+    window.addEventListener("pointermove", bump, true);
+    const id = setInterval(() => {
+      // A hidden window is not what anybody is looking at, and it receives none
+      // of the keys that would reset this, so its time does not count.
+      if (document.visibilityState !== "visible") return bump();
+      if (Date.now() - last < minutes * 60_000) return;
+      last = Date.now(); // asked; start counting again rather than asking every tick
+      tvbox().ambient?.request();
+    }, 5000);
+    return () => {
+      window.removeEventListener("keydown", bump, true);
+      window.removeEventListener("pointermove", bump, true);
+      clearInterval(id);
+    };
+  }, [ambient?.enabled, ambient?.idleMinutes, playing, waitingToSignIn]);
 
   // Back walks the screens first and only leaves the app from the top, which is
   // what the remote's Back means everywhere else on this box.

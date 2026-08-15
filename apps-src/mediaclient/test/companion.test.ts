@@ -176,4 +176,102 @@ describe("the companion poll", () => {
     await new Promise((r) => setTimeout(r, 30));
     expect(calls.length, "no poll after the stop").toBe(after);
   });
+  it("does not read an answer bigger than it will parse", async () => {
+    // The cap used to be a slice on an already-read body, which bounds parsing
+    // and nothing else: measured against a probe server, an 8 MB answer
+    // materialised in full behind a 64 KB limit. This app signs into servers it
+    // does not own and talks to them over plain HTTP, so the size of an answer
+    // is not something to assume.
+    let read = 0;
+    const huge = "<MediaContainer>" + "<!--" + "x".repeat(200_000) + "-->" + "</MediaContainer>";
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      if (!String(url).includes("/proxy/poll")) return xml("");
+      if (calls.filter((c) => c.url.includes("/proxy/poll")).length > 1) return held(init);
+      // A body delivered in chunks, counting what the client actually pulls.
+      // `pull`, not `start`: a stream that enqueues everything up front counts
+      // what the SERVER sent, and the whole question is what the client asked
+      // for.
+      let sent = 0;
+      const chunk = new TextEncoder().encode(huge.slice(0, 40_000));
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (sent >= 12) return controller.close();
+          sent += 1;
+          read += chunk.byteLength;
+          controller.enqueue(chunk);
+        },
+      });
+      return new Response(body, { status: 200, headers: { "Content-Type": "application/xml" } });
+    });
+
+    const stop = startCompanion({ baseUrl: "http://s:32400", token: "t", id: ID, onCommand: () => ({ ok: true }) });
+    await new Promise((r) => setTimeout(r, 400));
+    stop();
+
+    // Under the 64 KB cap plus one chunk: it stops pulling, rather than pulling
+    // 480 KB and then slicing.
+    expect(read).toBeLessThan(64 * 1024 + 2 * 40_000);
+  });
+
+  it("keeps a refusal from carrying anything private to the controller", async () => {
+    // The server hands this answer to the controller byte for byte - verified
+    // against the live one - and the reason is an error message from anywhere
+    // in the command path. It is the only string this app sends to a third
+    // party that the redactor never saw.
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      if (String(url).includes("/proxy/poll")) {
+        if (calls.filter((c) => c.url.includes("/proxy/poll")).length > 1) return held(init);
+        return xml('<MediaContainer size="1"><Command path="/player/playback/pause" commandID="3" /></MediaContainer>');
+      }
+      return xml("");
+    });
+
+    const stop = startCompanion({
+      baseUrl: "http://s:32400",
+      token: "t",
+      id: ID,
+      onCommand: () => ({ ok: false as const, reason: "failed at http://s:32400/x?X-Plex-Token=SECRET-abc123" }),
+    });
+    await new Promise((r) => setTimeout(r, 400));
+    stop();
+
+    const answer = calls.find((c) => c.url.includes("/proxy/response"));
+    expect(answer).toBeTruthy();
+    expect(String(answer!.init!.body)).not.toContain("SECRET-abc123");
+  });
+
+  it("sends no answer once it has been stopped", async () => {
+    // `stop()` aborts what is in flight, but a response created AFTER it was
+    // never in that set - so an acknowledgement went out under the old token
+    // however long the command had taken. There is nothing left to release
+    // either: the loop is gone.
+    let release: () => void = () => {};
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      if (String(url).includes("/proxy/poll")) {
+        if (calls.filter((c) => c.url.includes("/proxy/poll")).length > 1) return held(init);
+        return xml('<MediaContainer size="1"><Command path="/player/playback/pause" commandID="5" /></MediaContainer>');
+      }
+      return xml("");
+    });
+
+    const stop = startCompanion({
+      baseUrl: "http://s:32400",
+      token: "t",
+      id: ID,
+      // A command still running when the person signs out.
+      onCommand: () =>
+        new Promise((resolve) => {
+          release = () => resolve({ ok: true as const });
+        }),
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    stop();
+    release();
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(calls.some((c) => c.url.includes("/proxy/response"))).toBe(false);
+  });
 });

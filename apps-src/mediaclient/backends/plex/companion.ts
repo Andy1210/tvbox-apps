@@ -12,7 +12,7 @@
 // looks exactly like a box that is simply never chosen.
 
 import { plexHeaders, type PlexIdentityHeaders } from "./http";
-import { log } from "../../redact";
+import { log, redactString } from "../../redact";
 
 /**
  * What the poll must carry.
@@ -94,6 +94,7 @@ export function startCompanion(opts: {
   let controller: AbortController | null = null;
   /** In-flight acknowledgements, so `stop()` can free a loop parked in one. */
   const responders = new Set<AbortController>();
+  const once = runOnce();
   let commandId = 0;
   let backoff = RETRY_MS;
 
@@ -112,10 +113,19 @@ export function startCompanion(opts: {
     const url = new URL("player/proxy/response", base(opts.baseUrl));
     url.searchParams.set("commandID", id);
     const code = result.ok ? "200" : "500";
-    const status = result.ok ? "OK" : result.reason.slice(0, 120);
+    // Through the redactor, because this is the one string this app sends to a
+    // third party that the redactor never saw: the reason is an error message
+    // from anywhere in the command path, and the server hands the answer on to
+    // the controller byte for byte (verified against the live server).
+    const status = result.ok ? "OK" : redactString(result.reason).slice(0, 120);
     // Its own signal, and a timeout. `stop()` aborts the POLL, and a response
     // that never settles left the loop parked in an in-flight request carrying
     // the previous session's token - so sign-out did not actually stop it.
+    //
+    // A response created AFTER stop() was never in `responders` for stop() to
+    // abort, so it went out under the old token however long the command had
+    // taken. There is nothing to release either: the loop is gone.
+    if (stopped) return;
     const timer = setTimeout(() => respondController.abort(), RESPOND_TIMEOUT_MS);
     const respondController = new AbortController();
     responders.add(respondController);
@@ -160,8 +170,16 @@ export function startCompanion(opts: {
         if (!res.ok) throw new Error(`poll answered ${res.status}`);
         backoff = RETRY_MS;
 
-        const answer = (await res.text()).slice(0, MAX_ANSWER_BYTES);
-        for (const cmd of parse(answer)) {
+        const answer = await boundedText(res, MAX_ANSWER_BYTES);
+        // Nothing to answer with: the commandID the controller is waiting on is
+        // inside the body that was refused, so all this can do is say why and
+        // let the poll come round again.
+        if (answer.over) {
+          log.warn("companion poll answered more than this player will read; ignored");
+          await sleep(MIN_POLL_MS);
+          continue;
+        }
+        for (const cmd of parse(answer.text)) {
           const id = cmd.params.commandID;
           // Kept although THIS server ignores it: measured, PMS discards the
           // poll's commandID and keeps its own per-controller sequence. The
@@ -173,6 +191,10 @@ export function startCompanion(opts: {
           // server answering an unnumbered command had the box run it about
           // four times a second, forever. Run it once and move on.
           if (!id && !once.add(cmd.path)) continue;
+          // Stopped while this answer was being read. Sign-out and the profile
+          // picker both land here, and running the command anyway would play as
+          // the person who just left.
+          if (stopped) return;
           let result: CommandResult;
           try {
             // Bounded, because the loop does not poll while a command runs: a
@@ -251,15 +273,63 @@ function base(url: string): string {
   return url.endsWith("/") ? url : `${url}/`;
 }
 
-/** Remembers the unnumbered commands already run, so they run once. */
-const once = {
-  seen: new Set<string>(),
-  add(path: string): boolean {
-    if (this.seen.has(path)) return false;
-    this.seen.add(path);
-    return true;
-  },
-};
+/**
+ * Remembers the unnumbered commands already run, so they run once.
+ *
+ * One per loop rather than one per page: as a module singleton it outlived
+ * sign-out and the profile picker, so a command was remembered across the
+ * change of person, and it grew without limit on a server that sends paths
+ * (96 distinct ones inside 1.5 s, measured) - the set is keyed by a string the
+ * SERVER chooses.
+ */
+function runOnce(limit = 256): { add(path: string): boolean } {
+  const seen = new Set<string>();
+  return {
+    add(path: string): boolean {
+      if (seen.has(path)) return false;
+      // Full: the oldest is forgotten rather than the newest refused, because
+      // refusing would make the loop run an old command again on the next poll.
+      if (seen.size >= limit) seen.delete(seen.values().next().value as string);
+      seen.add(path);
+      return true;
+    },
+  };
+}
+
+/**
+ * Read an answer without buffering all of it.
+ *
+ * The cap used to be a `slice` on an already-read body, which bounds parsing
+ * and nothing else: measured, an 8 MB answer materialised in full behind a
+ * 64 KB limit. This app signs into servers it does not own, and the box talks
+ * to them over plain HTTP, so the far end is not a size we get to assume.
+ */
+async function boundedText(res: Response, max: number): Promise<{ text: string; over: boolean }> {
+  const declared = Number(res.headers?.get?.("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > max) return { text: "", over: true };
+  const body = (res as { body?: ReadableStream<Uint8Array> | null }).body;
+  // No stream to read: everything this runs on has one, so this is the shape a
+  // test double takes. Bounded by the length check above and by the guard here.
+  if (!body || typeof body.getReader !== "function") {
+    const text = await res.text();
+    return text.length > max ? { text: "", over: true } : { text, over: false };
+  }
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+      if (text.length > max) return { text: "", over: true };
+    }
+    text += decoder.decode();
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  return { text, over: false };
+}
 
 async function withTimeout<T>(work: Promise<T> | T, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;

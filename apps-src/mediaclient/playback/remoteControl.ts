@@ -43,6 +43,21 @@ const ok: CommandResult = { ok: true };
 const no = (reason: string): CommandResult => ({ ok: false, reason });
 
 /**
+ * Whether the item asked for is the one now playing.
+ *
+ * The player reports both of its failures by putting them in state and
+ * returning normally - no player on this box, and a stream it could not resolve
+ * - so "the call came back" says nothing about whether a film started. This is
+ * the only honest test, and it is why every path that starts something waits
+ * for it before answering.
+ */
+function started(id: string): CommandResult {
+  const after = usePlayer.getState();
+  if (!after.current || after.current.item.id !== id) return no(after.error ?? "the film did not start");
+  return ok;
+}
+
+/**
  * Run one command.
  *
  * Only the paths this box can honestly answer. An unknown one is refused rather
@@ -67,6 +82,18 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       const item = await backend.item(id);
       const offset = Number(arg(cmd, "offset") ?? "0");
       const at = Number.isFinite(offset) && offset > 0 ? offset : 0;
+      // Asked again, because the answer above is minutes old by the standards
+      // of this function: fetching the item is a round trip to the server, and
+      // the app can be sent behind the launcher while it is in flight. Starting
+      // a film then hands the box's one player to a window nobody is looking
+      // at, and the shell's refusal is invisible from here - the bridge throws
+      // its result away.
+      if (!isVisible()) return no("the media app is not on screen");
+      // And still the same person. Signing out or picking another profile
+      // replaces the backend, and a command already in flight would otherwise
+      // play as whoever was signed in when it arrived - history and all - with
+      // the profile picker on screen.
+      if (useApp.getState().backend !== backend) return no("the person on this box changed");
       await p.play(backend, item, {
         version: rememberedVersion(item.id, item.versions.length),
         // The controller's offset is the whole instruction, so the server's own
@@ -76,6 +103,19 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         resume: false,
         startMs: at,
       });
+      // What the player DID, not what it was asked to do: an unconditional OK
+      // told the house a film was playing while the television showed the
+      // launcher.
+      const playing = started(item.id);
+      if (!playing.ok) return playing;
+      // And it must still be the screen in front, or what just started is
+      // playing behind the launcher. Stopped rather than left running: the
+      // controller is being told this failed, and a box that keeps playing
+      // after that is the same lie in the other direction.
+      if (!isVisible()) {
+        await p.stop();
+        return no("the media app went off screen");
+      }
       return ok;
     }
     case "/player/playback/play":
@@ -96,14 +136,22 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       if (!p.current) return ok; // already what was asked for
       await p.stop();
       return ok;
-    case "/player/playback/skipNext":
-      if (!p.siblings.next) return no("nothing follows this");
-      p.playSibling("next");
-      return ok;
-    case "/player/playback/skipPrevious":
-      if (!p.siblings.prev) return no("nothing comes before this");
-      p.playSibling("prev");
-      return ok;
+    // Awaited and then checked, for the same reason playMedia is: `playSibling`
+    // starts the next episode through the same call that swallows its failures,
+    // so answering before it returned was answering before anything had been
+    // tried.
+    case "/player/playback/skipNext": {
+      const next = p.siblings.next;
+      if (!next) return no("nothing follows this");
+      await p.playSibling("next");
+      return started(next.id);
+    }
+    case "/player/playback/skipPrevious": {
+      const prev = p.siblings.prev;
+      if (!prev) return no("nothing comes before this");
+      await p.playSibling("prev");
+      return started(prev.id);
+    }
     case "/player/playback/seekTo": {
       if (!p.current) return no("nothing is playing");
       const to = Number(arg(cmd, "offset"));

@@ -132,7 +132,14 @@ interface PlayerState {
   siblings: { prev?: MediaItem; next?: MediaItem };
   /** The list playback is following, when it was started from one. */
   queue?: MediaItem[];
-  playSibling(which: "prev" | "next"): void;
+  /**
+   * Start the episode before or after this one.
+   *
+   * Resolves when the move has been attempted, so a caller that has to answer
+   * for it - the remote control protocol has to - can check what happened
+   * instead of reporting success before anything was tried.
+   */
+  playSibling(which: "prev" | "next"): Promise<void>;
   /**
    * The episode that will start by itself, and when.
    *
@@ -184,12 +191,12 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     set({ upNext: null });
   },
 
-  playSibling(which) {
+  async playSibling(which) {
     const item = get().siblings[which];
     if (!item || !currentBackend) return;
     // The queue travels with the move, or stepping once through a playlist
     // would land on an item that no longer knows it is in one.
-    void get().play(currentBackend, item, { resume: false, queue: get().queue });
+    await get().play(currentBackend, item, { resume: false, queue: get().queue });
   },
 
   async play(backend, item, opts) {
@@ -268,11 +275,19 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // An explicit start wins over both: a controller that names an offset has
     // said where to begin, and the server's own resume point is then simply a
     // different answer to a question nobody asked.
-    const resumeFrom =
-      opts?.startMs !== undefined ? opts.startMs : opts?.resume === false ? 0 : (item.viewOffsetMs ?? 0);
-    // Seconds, and only when it is worth it: resuming a film four seconds in is
-    // more surprising than starting it.
-    const startSec = resumeFrom > 10_000 ? Math.floor(resumeFrom / 1000) : 0;
+    const named = opts?.startMs;
+    const resumeFrom = named !== undefined ? named : opts?.resume === false ? 0 : (item.viewOffsetMs ?? 0);
+    // Seconds, and for a RESUME point only when it is worth it: resuming a film
+    // four seconds in is more surprising than starting it. An offset somebody
+    // named is not a resume point and is honoured whatever its size - the
+    // threshold used to swallow it, so a controller asking for five seconds in
+    // got the beginning while the bar said five seconds.
+    const startSec =
+      named !== undefined
+        ? Math.floor(Math.max(0, named) / 1000)
+        : resumeFrom > 10_000
+          ? Math.floor(resumeFrom / 1000)
+          : 0;
 
     set({
       current: { item, decision, markers, detail, choice },

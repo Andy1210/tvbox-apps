@@ -5,8 +5,12 @@
     "hu": "Média",
     "en": "Media"
   },
-  "version": "0.49.2",
+  "version": "0.50.0",
   "changelog": [
+    {
+      "version": "0.50.0",
+      "notes": "The box's screensaver now comes up over the media client too, after the same few minutes of nothing happening that the launcher uses - but never over a film, and never over the sign-in code. Big libraries behave properly again: the row you are on is no longer cut off at the bottom of the screen, the last row can be reached, and jumping to a letter near the end of the alphabet fills the screen instead of leaving it mostly black. Searching again no longer opens a row of results scrolled past its own beginning. And a film started by voice is reported honestly - if it did not start, the house is told so rather than being told it is playing."
+    },
     {
       "version": "0.3.0",
       "notes": "Pick who is watching when the box starts, so everyone's continue-watching row is their own - and turn that off in Settings if you would rather it just carried on as you. The libraries moved to the top, with search and settings beside them on the same row, so getting to them is one press sideways instead of hunting upwards. Reviews are a row you can move through with the remote. And a TV show that gained episodes now shows the series' own cover rather than four stills from it."
