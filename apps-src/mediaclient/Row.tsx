@@ -114,45 +114,54 @@ export function Row({
         className="flex shrink-0 flex-col gap-[1vh]"
       >
         <h2 className="shrink-0 px-[4vw] text-[2vh] font-semibold tracking-tight">{title}</h2>
-        <div
-          ref={window_}
-          // Clips; it does not scroll. Everything in it is carried by the layer
-          // below, which the compositor moves.
-          className="no-scrollbar overflow-hidden px-[4vw] py-[6vh] -my-[4vh]"
-        >
-          {/* `relative` is load-bearing, not spacing. A tile's offsetLeft is
+        {/* The inset is OUTSIDE the clip, and that is the whole point of the
+            extra element. `overflow` clips at the PADDING box, so a rail padded
+            by 4vw stays visible inside those 4vw - a tile sliding out of the
+            row ran all the way to the screen edge instead of disappearing at
+            the margin. Padding here, clipping below, and the two stop
+            disagreeing. */}
+        <div className="px-[4vw]">
+          <div
+            ref={window_}
+            // Clips; it does not scroll. Everything in it is carried by the
+            // layer below, which the compositor moves. The vertical padding is
+            // room for the focus ring, which is drawn outside a tile's box.
+            className="no-scrollbar overflow-hidden py-[6vh] -my-[4vh]"
+          >
+            {/* `relative` is load-bearing, not spacing. A tile's offsetLeft is
               measured against the nearest POSITIONED ancestor, and the maths
               above moves THIS layer - so without it the two are in different
               coordinate spaces, and the rail lurched back and forth with the
               cursor landing off screen. */}
-          <div
-            ref={(node) => {
-              layer.current = node;
-              mover.attach(node);
-            }}
-            style={{ willChange: "transform" }}
-            className="relative flex gap-[1.2vw]"
-          >
-            {items.map((item, i) => (
-              <Tile
-                key={item.id || `${id}-${i}`}
-                item={item}
-                posterUrl={posterUrl(item)}
-                focusKey={`${id}-${item.id || i}`}
-                heightVh={heightVh}
-                aspect={aspect}
-                captionLines={captionLines}
-                onEnter={() => onSelect(item)}
-                onArrowPress={onArrowFromFirst}
-                countdown={countdownFor?.id === item.id ? countdownFor.seconds : undefined}
-                // The rail moves itself; the browser must not also scroll it.
-                selfScroll={false}
-                onFocusedEl={(el) => {
-                  onFocusChild(el);
-                  onFocusItem?.(item);
-                }}
-              />
-            ))}
+            <div
+              ref={(node) => {
+                layer.current = node;
+                mover.attach(node);
+              }}
+              style={{ willChange: "transform" }}
+              className="relative flex gap-[1.2vw]"
+            >
+              {items.map((item, i) => (
+                <Tile
+                  key={item.id || `${id}-${i}`}
+                  item={item}
+                  posterUrl={posterUrl(item)}
+                  focusKey={`${id}-${item.id || i}`}
+                  heightVh={heightVh}
+                  aspect={aspect}
+                  captionLines={captionLines}
+                  onEnter={() => onSelect(item)}
+                  onArrowPress={onArrowFromFirst}
+                  countdown={countdownFor?.id === item.id ? countdownFor.seconds : undefined}
+                  // The rail moves itself; the browser must not also scroll it.
+                  selfScroll={false}
+                  onFocusedEl={(el) => {
+                    onFocusChild(el);
+                    onFocusItem?.(item);
+                  }}
+                />
+              ))}
+            </div>
           </div>
         </div>
       </section>
