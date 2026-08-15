@@ -98,3 +98,33 @@ describe("the home screen's background layers", () => {
     for (const cls of fixedLayers) expect(cls, cls).not.toMatch(/\bz-\d/);
   });
 });
+
+describe("what comes next", () => {
+  it("follows the list it was started from, not what the item belongs to", async () => {
+    // A playlist is a running order and it wins over parentage. Without this an
+    // episode played from a playlist was followed by the next episode of its
+    // SERIES, and a film - which belongs to nothing - had no next at all.
+    const { usePlayer } = await import("../playback/player");
+
+    const ep = (n: number, season: string) => ({
+      id: `e${n}`,
+      kind: "episode" as const,
+      title: `E${n}`,
+      parentId: season,
+    });
+    const film = { id: "f1", kind: "movie" as const, title: "Film" };
+
+    // A hand-made queue mixing a film and an episode, as a playlist does.
+    const queue = [film, ep(7, "s1"), { id: "f2", kind: "movie" as const, title: "Film 2" }];
+    const at = queue.findIndex((q) => q.id === "e7");
+    usePlayer.setState({ queue, siblings: { prev: queue[at - 1], next: queue[at + 1] } });
+
+    // The neighbours are the playlist's, not season s1's.
+    expect(usePlayer.getState().siblings.prev?.id).toBe("f1");
+    expect(usePlayer.getState().siblings.next?.id).toBe("f2");
+
+    // And a film in a list has a next, which it never could from parentage.
+    const first = queue.findIndex((q) => q.id === "f1");
+    expect(queue[first + 1]?.id).toBe("e7");
+  });
+});

@@ -323,7 +323,9 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
                 // no other way.
                 onFocused={toTop}
                 onEnter={() =>
-                  backend && toPlay && void usePlayer.getState().play(backend, toPlay, { version, ...pick(tracksFrom) })
+                  backend &&
+                  toPlay &&
+                  void usePlayer.getState().play(backend, toPlay, { version, ...pick(tracksFrom), queue: children })
                 }
                 className="rounded-[1vh] bg-white/15 px-[2.4vw] py-[1.4vh] text-[2.1vh]"
               >
@@ -339,9 +341,10 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
                 focusKey="detail-restart"
                 onEnter={() =>
                   backend &&
-                  backend &&
                   toPlay &&
-                  void usePlayer.getState().play(backend, toPlay, { resume: false, version, ...pick(tracksFrom) })
+                  void usePlayer
+                    .getState()
+                    .play(backend, toPlay, { resume: false, version, ...pick(tracksFrom), queue: children })
                 }
                 className="rounded-[1vh] bg-white/10 px-[2vw] py-[1.4vh] text-[2.1vh]"
               >
@@ -455,9 +458,13 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
               if (item.kind === "episode" && backend) {
                 // Resolved against the episode being started, not the one the
                 // cursor was on when the language was chosen.
-                void backend
-                  .item(item.id)
-                  .then((d) => usePlayer.getState().play(backend, item, { version, ...pick(d.versions[version]) }));
+                void backend.item(item.id).then((d) =>
+                  // The screen's own list is the running order: a playlist and
+                  // a collection are one, and a season is one too. Without it
+                  // an episode played from a playlist would be followed by the
+                  // next episode of its SERIES, and a film by nothing at all.
+                  usePlayer.getState().play(backend, item, { version, ...pick(d.versions[version]), queue: children }),
+                );
                 return;
               }
               go({ name: "item", itemId: item.id });
