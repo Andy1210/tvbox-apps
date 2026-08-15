@@ -72,7 +72,11 @@ if (bridge.onCommand) {
   const map: Record<string, string> = { play: "play", resume: "play", pause: "pause", next: "next", previous: "prev" };
   bridge.onCommand((cmd: unknown) => {
     const a = map[String((cmd as { action?: string } | null)?.action || "").toLowerCase()];
-    if (a) control(a);
+    // Nothing here has a screen to say it on - this is voice or MQTT, arriving
+    // with nobody necessarily looking - so a refusal is at least written down.
+    // The refusals worth finding here are the box_* ones: the box is being driven
+    // by an account this box has not linked, or it is not addressable at all.
+    if (a) void control(a).then((err) => err && console.warn("[spotify] remote " + a + " refused: " + err));
   });
 }
 

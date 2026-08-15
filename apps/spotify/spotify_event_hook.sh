@@ -12,6 +12,8 @@
 # librespot env vars (0.8): PLAYER_EVENT, TRACK_ID, URI, NAME, ARTISTS (newline
 # separated), ALBUM, ALBUM_ARTISTS, COVERS (newline separated, largest first),
 # DURATION_MS, POSITION_MS, VOLUME (0-65535), ITEM_TYPE, IS_EXPLICIT, NUMBER.
+# session_connected carries USER_NAME instead: the account librespot is signed
+# into, which is the only account the box can be commanded as.
 set -euo pipefail
 
 URL="${TVBOX_SPOTIFY_EVENT_URL:-http://127.0.0.1:8097/tvbox/api/spotify/event}"
@@ -37,10 +39,17 @@ print(json.dumps({
     "position_ms":  num(os.environ.get("POSITION_MS")),
     "volume":       num(os.environ.get("VOLUME")),
     "item_type":    os.environ.get("ITEM_TYPE", ""),
+    "user_name":    os.environ.get("USER_NAME", ""),
+    # Proves the event came from the daemon the shell started, which is what lets
+    # user_name decide the account the box is commanded as.
+    "key":          os.environ.get("TVBOX_SPOTIFY_EVENT_KEY", ""),
 }))
 PY
 )
 
-curl --silent --max-time 2 --request POST \
-  --header "Content-Type: application/json" --data "$payload" "$URL" \
+# The payload goes in on stdin, not in argv: it carries the key that tells the
+# shell this event is the daemon's, and an argument is readable in /proc by
+# anything running as this user.
+printf '%s' "$payload" | curl --silent --max-time 2 --request POST \
+  --header "Content-Type: application/json" --data-binary @- "$URL" \
   >/dev/null 2>&1 || true

@@ -200,8 +200,7 @@ function searchLrclib(title, artist, durSec) {
           }
           if (!Array.isArray(list) || !list.length) return resolve(null);
           const want = Number(durSec) || 0;
-          const score = (e) =>
-            (want && Math.abs((e.duration || 0) - want) <= 7 ? 0 : 100) + (e.syncedLyrics ? 0 : 10);
+          const score = (e) => (want && Math.abs((e.duration || 0) - want) <= 7 ? 0 : 100) + (e.syncedLyrics ? 0 : 10);
           list.sort((a, b) => score(a) - score(b));
           const best = list[0];
           // a wildly different duration is a different song/version - reject
@@ -233,6 +232,24 @@ module.exports = (host) => {
   // credentials, so this sticks across restarts; zeroconf stays on, so any phone
   // can still cast and take the box over as usual.
   let adoptToken = "";
+  // What makes an event's `user_name` trustworthy. The rest of an event draws a
+  // screen, and /tvbox/api/spotify/event has always been reachable by anything
+  // served from this box's own origin. The owner is different in kind: it decides
+  // which account the TV's buttons act as, so it is honoured only when the event
+  // carries the key this process handed to librespot in its environment. Without
+  // it the event still renders; it just cannot name an account.
+  //
+  // What that is worth, exactly: it stops a REMOTE app's renderer and anything in
+  // a flatpak sandbox (no host /proc). It does not stop another installed local
+  // app package — a manifest `runtime.bridge` gets Node in its own renderer, and
+  // SECURITY.md already puts that inside the trust boundary — nor any process
+  // running as this user, since both can read the daemon's environment.
+  const eventKey = crypto.randomBytes(24).toString("hex");
+  function fromOurDaemon(k) {
+    const a = Buffer.from(String(k || ""));
+    const b = Buffer.from(eventKey);
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  }
   function spotifyDeviceName() {
     return (host.config.rawSpotify() || {}).deviceName || "tvbox";
   }
@@ -291,7 +308,7 @@ module.exports = (host) => {
     const out = librespotLog === "ignore" ? "ignore" : librespotLog;
     host.spawnService("librespot", {
       argv: librespotArgv, // recomputed each (re)start -> picks up rename + sink
-      env: host.childEnv(),
+      env: { ...host.childEnv(), TVBOX_SPOTIFY_EVENT_KEY: eventKey },
       stdio: ["ignore", out, out],
       minUptimeMs: 5000,
       ceiling: 5,
@@ -300,15 +317,19 @@ module.exports = (host) => {
     });
   }
   // Killing the process emits no disconnect event, so reset now-playing to idle
-  // whenever we tear it down ourselves.
+  // whenever we tear it down ourselves. The new instance registers as a NEW
+  // Connect device under the same name, so the id commands are addressed to has
+  // to be looked up again — Spotify accepts a stale one and does nothing.
   function stopLibrespot() {
     host.stopService("librespot");
+    spotifyApi.forgetBoxDevice();
     spotify.clear();
   }
   // Apply a new --name: respawn after a beat so the old instance releases its
   // zeroconf port + audio device before the new one binds.
   function restartLibrespot() {
     spotify.clear();
+    spotifyApi.forgetBoxDevice();
     if (!enabled()) return stopLibrespot(); // disabled mid-flight -> ensure it's down
     host.restartService("librespot", 900);
   }
@@ -591,6 +612,14 @@ module.exports = (host) => {
     },
     "POST /event": (req, res, ctx) => {
       const ev = ctx.body || {};
+      if (ev.user_name && !fromOurDaemon(ev.key)) {
+        // Anything on this origin can post an event; only our daemon can say who
+        // the box belongs to. A forged one would otherwise strand the transport
+        // controls on a box "somebody else is driving".
+        host.log("spotify: ignored an event naming an account without the daemon key");
+        delete ev.user_name;
+      }
+      delete ev.key;
       spotify.handleEvent(ev);
       // The same events, raw: autoplay needs the event NAME (a context running out
       // is an end_of_track with nothing after it), which the rendered SSE state
@@ -764,7 +793,8 @@ module.exports = (host) => {
   });
   const keyboardPageHtml = fs.readFileSync(path.join(__dirname, "pairing", "keyboard.html"), "utf8");
   host.pairing.register("keyboard", {
-    page: (ctx) => renderTemplate(keyboardPageHtml, { lang: ctx.locale, ...(KEYBOARD_STR[ctx.locale] || KEYBOARD_STR.en) }),
+    page: (ctx) =>
+      renderTemplate(keyboardPageHtml, { lang: ctx.locale, ...(KEYBOARD_STR[ctx.locale] || KEYBOARD_STR.en) }),
     routes: {
       "POST /key": (req, res, ctx) => {
         try {
@@ -801,6 +831,22 @@ module.exports = (host) => {
         host.log("cast started -> open Spotify, stop other playback");
         if (host.navTo) host.navTo("spotify");
         else host.showLauncher("#spotify");
+        // Music started here, so whoever started it is holding the box. The
+        // session event below is the direct signal, but it does not always come;
+        // this asks Spotify instead, and both end in the same place.
+        spotifyApi
+          .followBox()
+          .then((moved) => moved && host.log("spotify: following the account that cast to the box"))
+          .catch(() => {});
+      });
+      // The box changed hands. Whoever picked it in their Spotify app now owns
+      // the session, so the launcher follows them: their library is the one that
+      // matches the music, and their player is the one the buttons reach. A
+      // household with two linked accounts had neither — the screen stayed on
+      // whichever account was linked last, and its pause never stopped the cast.
+      spotify.onSessionUser((userId) => {
+        if (spotifyApi.boxSignedInAs(userId))
+          host.log("spotify: the box changed hands; following the account playing on it");
       });
       // HOME widget: the playing track as a card while a cast is active (shell
       // 1.5+ host API; older shells simply have no host.widget). Keyed so the

@@ -71,14 +71,35 @@ function loadAccounts() {
   }
   return { active: "", list: [] };
 }
+// Written whole, then renamed over the old one: this file is the only copy of
+// every linked account's refresh token, and it is now written on a handover as
+// well as on a link. A power cut during a plain overwrite leaves a truncated file
+// and the box has no accounts at all; a rename either happened or did not.
 function saveAccounts() {
+  const tmp = ACCOUNTS_FILE + ".tmp";
   try {
     const dir = path.dirname(ACCOUNTS_FILE);
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(accounts), { mode: 0o600 });
+    // fsync before the rename, the same shape the box uses for the boot partition:
+    // the rename can otherwise reach the disk before the bytes it points at, and
+    // the file that survives a power cut is then empty - which here means the box
+    // has no linked accounts at all.
+    const fd = fs.openSync(tmp, "w", 0o600);
+    try {
+      fs.writeFileSync(fd, JSON.stringify(accounts));
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.chmodSync(tmp, 0o600); // enforce regardless of umask (refresh tokens)
+    fs.renameSync(tmp, ACCOUNTS_FILE);
     fs.chmodSync(dir, 0o700);
-    fs.chmodSync(ACCOUNTS_FILE, 0o600); // enforce on every write (refresh tokens)
   } catch (e) {
+    try {
+      fs.unlinkSync(tmp);
+    } catch (e2) {
+      /* nothing left to clean up */
+    }
     console.warn("[spotify-api] accounts persist failed:", e.message);
   }
 }
@@ -660,6 +681,150 @@ async function findBoxAccount() {
   }
   return null;
 }
+
+// The box's device id within one account's list, cached: a transport press must
+// not cost a device listing of its own, and the answer only changes when the box
+// changes hands, is renamed, or its daemon is restarted — all of which call
+// forgetBoxDevice. The TTL is the bound on anything that does neither, a crash
+// respawn included (that one goes through the supervisor, not through us).
+//
+// A MISS is never cached. It means the box is not in that account's list right
+// now, which is exactly what a respawning librespot looks like for a second or
+// two — and caching it would answer the press somebody makes immediately
+// afterwards out of memory, for half a minute.
+const BOX_DEV_TTL_MS = 30000;
+let boxDev = { key: "", id: "", at: 0 };
+function boxDevKey(acc) {
+  return acc.id + "\n" + spotifyBridge.deviceName();
+}
+function rememberBoxDevice(acc, id) {
+  if (acc && id) boxDev = { key: boxDevKey(acc), id, at: Date.now() };
+}
+async function boxDeviceIdFor(acc) {
+  if (!acc) return "";
+  const key = boxDevKey(acc);
+  if (boxDev.key === key && boxDev.id && Date.now() - boxDev.at < BOX_DEV_TTL_MS) return boxDev.id;
+  const id = await boxDeviceOn(acc);
+  rememberBoxDevice(acc, id);
+  return id;
+}
+// A restart hands the box a NEW device id under the same name, so a cached one
+// would address a device that no longer exists — and Spotify accepts that id and
+// does nothing with it.
+function forgetBoxDevice() {
+  boxDev = { key: "", id: "", at: 0 };
+}
+
+// Who the box is playing as. Every command about the box is sent as this account
+// and addressed to this device id; nothing else may stand in for either.
+//
+// Two sources, and the second is not a legacy path — it is what answers most of
+// the time:
+//   1. librespot's session user. Exact and free, but librespot 0.8 names it only
+//      when the box is ACTIVATED (see spotify.js), so an idle box has no owner
+//      here even though it is signed into one.
+//   2. the device lists — whoever can see the box is signed into it.
+//
+// The named owner is CHECKED rather than trusted: if that account cannot address
+// the box, the sweep decides. Three states this code produces itself would
+// otherwise report a stranger holding the box — a synthetic or "legacy" account
+// id that matches no session user, an account dropped mid-flight by a failed
+// refresh, and a name left over from a daemon that has since restarted.
+//
+// `state` is the whole answer, because the four cases need four different things
+// done about them:
+//   ours         a linked account holds the box; account + devId are set
+//   unreachable  a linked account holds it, but we could not address the device.
+//                Transient, and NOT permission to take the box off them
+//   other        an account this box has not linked holds it: nothing we send
+//                can reach that playback
+//   none         nobody we know holds it; the box is free
+// `needDevice` is what a READ can do without: a question about the box needs only
+// the account to ask as, and with the session user known that costs no request.
+async function boxOwner(needDevice) {
+  const user = spotifyBridge.sessionUser();
+  const named = user ? accounts.list.find((x) => x.id === user) : null;
+  if (named) {
+    if (!needDevice) return { state: "ours", account: named, devId: "" };
+    let devId = "";
+    try {
+      devId = await boxDeviceIdFor(named);
+    } catch (e) {
+      devId = "";
+    }
+    if (devId) return { state: "ours", account: named, devId };
+  }
+  // Nobody named, but the last press already paid for a listing and the answer is
+  // still warm. Without this the sweep below runs on every /player poll — one
+  // listing per linked account, every twenty seconds, on the path the comment
+  // above calls the common one.
+  const cached = !named && cachedBoxOwner();
+  if (cached) return cached;
+  let found = null;
+  try {
+    found = await findBoxAccount();
+  } catch (e) {
+    found = null;
+  }
+  if (found) {
+    rememberBoxDevice(found.account, found.devId); // paid for once, not again next press
+    return { state: "ours", account: found.account, devId: found.devId };
+  }
+  if (named) return { state: "unreachable", account: named, devId: "" };
+  // A name we cannot use only means "somebody else is on the box" while their
+  // session is UP. A guest who cast once and went home leaves their name behind,
+  // and reading that as an owner refused every press and every play from the TV
+  // until the daemon was restarted — adoption included, since that is gated on
+  // the box being free.
+  if (user && spotifyBridge.sessionActive()) return { state: "other", account: null, devId: "" };
+  return { state: "none", account: null, devId: "" };
+}
+// The device cache read back as an owner: same TTL, same key, and the account has
+// to still be linked - removing an account must not leave the box addressed as it.
+function cachedBoxOwner() {
+  if (!boxDev.id || Date.now() - boxDev.at >= BOX_DEV_TTL_MS) return null;
+  const [accId, name] = boxDev.key.split("\n");
+  if (name !== spotifyBridge.deviceName()) return null;
+  const acc = accounts.list.find((x) => x.id === accId);
+  return acc ? { state: "ours", account: acc, devId: boxDev.id } : null;
+}
+
+// Follow the box: the account holding its session is the one whose library the
+// TV should be showing, and whose player its buttons reach. This is what a cast
+// from a phone changes, and until it did, a second linked account could take the
+// box over and leave the screen browsing — and commanding — the first one.
+//
+// The window is autoplay's: a continuation it starts activates the box, and an
+// activation otherwise reads as somebody having chosen this room.
+// `asked` is a person having pressed something, which outranks the window and
+// ends it: they are in the room, and the screen they are looking at should be
+// about the music they are hearing.
+const FOLLOW_SUPPRESS_MS = 30000;
+let suppressFollowUntil = 0;
+function switchActiveTo(id, asked) {
+  if (asked) suppressFollowUntil = 0;
+  else if (Date.now() < suppressFollowUntil) return false;
+  if (!id || id === accounts.active) return false;
+  if (!accounts.list.find((x) => x.id === id)) return false;
+  accounts.active = id;
+  saveAccounts();
+  return true;
+}
+// The box changed hands (librespot signed into a different account, or out of
+// one): where it was is no longer where it is.
+function boxSignedInAs(userId) {
+  forgetBoxDevice();
+  return switchActiveTo(userId);
+}
+// The same thing without being told who. librespot does not always name the
+// account: measured on a box logging in from its cached credentials, no
+// session_connected arrived at all, and the launcher stayed on the other account
+// with a box that was not its. Music starting is the other moment worth asking
+// at, and the device lists answer it.
+async function followBox() {
+  const owner = await boxOwner(false);
+  return !!(owner.account && switchActiveTo(owner.account.id));
+}
 // What THE BOX is doing, which is a different question from what the active
 // account's player is doing, and the only one autoplay may act on.
 //
@@ -677,11 +842,14 @@ async function boxPlayerState() {
   if (!connected()) return { ...unknown, ok: true };
   let found;
   try {
-    found = await findBoxAccount();
+    found = await boxOwner(false); // a read: the account is enough
   } catch (e) {
     return { ...unknown, error: String(e.message || e) };
   }
-  if (!found) return { ok: true, box: false, is_playing: false };
+  // "Somebody we have not linked is driving it" and "nobody we know holds it"
+  // mean the same thing here: nothing we could start would reach this box, so
+  // there is nothing to continue.
+  if (!found.account) return { ok: true, box: false, is_playing: false };
   try {
     const p = await apiGet(found.account, "/me/player");
     const device = ((p && p.device) || {}).name || "";
@@ -726,10 +894,24 @@ function collectionUri(acc) {
 
 async function play({ contextUri, uris, offset, collection, keepActive }) {
   if (!connected()) return { ok: false, error: "not connected" };
-  const found = await findBoxAccount();
-  if (!found) return { ok: false, error: "box_not_found" };
+  // Armed BEFORE the request, not after it. Starting playback activates the box,
+  // and the activation event is what the launcher follows; on an idle box the
+  // play takes two round trips (the 404 transfer and the retry below) while the
+  // event needs one local POST, so arming afterwards armed it too late and a
+  // continuation nobody asked for still repointed the household's library.
+  if (keepActive) suppressFollowUntil = Date.now() + FOLLOW_SUPPRESS_MS;
+  const found = await boxOwner(true);
+  // `box_not_found` is the answer that lets the caller ADOPT — restart librespot
+  // signed into the active account, which tears down whatever session the box is
+  // holding. So only a box nobody holds may answer it. A box held by an account
+  // we cannot address (a listing that failed, a 429) or by one we have not linked
+  // says so instead: neither is a reason to take the box off somebody, and the
+  // paused-cast case slips past adoption's is_playing guard.
+  if (found.state === "other") return { ok: false, error: "box_other_account" };
+  if (found.state === "unreachable" || (found.account && !found.devId)) return { ok: false, error: "box_unreachable" };
+  if (!found.account) return { ok: false, error: "box_not_found" };
   const { account: target, devId } = found;
-  const q = `?device_id=${devId}`;
+  const q = `?device_id=${encodeURIComponent(devId)}`;
   const pos = Number(offset) > 0 ? Math.floor(Number(offset)) : 0;
   // The collection uri has to name the account that actually owns the box's
   // session, which is not necessarily the active one.
@@ -758,58 +940,111 @@ async function play({ contextUri, uris, offset, collection, keepActive }) {
   // switching the household's active account from a background timer would
   // silently change whose library the TV browses, with nothing on screen having
   // happened.
-  if (r.ok && !keepActive && target.id !== accounts.active) {
-    accounts.active = target.id;
-    saveAccounts();
-  }
+  if (r.ok && !keepActive) switchActiveTo(target.id, true);
   return { ok: r.ok, error: r.ok ? "" : "HTTP " + r.status + " " + (r.body || "").slice(0, 80) };
 }
 
-// Transport controls for the box (the connected account controls /me/player; the
-// box became the active device when we started playback there). playpause checks
-// the live player so one button works for both states.
+// Transport controls for the box. Two things decide where a press lands, and
+// both used to be assumed rather than resolved:
+//
+//   • WHICH ACCOUNT. The box is signed into one, and it is not necessarily the
+//     one the launcher is browsing — a phone casting to the box takes it over
+//     without asking the TV. Sent as the active account instead, a pause reached
+//     a player that account happened to have somewhere else: nothing on the box
+//     stopped, and if that account was listening on a phone, the TV paused the
+//     phone. Both were reported from one living room.
+//   • WHICH DEVICE. /me/player/* with no device_id means "whatever this account
+//     is playing on", which is the box only while the box is the thing playing.
+//     Addressing the box by id is what keeps a press in this room.
 const REPEAT_STATES = ["off", "context", "track"];
 
-// `accId` names the account to act on, defaulting to the active one. Autoplay
-// needs it: it starts playback under whichever account drives the box without
-// making that one active, so a command sent as the active account would reach a
-// different player entirely - and a pause that lands on the wrong player leaves
-// the music it was meant to stop playing.
+// `accId` names the account to act on, and is how autoplay commands the box
+// without making its owner the active account. Without it the box's owner is
+// resolved, and the launcher follows it — the account that is playing here is
+// the one this screen should be about.
 async function control(action, state, accId) {
   if (!connected()) return { ok: false, error: "not connected" };
-  const acc = accountById(accId);
-  const write = (m, p, payload) => apiWrite(acc, m, p, payload);
-  if (action === "playpause") {
-    let playing = false;
+  let acc = null;
+  let devId = "";
+  let asked = false; // a person pressed this, as opposed to autoplay cleaning up
+  if (accId) {
+    // A named account is not a licence to skip the device: accountById falls back
+    // to the ACTIVE account for an id it does not know (an account removed while
+    // autoplay was armed), and a write with no device_id is "whatever this account
+    // is playing on" — which is how autoplay's own cancel-pause would have paused
+    // a family member's phone.
+    acc = accounts.list.find((x) => x.id === accId);
+    if (!acc) return { ok: false, error: "no_such_account" };
     try {
-      const p = await apiGet(acc, "/me/player");
-      playing = !!(p && p.is_playing);
-    } catch (e) {}
-    action = playing ? "pause" : "play";
+      devId = await boxDeviceIdFor(acc);
+    } catch (e) {
+      devId = "";
+    }
+    if (!devId) return { ok: false, error: "box_unreachable" };
+  } else {
+    const owner = await boxOwner(true);
+    // Four states, four answers. Only "none" says the box is idle; the others say
+    // somebody else is driving it, or that we could not address it — and a
+    // command sent anyway would land in another room.
+    if (owner.state === "other") return { ok: false, error: "box_other_account" };
+    if (owner.state === "unreachable" || (owner.account && !owner.devId))
+      return { ok: false, error: "box_unreachable" };
+    if (!owner.account) return { ok: false, error: "box_not_found" };
+    acc = owner.account;
+    devId = owner.devId;
+    asked = true;
+    // Somebody is in the room, which ends the window autoplay armed - here rather
+    // than after the write, because a press Spotify refuses is still a person.
+    suppressFollowUntil = 0;
+  }
+  const at = (p) => p + (p.indexOf("?") >= 0 ? "&" : "?") + "device_id=" + encodeURIComponent(devId);
+  const write = (m, p, payload) => apiWrite(acc, m, at(p), payload);
+  if (action === "playpause") {
+    action = (await boxIsPlaying(acc)) ? "pause" : "play";
   }
   // Shuffle and repeat carry a value, so they are not in the table below. Both are
   // player-wide settings rather than one-shot commands: they persist until changed,
   // which is why the UI reads them back from playerState() instead of assuming.
+  let res;
   if (action === "shuffle") {
     const on = state === true || state === "true";
-    const res = await write("PUT", "/me/player/shuffle?state=" + (on ? "true" : "false"));
-    return { ok: res.ok, error: res.ok ? "" : "HTTP " + res.status };
-  }
-  if (action === "repeat") {
+    res = await write("PUT", "/me/player/shuffle?state=" + (on ? "true" : "false"));
+  } else if (action === "repeat") {
     const s = REPEAT_STATES.includes(state) ? state : "off";
-    const res = await write("PUT", "/me/player/repeat?state=" + s);
-    return { ok: res.ok, error: res.ok ? "" : "HTTP " + res.status };
+    res = await write("PUT", "/me/player/repeat?state=" + s);
+  } else {
+    const routes = {
+      play: ["PUT", "/me/player/play"],
+      pause: ["PUT", "/me/player/pause"],
+      next: ["POST", "/me/player/next"],
+      prev: ["POST", "/me/player/previous"],
+    };
+    const r = routes[action];
+    if (!r) return { ok: false, error: "bad action" };
+    res = await write(r[0], r[1]);
   }
-  const routes = {
-    play: ["PUT", "/me/player/play"],
-    pause: ["PUT", "/me/player/pause"],
-    next: ["POST", "/me/player/next"],
-    prev: ["POST", "/me/player/previous"],
-  };
-  const r = routes[action];
-  if (!r) return { ok: false, error: "bad action" };
-  const res = await write(r[0], r[1]);
+  // Only a command that landed moves the launcher: a press Spotify refused has
+  // not made that account the one playing here, and repointing the household's
+  // library on a 403 would be a change nobody caused.
+  if (res.ok && asked) switchActiveTo(acc.id, true);
   return { ok: res.ok, error: res.ok ? "" : "HTTP " + res.status };
+}
+
+// Is the BOX playing — the question the one play/pause button asks, and not the
+// same as "is this account playing", which is true of a phone in another room.
+// Asked of the owner's player and pinned to the device name; the librespot state
+// is the fallback, because the events that feed it come over a hook whose curl
+// failures are swallowed, and a lost `paused` would make the button send the
+// opposite of what its icon shows.
+async function boxIsPlaying(acc) {
+  try {
+    const p = await apiGet(acc, "/me/player");
+    const device = ((p && p.device) || {}).name || "";
+    if (device.trim().toLowerCase() === spotifyBridge.deviceName().trim().toLowerCase()) return !!(p && p.is_playing);
+    return false; // the account is playing somewhere else, so the box is not
+  } catch (e) {
+    return !!spotifyBridge.getState().is_playing;
+  }
 }
 
 // What the shuffle and repeat toggles must reflect. librespot's cast metadata (the
@@ -821,6 +1056,13 @@ async function control(action, state, accId) {
 // cannot tell "nothing is playing" from "we could not find out". That difference
 // decides whether autoplay may start music, and defaulting it to "nothing is
 // playing" would have it push its own tracks over somebody's live session.
+//
+// The question is about THE BOX, so it is asked of the account holding the box —
+// the same resolution the buttons use, or the toggles would show one player's
+// settings and change another's. `other_account` is the case no read can cover:
+// the box is being driven by an account this box has not linked, so there is
+// nothing of ours to ask, and the screen has to say so rather than show a
+// player's worth of blanks.
 async function playerState() {
   const unknown = {
     ok: false,
@@ -831,8 +1073,23 @@ async function playerState() {
     repeat: "off",
   };
   if (!connected()) return { ...unknown, ok: true };
+  let owner;
   try {
-    const p = await userGet("/me/player");
+    owner = await boxOwner(false); // a read: the account is enough
+  } catch (e) {
+    return { ...unknown, error: String(e.message || e) };
+  }
+  const idle = { ok: true, connected: true, active: false, is_playing: false, shuffle: false, repeat: "off" };
+  if (owner.state === "other") return { ...idle, other_account: true };
+  if (!owner.account) return idle;
+  try {
+    const p = await apiGet(owner.account, "/me/player");
+    const device = ((p && p.device) || {}).name || "";
+    // Shuffle and repeat belong to the player that is running, so they are only
+    // this box's settings while the box is the device. Reported otherwise, the
+    // TV would show a phone's shuffle as its own.
+    const isBox = device.trim().toLowerCase() === spotifyBridge.deviceName().trim().toLowerCase();
+    if (!isBox) return { ...idle, account: owner.account.name || "" };
     return {
       ok: true,
       connected: true,
@@ -840,7 +1097,8 @@ async function playerState() {
       is_playing: !!(p && p.is_playing),
       shuffle: !!(p && p.shuffle_state),
       repeat: REPEAT_STATES.includes(p && p.repeat_state) ? p.repeat_state : "off",
-      device: ((p && p.device) || {}).name || "",
+      device,
+      account: owner.account.name || "",
     };
   } catch (e) {
     return { ...unknown, error: String(e.message || e) };
@@ -979,5 +1237,9 @@ module.exports = {
   switchAccount,
   removeAccount,
   findBoxAccount,
+  boxOwner,
+  boxSignedInAs,
+  followBox,
+  forgetBoxDevice,
   activeAccessToken,
 };

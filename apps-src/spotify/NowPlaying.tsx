@@ -3,6 +3,7 @@ import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spat
 import { useI18n, useBackspace, FocusButton } from "@sdk";
 import { useSpotifyStore } from "./stores/spotify";
 import { Lyrics } from "./Lyrics";
+import { focusLost, jump } from "./focus";
 import { mmss, control, playerState, type PlayerState, type Repeat } from "./api";
 
 // transport icons (inline SVG so they render regardless of font)
@@ -104,7 +105,13 @@ export function NowPlaying({
   const at = useSpotifyStore((s) => s.at);
   const [, setTick] = useState(0);
   const [showLyrics, setShowLyrics] = useState(false);
-  const { ref, focusKey } = useFocusable({ focusKey: "sp-now" });
+  // Where focus goes when it has to come back to this screen without being told
+  // where. That happens on its own: shuffle and repeat mount and unmount with
+  // what the box is doing, and when the one holding focus goes, the library
+  // clears the parent's last-focused child and falls back to the element nearest
+  // the top-left — the Browse pill, in the opposite corner from the row the
+  // person was on. The play button is the neighbour, and it is always there.
+  const { ref, focusKey } = useFocusable({ focusKey: "sp-now", preferredChildFocusKey: "sp-playpause" });
 
   // Back closes the lyrics overlay first, then exits to HOME.
   useBackspace(() => {
@@ -192,14 +199,11 @@ export function NowPlaying({
   }, [connected]);
   const repeatNext: Record<Repeat, Repeat> = { off: "context", context: "track", track: "off" };
   const repeat: Repeat = player?.repeat || "off";
-  // These act on the ACTIVE account's player, which on a box with several linked
-  // accounts is not necessarily this box: someone else's phone can be that
-  // account's active device. Showing its shuffle state here would be a claim
-  // about this room, and pressing the button would reach into another one - so
-  // the two settings appear only once the player really is this box.
-  // `active` as well as the name: a player that stopped can still carry the device
-  // it last played on, and settings shown for a player that is not running are a
-  // claim about nothing.
+  // The read is about the box (the server asks the account holding it), so this
+  // is the second half of the same rule rather than a workaround for the first:
+  // shuffle and repeat are settings of a player that is RUNNING, and shown for
+  // one that is not they are a claim about nothing. `active` as well as the name,
+  // because a player that stopped still carries the device it last played on.
   // The two names come from different places: the Web API's device list, and what
   // librespot was told to call itself. Fold them the same way the box does server
   // side, or a difference in case or a stray space hides the settings on the very
@@ -207,12 +211,30 @@ export function NowPlaying({
   const sameDevice = (a: string, b: string) => !!a.trim() && a.trim().toLowerCase() === b.trim().toLowerCase();
   const onThisBox = !!player?.ok && !!player.active && sameDevice(player.device || "", state?.device_name || "");
 
+  // The net under that: a focus key can outlive the element it named, and then no
+  // arrow goes anywhere - a remote that has stopped working, with no way back.
+  useEffect(() => {
+    const id = setTimeout(() => {
+      if (focusLost()) jump("sp-playpause", "sp-browse", "sp-gear");
+    }, 60);
+    return () => clearTimeout(id);
+  }, [onThisBox, connected, hasTrackNow]);
+
+  // Why a press did nothing. The box_* answers are the ones that are not Spotify
+  // refusing us: the box is held by an account this box has not linked, or it is
+  // not addressable as a device at all. Each needs a different thing done about
+  // it, and none of them is "Spotify error" - which is what they all used to read
+  // as, on a screen whose buttons had just silently reached another room.
+  const ctrlMessage = (err: string) => {
+    if (err === "box_other_account") return t("spotify.otherAccount");
+    if (err === "box_not_found") return t("spotify.boxNotFound");
+    if (err === "box_unreachable") return t("spotify.boxUnreachable");
+    return /not registered|HTTP 403/i.test(err) ? t("spotify.notRegistered") : t("spotify.apiError", { error: err });
+  };
+
   const doControl = (a: string, v?: boolean | string) =>
     void control(a, v).then((err) => {
-      if (err)
-        setCtrlErr(
-          /not registered|HTTP 403/i.test(err) ? t("spotify.notRegistered") : t("spotify.apiError", { error: err }),
-        );
+      if (err) setCtrlErr(ctrlMessage(err));
       else refreshPlayer();
     });
 
@@ -235,10 +257,7 @@ export function NowPlaying({
       repeat: a === "repeat" ? (v as Repeat) : (p?.repeat ?? "off"),
     }));
     void control(a, v).then((err) => {
-      if (err)
-        setCtrlErr(
-          /not registered|HTTP 403/i.test(err) ? t("spotify.notRegistered") : t("spotify.apiError", { error: err }),
-        );
+      if (err) setCtrlErr(ctrlMessage(err));
       setTimeout(refreshPlayer, 700);
     });
   };
@@ -335,7 +354,20 @@ export function NowPlaying({
                 </Ctrl>
               </div>
             )}
-            {ctrlErr && <div className="text-[1.5vh] text-warn mt-[0.4vh] max-w-[40vw]">{ctrlErr}</div>}
+          </div>
+        )}
+
+        {/* Why a press did nothing, and the standing case of it: an account this
+            box has not linked is driving the music, so none of these buttons can
+            reach it. Anchored to the bottom of the screen rather than placed in
+            the column, for two reasons - it does not shove the cover and the
+            controls upwards as it appears, and it is in the same place whether
+            the lyrics are open or not. On its own backdrop, because the layer
+            underneath is somebody's album art and amber prose on a bright photo
+            is not readable from a sofa. */}
+        {connected && (ctrlErr || player?.otherAccount) && (
+          <div className="absolute bottom-[3vh] left-1/2 -translate-x-1/2 z-30 max-w-[70vw] rounded-[1.4vh] bg-black/70 px-[2.4vw] py-[1.2vh] text-center text-[2.1vh] text-warn">
+            {ctrlErr || t("spotify.otherAccount")}
           </div>
         )}
 
