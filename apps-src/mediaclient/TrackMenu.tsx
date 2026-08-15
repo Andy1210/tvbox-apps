@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
-import { FocusButton, useI18n } from "@sdk";
+import { FocusButton, useFocusableItem, useI18n } from "@sdk";
 import { useFocusFallback, useInitialFocus } from "./focus";
 import type { MediaVersion, Track } from "./backends/types";
 
@@ -35,6 +35,13 @@ export interface TrackMenuProps {
   current: Choice;
   onChoose: (next: Choice) => void;
   onClose: () => void;
+  /**
+   * Shift the subtitles in time, in seconds. Absent before playback, where
+   * there is nothing running to shift.
+   */
+  onNudgeSubDelay?: (deltaSec: number) => void;
+  /** The shift currently in force, for the row to show. */
+  subDelaySec?: number;
   /** Look for subtitles the server could fetch. Absent when unsupported. */
   onSearchSubtitles?: () => void;
   /** What the search turned up, for the user to choose from. */
@@ -66,6 +73,8 @@ export function TrackMenu({
   versions,
   current,
   onChoose,
+  onNudgeSubDelay,
+  subDelaySec,
   onClose,
   onSearchSubtitles,
   found,
@@ -165,6 +174,12 @@ export function TrackMenu({
             </Column>
 
             <Column title={t("tracks.subtitles")}>
+              {/* At the TOP of the column, not under the tracks: it applies to
+                  whichever subtitle is on, and a film with fifteen embedded
+                  tracks would otherwise bury it past the fold. */}
+              {onNudgeSubDelay && (
+                <Offset value={subDelaySec ?? 0} onNudge={onNudgeSubDelay} label={t("tracks.subOffset")} />
+              )}
               <Option
                 focusKey="sub-off"
                 active={choice.subtitle === "none"}
@@ -308,6 +323,73 @@ function Column({
 
 function Empty({ text }: { text: string }): React.JSX.Element {
   return <p className="text-[1.7vh] text-fg-dim">{text}</p>;
+}
+
+/**
+ * Shift the subtitles in time.
+ *
+ * Left and Right adjust rather than moving between columns, which is the one
+ * place in this menu where that is true - and it is the right trade: an offset
+ * is found by nudging until the line lands on the mouth, and a pair of buttons
+ * would mean a press per step with the value two columns away from the eye.
+ * Up and Down still leave, so it is a detour and not a trap.
+ *
+ * OK sets it back to zero. A row that answers OK with nothing is a dead press,
+ * and returning to zero is the only other thing this row can mean.
+ */
+const STEP_SEC = 0.25;
+
+function Offset({
+  value,
+  onNudge,
+  label,
+}: {
+  value: number;
+  onNudge: (deltaSec: number) => void;
+  label: string;
+}): React.JSX.Element {
+  const { locale } = useI18n();
+  const { ref, focused } = useFocusableItem({
+    focusKey: "sub-offset",
+    onArrowPress: (direction: string) => {
+      if (direction === "left") {
+        onNudge(-STEP_SEC);
+        return false;
+      }
+      if (direction === "right") {
+        onNudge(STEP_SEC);
+        return false;
+      }
+      return true;
+    },
+    onEnterPress: () => onNudge(-value),
+  });
+
+  // Signed and to two places, so a change of a quarter second is visible - and
+  // formatted for the locale, because a Hungarian television writes 0,25.
+  const shown = new Intl.NumberFormat(locale ?? "en", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+    signDisplay: "exceptZero",
+  }).format(value);
+
+  return (
+    <div
+      ref={ref}
+      className={`flex items-center justify-between rounded-[0.8vh] px-[1.2vw] py-[0.9vh] ${
+        focused ? "bg-white text-black" : "bg-white/5"
+      }`}
+    >
+      <span className="text-[2.4vh]">{label}</span>
+      <span className="flex items-center gap-[0.8vw] text-[2.4vh] tabular-nums">
+        {/* Triangles, not words: they say which key moves the value, and the
+            row is only reachable with a remote that has those two keys. */}
+        <span aria-hidden="true">&#9666;</span>
+        <span className="min-w-[4.2vw] text-center">{shown}s</span>
+        <span aria-hidden="true">&#9656;</span>
+      </span>
+    </div>
+  );
 }
 
 function Option({
