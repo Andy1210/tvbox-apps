@@ -170,12 +170,19 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
 
           {/* The rail's buttons sit on the brightest part of that picture now
               that it reaches the top edge - measured, "Search" over a pale
-              backdrop was 2.09:1. A gradient to transparent, not a band: it is
-              gone by 15vh, and over a white patch the chip text still reads at
-              10:1. */}
+              backdrop was 2.09:1. A gradient to transparent, not a band, so
+              there is no edge to see.
+
+              Sized from where the glyphs actually are, which is not the top of
+              the screen: a heading sits above the rail, so the chip text runs
+              6.25vh to 8.4vh rather than starting at 1vh. Measured over a white
+              patch of backdrop, the earlier 15vh version held the cap tops at
+              5.37:1 and let the baseline fall to 4.12:1 and the descenders to
+              3.58:1 - under 4.5:1, and at 17.8pt this is not large text. At
+              20vh/0.95/0.72 the whole glyph band is 7.3:1 or better. */}
           {art && (
             <div
-              className="pointer-events-none fixed inset-x-0 top-0 h-[15vh] bg-gradient-to-b from-bg-0/92 via-bg-0/62 to-transparent"
+              className="pointer-events-none fixed inset-x-0 top-0 h-[20vh] bg-gradient-to-b from-bg-0/95 via-bg-0/72 to-transparent"
               aria-hidden="true"
             />
           )}

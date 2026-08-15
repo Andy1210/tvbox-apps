@@ -244,6 +244,69 @@ describe("the skip button", () => {
     expect(getCurrentFocusKey()).not.toBe("skip");
     expect(getCurrentFocusKey()).toBeTruthy();
   });
+
+  it("does not take the cursor back every time the overlay reappears", async () => {
+    // It announces itself for three seconds when a marker starts, and taking the
+    // cursor is the point of that. But it is ALSO on screen whenever the overlay
+    // is up, and the overlay comes up on every keypress - so keying the grab on
+    // visibility re-took the cursor on every press for the whole two minutes of
+    // an intro. What that felt like: Right seeked once and then stopped moving
+    // the film at all, and OK-OK skipped the intro instead of pausing.
+    usePlayer.setState({
+      current: {
+        item,
+        decision: { url: "http://x/s.m3u8", session: "s", transcoded: false },
+        markers: [{ type: "intro", startMs: 595_000, endMs: 700_000 }],
+        detail: undefined,
+        choice: { version: 0 },
+      } as never,
+      overlay: false,
+    });
+    render(<Player />);
+    await settle();
+
+    // Past the three seconds the button announces itself for, and then with the
+    // overlay hidden - which is what the idle timer does a second later. Both
+    // halves matter: with the overlay still up the button is on screen the whole
+    // time and nothing toggles, so a press proves nothing.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 3_100));
+    });
+    await act(async () => {
+      usePlayer.setState({ overlay: false });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await act(async () => setFocus("player-idle"));
+    await flushFocus();
+    expect(getCurrentFocusKey()).toBe("player-idle");
+
+    // A press with the marker still running. The overlay comes back up, so the
+    // button is on screen again - and it must stay where it is.
+    await remote.right();
+    await settle();
+    expect(getCurrentFocusKey(), "the skip button took the cursor off a resting press").toBe("player-idle");
+
+    // Which means the arrow did what resting arrows do.
+    expect(usePlayer.getState().seekTargetMs).toBe(610_000);
+  });
+
+  it("keeps the highlight when Left runs off the end of the button row", async () => {
+    // The row hands Left and Right to spatial navigation so the transport
+    // buttons can be walked, and the resting anchor is a zero-sized element at
+    // the page origin - a perfectly good LEFT candidate from the leftmost
+    // button. Nothing was then highlighted, and the arrows silently went back to
+    // meaning a ten-second seek.
+    render(<Player />);
+    await settle();
+    await act(async () => setFocus("pb-playpause"));
+    await flushFocus();
+
+    for (let i = 0; i < 4; i++) {
+      await remote.left();
+      await settle();
+      expect(getCurrentFocusKey(), `after ${i + 1} Left press(es)`).not.toBe("player-idle");
+    }
+  });
 });
 
 describe("the overlay's own controls", () => {

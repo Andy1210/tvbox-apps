@@ -5,6 +5,7 @@ import { act, render } from "@testing-library/react";
 import { configureI18n } from "@sdk";
 import { Detail } from "../Detail";
 import { useApp } from "../state";
+import { doesFocusableExist } from "@noriginmedia/norigin-spatial-navigation";
 import { setupRemote, setFocus, getCurrentFocusKey, flushFocus, remote } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
@@ -77,6 +78,55 @@ describe("a group with nothing in it", () => {
     await remote.down();
     await remote.right();
     expect(getCurrentFocusKey()).toBeTruthy();
+  });
+});
+
+describe("a series screen", () => {
+  it("opens on something that exists", async () => {
+    // A show has no Play button - the server answers 400 for one - but the
+    // initial focus was chosen by a DIFFERENT test than the render used, and
+    // that one said a show is playable. norigin hands back a focus key it does
+    // not know unchanged, so focus parked on a component that was never
+    // mounted: no origin for the key handler, every press discarded, nothing
+    // logged. All 256 series screens.
+    const show = detail({ id: "sh1", kind: "show", title: "Show" });
+    const seasons = [
+      { id: "s1", kind: "season" as const, title: "S1" },
+      { id: "s2", kind: "season" as const, title: "S2" },
+    ];
+    useApp.setState({
+      backend: {
+        kind: "plex",
+        item: async () => show,
+        children: async () => seasons,
+        posterUrl: () => undefined,
+        artUrl: () => undefined,
+        backdropUrl: () => undefined,
+        themeUrl: () => undefined,
+        imageHeaders: () => ({}),
+        markers: async () => [],
+      } as unknown as MediaBackend,
+      screen: { name: "item", itemId: "sh1" },
+      history: [],
+      failure: null,
+    });
+    await act(async () => setFocus(""));
+    render(<Detail itemId="sh1" />);
+    for (let i = 0; i < 3; i++) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await flushFocus();
+    }
+
+    const key = getCurrentFocusKey();
+    expect(key, "a show must not open on the play button it does not render").not.toBe("detail-play");
+    expect(doesFocusableExist(String(key)), `initial focus was ${String(key)}, which does not exist`).toBe(true);
+
+    // And the D-pad actually moves, which is the thing that was broken.
+    await remote.down();
+    await remote.right();
+    expect(doesFocusableExist(String(getCurrentFocusKey()))).toBe(true);
   });
 });
 

@@ -5,7 +5,7 @@
 // session, which everything needs.
 
 import { create } from "zustand";
-import type { MediaBackend, Session } from "./backends/types";
+import type { MediaBackend, MediaItem, Session } from "./backends/types";
 import { PlexBackend } from "./backends/plex/backend";
 import { getIdentity, deviceName, type Identity } from "./identity";
 import { readJson, writeJson, removeRaw } from "./storage";
@@ -32,6 +32,20 @@ export type Screen =
        * season, and this is what says which one arrived pointing at.
        */
       focusChildId?: string;
+      /**
+       * The list this was opened from, when it was opened from one.
+       *
+       * A film has no children, so its own screen has nothing to build a
+       * running order out of - which left a film started from a playlist
+       * followed by nothing, the one case the queue was added for. An episode
+       * never needed this: it plays from the list's own screen.
+       *
+       * The items travel rather than the list's id, because the screen lives in
+       * memory only - so this costs a reference, and the alternative costs a
+       * round trip on the way into every film plus a guess at whether the id
+       * belongs to a playlist or a collection, which are different endpoints.
+       */
+      queueFrom?: MediaItem[];
     }
   | { name: "person"; personId: string; personName: string }
   | { name: "search" }
