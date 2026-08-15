@@ -98,7 +98,9 @@
     "q3": "Medium",
     "q4": "Lower",
     "q5": "For a weak network",
-    "q6": "For a very slow network"
+    "q6": "For a very slow network",
+    "previousEpisode": "Previous episode",
+    "nextEpisode": "Next episode"
   },
   "search": {
     "title": "Search",

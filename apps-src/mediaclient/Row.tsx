@@ -29,6 +29,15 @@ export interface RowProps {
    * highlighted, not merely which one was pressed.
    */
   onFocusItem?: (item: MediaItem) => void;
+  /**
+   * Intercept an arrow leaving this row.
+   *
+   * A row's vertical padding pulls its box over whatever sits above it, and
+   * spatial navigation drops a candidate whose bottom is inside the focused
+   * element - so Up out of a row can find nothing at all. Where that matters,
+   * the screen says where Up goes instead of letting geometry decide.
+   */
+  onArrowFromFirst?: (direction: string) => boolean;
 }
 
 /**
@@ -49,6 +58,7 @@ export function Row({
   captionLines,
   onReached,
   onFocusItem,
+  onArrowFromFirst,
 }: RowProps): React.JSX.Element | null {
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -106,6 +116,7 @@ export function Row({
               aspect={aspect}
               captionLines={captionLines}
               onEnter={() => onSelect(item)}
+              onArrowPress={onArrowFromFirst}
               onFocusedEl={(el) => {
                 onFocusChild(el);
                 onFocusItem?.(item);

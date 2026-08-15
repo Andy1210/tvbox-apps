@@ -98,7 +98,9 @@
     "q3": "Közepes",
     "q4": "Gyengébb",
     "q5": "Gyenge hálózaton",
-    "q6": "Nagyon lassú hálózaton"
+    "q6": "Nagyon lassú hálózaton",
+    "previousEpisode": "Előző rész",
+    "nextEpisode": "Következő rész"
   },
   "search": {
     "title": "Keresés",

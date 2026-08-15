@@ -177,7 +177,7 @@ export function Home(): React.JSX.Element {
           //
           // The mask is the belt to that brace: a row entering from above fades
           // rather than appearing as a line of text with its top cut off.
-          className="no-scrollbar flex flex-1 flex-col gap-[2vh] overflow-y-auto pb-[2vh] scroll-pt-[6vh] scroll-pb-[6vh] [mask-image:linear-gradient(to_bottom,transparent_0,#000_2.5vh)]"
+          className="no-scrollbar flex flex-1 flex-col gap-[2vh] overflow-y-auto pt-[2.5vh] pb-[2vh] scroll-pt-[8.5vh] scroll-pb-[6vh] [mask-image:linear-gradient(to_bottom,transparent_0,#000_2.5vh)]"
         >
           {/* Ordered by the household, not by us. A row switched off is not
           rendered at all rather than rendered empty, and one with nothing in it

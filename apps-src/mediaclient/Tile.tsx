@@ -25,6 +25,8 @@ export interface TileProps {
   aspect?: number;
   /** Caption lines before it truncates. */
   captionLines?: 2 | 3;
+  /** Intercept an arrow before spatial navigation resolves it. */
+  onArrowPress?: (direction: string) => boolean;
 }
 
 /** How far through the item, 0-1, or null when it was never started. */
@@ -64,12 +66,13 @@ export function Tile({
   onFocusedEl,
   aspect = 2 / 3,
   captionLines = 2,
+  onArrowPress,
 }: TileProps): React.JSX.Element {
   // scrollIntoView scrolls BOTH axes - `inline` defaults to "nearest" - so a
   // row gets its vertical scrolling from here and then supersedes the horizontal
   // half with its own scrollTo, which gives the focused tile some run-up. That
   // ordering holds only because this hook runs before the effect below.
-  const { ref, focused } = useFocusableItem({ focusKey, onEnterPress: onEnter }, { block: "nearest" });
+  const { ref, focused } = useFocusableItem({ focusKey, onEnterPress: onEnter, onArrowPress }, { block: "nearest" });
   const el = useRef<HTMLDivElement | null>(null);
   const backend = useApp((s) => s.backend);
   const [src, setSrc] = useState<string | null>(null);
