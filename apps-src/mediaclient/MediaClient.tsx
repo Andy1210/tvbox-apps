@@ -13,6 +13,7 @@ import { Settings } from "./Settings";
 import { usePlayer } from "./playback/player";
 import { useApp } from "./state";
 import { usePrefs } from "./prefs";
+import { useChosenVersion } from "./chosenVersion";
 
 export interface MediaClientProps {
   /** Leave the app and return to the launcher. */
@@ -39,6 +40,11 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   // Read once at start: everything below reads them, and Settings writes.
   const loadPrefs = usePrefs((s) => s.load);
   useEffect(() => void loadPrefs(), [loadPrefs]);
+  // Read once at start too: a detail screen needs it the moment its item
+  // arrives, and a fetch per screen would be a round trip before the version
+  // chips could be drawn correctly.
+  const loadVersions = useChosenVersion((s) => s.load);
+  useEffect(() => void loadVersions(), [loadVersions]);
 
   useEffect(() => installNavSounds(), []);
   // Through the store rather than a one-shot fetch, so turning the setting off
