@@ -39,6 +39,7 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
   const backend = useApp((s) => s.backend);
   const go = useApp((s) => s.go);
   const replace = useApp((s) => s.replace);
+  const back = useApp((s) => s.back);
   const fail = useApp((s) => s.fail);
   const failure = useApp((s) => s.failure);
   const playing = usePlayer((s) => s.current !== null);
@@ -149,18 +150,25 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
   };
   // Arriving from a carry-on-watching tile opens on THAT episode rather than on
   // the play button, so the page is already describing what was pressed.
-  useInitialFocus(
-    focusChildId
-      ? `children-${itemId}-${focusChildId}`
-      : detail && !playableKind(detail)
-        ? `children-${itemId}-${children[0]?.id}`
-        : "detail-play",
-    Boolean(detail),
-  );
+  // Whatever this screen actually has: the episode someone arrived pointing at,
+  // the first child on a group, the play button on a film - and on a group with
+  // nothing in it, the message's own way out, because none of the others exist.
+  const first = focusChildId
+    ? `children-${itemId}-${focusChildId}`
+    : detail && !playableKind(detail)
+      ? children[0]
+        ? `children-${itemId}-${children[0].id}`
+        : "detail-back"
+      : "detail-play";
+  useInitialFocus(first, Boolean(detail));
   // Returning from playback unmounts the player, which held focus - without a
   // fallback the detail page comes back with the D-pad dead.
   useFocusFallback(
-    "detail-play",
+    // The play button when there is one; otherwise the first child, which is
+    // what a group screen has instead. A group with NEITHER - an empty
+    // collection, and this server has one - left nothing focusable at all, so
+    // every press was discarded and only Back worked.
+    first,
     (key) =>
       key.startsWith("detail-") ||
       key.startsWith("cast-") ||
@@ -180,6 +188,17 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
 
   if (failure) return <Message failure={failure} onRetry={() => setReload((n) => n + 1)} />;
   if (!detail) return <Message loading />;
+
+  // A group with nothing in it. Without this the screen had no focusable at all
+  // - Play is hidden on a group and there is no first child to fall back to -
+  // so every press was discarded and only Back did anything.
+  if (!playableKind(detail) && children.length === 0)
+    return (
+      <Message
+        text={t(detail.kind === "playlist" ? "detail.emptyPlaylist" : "detail.emptyCollection")}
+        actions={[{ key: "detail-back", label: t("common.back"), onEnter: () => back() }]}
+      />
+    );
 
   const poster = (item: MediaItem): string | undefined =>
     backend?.posterUrl(item, 300 * artworkScale(), 450 * artworkScale());
