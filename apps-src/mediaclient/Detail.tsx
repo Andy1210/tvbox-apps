@@ -64,6 +64,8 @@ export function Detail({
    */
   const [audioLang, setAudioLang] = useState<string | undefined>();
   const [subLang, setSubLang] = useState<string | "none" | undefined>();
+  /** The chosen subtitle when it has no language to be remembered by. */
+  const [subId, setSubId] = useState<string | undefined>();
   /**
    * The episode the cursor is on, with its own tracks.
    *
@@ -141,7 +143,17 @@ export function Detail({
     };
   }, [backend, itemId, fail, reload]);
 
-  const { ref, focusKey } = useFocusable({ focusKey: `detail-${itemId}`, saveLastFocusedChild: true });
+  // Not a place the arrows may land while the failure screen is up.
+  // `useFocusable` registers on the hook call, which is above the early return
+  // that swaps this screen for the error - so the container stayed registered
+  // with no node and a zero-sized box at the page origin, and one arrow press
+  // from "Try again" landed on it. It answers no OK, so the remote was dead
+  // with the button still highlighted.
+  const { ref, focusKey } = useFocusable({
+    focusKey: `detail-${itemId}`,
+    saveLastFocusedChild: true,
+    focusable: !failure,
+  });
   // The focus container IS the scroller here, so one ref serves both.
   const toTop = useScrollToTopOnFirst(ref);
 
@@ -215,7 +227,13 @@ export function Detail({
       key.startsWith("cast-") ||
       key.startsWith("children-") ||
       key.startsWith("extras-") ||
-      key.startsWith("review-"),
+      key.startsWith("review-") ||
+      // The failure screen's own button. It replaces this whole screen, so its
+      // key is the only one on it - and a predicate that did not recognise it
+      // pulled focus onto a key the failure screen never renders, on the FIRST
+      // arrow press. "Something went wrong / Try again", highlighted, and the
+      // remote does nothing but Back.
+      key.startsWith("msg-"),
     // Not while the language panel is up. This is a window listener and stays
     // armed behind it; the panel's keys are none of the above, so every press
     // it could not resolve threw focus back onto the play button - which is
@@ -292,6 +310,17 @@ export function Detail({
    */
   const order = children.length ? children : (queueFrom ?? []);
   /**
+   * What the one row on this screen holds.
+   *
+   * Usually the children. On a FILM there are none - and a film opened from a
+   * playlist now has a next, so the countdown to it had nowhere to be drawn:
+   * the film ended, five seconds passed with nothing on screen, and the next
+   * one started unannounced. It also left the fallback focus key pointing at a
+   * tile that was never mounted, so the first press during that window was
+   * swallowed. The row is what gives the countdown both a place and a key.
+   */
+  const rowItems = children.length ? children : upNext ? [upNext.item] : [];
+  /**
    * What Play starts.
    *
    * A season is not a thing the server can resolve a stream for either - it
@@ -330,11 +359,27 @@ export function Detail({
   // materialising only after someone has been down into the list and back.
   const tracksFrom = shown.versions[version] ?? firstChild?.versions[version];
 
-  /** The chosen language, resolved against whatever is about to play. */
+  /**
+   * The chosen tracks, resolved against whatever is about to play.
+   *
+   * By language where there is one, because that is what carries across
+   * episodes - and by the track's own id where there is not. Measured on this
+   * server, 426 of 493 sidecar subtitles carry no language at all, so keying
+   * only on language dropped the choice on the floor: the picker closed, the
+   * tick never moved, and Play started with no subtitle. An id only matches
+   * within the same item, which is the film case and is the honest limit -
+   * a track with no language has nothing to match on in the next episode.
+   */
   const pick = (v: MediaVersion | undefined): { audio?: number; subtitle?: number | "none" } => ({
     audio: audioLang ? v?.audio.find((a) => a.language === audioLang)?.ordinal : undefined,
     subtitle:
-      subLang === "none" ? "none" : subLang ? v?.subtitles.find((x) => x.language === subLang)?.ordinal : undefined,
+      subLang === "none"
+        ? "none"
+        : subLang
+          ? v?.subtitles.find((x) => x.language === subLang)?.ordinal
+          : subId
+            ? v?.subtitles.find((x) => x.id === subId)?.ordinal
+            : undefined,
   });
 
   return (
@@ -346,9 +391,11 @@ export function Detail({
           audio={pick(tracksFrom).audio}
           subtitle={pick(tracksFrom).subtitle}
           onAudio={(ordinal) => setAudioLang(tracksFrom?.audio.find((a) => a.ordinal === ordinal)?.language)}
-          onSubtitle={(ordinal) =>
-            setSubLang(ordinal === "none" ? "none" : tracksFrom?.subtitles.find((x) => x.ordinal === ordinal)?.language)
-          }
+          onSubtitle={(ordinal) => {
+            const track = ordinal === "none" ? undefined : tracksFrom?.subtitles.find((x) => x.ordinal === ordinal);
+            setSubLang(ordinal === "none" ? "none" : track?.language);
+            setSubId(track?.language ? undefined : track?.id);
+          }}
           onClose={() => setPicking(false)}
         />
       )}
@@ -479,17 +526,19 @@ export function Detail({
           )}
         </header>
 
-        {children.length > 0 && (
+        {rowItems.length > 0 && (
           <Row
             id={`children-${itemId}`}
             title={
-              detail.kind === "show"
-                ? t("detail.seasons")
-                : detail.kind === "season"
-                  ? t("detail.episodes")
-                  : t("detail.inThis")
+              children.length === 0
+                ? t("detail.upNext")
+                : detail.kind === "show"
+                  ? t("detail.seasons")
+                  : detail.kind === "season"
+                    ? t("detail.episodes")
+                    : t("detail.inThis")
             }
-            items={children}
+            items={rowItems}
             // An episode's artwork is a frame from it, which is 16:9 - shown in
             // a poster-shaped tile it was letterboxed into a strip. A season's
             // artwork IS a poster, so only the episodes change shape.

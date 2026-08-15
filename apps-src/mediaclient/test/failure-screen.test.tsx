@@ -1,0 +1,61 @@
+import { describe, it, expect } from "vitest";
+import { act, render } from "@testing-library/react";
+import { configureI18n } from "@sdk";
+import { doesFocusableExist } from "@noriginmedia/norigin-spatial-navigation";
+import { Home } from "../Home";
+import { useApp } from "../state";
+import { setupRemote, setFocus, getCurrentFocusKey, flushFocus, remote } from "./remote";
+import en from "../locales/en.json";
+import hu from "../locales/hu.json";
+import type { MediaBackend } from "../backends/types";
+
+// The screen a household lands on when the server is down.
+//
+// The error draws correctly and its button is highlighted, so this looks right
+// in a screenshot. What was wrong is what happens on the NEXT press: the
+// fallback aimed at the rail, which the failure screen does not render, so the
+// cursor left for a key that does not exist and OK stopped working. Nothing
+// errors, and Back still works, which is how it survived being looked at.
+
+configureI18n({ hu, en }, { fallback: "en" });
+setupRemote();
+
+describe("the home screen when the server cannot be reached", () => {
+  it("answers the remote after the first press, not only before it", async () => {
+    useApp.setState({
+      backend: {
+        kind: "plex",
+        libraries: async () => {
+          throw new Error("connection refused");
+        },
+        posterUrl: () => undefined,
+        artUrl: () => undefined,
+        backdropUrl: () => undefined,
+        themeUrl: () => undefined,
+        imageHeaders: () => ({}),
+      } as unknown as MediaBackend,
+      screen: { name: "home" },
+      history: [],
+      failure: null,
+    });
+    await act(async () => setFocus(""));
+    render(<Home />);
+    for (let i = 0; i < 3; i++) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await flushFocus();
+    }
+
+    const arrived = String(getCurrentFocusKey());
+    expect(arrived.startsWith("msg-"), `arrived on ${arrived}`).toBe(true);
+
+    for (const press of [remote.down, remote.right, remote.up, remote.left]) {
+      await press();
+      await flushFocus();
+      const at = String(getCurrentFocusKey());
+      expect(doesFocusableExist(at), `focus went to ${at}, which is not on screen`).toBe(true);
+      expect(at.startsWith("msg-"), `focus went to ${at}`).toBe(true);
+    }
+  });
+});

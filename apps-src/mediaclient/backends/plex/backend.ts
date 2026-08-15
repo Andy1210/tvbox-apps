@@ -697,6 +697,29 @@ export class PlexBackend implements MediaBackend {
     return url.toString();
   }
 
+  /**
+   * A sidecar subtitle as a file the player can open.
+   *
+   * One place, because there are two call sites and they used to disagree:
+   * `resolveStream` handed the file over, and the in-player track menu - which
+   * never goes near `resolveStream` on a direct-play file - passed the track's
+   * negative ordinal straight to the player, where a negative index means "no
+   * subtitles". So the same choice worked before playback and switched them off
+   * during it.
+   *
+   * The token has to be in the URL: the player is a separate process and cannot
+   * send a header. That is why the path is bounded first - same rule as the
+   * media part.
+   */
+  subtitleFileUrl(track?: Track): string | undefined {
+    if (!track?.external) return undefined;
+    if (!track.key || !STREAM_PATH.test(track.key)) {
+      log.warn("external subtitle has no usable path; left off");
+      return undefined;
+    }
+    return buildUrl(this.base, track.key.replace(/^\//, ""), { "X-Plex-Token": this.session.token });
+  }
+
   // ---- playback ---------------------------------------------------------
 
   /** Reads the same document the detail screen just fetched, not a second copy. */
@@ -826,14 +849,9 @@ export class PlexBackend implements MediaBackend {
       typeof opts.subtitle === "number" && opts.subtitle < 0
         ? chosen?.subtitles.find((t) => t.ordinal === opts.subtitle)
         : undefined;
-    if (external && !(external.key && STREAM_PATH.test(external.key)))
-      log.warn("external subtitle has no usable path; left off");
     // Not while the server is burning one in: that would be the same subtitle
     // twice, once in the picture and once over it.
-    const subFile =
-      !burned && external?.key && STREAM_PATH.test(external.key)
-        ? buildUrl(this.base, external.key.replace(/^\//, ""), { "X-Plex-Token": this.session.token })
-        : undefined;
+    const subFile = burned ? undefined : this.subtitleFileUrl(external);
     // A negative ordinal never reaches the player: either it became a sub file
     // above, or it could not be used and off is the honest answer.
     const sub: number | "no" =
