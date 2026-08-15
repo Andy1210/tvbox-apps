@@ -131,3 +131,34 @@ describe("the rails move themselves too", () => {
     }
   });
 });
+
+describe("the coordinates a mover is driven with", () => {
+  it("come from the layer it moves, in a row", () => {
+    // The bug this pins: a tile's `offsetLeft` is measured against the nearest
+    // POSITIONED ancestor, and the row's maths moves the layer the tiles sit
+    // in. With that layer unpositioned the two were different coordinate
+    // spaces, so every press computed a target in the wrong frame - the rail
+    // lurched back and forth and the cursor ended up off screen, while the
+    // animation itself stayed perfectly smooth. It looks like a scrolling bug
+    // and it is an arithmetic one.
+    const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Row.tsx"), "utf8");
+
+    // The moved layer is positioned, so it IS the offset parent.
+    const layer = /<div\s+ref=\{\(node\) => \{[^}]*mover\.attach\(node\)[\s\S]{0,200}?className="([^"]*)"/.exec(src);
+    expect(layer, "the moved layer is still identifiable").toBeTruthy();
+    expect(layer![1], "the layer must be the offset parent").toContain("relative");
+
+    // And the travel is bounded by that layer's width, not by a window that no
+    // longer scrolls.
+    expect(src).toContain("layer.current?.scrollWidth");
+  });
+
+  it("come from the row index in the grid, which needs no element at all", () => {
+    // The grid does not have this problem because it never measures a tile: it
+    // knows the row and the row height. Worth stating - it is why the same
+    // change was correct there and wrong here.
+    const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Library.tsx"), "utf8");
+    expect(src).toContain("start: row * rowHeight");
+    expect(src).not.toContain("offsetLeft");
+  });
+});
