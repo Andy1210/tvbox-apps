@@ -12,8 +12,11 @@ import { Search } from "./Search";
 import { Settings } from "./Settings";
 import { usePlayer } from "./playback/player";
 import { useApp } from "./state";
+import { deviceName } from "./identity";
 import { usePrefs } from "./prefs";
 import { useChosenVersion } from "./chosenVersion";
+import { startCompanion } from "./backends/plex/companion";
+import { runCompanionCommand } from "./playback/remoteControl";
 
 export interface MediaClientProps {
   /** Leave the app and return to the launcher. */
@@ -45,6 +48,28 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   // chips could be drawn correctly.
   const loadVersions = useChosenVersion((s) => s.load);
   useEffect(() => void loadVersions(), [loadVersions]);
+
+  /**
+   * Answer the remote control protocol while somebody is signed in.
+   *
+   * This is what lets a film be started by voice: the assistant creates a play
+   * queue on the server and points a `playMedia` at this box by name, and the
+   * same wire carries a phone's play, pause and skip. It cannot run before
+   * sign-in - there is no server to poll and no token to poll it with - and it
+   * must stop at sign-out, or the box keeps answering for an account that has
+   * left.
+   */
+  const session = useApp((s) => s.session);
+  const identity = useApp((s) => s.identity);
+  useEffect(() => {
+    if (!session || !identity) return;
+    return startCompanion({
+      baseUrl: session.baseUrl,
+      token: session.token,
+      id: { clientId: identity.clientId, deviceName: deviceName(identity.host) },
+      onCommand: runCompanionCommand,
+    });
+  }, [session, identity]);
 
   useEffect(() => installNavSounds(), []);
   // Through the store rather than a one-shot fetch, so turning the setting off

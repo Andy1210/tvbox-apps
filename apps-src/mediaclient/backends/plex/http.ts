@@ -8,7 +8,7 @@
 // the plain path is both simpler and more capable.
 
 import { log } from "../../redact";
-import { CLIENT_PLATFORM, CLIENT_PRODUCT, CLIENT_VERSION } from "../../identity";
+import { CLIENT_PLATFORM, CLIENT_PLATFORM_VERSION, CLIENT_PRODUCT, CLIENT_VERSION } from "../../identity";
 
 export const PLEX_TV = "https://plex.tv";
 
@@ -20,10 +20,16 @@ export interface PlexIdentityHeaders {
 /**
  * The X-Plex-* set every request carries.
  *
- * `X-Plex-Provides` is deliberately NOT sent. It is what marks a client as
- * remotely controllable, and this app answers no such protocol - claiming
- * otherwise would put it in the account's player list where a phone (or the
- * house assistant) could cast to it and get silence.
+ * `X-Plex-Provides: player` is what marks a client as remotely controllable,
+ * and it is sent on EVERY request rather than only on the poll: the account's
+ * device list is what a controller looks the box up in, and that list is built
+ * from these headers wherever they are seen - plex.tv included, which the poll
+ * never touches. Withholding it kept the box off that list entirely.
+ *
+ * It was withheld until this app answered the protocol, and that condition was
+ * the point rather than caution: a client in the player list that ignores what
+ * is sent to it is worse than one that is absent, because a phone offers it and
+ * gets silence. See `companion.ts` for the half that makes the claim true.
  */
 /**
  * The interface language, as a bare two-letter code.
@@ -46,6 +52,11 @@ export function plexHeaders(id: PlexIdentityHeaders, extra?: Record<string, stri
     "X-Plex-Platform": CLIENT_PLATFORM,
     "X-Plex-Device": CLIENT_PRODUCT,
     "X-Plex-Device-Name": id.deviceName,
+    "X-Plex-Provides": "player",
+    // Required by the companion poll, which refuses without it - and harmless
+    // everywhere else, so it is set once here rather than remembered at the one
+    // call site that needs it.
+    "X-Plex-Platform-Version": CLIENT_PLATFORM_VERSION,
     // The server translates what IT names - sort orders, filter titles, genres -
     // and without this it answers in English. That is the largest text surface
     // in the app that no locale file can reach: "Rendezés" heading a column of

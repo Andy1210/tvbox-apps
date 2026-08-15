@@ -152,6 +152,12 @@ export function __resetIdentity(): void {
  */
 export const CLIENT_PRODUCT = "tvbox";
 export const CLIENT_PLATFORM = "Linux";
+/**
+ * Required by the companion poll, which answers 400 without it and says which
+ * header is missing only in the SERVER's log. The value is not inspected - what
+ * matters is that it is there.
+ */
+export const CLIENT_PLATFORM_VERSION = "1";
 export const CLIENT_VERSION = "0.1.0";
 
 /** Device name shown on the account. The room is what a person recognises. */
