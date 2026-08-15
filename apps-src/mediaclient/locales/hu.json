@@ -158,7 +158,8 @@
     "searchNone": "Nincs találat.",
     "download": "Letöltés",
     "part": "{n}. rész / {of}",
-    "title": "Hang és felirat"
+    "title": "Hang és felirat",
+    "subOffset": "Felirat eltolás"
   },
   "profiles": {
     "title": "Ki néz?",

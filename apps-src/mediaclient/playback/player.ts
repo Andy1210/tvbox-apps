@@ -102,6 +102,15 @@ interface PlayerState {
   seekTo(ms: number): void;
   stop(): Promise<void>;
   showOverlay(on: boolean): void;
+  /**
+   * How far the subtitles are shifted, in seconds.
+   *
+   * Not a saved preference, unlike the subtitle's size and colour: an offset
+   * corrects one badly timed FILE, so carrying it to the next film would break
+   * subtitles that were right. It resets with every start.
+   */
+  subDelaySec: number;
+  nudgeSubDelay(deltaSec: number): void;
   /** The marker covering the current position, when there is one. */
   activeMarker(): Marker | null;
   skipMarker(): void;
@@ -157,6 +166,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   scrubMs: null,
   siblings: {},
   upNext: null,
+  subDelaySec: 0,
   overlay: false,
   error: null,
 
@@ -191,7 +201,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // row, a search result or a person's credits, and only one of those knew
     // what the episode was part of - so the buttons appeared on one route and
     // not the others.
-    set({ siblings: {} });
+    set({ siblings: {}, subDelaySec: 0 });
     get().cancelUpNext();
 
     const queue = opts?.queue;
@@ -460,6 +470,18 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     set({ overlay: on });
   },
 
+  nudgeSubDelay(deltaSec) {
+    // Clamped to what the shell will accept. Out of range it refuses the value
+    // outright, which would leave the number on screen disagreeing with the
+    // subtitles - the shell's own note says a refusal must not read as success.
+    const next = Math.min(120, Math.max(-120, Math.round((get().subDelaySec + deltaSec) * 100) / 100));
+    set({ subDelaySec: next });
+    const tv = bridge();
+    void Promise.resolve(tv?.setPlayerProp?.("sub-delay", next)).then((r) => {
+      if (r && typeof r === "object" && "ok" in r && !r.ok) log.warn("player refused sub-delay");
+    });
+  },
+
   activeMarker() {
     const { current, positionMs } = get();
     if (!current) return null;
@@ -658,5 +680,5 @@ export function resetPlayer(): void {
   usePlayer.getState().cancelUpNext();
   void usePlayer.getState().stop();
   currentBackend = null;
-  usePlayer.setState({ siblings: {}, queue: undefined, upNext: null });
+  usePlayer.setState({ siblings: {}, queue: undefined, upNext: null, subDelaySec: 0 });
 }

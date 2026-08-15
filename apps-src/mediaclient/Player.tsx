@@ -12,6 +12,7 @@ import { TrackMenu, type Choice } from "./TrackMenu";
 import type { Track } from "./backends/types";
 import { usePlayer } from "./playback/player";
 import { ScrubPreview } from "./ScrubPreview";
+import { ChapterStrip } from "./ChapterStrip";
 import { NextIcon, PauseIcon, PlayIcon, PreviousIcon } from "./icons";
 import { episodeNumber } from "./Tile";
 import { applySubtitleStyle, usePrefs } from "./prefs";
@@ -69,6 +70,7 @@ export function Player(): React.JSX.Element | null {
   const overlay = usePlayer((s) => s.overlay);
   const scrubMs = usePlayer((s) => s.scrubMs);
   const siblings = usePlayer((s) => s.siblings);
+  const subDelaySec = usePlayer((s) => s.subDelaySec);
 
   const [menu, setMenu] = useState<null | "version" | "audio" | "subtitles" | "quality">(null);
   // Which language the subtitle search asks for. Seeded from the interface, but
@@ -91,6 +93,17 @@ export function Player(): React.JSX.Element | null {
   // Read inside the key handler, which is registered once per film rather than
   // per render, so it cannot close over the current value.
   const skippableRef = useRef(false);
+  /**
+   * Whether the chapter strip is out.
+   *
+   * Closed by default and opened by going DOWN from the bar. It is tall, and an
+   * overlay over a running film should show as little as it can - so this is a
+   * thing to be asked for, not a thing to be dismissed.
+   */
+  const [chapters, setChapters] = useState(false);
+  const hasChaptersRef = useRef(false);
+  const chaptersOpenRef = useRef(false);
+  chaptersOpenRef.current = chapters;
 
   const { ref, focusKey } = useFocusable({ focusKey: "player", saveLastFocusedChild: true, isFocusBoundary: true });
 
@@ -146,7 +159,8 @@ export function Player(): React.JSX.Element | null {
       const onBar = fk === "scrub";
       // Anything that is not ours counts as resting too: a key left behind by
       // the screen that started the film must not be able to act on a press.
-      const idle = !fk || fk === IDLE_KEY || !(onBar || fk.startsWith("pb-") || fk === "skip");
+      const onChapter = Boolean(fk?.startsWith("ch-"));
+      const idle = !fk || fk === IDLE_KEY || !(onBar || onChapter || fk.startsWith("pb-") || fk === "skip");
       p.showOverlay(true);
       if (hideTimer.current) clearTimeout(hideTimer.current);
 
@@ -162,7 +176,7 @@ export function Player(): React.JSX.Element | null {
             setFocus("scrub");
             break;
           }
-          if (!idle && !onBar) break; // the button row: spatial navigation's
+          if (!idle && !onBar) break; // the buttons and the chapters: geometry's
           e.preventDefault();
           e.stopPropagation();
           const dir = e.key === "ArrowRight" ? 1 : -1;
@@ -179,8 +193,8 @@ export function Player(): React.JSX.Element | null {
           break;
         }
         case "Enter":
-          // With a button focused, OK belongs to it - otherwise one press would
-          // both fire the button and toggle pause.
+          // With a button or a chapter focused, OK belongs to it - otherwise one
+          // press would both fire it and toggle pause.
           if (!idle && !onBar) break;
           // From rest, OK BRINGS THE OVERLAY UP rather than pausing. Pausing is
           // the first thing a stray press does otherwise, and the controls are
@@ -229,7 +243,13 @@ export function Player(): React.JSX.Element | null {
           e.preventDefault();
           e.stopPropagation();
           if (idle) setFocus("scrub");
-          else if (fk?.startsWith("pb-")) setFocus("scrub");
+          else if (onChapter) {
+            // Closed on the way out. The strip exists while you are in it or
+            // below it, so "only when navigating down" stays true for the next
+            // press as well as the first.
+            setChapters(false);
+            setFocus("scrub");
+          } else if (fk?.startsWith("pb-")) setFocus(chaptersOpenRef.current ? "chapters" : "scrub");
           else if (onBar && skippableRef.current) setFocus("skip");
           // From the skip button itself Up has nowhere to go, and the press is
           // already consumed - so it goes back to the bar rather than sitting
@@ -246,8 +266,15 @@ export function Player(): React.JSX.Element | null {
             // the resting anchor - jumped the film instead of doing what the
             // button said.
             p.cancelScrub();
-            setFocus("pb-playpause");
-          }
+            // Down from the bar is the request for the chapters. Opening and
+            // focusing in one press, because a row that appears and does not
+            // take the cursor costs a second press to reach and reads as the
+            // press having done nothing.
+            if (hasChaptersRef.current) {
+              setChapters(true);
+              setFocus("chapters");
+            } else setFocus("pb-playpause");
+          } else if (onChapter) setFocus("pb-playpause");
           break;
       }
 
@@ -267,6 +294,14 @@ export function Player(): React.JSX.Element | null {
       window.removeEventListener("keyup", onKeyUp, true);
     };
   }, [current, menu]);
+
+  hasChaptersRef.current = (current?.detail?.chapters?.length ?? 0) > 0;
+  // Closed when the film changes, and when the overlay goes away: it is a thing
+  // that was asked for, and neither of those is the same request.
+  useEffect(() => setChapters(false), [current?.item.id]);
+  useEffect(() => {
+    if (!overlay) setChapters(false);
+  }, [overlay]);
 
   const marker = current ? usePlayer.getState().activeMarker() : null;
   const skippable = Boolean(marker && (marker.type === "intro" || (marker.type === "credits" && !marker.final)));
@@ -471,6 +506,8 @@ export function Player(): React.JSX.Element | null {
           setFoundSubs([]);
           setSearchState("idle");
         }}
+        onNudgeSubDelay={(delta) => usePlayer.getState().nudgeSubDelay(delta)}
+        subDelaySec={subDelaySec}
         onSearchSubtitles={backend ? () => void searchSubtitles() : undefined}
         found={foundSubs}
         onDownloadSubtitle={(track) => void downloadSubtitle(track)}
@@ -485,6 +522,7 @@ export function Player(): React.JSX.Element | null {
   // otherwise there is no way to tell how far you have wandered, or to get back.
   const playedPct = durationMs > 0 ? Math.min(100, ((seekTargetMs ?? positionMs) / durationMs) * 100) : 0;
   const partId = current.detail?.versions[current.choice.version]?.partId;
+  const chapterList = current.detail?.chapters ?? [];
 
   return (
     <FocusContext.Provider value={focusKey}>
@@ -552,6 +590,20 @@ export function Player(): React.JSX.Element | null {
               scrubbing={scrubMs !== null}
               partId={partId}
             />
+
+            {/* Between the bar and the buttons, which is what "pushes the bar
+                up": the button row stays where it has always been - a remote is
+                driven from muscle memory - and the space is taken from above.
+                Closed unless it was asked for, so an ordinary press does not
+                get a strip of thumbnails over the film. */}
+            {chapters && chapterList.length > 0 && (
+              <ChapterStrip
+                chapters={chapterList}
+                partId={partId}
+                positionMs={seekTargetMs ?? positionMs}
+                onPick={(ms) => usePlayer.getState().seekTo(ms)}
+              />
+            )}
 
             <ButtonRow
               paused={state === "paused"}

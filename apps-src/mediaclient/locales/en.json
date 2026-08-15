@@ -158,7 +158,8 @@
     "searchNone": "Nothing found.",
     "download": "Download",
     "part": "part {n} of {of}",
-    "title": "Audio and subtitles"
+    "title": "Audio and subtitles",
+    "subOffset": "Subtitle offset"
   },
   "profiles": {
     "title": "Who is watching?",

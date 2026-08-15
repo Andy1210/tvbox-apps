@@ -4,6 +4,7 @@ import { configureI18n } from "@sdk";
 import { Player } from "../Player";
 import { usePlayer, __wirePlayerEventsForTest } from "../playback/player";
 import { useApp } from "../state";
+import { doesFocusableExist } from "@noriginmedia/norigin-spatial-navigation";
 import { setupRemote, remote, setFocus, getCurrentFocusKey, flushFocus } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
@@ -333,5 +334,117 @@ describe("the overlay's own controls", () => {
     // With them closed, Back is what it always was.
     await remote.back();
     expect(usePlayer.getState().state).toBe("paused");
+  });
+});
+
+describe("the chapter strip", () => {
+  const withChapters = (): void => {
+    usePlayer.setState({
+      current: {
+        item,
+        decision: { url: "http://x/s.m3u8", session: "s", transcoded: false },
+        markers: [],
+        detail: {
+          id: "m1",
+          kind: "movie",
+          title: "Film",
+          roles: [],
+          extras: [],
+          reviews: [],
+          scores: [],
+          versions: [{ index: 0, label: "1080p", partId: "1", audio: [], subtitles: [] }],
+          chapters: [
+            { index: 1, startMs: 0, endMs: 600_000 },
+            { index: 2, startMs: 600_000, endMs: 1_200_000 },
+            { index: 3, startMs: 1_200_000, endMs: 1_800_000 },
+          ],
+        },
+        choice: { version: 0 },
+      } as never,
+      positionMs: 700_000,
+      overlay: true,
+    });
+  };
+
+  it("is not there until Down asks for it, and opens where the film is", async () => {
+    // Tall enough to matter over a running film, so it is asked for rather than
+    // dismissed - and it opens pointing at the chapter being played, not at the
+    // start of the film, which is never where anyone is.
+    withChapters();
+    render(<Player />);
+    await settle();
+
+    expect(doesFocusableExist("chapters"), "closed until it is asked for").toBe(false);
+
+    await act(async () => setFocus("scrub"));
+    await flushFocus();
+    await remote.down();
+    await settle();
+
+    // 700_000 is inside the second chapter.
+    expect(getCurrentFocusKey()).toBe("ch-2-600000");
+  });
+
+  it("goes down to the buttons and comes back up to where it was", async () => {
+    withChapters();
+    render(<Player />);
+    await settle();
+    await act(async () => setFocus("scrub"));
+    await flushFocus();
+    await remote.down();
+    await settle();
+
+    await remote.down();
+    await settle();
+    expect(getCurrentFocusKey()).toBe("pb-playpause");
+
+    // Still open, so Up belongs to it rather than to the bar - otherwise the
+    // strip would sit on screen with no way back into it.
+    await remote.up();
+    await settle();
+    expect(getCurrentFocusKey()).toBe("ch-2-600000");
+  });
+
+  it("closes on the way back up to the bar", async () => {
+    withChapters();
+    render(<Player />);
+    await settle();
+    await act(async () => setFocus("scrub"));
+    await flushFocus();
+    await remote.down();
+    await settle();
+
+    await remote.up();
+    await settle();
+    expect(getCurrentFocusKey()).toBe("scrub");
+    expect(doesFocusableExist("chapters"), "the strip is out only while you are in it or below it").toBe(false);
+  });
+
+  it("does not seek when the arrows are choosing a chapter", async () => {
+    // Left and Right belong to the strip here, exactly as they do on the button
+    // row. Treated as resting they would have jumped the film ten seconds per
+    // press while the cursor appeared to move between thumbnails.
+    withChapters();
+    render(<Player />);
+    await settle();
+    await act(async () => setFocus("scrub"));
+    await flushFocus();
+    await remote.down();
+    await settle();
+
+    usePlayer.setState({ seekTargetMs: null });
+    await remote.right();
+    await settle();
+    expect(usePlayer.getState().seekTargetMs, "an arrow on the strip is not a seek").toBeNull();
+  });
+
+  it("goes straight to the buttons on a film with none", async () => {
+    render(<Player />);
+    await settle();
+    await act(async () => setFocus("scrub"));
+    await flushFocus();
+    await remote.down();
+    await settle();
+    expect(getCurrentFocusKey()).toBe("pb-playpause");
   });
 });
