@@ -7,6 +7,7 @@ import { artworkScale } from "./posters";
 import { useFocusFallback, useInitialFocus } from "./focus";
 import { usePlayer } from "./playback/player";
 import { classify, useApp } from "./state";
+import { createMover, nearest } from "./moveTo";
 import { LibraryFilters, type LibraryView } from "./LibraryFilters";
 import type { MediaItem } from "./backends/types";
 import { log } from "./redact";
@@ -103,7 +104,15 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   const jump = useRef(0);
   const [items, setItems] = useState<(MediaItem | null)[]>([]);
   const [total, setTotal] = useState<number | null>(null);
+  /**
+   * Where the grid sits, and what moves it.
+   *
+   * `scrollTop` is still React state because the virtualiser is computed from
+   * it - but it is set from the mover rather than from a scroll event, and only
+   * when the WINDOW changes, so moving a row does not re-render the grid.
+   */
   const [scrollTop, setScrollTop] = useState(0);
+  const mover = useMemo(() => createMover("y"), []);
   const [viewport, setViewport] = useState(1080);
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -202,12 +211,42 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     setTotal(null);
     setScrollTop(0);
     // A different list, not a move within one: there is nothing to follow from
-    // the old scroll position to the new one.
-    scroller.current?.scrollTo({ top: 0, behavior: "instant" });
+    // the old position to the new one.
+    mover.to(0, false);
     void loadPage(0);
   }, [loadPage]);
 
   const rows = Math.ceil((total ?? items.length) / COLUMNS) || 0;
+  /**
+   * Bring a row into the window, animating unless it is a jump.
+   *
+   * `nearest` in the sense scrollIntoView means it: a row already on screen
+   * does not move the grid at all, which is what keeps a sideways press from
+   * nudging it. The padding is the scroll-padding the container used to carry -
+   * a row flush against the edge is inside the overscan of some televisions.
+   *
+   * The window is updated from here rather than from a scroll event, and only
+   * when it actually changes: moving one row would otherwise re-render every
+   * tile in it, in the middle of the animation that is trying to be smooth.
+   */
+  const showRow = useCallback(
+    (row: number) => {
+      const padVh = (v: number): number => Math.round((v / 100) * viewport);
+      const to = nearest({
+        at: mover.at,
+        viewport,
+        start: row * rowHeight,
+        size: rowHeight,
+        padStart: padVh(4),
+        padEnd: padVh(6),
+        max: rows * rowHeight,
+      });
+      mover.to(to, true);
+      setScrollTop((prev) => (sameWindow(prev, to, rowHeight, viewport) ? prev : to));
+    },
+    [mover, viewport, rowHeight, rows],
+  );
+
   const firstRow = Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN);
   const lastRow = Math.min(rows, Math.ceil((scrollTop + viewport) / rowHeight) + OVERSCAN);
 
@@ -323,6 +362,9 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
               posterUrl={poster(item)}
               focusKey={`cell-${i}`}
               heightVh={TILE_VH}
+              // The grid moves itself; the browser must not also scroll it.
+              selfScroll={false}
+              onFocusedEl={() => showRow(r)}
               onEnter={() => go({ name: "item", itemId: item.id })}
             />
           ) : (
@@ -334,6 +376,8 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
               item={{ id: `pending-${i}`, kind: "movie", title: "" }}
               focusKey={`cell-${i}`}
               heightVh={TILE_VH}
+              selfScroll={false}
+              onFocusedEl={() => showRow(r)}
               onEnter={() => {}}
             />
           )}
@@ -410,26 +454,27 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
         // Fetch before scrolling: the window is computed from scrollTop, so the
         // rows land already requested rather than as a screen of placeholders.
         void loadPage(Math.floor(offset / PAGE));
-        // Instant, not smooth, and now stated rather than inherited: the
-        // scroller animates by default so the arrows feel like a surface, and
-        // this would have inherited that. A jump to "S" in a library of 1,700
-        // crosses most of the list, and animating that distance is a second of
-        // scenery on the way to somewhere the person already chose - through a
-        // window that is rebuilt on every frame of it, because the grid is
-        // virtualised on `scrollTop`.
-        scroller.current?.scrollTo({ top: row * rowHeight, behavior: "instant" });
+        // Not animated. A jump to "S" in a library of 1,700 crosses most of
+        // the list, and animating that distance is a second of scenery on the
+        // way to somewhere the person already chose - through a window that is
+        // rebuilt as it passes, because the grid is virtualised.
+        mover.to(row * rowHeight, false);
+        setScrollTop(row * rowHeight);
       })
       .catch((e) => log.warn("letter jump failed", e));
   };
 
   return (
     <FocusContext.Provider value={focusKey}>
-      {/* Over the grid, never instead of it. Replacing it unmounted the
-          scroller while `scrollTop` lived on in React state, so on close a
-          fresh scroller mounted at 0 while the virtualised window was still
-          computed from the old position - the only mounted rows were far below
-          the viewport, the screen was blank, and the focus guard then set focus
-          to a cell that was not mounted, over and over. Every press discarded. */}
+      {/* Over the grid, never instead of it. Replacing it unmounted the moved
+          layer while `scrollTop` lived on in React state, so on close a fresh
+          one mounted at 0 while the virtualised window was still computed from
+          the old position - the only mounted rows were far below the viewport,
+          the screen was blank, and the focus guard then set focus to a cell
+          that was not mounted, over and over. Every press discarded.
+
+          The mover keeps its own offset across that, and re-applies it when the
+          element attaches, so the two cannot disagree the way they did. */}
       {panel}
       <div className="flex h-full flex-col">
         <div className="flex items-center gap-[1.4vw] px-[4vw] py-[2vh]">
@@ -481,42 +526,25 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
             // than an instant one on a Pi: the animation was fine, the work
             // underneath it was not. Returning the previous value tells React
             // there is nothing to do.
-            onScroll={(e) => {
-              const top = e.currentTarget.scrollTop;
-              setScrollTop((prev) => (sameWindow(prev, top, rowHeight, viewport) ? prev : top));
-            }}
             // scroll-padding for the same reason the other screens have it: the
             // bottom row would otherwise land flush against the edge, which is
             // inside TV overscan on some sets.
             // Vertical padding, because the focus ring is drawn OUTSIDE the
             // tile's box and this element clips: without it the top row's ring
             // loses its upper edge against the scroller's own boundary.
-            // No animation, and this is settled rather than untried. Measured on
-            // the box with injected key presses and /proc sampling, per row:
+            // NOT a scroller. The grid moves itself with a composited
+            // transform, the way Plex's own client does - there is no
+            // `scrollIntoView` and no `scroll-behavior` anywhere in that
+            // bundle; positions are translations and movement is a Web
+            // Animations keyframe pair on `transform`.
             //
-            //   animated   renderer 73-85 ms   GPU process 111-118 ms
-            //   instant    renderer 34-47 ms   GPU process  18-23 ms
+            // Measured here before that change, per row moved: animating a
+            // native scroll cost the GPU process 111-118 ms against 18-23 ms
+            // for the same distance jumped, because a scrolling container whose
+            // contents are rebuilt underneath it re-rasters what a transform
+            // simply moves.
             //
-            // Then tried a second time on a grid with about 40% fewer tiles, in
-            // case the cost was one bad frame - the window shift and a row of
-            // image decodes both land inside the animation - rather than the
-            // whole of it. It still read as a stutter in the room, so it is the
-            // whole of it: a row here moves 34% of the screen, and every frame
-            // of that movement re-rasters what a jump rasters once.
-            //
-            // A jump cut is the honest answer for THIS scroller, which is not
-            // the same as for this hardware: Plex's own client animates its
-            // grid on the same box, at the same output, and reads as smooth. So
-            // the cost is something this implementation does and that one does
-            // not - most likely that a native scroll of a virtualised list
-            // re-rasters, where moving the content with a composited transform
-            // would not, and that the window shifts DOM in the middle of every
-            // animation.
-            //
-            // That is the shape of a fix rather than a fix, and it is a real
-            // change: the grid would move itself instead of being scrolled.
-            // Until then this stays a jump cut, because a stutter is worse.
-            className="no-scrollbar relative flex-1 overflow-y-auto px-[3vw] pt-[1.2vh] pb-[2vh] scroll-pt-[4vh] scroll-pb-[6vh]"
+            className="no-scrollbar relative flex-1 overflow-hidden px-[3vw] pt-[1.2vh] pb-[2vh]"
           >
             {total === 0 && (
               <div className="flex h-full items-center justify-center text-[2.2vh] text-fg-dim">
@@ -530,7 +558,11 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
             {/* One tall spacer carries the scrollbar; only the visible rows are
                 mounted, because a library of several thousand posters is exactly
                 the kind of DOM this hardware cannot afford. */}
-            <div style={{ height: rows * rowHeight }} className="relative">
+            <div
+              ref={(node) => mover.attach(node)}
+              style={{ height: rows * rowHeight, willChange: "transform" }}
+              className="relative"
+            >
               {visible}
             </div>
           </div>
