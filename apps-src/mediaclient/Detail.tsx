@@ -64,6 +64,9 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
    */
   const [focused, setFocused] = useState<ItemDetail | null>(null);
   const [firstChild, setFirstChild] = useState<ItemDetail | null>(null);
+  const upNext = usePlayer((s) => s.upNext);
+  // Only to re-render while a countdown is running; the value is the clock.
+  const [, setTick] = useState(0);
   const [picking, setPicking] = useState(false);
   const [detail, setDetail] = useState<ItemDetail | null>(null);
   const [busy, setBusy] = useState(false);
@@ -153,13 +156,15 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
   // Whatever this screen actually has: the episode someone arrived pointing at,
   // the first child on a group, the play button on a film - and on a group with
   // nothing in it, the message's own way out, because none of the others exist.
-  const first = focusChildId
-    ? `children-${itemId}-${focusChildId}`
-    : detail && !playableKind(detail)
-      ? children[0]
-        ? `children-${itemId}-${children[0].id}`
-        : "detail-back"
-      : "detail-play";
+  const first = upNext
+    ? `children-${itemId}-${upNext.item.id}`
+    : focusChildId
+      ? `children-${itemId}-${focusChildId}`
+      : detail && !playableKind(detail)
+        ? children[0]
+          ? `children-${itemId}-${children[0].id}`
+          : "detail-back"
+        : "detail-play";
   useInitialFocus(first, Boolean(detail));
   // Returning from playback unmounts the player, which held focus - without a
   // fallback the detail page comes back with the D-pad dead.
@@ -181,6 +186,25 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
     // exactly "I cannot navigate in the subtitle list".
     !playing && !picking,
   );
+
+  /**
+   * The countdown on the next episode, and the press that stops it.
+   *
+   * Any key cancels - not only the one that starts it - because a countdown
+   * somebody cannot stop is a countdown they fight. The listener is capture
+   * phase so it sees the press before anything else acts on it, and the
+   * re-render each second is what draws the number down.
+   */
+  useEffect(() => {
+    if (!upNext) return;
+    const cancel = (): void => usePlayer.getState().cancelUpNext();
+    window.addEventListener("keydown", cancel, true);
+    const id = setInterval(() => setTick((n) => n + 1), 250);
+    return () => {
+      window.removeEventListener("keydown", cancel, true);
+      clearInterval(id);
+    };
+  }, [upNext]);
 
   // Before the early returns, as hooks must be. `detail` is null while loading,
   // which is simply no theme yet.
@@ -408,6 +432,9 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
               setFocus(playable ? "detail-play" : "detail-lang");
               return false;
             }}
+            countdownFor={
+              upNext ? { id: upNext.item.id, seconds: Math.max(0, Math.ceil((upNext.at - Date.now()) / 1000)) } : null
+            }
             onFocusItem={(item) => {
               if (item.kind !== "episode" || !backend) return;
               // Already showing it: moving back onto the same tile must not

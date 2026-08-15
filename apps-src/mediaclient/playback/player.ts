@@ -105,11 +105,23 @@ interface PlayerState {
    */
   siblings: { prev?: MediaItem; next?: MediaItem };
   playSibling(which: "prev" | "next"): void;
+  /**
+   * The episode that will start by itself, and when.
+   *
+   * Set when one runs out with another behind it. The screen underneath shows a
+   * countdown on that episode; any press cancels it, because a countdown that
+   * cannot be stopped is a countdown people fight.
+   */
+  upNext: { item: MediaItem; at: number } | null;
+  cancelUpNext(): void;
 }
 
 let scheduler: PlaybackScheduler | null = null;
 /** A restart is in flight. See changeTracks. */
 let restarting = false;
+let upNextTimer: ReturnType<typeof setTimeout> | null = null;
+/** Long enough to read the title, short enough not to be a wait. */
+const UP_NEXT_MS = 5_000;
 let unsubscribePlayer: (() => void) | null = null;
 let currentBackend: MediaBackend | null = null;
 let lifecycleWired = false;
@@ -124,8 +136,15 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   seekFromMs: null,
   scrubMs: null,
   siblings: {},
+  upNext: null,
   overlay: false,
   error: null,
+
+  cancelUpNext() {
+    if (upNextTimer) clearTimeout(upNextTimer);
+    upNextTimer = null;
+    set({ upNext: null });
+  },
 
   playSibling(which) {
     const item = get().siblings[which];
@@ -144,6 +163,24 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     await get().stop();
 
     currentBackend = backend;
+    // The episodes either side, worked out HERE rather than by whoever pressed
+    // play. A film can be started from a season screen, a carry-on-watching
+    // row, a search result or a person's credits, and only one of those knew
+    // what the episode was part of - so the buttons appeared on one route and
+    // not the others.
+    set({ siblings: {} });
+    get().cancelUpNext();
+    if (item.kind === "episode" && item.parentId) {
+      void backend
+        .children(item.parentId)
+        .then((kids) => {
+          const at = kids.findIndex((k) => k.id === item.id);
+          if (at >= 0) set({ siblings: { prev: kids[at - 1], next: kids[at + 1] } });
+        })
+        .catch(() => {
+          /* no neighbours is the same as not knowing them */
+        });
+    }
     const session = randomSession();
     const choice = {
       version: opts?.version ?? 0,
@@ -481,6 +518,7 @@ async function handleFinished(reason: string | undefined, get: () => PlayerState
   const nearEnd = s.durationMs > 0 && s.positionMs >= s.durationMs - NEAR_END_MS;
   const ranOut = !reason && nearEnd;
 
+  const next = s.siblings.next;
   await get().stop();
 
   if (!ranOut) {
@@ -488,7 +526,20 @@ async function handleFinished(reason: string | undefined, get: () => PlayerState
     else log.warn("playback ended early with no reason - not advancing");
     return;
   }
-  // Auto-advance lands in the next step; ending cleanly is what matters here.
+  // An episode that ran out with another behind it starts the next one by
+  // itself, after a countdown anyone can stop. The screen underneath is the
+  // season, so the countdown is drawn on the episode it is about to play -
+  // there is nothing to invent, only something to point at.
+  if (!next) return;
+  const backend = currentBackend;
+  usePlayer.setState({ upNext: { item: next, at: Date.now() + UP_NEXT_MS } });
+  if (upNextTimer) clearTimeout(upNextTimer);
+  upNextTimer = setTimeout(() => {
+    upNextTimer = null;
+    const still = usePlayer.getState().upNext;
+    usePlayer.setState({ upNext: null });
+    if (still && backend) void usePlayer.getState().play(backend, still.item, { resume: false });
+  }, UP_NEXT_MS);
 }
 
 /** Release server-side state when the app stops being visible (see lifecycle). */

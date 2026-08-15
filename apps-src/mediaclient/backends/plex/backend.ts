@@ -739,14 +739,17 @@ export class PlexBackend implements MediaBackend {
     // Chosen tracks are told to the server before the decision, so the stream it
     // builds already carries them - a transcode started with the wrong audio
     // cannot be corrected without starting over.
-    if (chosen && (opts.audio !== undefined || opts.subtitle !== undefined)) {
+    // Subtitles OFF unless somebody asked for them. Saying nothing is not
+    // neutral: the server remembers whatever was selected for this item last
+    // time - by another client, or by its own auto-select - and turns it back
+    // on, so a film started clean came up with subtitles nobody chose. "none"
+    // is the only value that means off.
+    if (chosen) {
       const audioId = opts.audio !== undefined ? chosen.audio[opts.audio]?.id : undefined;
       const subtitleId =
-        opts.subtitle === "none"
+        opts.subtitle === undefined || opts.subtitle === "none"
           ? "none"
-          : opts.subtitle !== undefined
-            ? chosen.subtitles.find((t) => t.ordinal === opts.subtitle)?.id
-            : undefined;
+          : chosen.subtitles.find((t) => t.ordinal === opts.subtitle)?.id;
 
       // An ordinal that resolves to nothing must not be dropped in silence: the
       // parameter would simply be omitted, which the server reads as "no
