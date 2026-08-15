@@ -78,6 +78,8 @@ interface PlayerState {
        */
       startMs?: number;
       version?: number;
+      /** That file's own id, when the caller knows it. See resolveStream. */
+      partId?: string;
       audio?: number;
       subtitle?: number | "none";
       maxBitrateKbps?: number;
@@ -262,6 +264,10 @@ export const usePlayer = create<PlayerState>((set, get) => ({
           session,
           panel: tv.panel ?? null,
           version: choice.version,
+          // Known only once this title's files have been listed, which is the
+          // second play onwards - a version SWITCH. The first play has nothing
+          // to name yet and asks for the position it was given.
+          partId: opts?.partId ?? get().current?.detail?.versions[choice.version]?.partId,
           audio: choice.audio,
           subtitle: choice.subtitle,
           maxBitrateKbps: choice.maxBitrateKbps,
@@ -423,6 +429,10 @@ export const usePlayer = create<PlayerState>((set, get) => ({
         { ...cur.item, viewOffsetMs: at },
         {
           version: choice.version,
+          // Known only once this title's files have been listed, which is the
+          // second play onwards - a version SWITCH. The first play has nothing
+          // to name yet, and asks for the position it was given.
+          partId: get().current?.detail?.versions[choice.version]?.partId,
           audio: choice.audio,
           maxBitrateKbps: choice.maxBitrateKbps,
           subtitle: choice.subtitle,

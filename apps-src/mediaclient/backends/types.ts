@@ -455,6 +455,16 @@ export interface MediaBackend {
       panel?: { width: number; height: number } | null;
       /** Which file to play, when the library holds more than one. */
       version?: number;
+      /**
+       * That file's own id, when the caller has it.
+       *
+       * The position and the identity are not the same answer: a backend whose
+       * decision endpoint RANKS the files it returns hands them back in an
+       * order of its own, and picking by position then plays one file while
+       * reporting another - which leaves everything downstream indexing the
+       * versions array with a number that means nothing.
+       */
+      partId?: string;
       /** 0-based ordinals within their type. */
       audio?: number;
       subtitle?: number | "none";
@@ -481,6 +491,16 @@ export interface MediaBackend {
   reapOwnSessions(): Promise<number>;
 
   // --- state ---
+  /**
+   * Give up the credential this session holds, where the server can be told.
+   *
+   * Optional because it is not a thing every server does. Plex hands out a
+   * token tied to the account and expects the client to forget it; Jellyfin
+   * mints one per device that stays valid and listed as an active device until
+   * somebody revokes it - and the box has just thrown away its only copy, so
+   * after a sign-out nothing on the television can revoke it any more.
+   */
+  revokeSession?(): Promise<void>;
   reportProgress(id: string, positionMs: number, durationMs: number, state: PlaybackState): Promise<void>;
   setWatched(id: string, watched: boolean): Promise<void>;
   history(limit: number): Promise<HistoryRow[]>;

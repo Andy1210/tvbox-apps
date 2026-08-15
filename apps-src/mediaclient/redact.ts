@@ -50,6 +50,12 @@ function scrub(s: string): string {
   // `Authorization: Bearer <token>` is a header, not a parameter, and reaches a
   // message whenever one is quoted back.
   out = out.replace(/\b(bearer\s+)[\w.\-+/=]+/gi, "$1<redacted>");
+  // Jellyfin's own header puts the credential inside a comma-separated list -
+  // `MediaBrowser Client="…", Token="…"` - so nothing in front of it is a `?`
+  // or an `&`, and the passes above walk straight past it. Same for the two
+  // JSON fields its answers carry a credential in.
+  out = out.replace(/\b(token\s*=\s*")[^"]*"/gi, '$1<redacted>"');
+  out = out.replace(/("(?:AccessToken|Secret)"\s*:\s*")[^"]*"/gi, '$1<redacted>"');
   return out;
 }
 

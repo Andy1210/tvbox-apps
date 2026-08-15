@@ -278,3 +278,26 @@ describe("a token with no query string in front of it", () => {
     expect(redactString("nothing is playing")).toBe("nothing is playing");
   });
 });
+
+describe("the shapes Jellyfin puts a credential in", () => {
+  // Jellyfin's credential does not travel as a query parameter: it is one
+  // element of a comma-separated Authorization header, and its answers carry it
+  // in two JSON fields. Nothing in front of either is a `?` or an `&`, which is
+  // all the first pass looked for.
+  it("redacts the MediaBrowser header and the fields an answer carries", () => {
+    const header = 'MediaBrowser Client="tvbox", Device="box", DeviceId="d1", Version="1", Token="abc123SECRET"';
+    expect(redactString(header)).not.toContain("abc123SECRET");
+    // And the rest of the header stays readable, which is the point of
+    // redacting rather than dropping.
+    expect(redactString(header)).toContain('Client="tvbox"');
+
+    expect(redactString('{"AccessToken":"abc123SECRET","User":{"Name":"a"}}')).not.toContain("abc123SECRET");
+    expect(redactString('{"Secret":"abc123SECRET","Code":"123456"}')).not.toContain("abc123SECRET");
+    // The code is not a credential and is what somebody reads off the screen.
+    expect(redactString('{"Secret":"abc123SECRET","Code":"123456"}')).toContain("123456");
+  });
+
+  it("leaves an ordinary sentence with the word token in it alone", () => {
+    expect(redactString("the token expired")).toBe("the token expired");
+  });
+});
