@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect, beforeEach } from "vitest";
 import { createMover, nearest } from "../moveTo";
 
@@ -108,5 +110,24 @@ describe("where a row has to put the window", () => {
 
   it("stops at the end of the list", () => {
     expect(nearest({ at: 0, start: 33800, ...win })).toBe(34000 - 1000);
+  });
+});
+
+describe("the rails move themselves too", () => {
+  it("neither the grid nor a row is scrolled by anything", () => {
+    // Both were native scrollers, and both re-rastered per frame what a
+    // transform moves. A row also loads data as the cursor crosses it - a
+    // season's cast and description follow the highlighted episode - so it had
+    // the same cost with more landing inside the animation.
+    //
+    // Asserted on what is unambiguous across both files. The letter strip is
+    // still a small native scroller and legitimately so, which is why this does
+    // not sweep the whole file for `overflow`.
+    for (const file of ["Library.tsx", "Row.tsx"]) {
+      const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient", file), "utf8");
+      expect(src, `${file} must not scroll`).not.toContain("scrollTo(");
+      expect(src, `${file} hands movement to the container`).toContain("selfScroll={false}");
+      expect(src, `${file} moves a layer`).toContain("mover.attach(node)");
+    }
   });
 });
