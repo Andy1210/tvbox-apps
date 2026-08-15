@@ -180,5 +180,16 @@
     "wrongPin": "Nem jó a PIN-kód.",
     "continue": "Tovább enélkül",
     "none": "Ehhez a fiókhoz nincs másik felhasználó."
+  },
+  "jellyfin": {
+    "name": "Név",
+    "added": "Hozzáadva",
+    "premiere": "Megjelenés",
+    "rating": "Értékelés",
+    "runtime": "Hossz",
+    "played": "Utoljára nézve",
+    "random": "Véletlen",
+    "genre": "Műfaj",
+    "unwatched": "Amit még nem láttam"
   }
 }

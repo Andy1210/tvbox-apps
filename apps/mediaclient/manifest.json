@@ -5,8 +5,12 @@
     "hu": "Média",
     "en": "Media"
   },
-  "version": "0.53.0",
+  "version": "0.53.1",
   "changelog": [
+    {
+      "version": "0.53.1",
+      "notes": "The Jellyfin sort and filter names follow the language the box is set to, instead of always being Hungarian."
+    },
     {
       "version": "0.53.0",
       "notes": "The A-Z strip works on a Jellyfin library, so a library of 1788 films has an end you can reach. Choosing another server no longer forgets the address you typed. The screen after the address keyboard highlights something again, and connecting to a wrong address gives up instead of sitting there. The track menu shows which audio and subtitle are playing, and a subtitle search on a server without one says so rather than reporting nothing found."

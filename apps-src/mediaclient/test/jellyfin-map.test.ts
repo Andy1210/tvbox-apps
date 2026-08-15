@@ -235,3 +235,38 @@ describe("a detail", () => {
     expect(d.reviews).toEqual([]);
   });
 });
+
+describe("what a sort is called", () => {
+  it("follows the screen's language rather than one baked in", async () => {
+    const { configureI18n, useLocaleStore } = await import("@sdk");
+    const en = (await import("../locales/en.json")).default;
+    const hu = (await import("../locales/hu.json")).default;
+    const { JellyfinBackend } = await import("../backends/jellyfin/backend");
+    configureI18n({ hu, en }, { fallback: "en" });
+    const backend = new JellyfinBackend(
+      {
+        kind: "jellyfin",
+        profileId: "u",
+        profileName: "u",
+        token: "t",
+        accountToken: "t",
+        serverId: "s",
+        serverName: "s",
+        baseUrl: "http://x:8096",
+        location: "lan",
+      },
+      { deviceId: "d", deviceName: "b" },
+    );
+
+    // Jellyfin names none of these itself - Plex answers in the language the
+    // request carries and this server has no such endpoint - so a hardcoded
+    // list showed Hungarian to an English screen.
+    useLocaleStore.setState({ locale: "en" });
+    expect((await backend.sortOptions()).map((s2) => s2.title)).toContain("Date added");
+    expect((await backend.filterOptions()).map((f) => f.title)).toContain("Genre");
+
+    useLocaleStore.setState({ locale: "hu" });
+    expect((await backend.sortOptions()).map((s2) => s2.title)).toContain("Hozzáadva");
+    expect((await backend.filterOptions()).map((f) => f.title)).toContain("Műfaj");
+  });
+});

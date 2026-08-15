@@ -180,5 +180,16 @@
     "wrongPin": "That PIN is not right.",
     "continue": "Carry on without this",
     "none": "This account has no other users."
+  },
+  "jellyfin": {
+    "name": "Name",
+    "added": "Date added",
+    "premiere": "Release",
+    "rating": "Rating",
+    "runtime": "Length",
+    "played": "Last watched",
+    "random": "Random",
+    "genre": "Genre",
+    "unwatched": "Not seen yet"
   }
 }

@@ -27,6 +27,7 @@ import {
   type JellyfinItem,
   type JellyfinMediaSource,
 } from "./map";
+import { translate, useLocaleStore } from "@sdk";
 import { listUsers } from "./auth";
 import type {
   CreditSet,
@@ -66,15 +67,28 @@ import { log } from "../../redact";
 // are top-level on every item answer already.
 const LIST_FIELDS = "Overview,SortName,DateCreated,ParentId,PrimaryImageAspectRatio";
 
-/** Jellyfin's own sort keys, with what to call them on screen. */
-const SORTS: { key: string; title: string }[] = [
-  { key: "SortName", title: "Név" },
-  { key: "DateCreated", title: "Hozzáadva" },
-  { key: "PremiereDate", title: "Megjelenés" },
-  { key: "CommunityRating", title: "Értékelés" },
-  { key: "Runtime", title: "Hossz" },
-  { key: "DatePlayed", title: "Utoljára nézve" },
-  { key: "Random", title: "Véletlen" },
+/**
+ * What to call a sort or a filter on screen.
+ *
+ * Translated HERE, unlike the sibling backend, because there is nothing to ask:
+ * Plex names its own sorts in the language the request carries, and Jellyfin has
+ * no endpoint that names them at all. Hardcoding one language would have shown
+ * Hungarian to an English screen, which is the half of this the server cannot
+ * cover for us.
+ */
+function label(key: string): string {
+  return translate(useLocaleStore.getState().locale || "en", key);
+}
+
+/** Jellyfin's own sort keys, paired with the name to show. */
+const SORTS: { key: string; title: () => string }[] = [
+  { key: "SortName", title: () => label("jellyfin.name") },
+  { key: "DateCreated", title: () => label("jellyfin.added") },
+  { key: "PremiereDate", title: () => label("jellyfin.premiere") },
+  { key: "CommunityRating", title: () => label("jellyfin.rating") },
+  { key: "Runtime", title: () => label("jellyfin.runtime") },
+  { key: "DatePlayed", title: () => label("jellyfin.played") },
+  { key: "Random", title: () => label("jellyfin.random") },
 ];
 
 /**
@@ -259,8 +273,9 @@ export class JellyfinBackend implements MediaBackend {
   async sortOptions(): Promise<SortOption[]> {
     // A fixed list rather than an asked one: Jellyfin has no endpoint that
     // names its sorts, so unlike the Plex side there is nothing to ask. The
-    // keys are the server's own; only the labels are ours.
-    return SORTS;
+    // keys are the server's own; only the labels are ours. Read at call time,
+    // so a change of language reaches a screen that is already open.
+    return SORTS.map((s) => ({ key: s.key, title: s.title() }));
   }
 
   /**
@@ -309,12 +324,12 @@ export class JellyfinBackend implements MediaBackend {
 
   async filterOptions(): Promise<FilterOption[]> {
     return [
-      { key: "genre", title: "Műfaj", kind: "list" },
-      { key: "unwatched", title: "Amit még nem láttam", kind: "flag" },
+      { key: "genre", title: label("jellyfin.genre"), kind: "list" },
+      { key: "unwatched", title: label("jellyfin.unwatched"), kind: "flag" },
     ];
   }
 
-  async filterValues(libraryId: string, filter: string): Promise<SortOption[]> {
+  async filterValues(libraryId: string, filter: string, _path?: string): Promise<SortOption[]> {
     if (filter !== "genre") return [];
     const res = await this.req<{ Genres?: { Name?: string; Id?: string }[] }>("Items/Filters2", {
       query: { userId: this.userId, parentId: libraryId, includeItemTypes: "Movie,Series" },
