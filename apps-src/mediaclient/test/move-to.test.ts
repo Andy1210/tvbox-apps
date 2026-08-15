@@ -162,3 +162,31 @@ describe("the coordinates a mover is driven with", () => {
     expect(src).not.toContain("offsetLeft");
   });
 });
+
+describe("where a moving rail is cut", () => {
+  it("is cut at the inset, not at the screen edge", () => {
+    // `overflow` clips at the PADDING box, so a rail that carries its own
+    // horizontal inset stays visible inside that inset - a tile sliding out of
+    // the row ran all the way to the screen edge instead of disappearing at the
+    // margin. The inset therefore sits on a wrapper OUTSIDE the clipping
+    // element.
+    const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Row.tsx"), "utf8");
+    const clip = /className="no-scrollbar overflow-hidden([^"]*)"/.exec(src);
+    expect(clip, "the clipping element is still identifiable").toBeTruthy();
+    expect(clip![1], "no horizontal inset on the element that clips").not.toMatch(/px-|pl-|pr-/);
+    // The vertical padding stays inside it, and for the opposite reason: it is
+    // the room a focus ring needs, and a ring drawn outside the tile's box is
+    // exactly what the clip would cut.
+    expect(clip![1]).toContain("py-");
+  });
+
+  it("keeps the grid's own padding inside its clip, which is not a contradiction", () => {
+    // The grid only moves vertically, so nothing can slide out sideways under
+    // its horizontal inset - and its vertical padding is the focus ring's room,
+    // which has to be inside the clip to be of any use.
+    const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Library.tsx"), "utf8");
+    const clip = /className="no-scrollbar relative flex-1 overflow-hidden([^"]*)"/.exec(src);
+    expect(clip, "the grid window is still identifiable").toBeTruthy();
+    expect(clip![1]).toMatch(/p[tb]-/);
+  });
+});
