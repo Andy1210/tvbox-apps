@@ -96,6 +96,15 @@ interface PlayerState {
   /** The marker covering the current position, when there is one. */
   activeMarker(): Marker | null;
   skipMarker(): void;
+  /**
+   * The episodes either side of this one, and how to start them.
+   *
+   * Kept here rather than looked up by the overlay: the overlay is drawn over a
+   * film and has no idea what it is part of, and the player already holds the
+   * season it was started from.
+   */
+  siblings: { prev?: MediaItem; next?: MediaItem };
+  playSibling(which: "prev" | "next"): void;
 }
 
 let scheduler: PlaybackScheduler | null = null;
@@ -114,8 +123,15 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   seekTargetMs: null,
   seekFromMs: null,
   scrubMs: null,
+  siblings: {},
   overlay: false,
   error: null,
+
+  playSibling(which) {
+    const item = get().siblings[which];
+    if (!item || !currentBackend) return;
+    void get().play(currentBackend, item, { resume: false });
+  },
 
   async play(backend, item, opts) {
     const tv = bridge();

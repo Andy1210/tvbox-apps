@@ -12,6 +12,7 @@ import { TrackMenu, type Choice } from "./TrackMenu";
 import type { Track } from "./backends/types";
 import { usePlayer } from "./playback/player";
 import { ScrubPreview } from "./ScrubPreview";
+import { NextIcon, PauseIcon, PlayIcon, PreviousIcon } from "./icons";
 import { applySubtitleStyle, usePrefs } from "./prefs";
 
 /**
@@ -66,6 +67,7 @@ export function Player(): React.JSX.Element | null {
   const buffering = usePlayer((s) => s.buffering);
   const overlay = usePlayer((s) => s.overlay);
   const scrubMs = usePlayer((s) => s.scrubMs);
+  const siblings = usePlayer((s) => s.siblings);
 
   const [menu, setMenu] = useState<null | "version" | "audio" | "subtitles" | "quality">(null);
   // Which language the subtitle search asks for. Seeded from the interface, but
@@ -326,7 +328,11 @@ export function Player(): React.JSX.Element | null {
     // Not while a cursor is out: the mark would stay drawn on the bar while the
     // arrows stopped moving it and OK skipped the marker instead of committing
     // - the bar would be showing a place OK was never going to go.
-    if (skippable && !menu && usePlayer.getState().scrubMs === null && getCurrentFocusKey() === "scrub")
+    // From the resting state as well as from the bar. Resting is where the
+    // overlay sits by default, so requiring the bar meant the button appeared
+    // with the cursor nowhere near it and OK did something else.
+    const at = getCurrentFocusKey();
+    if (skippable && !menu && usePlayer.getState().scrubMs === null && (!at || at === IDLE_KEY || at === "scrub"))
       setFocus("skip");
   }, [skippable, menu]);
 
@@ -407,6 +413,22 @@ export function Player(): React.JSX.Element | null {
 
   return (
     <FocusContext.Provider value={focusKey}>
+      {/* OUTSIDE the fading wrapper, and that is the point: the overlay hides
+          itself after four seconds of no input, and the skip button lived
+          inside it - so during an intro, which is exactly when it is wanted, it
+          was gone before anyone looked up. Bottom right, where a television
+          puts this. */}
+      {skippable && (
+        <div className="absolute right-[4vw] bottom-[6vh] z-20">
+          <FocusButton
+            focusKey="skip"
+            onEnter={() => usePlayer.getState().skipMarker()}
+            className="rounded-[1vh] bg-black/70 px-[2.4vw] py-[1.4vh] text-[2.2vh] font-semibold [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]"
+          >
+            {t(marker!.type === "intro" ? "player.skipIntro" : "player.skipCredits")}
+          </FocusButton>
+        </div>
+      )}
       <div
         ref={ref}
         className={`absolute inset-0 flex flex-col justify-end transition-opacity duration-200 ${
@@ -414,26 +436,6 @@ export function Player(): React.JSX.Element | null {
         }`}
       >
         <IdleAnchor />
-
-        {skippable && (
-          <div className="absolute right-[4vw] bottom-[34vh]">
-            <FocusButton
-              focusKey="skip"
-              onEnter={() => usePlayer.getState().skipMarker()}
-              // Not the focus colour at rest. It was solid white with black
-              // text whether focused or not, and focus only takes it from 90%
-              // to 100% - so on a button that is now a navigation target, there
-              // was no way to tell whether OK would skip or seek.
-              // Dark ground and a shadow, like the buttons below it. A 20%
-              // white wash over a bright frame composites to near-white, and
-              // white text on that is about 1.15:1 - the button sits above the
-              // gradient, so it has nothing else to stand on.
-              className="rounded-[1vh] bg-black/55 px-[2vw] py-[1.2vh] text-[2vh] font-semibold [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]"
-            >
-              {t(marker!.type === "intro" ? "player.skipIntro" : "player.skipCredits")}
-            </FocusButton>
-          </div>
-        )}
 
         {/* A gradient rather than a panel: the film keeps showing through, which
             is what makes the overlay feel like it belongs to the picture. */}
@@ -475,6 +477,10 @@ export function Player(): React.JSX.Element | null {
             <ButtonRow
               paused={state === "paused"}
               canChooseTracks={Boolean(current.detail)}
+              hasPrev={Boolean(siblings.prev)}
+              hasNext={Boolean(siblings.next)}
+              onPrev={() => usePlayer.getState().playSibling("prev")}
+              onNext={() => usePlayer.getState().playSibling("next")}
               onPlayPause={() => usePlayer.getState().togglePause()}
               onTracks={() => setMenu("audio")}
               onQuality={() => setMenu("quality")}
@@ -616,15 +622,23 @@ function ScrubBar({
 function ButtonRow({
   paused,
   canChooseTracks,
+  hasPrev,
+  hasNext,
   onPlayPause,
   onTracks,
   onQuality,
+  onPrev,
+  onNext,
 }: {
   paused: boolean;
   canChooseTracks: boolean;
+  hasPrev: boolean;
+  hasNext: boolean;
   onPlayPause: () => void;
   onTracks: () => void;
   onQuality: () => void;
+  onPrev: () => void;
+  onNext: () => void;
 }): React.JSX.Element {
   const { t } = useI18n();
   // Opaque enough to read against any frame, and above the 10-foot floor of
@@ -633,9 +647,27 @@ function ButtonRow({
 
   return (
     <div className="flex items-center gap-[1vw]">
-      <FocusButton focusKey="pb-playpause" onEnter={onPlayPause} className={cls}>
-        {t(paused ? "player.play" : "player.pause")}
+      {/* Episode stepping first, so the three transport controls sit together
+          in the order a remote's own keys do. Only when there is one: a button
+          that highlights and does nothing is worse than no button. */}
+      {hasPrev && (
+        <FocusButton focusKey="pb-prev" label={t("player.previousEpisode")} onEnter={onPrev} className={cls}>
+          <PreviousIcon />
+        </FocusButton>
+      )}
+      <FocusButton
+        focusKey="pb-playpause"
+        label={t(paused ? "player.play" : "player.pause")}
+        onEnter={onPlayPause}
+        className={cls}
+      >
+        {paused ? <PlayIcon /> : <PauseIcon />}
       </FocusButton>
+      {hasNext && (
+        <FocusButton focusKey="pb-next" label={t("player.nextEpisode")} onEnter={onNext} className={cls}>
+          <NextIcon />
+        </FocusButton>
+      )}
       {/* Only when there is something to choose between. A button that opens a
           panel with nothing in it is worse than no button - and the panel is
           what Back would then close instead of pausing. */}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
+import { FocusContext, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, useI18n } from "@sdk";
 import { Row } from "./Row";
 import { Message } from "./Message";
@@ -209,6 +209,18 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
   /** A group is a list of things to play, not a thing to play. */
   const playable = detail.kind !== "collection" && detail.kind !== "playlist";
   /**
+   * What Play starts.
+   *
+   * A season is not a thing the server can resolve a stream for either - it
+   * answers the same 400 a collection does - so Play there means the first
+   * episode nobody has finished, which is what someone pressing it wants. On a
+   * film it is the film.
+   */
+  const toPlay =
+    detail.kind === "season" || detail.kind === "show"
+      ? (children.find((c) => !(c.viewCount ?? 0) && !(c.viewOffsetMs ?? 0)) ?? children[0])
+      : detail;
+  /**
    * What the page is describing.
    *
    * On a season that is the episode the cursor is on, not the season: its
@@ -287,7 +299,7 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
                 // no other way.
                 onFocused={toTop}
                 onEnter={() =>
-                  backend && void usePlayer.getState().play(backend, detail, { version, ...pick(tracksFrom) })
+                  backend && toPlay && void usePlayer.getState().play(backend, toPlay, { version, ...pick(tracksFrom) })
                 }
                 className="rounded-[1vh] bg-white/15 px-[2.4vw] py-[1.4vh] text-[2.1vh]"
               >
@@ -303,7 +315,9 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
                 focusKey="detail-restart"
                 onEnter={() =>
                   backend &&
-                  void usePlayer.getState().play(backend, detail, { resume: false, version, ...pick(tracksFrom) })
+                  backend &&
+                  toPlay &&
+                  void usePlayer.getState().play(backend, toPlay, { resume: false, version, ...pick(tracksFrom) })
                 }
                 className="rounded-[1vh] bg-white/10 px-[2vw] py-[1.4vh] text-[2.1vh]"
               >
@@ -384,6 +398,16 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
             posterUrl={detail.kind === "season" ? wide : poster}
             aspect={detail.kind === "season" ? 16 / 9 : undefined}
             heightVh={detail.kind === "season" ? 15 : 22}
+            // Up from the first row of a detail screen goes to the buttons,
+            // decided here rather than by geometry: the row's own padding pulls
+            // its box up over them, and spatial navigation drops a candidate
+            // whose bottom is inside the focused element - so Up found nothing
+            // and the cursor left the screen.
+            onArrowFromFirst={(dir) => {
+              if (dir !== "up") return true;
+              setFocus(playable ? "detail-play" : "detail-lang");
+              return false;
+            }}
             onFocusItem={(item) => {
               if (item.kind !== "episode" || !backend) return;
               // Already showing it: moving back onto the same tile must not
