@@ -59,10 +59,12 @@ import { log } from "../../redact";
  * fields do. `MediaSources` is deliberately NOT here - it is per-file detail
  * that a grid never draws, and on a 60-item page it is most of the payload.
  */
-const LIST_FIELDS = "Overview,SortName,DateCreated,ParentId,PrimaryImageAspectRatio,ProductionYear";
-/** What a detail screen needs, which is everything a grid does not. */
-const DETAIL_FIELDS =
-  "Overview,SortName,DateCreated,Genres,Studios,Taglines,People,ProviderIds,Chapters,MediaSources,MediaStreams,ParentId,ProductionYear";
+// Every name here is an `ItemFields` member the server declares. A name it does
+// not know is DROPPED rather than refused, so a typo reads exactly like a
+// working field until something is missing on screen - `ProductionYear` and
+// `UserData` were both in these lists and are neither members nor needed: they
+// are top-level on every item answer already.
+const LIST_FIELDS = "Overview,SortName,DateCreated,ParentId,PrimaryImageAspectRatio";
 
 /** Jellyfin's own sort keys, with what to call them on screen. */
 const SORTS: { key: string; title: string }[] = [
@@ -74,6 +76,35 @@ const SORTS: { key: string; title: string }[] = [
   { key: "DatePlayed", title: "Utoljára nézve" },
   { key: "Random", title: "Véletlen" },
 ];
+
+interface PlaybackInfoResponse {
+  MediaSources?: JellyfinMediaSource[];
+  PlaySessionId?: string;
+}
+
+/**
+ * What this box can play, and what it will accept instead.
+ *
+ * mpv on the Pi plays everything this library holds, so the profile says so
+ * rather than describing codecs one by one - and a server that decides to
+ * transcode anyway still answers with a URL.
+ */
+function deviceProfileBody(maxBitrateKbps?: number): Record<string, unknown> {
+  return {
+    DeviceProfile: {
+      MaxStreamingBitrate: maxBitrateKbps ? maxBitrateKbps * 1000 : 200_000_000,
+      DirectPlayProfiles: [{ Type: "Video" }, { Type: "Audio" }],
+      TranscodingProfiles: [
+        { Type: "Video", Container: "ts", VideoCodec: "h264", AudioCodec: "aac", Protocol: "hls" },
+      ],
+      SubtitleProfiles: [
+        { Format: "srt", Method: "External" },
+        { Format: "subrip", Method: "External" },
+      ],
+    },
+    MaxStreamingBitrate: maxBitrateKbps ? maxBitrateKbps * 1000 : undefined,
+  };
+}
 
 interface ItemsResponse {
   Items?: JellyfinItem[];
@@ -206,8 +237,28 @@ export class JellyfinBackend implements MediaBackend {
     return SORTS;
   }
 
-  async collections(libraryId: string, q: PageQuery): Promise<Page<MediaItem>> {
-    return this.libraryPage(libraryId, { ...q, of: "collections" });
+  /**
+   * The collections a library's titles belong to.
+   *
+   * NOT asked under the library's own id: Jellyfin keeps box sets in a folder
+   * of their own, so a query with `parentId` set to a film library answers with
+   * nothing at all - and nothing is what an empty grid looks like when it is
+   * working. Asked across the server instead.
+   */
+  async collections(_libraryId: string, q: PageQuery): Promise<Page<MediaItem>> {
+    const res = await this.req<ItemsResponse>("Items", {
+      query: {
+        userId: this.userId,
+        recursive: true,
+        includeItemTypes: "BoxSet",
+        startIndex: q.offset,
+        limit: q.limit,
+        sortBy: q.sort || "SortName",
+        sortOrder: q.desc ? "Descending" : "Ascending",
+        fields: LIST_FIELDS,
+      },
+    });
+    return { items: (res.Items || []).map(toItem), total: res.TotalRecordCount };
   }
 
   async playlists(): Promise<MediaItem[]> {
@@ -269,8 +320,12 @@ export class JellyfinBackend implements MediaBackend {
   }
 
   async item(id: string): Promise<ItemDetail> {
+    // No `fields` here: this route declares none and answers with the lot
+    // anyway - people, chapters and media sources included, verified against
+    // the live server. A name it does not know would be dropped in silence, so
+    // sending a list would read as working while doing nothing.
     const it = await this.req<JellyfinItem>(`Items/${encodeURIComponent(id)}`, {
-      query: { userId: this.userId, fields: DETAIL_FIELDS },
+      query: { userId: this.userId },
     });
     return toDetail(it);
   }
@@ -331,9 +386,56 @@ export class JellyfinBackend implements MediaBackend {
     return this.sized(item.thumb, w, h);
   }
 
+  /**
+   * Resolve a server-supplied path against this server, or drop it.
+   *
+   * The origin is read off the RESOLVED url, never off the string. Deciding
+   * "is this absolute?" with a pattern and then resolving with `new URL` is two
+   * parsers reading one value, and they disagree: the URL parser strips leading
+   * and trailing spaces and every tab, CR and LF anywhere in the input before it
+   * parses, so "\thttp://elsewhere/x" is not absolute to a pattern and is
+   * absolute to the parser. Resolving first collapses the two readings into one
+   * and covers the case-, protocol-relative- and scheme- variants without a rule
+   * for each.
+   *
+   * Every string this is given comes from the server: an image tag, a subtitle's
+   * delivery path, a transcoding URL. Same origin also means same SCHEME, which
+   * is what keeps `file://` and `smb://` out of something handed to mpv.
+   */
+  private onServer(path: string): URL | undefined {
+    let base: URL;
+    try {
+      base = new URL(this.base);
+    } catch {
+      return undefined;
+    }
+    const root = this.base.endsWith("/") ? this.base : this.base + "/";
+    let url: URL;
+    let raw: URL;
+    try {
+      // Twice, and both have to land on this server. The first strips the
+      // leading slash so a base that carries a path - a server behind a proxy -
+      // keeps it. The second reads the value as written, which is what catches
+      // the protocol-relative form: "//elsewhere/x" loses one slash in the
+      // first reading and becomes an innocent path on our own host, so it would
+      // pass while plainly meaning another host. Refusing it is a decision;
+      // surviving it by accident is not.
+      url = new URL(path.replace(/^\//, ""), root);
+      raw = new URL(path, root);
+    } catch {
+      return undefined;
+    }
+    if (url.origin !== base.origin || raw.origin !== base.origin) {
+      log.warn("a server-supplied URL points off the server; dropped");
+      return undefined;
+    }
+    return url;
+  }
+
   private sized(path: string | undefined, w: number, h: number): string | undefined {
     if (!path) return undefined;
-    const url = new URL(path, this.base.endsWith("/") ? this.base : this.base + "/");
+    const url = this.onServer(path);
+    if (!url) return undefined;
     url.searchParams.set("fillWidth", String(Math.round(w)));
     url.searchParams.set("fillHeight", String(Math.round(h)));
     url.searchParams.set("quality", "90");
@@ -349,8 +451,7 @@ export class JellyfinBackend implements MediaBackend {
   }
 
   artUrl(path: string): string | undefined {
-    if (/^https?:\/\//i.test(path)) return undefined;
-    return buildUrl(this.base, path);
+    return this.onServer(path)?.toString();
   }
 
   chapterThumbUrl(thumb: string, w: number, h: number): string | undefined {
@@ -378,7 +479,13 @@ export class JellyfinBackend implements MediaBackend {
     // The player is another process and cannot send a header, so this one URL
     // carries the token - the same trade the Plex side makes for the stream
     // itself, and the reason `redact.ts` exists.
-    const url = new URL(track.key.replace(/^\//, ""), this.base.endsWith("/") ? this.base : this.base + "/");
+    const url = this.onServer(track.key);
+    // Dropped rather than fetched without the credential: this URL reaches
+    // ANOTHER PROCESS with the token on it, and a server that names another
+    // host is naming somewhere to send the token to. Measured on the sibling
+    // backend and stated there: the rule is not "bound these three functions",
+    // it is "bound everything the token is attached to".
+    if (!url) return undefined;
     url.searchParams.set("api_key", this.session.token);
     return url.toString();
   }
@@ -387,52 +494,102 @@ export class JellyfinBackend implements MediaBackend {
 
   async resolveStream(
     id: string,
-    opts: { session: string; version?: number; audio?: number; subtitle?: number | "none"; maxBitrateKbps?: number },
+    opts: {
+      session: string;
+      version?: number;
+      partId?: string;
+      audio?: number;
+      subtitle?: number | "none";
+      maxBitrateKbps?: number;
+    },
   ): Promise<StreamDecision> {
-    const info = await this.req<{ MediaSources?: JellyfinMediaSource[]; PlaySessionId?: string }>(
-      `Items/${encodeURIComponent(id)}/PlaybackInfo`,
-      {
+    const ask = (extra: Record<string, unknown> = {}): Promise<PlaybackInfoResponse> =>
+      this.req<PlaybackInfoResponse>(`Items/${encodeURIComponent(id)}/PlaybackInfo`, {
         method: "POST",
         query: { userId: this.userId },
-        body: {
-          // What this box can play without help. mpv on the Pi plays everything
-          // the library holds, so the profile says so rather than describing
-          // codecs one by one - and a server that decides to transcode anyway
-          // still answers with a URL, which is the case below.
-          DeviceProfile: {
-            MaxStreamingBitrate: opts.maxBitrateKbps ? opts.maxBitrateKbps * 1000 : 200_000_000,
-            DirectPlayProfiles: [{ Type: "Video" }, { Type: "Audio" }],
-            TranscodingProfiles: [
-              { Type: "Video", Container: "ts", VideoCodec: "h264", AudioCodec: "aac", Protocol: "hls" },
-            ],
-            SubtitleProfiles: [{ Format: "srt", Method: "External" }, { Format: "subrip", Method: "External" }],
-          },
-          MaxStreamingBitrate: opts.maxBitrateKbps ? opts.maxBitrateKbps * 1000 : undefined,
-        },
-      },
-    );
+        body: { ...deviceProfileBody(opts.maxBitrateKbps), ...extra },
+      });
+
+    // Named on the way IN when the caller knows which file it wants, so the
+    // server ranks nothing and answers about that one.
+    let info = await ask(opts.partId ? { MediaSourceId: opts.partId } : {});
     const sources = info.MediaSources || [];
-    const source = sources[opts.version ?? 0] || sources[0];
-    if (!source) throw new Error("the server offered no file for this");
+    // By identity when the caller has one, by position only when it does not.
+    // This endpoint RANKS the files it returns, so its order is its own: picking
+    // by position played one file while reporting another, and everything
+    // downstream indexes the versions array with that number - the scrub
+    // thumbnails and the mid-playback track menu both read a version that was
+    // never playing.
+    let source = opts.partId ? sources.find((s) => s.Id === opts.partId) : sources[opts.version ?? 0];
+    if (!source) {
+      // Refused rather than quietly played as file 0: a person who chose the
+      // Hungarian copy would otherwise get the English one with nothing said.
+      throw new Error("the server does not have the file that was asked for");
+    }
+
+    // A transcode is BUILT by the server, so the tracks have to be named before
+    // it builds one - the URL carries the audio it chose, and returning the
+    // caller's choice beside a stream that ignores it is a report of something
+    // that is not happening. Asked again only when there is a transcode AND a
+    // choice to honour, which is the uncommon case.
+    const chosen = source;
+    const audioTracks = toTracks(chosen.MediaStreams, "Audio");
+    const subTracksFirst = toTracks(chosen.MediaStreams, "Subtitle");
+    const audioIndex = typeof opts.audio === "number" ? audioTracks.find((t) => t.ordinal === opts.audio)?.id : undefined;
+    const subInside =
+      typeof opts.subtitle === "number" ? subTracksFirst.find((t) => t.ordinal === opts.subtitle && !t.external) : undefined;
+    if (chosen.TranscodingUrl && (audioIndex !== undefined || subInside)) {
+      const again = await ask({
+        MediaSourceId: chosen.Id,
+        ...(audioIndex !== undefined ? { AudioStreamIndex: Number(audioIndex) } : {}),
+        ...(subInside ? { SubtitleStreamIndex: Number(subInside.id) } : {}),
+      }).catch(() => undefined);
+      const rebuilt = again?.MediaSources?.find((s2) => s2.Id === chosen.Id);
+      if (rebuilt) {
+        info = again!;
+        source = rebuilt;
+      }
+    }
 
     const transcoded = !!source.TranscodingUrl;
-    const url = transcoded
-      ? buildUrl(this.base, source.TranscodingUrl!.replace(/^\//, ""), { api_key: this.session.token })
-      : buildUrl(this.base, `Videos/${encodeURIComponent(id)}/stream`, {
-          static: true,
-          mediaSourceId: source.Id,
-          api_key: this.session.token,
-        });
+    let url: string;
+    if (transcoded) {
+      // The server chose this string, and the box is about to hand it to mpv
+      // with the token on it - so where it points is the server's decision
+      // unless it is bounded here. Off-origin is refused rather than played:
+      // an unplayable film is a bad evening, a token posted to somebody else's
+      // host is worse and silent.
+      const resolved = this.onServer(source.TranscodingUrl!);
+      if (!resolved) throw new Error("the server pointed the stream somewhere else");
+      resolved.searchParams.set("api_key", this.session.token);
+      url = resolved.toString();
+    } else {
+      url = buildUrl(this.base, `Videos/${encodeURIComponent(id)}/stream`, {
+        static: true,
+        mediaSourceId: source.Id,
+        api_key: this.session.token,
+      });
+    }
 
     const subs = toTracks(source.MediaStreams, "Subtitle");
-    const chosenSub = typeof opts.subtitle === "number" ? subs[opts.subtitle] : undefined;
+    // BY ORDINAL, not by array position. They agree for embedded tracks and
+    // they do not for a sidecar, whose ordinal is negative - so indexing with
+    // one read off the end of the array, the choice became "auto", and a
+    // subtitle the person had just turned on never appeared. This library holds
+    // sidecars beside 487 films, and for a film whose only subtitle is one of
+    // them the row was simply a lie.
+    const chosenSub =
+      typeof opts.subtitle === "number" ? subs.find((t) => t.ordinal === opts.subtitle) : undefined;
+    this.playing = { session: info.PlaySessionId, itemId: id, started: false, stopped: false };
     return {
       url,
       audio: typeof opts.audio === "number" ? opts.audio : "auto",
       sub: opts.subtitle === "none" ? "no" : chosenSub && !chosenSub.external ? chosenSub.ordinal : "auto",
       subFile: chosenSub?.external ? this.subtitleFileUrl(chosenSub) : undefined,
       subtitlesBurnedIn: false,
-      version: opts.version ?? 0,
+      // The position of the file that IS playing, so the versions array can be
+      // indexed with it.
+      version: opts.partId ? Math.max(0, sources.indexOf(source)) : (opts.version ?? 0),
       session: info.PlaySessionId,
       location: this.session.location,
       transcoded,
@@ -490,15 +647,42 @@ export class JellyfinBackend implements MediaBackend {
       .filter((m) => m.endMs > m.startMs);
   }
 
+  /**
+   * The session the server built for what is playing, and what is playing in it.
+   *
+   * Held because the progress reports do not carry them: the interface passes
+   * an item and a position, and Jellyfin wants both of those PLUS the session
+   * it issued - a stop with no item is a stop it cannot attribute, and its own
+   * log says so ("PlaybackStopped reported with null media info").
+   */
+  private playing: { session?: string; itemId?: string; started: boolean; stopped: boolean } = {
+    started: false,
+    stopped: false,
+  };
+
   async keepAlive(): Promise<void> {
     // Progress reports are what keep a session alive here; there is no separate
     // ping, and sending one would open a second session against the same file.
   }
 
+  /**
+   * Close a session the scheduler has not already closed.
+   *
+   * It carries the ITEM as well as the session id. Without one the server
+   * accepts the stop and logs `PlaybackStopped reported with null media info` -
+   * seen in this server's own log, from this app - and a stop it cannot
+   * attribute cannot clear what the session was holding.
+   *
+   * Skipped entirely when a stop has already gone out for this session, which
+   * is the ordinary path: the scheduler reports `stopped` and then teardown
+   * calls this, and the second one was the line in the log.
+   */
   async endSession(session: string): Promise<void> {
+    if (this.playing.stopped && this.playing.session === session) return;
+    this.playing.stopped = true;
     await this.req("Sessions/Playing/Stopped", {
       method: "POST",
-      body: { PlaySessionId: session },
+      body: { PlaySessionId: session, ItemId: this.playing.itemId },
     }).catch((e) => log.warn("could not end the session", e));
   }
 
@@ -512,12 +696,22 @@ export class JellyfinBackend implements MediaBackend {
    */
   async reapOwnSessions(): Promise<number> {
     try {
-      const sessions = await this.req<{ Id: string; DeviceId?: string; NowPlayingItem?: unknown }[]>("Sessions");
+      const sessions = await this.req<{ Id: string; DeviceId?: string; NowPlayingItem?: { Id?: string } }[]>("Sessions");
       const mine = (sessions || []).filter((s) => s.DeviceId === this.id.deviceId && s.NowPlayingItem);
+      let stopped = 0;
       for (const s of mine) {
-        await this.req("Sessions/Playing/Stopped", { method: "POST", body: { PlaySessionId: s.Id } }).catch(() => {});
+        // Counted after the attempt rather than before it: this token may not
+        // be allowed to stop a session at all, and reporting a number that only
+        // says how many were FOUND is how a reaper looks like it works.
+        const ok = await this.req("Sessions/Playing/Stopped", {
+          method: "POST",
+          body: { PlaySessionId: s.Id, ItemId: (s.NowPlayingItem as { Id?: string } | undefined)?.Id },
+        })
+          .then(() => true)
+          .catch(() => false);
+        if (ok) stopped += 1;
       }
-      return mine.length;
+      return stopped;
     } catch {
       return 0;
     }
@@ -525,18 +719,46 @@ export class JellyfinBackend implements MediaBackend {
 
   // --- state ---
 
+  /**
+   * Tell the server this token is finished with.
+   *
+   * A Quick Connect token does not expire, so without this a sign-out leaves it
+   * valid on the server and listed as an active device - while the box has just
+   * deleted its only copy of it, which is what makes it unrevocable from here.
+   * Best effort: a sign-out must not be blocked by a server that is off.
+   */
+  async revokeSession(): Promise<void> {
+    await this.req("Sessions/Logout", { method: "POST" }).catch((e) =>
+      log.warn("the server was not told this session ended", e),
+    );
+  }
+
   async reportProgress(id: string, positionMs: number, _durationMs: number, state: PlaybackState): Promise<void> {
-    const path =
-      state === "stopped" ? "Sessions/Playing/Stopped" : positionMs > 0 ? "Sessions/Playing/Progress" : "Sessions/Playing";
-    await this.req(path, {
-      method: "POST",
-      body: {
-        ItemId: id,
-        PositionTicks: msToTicks(positionMs),
-        IsPaused: state === "paused",
-        PlayMethod: "DirectStream",
-      },
-    }).catch((e) => log.warn("could not report progress", e));
+    // The START is decided by whether one has been sent for this session, not
+    // by the position being zero. A film RESUMED begins at its own offset, so
+    // keying on the position meant a resumed film never reported a start at all
+    // - and a session that never started is not in the server's list, which is
+    // what `reapOwnSessions` looks in for its own leftovers.
+    const body = {
+      ItemId: id,
+      PlaySessionId: this.playing.session,
+      PositionTicks: msToTicks(positionMs),
+      IsPaused: state === "paused",
+      PlayMethod: "DirectStream",
+    };
+    let path: string;
+    if (state === "stopped") {
+      if (this.playing.stopped) return;
+      this.playing.stopped = true;
+      path = "Sessions/Playing/Stopped";
+    } else if (!this.playing.started) {
+      this.playing.started = true;
+      this.playing.itemId = id;
+      path = "Sessions/Playing";
+    } else {
+      path = "Sessions/Playing/Progress";
+    }
+    await this.req(path, { method: "POST", body }).catch((e) => log.warn("could not report progress", e));
   }
 
   async setWatched(id: string, watched: boolean): Promise<void> {
@@ -556,7 +778,6 @@ export class JellyfinBackend implements MediaBackend {
         sortBy: "DatePlayed",
         sortOrder: "Descending",
         limit,
-        fields: "UserData",
       },
     });
     return (res.Items || []).map((it) => ({

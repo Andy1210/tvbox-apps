@@ -203,11 +203,18 @@ export function toTracks(streams: JellyfinStream[] | undefined, type: "Audio" | 
   // The ordinal counts only what is INSIDE the file, because that is what the
   // player counts: an external subtitle has no position among the container's
   // tracks and is handed over as a file instead.
-  let ordinal = 0;
+  //
+  // Each sidecar gets its OWN negative ordinal rather than a shared -1. The
+  // ordinal is how a choice is named on the way back down AND what the track
+  // menu builds its focus keys from, so one value for all of them makes every
+  // sidecar after the first unreachable with a remote and unselectable in code.
+  // The sibling backend carries the same rule with the count that forced it.
+  let inside = 0;
+  let outside = 0;
   return (streams || [])
     .filter((s) => s.Type === type)
     .map((s) => ({
-      ordinal: s.IsExternal ? -1 : ordinal++,
+      ordinal: s.IsExternal ? -(++outside) : inside++,
       id: String(s.Index),
       kind,
       language: s.Language,

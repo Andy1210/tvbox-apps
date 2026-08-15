@@ -184,7 +184,14 @@ export function Login(): React.JSX.Element {
         initial={server?.baseUrl ?? ""}
         onDone={(value) => {
           const base = normaliseAddress(value);
-          if (!base) return;
+          // Something that is not an address at all - a letter O where a zero
+          // belongs, a port with no host, a scheme with nothing after it. The
+          // keyboard used to stay up with Done doing nothing at all, forever,
+          // which reads as a broken remote rather than as a typo.
+          if (!base) {
+            setPhase({ name: "failed", why: "notFound" });
+            return;
+          }
           const next: RememberedServer = { kind: "jellyfin", baseUrl: base };
           setServer(next);
           setRound((r) => r + 1);

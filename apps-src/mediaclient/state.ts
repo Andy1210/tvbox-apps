@@ -189,6 +189,12 @@ export const useApp = create<State>((set, get) => ({
   },
 
   async signOut() {
+    // Told BEFORE the credential is dropped, because it is the credential that
+    // authorises saying so - and awaited, because the alternative is a request
+    // racing the state that carries its token. It cannot fail the sign-out: a
+    // server that is off must not leave somebody staring at a library they
+    // asked to leave.
+    await get().backend?.revokeSession?.().catch(() => {});
     const dropped = await removeRaw(SESSION_KEY);
     // The screen returns to sign-in either way - leaving someone looking at a
     // library they asked to leave would be worse - but a credential that

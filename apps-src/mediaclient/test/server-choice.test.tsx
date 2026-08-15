@@ -69,12 +69,30 @@ describe("the backend a session names", () => {
     expect(backendFor(session({ kind: "jellyfin" }), identity).kind).toBe("jellyfin");
   });
 
-  it("gives Jellyfin a device id that survives a restart", () => {
+  it("gives Jellyfin a device id that survives a restart", async () => {
     // Jellyfin ties a session and its remembered state to the device id, so a
     // value minted per run would leave a trail of dead sessions on the server.
-    const a = backendFor(session({ kind: "jellyfin" }), identity);
-    const b = backendFor(session({ kind: "jellyfin" }), identity);
-    expect(a.kind).toBe(b.kind);
+    //
+    // Read off the WIRE, because the id is not otherwise observable - and the
+    // first version of this test compared two `kind` literals, which is a
+    // sentence that cannot fail.
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
+      seen.push(String((init?.headers as Record<string, string>)?.Authorization ?? ""));
+      return new Response(JSON.stringify({ Items: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    await backendFor(session({ kind: "jellyfin" }), identity).libraries();
+    await backendFor(session({ kind: "jellyfin" }), identity).libraries();
+    vi.unstubAllGlobals();
+
+    expect(seen).toHaveLength(2);
+    const id = (h: string): string => /DeviceId="([^"]*)"/.exec(h)?.[1] ?? "";
+    expect(id(seen[0])).toBe(identity.clientId);
+    expect(id(seen[1])).toBe(id(seen[0]));
   });
 });
 
@@ -159,7 +177,10 @@ describe("changing the server after a sign-out", () => {
     const { container } = render(<Login />);
     await waitFor(() => expect(container.textContent).toContain("123456"));
 
-    await setFocus("login-other");
+    // NOT setFocus("login-other") - that would hand the test the very thing it
+    // is checking. The code screen has to point the remote at the way back by
+    // itself, because it is the only thing on that screen a press can reach.
+    await waitFor(() => expect(getCurrentFocusKey()).toBe("login-other"));
     await act(async () => {
       await remote.ok();
     });
