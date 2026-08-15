@@ -1,4 +1,4 @@
-import { useFocusable, FocusContext } from "@noriginmedia/norigin-spatial-navigation";
+import { useFocusable, FocusContext, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useCallback, useMemo, useRef } from "react";
 import { Tile } from "./Tile";
 import { createMover, nearest } from "./moveTo";
@@ -99,6 +99,33 @@ export function Row({
     [onReached, mover],
   );
 
+  /**
+   * Sideways off the end of the rail goes round; anything else is the caller's.
+   *
+   * Without this the ends were not a boundary, they were an accident: with no
+   * candidate in that direction, spatial navigation goes up to the container
+   * and the container restores its LAST FOCUSED child. From the first tile that
+   * looks like a jump to the end of the row, and from the last tile it looks
+   * like nothing happening at all - the same behaviour twice, visible once.
+   *
+   * A row on a television is a ring: forty episodes and the fortieth is one
+   * press from the first. The move is a jump rather than a slide, which the
+   * mover already decides for anything more than a screen away.
+   */
+  const wrapOrDelegate = useCallback(
+    (dir: string, index: number): boolean => {
+      const last = items.length - 1;
+      if (last > 0 && ((dir === "left" && index === 0) || (dir === "right" && index === last))) {
+        const to = dir === "left" ? last : 0;
+        const item = items[to];
+        setFocus(`${id}-${item.id || to}`);
+        return false;
+      }
+      return onArrowFromFirst ? onArrowFromFirst(dir) : true;
+    },
+    [items, id, onArrowFromFirst],
+  );
+
   const { ref, focusKey } = useFocusable({ focusKey: `row-${id}`, trackChildren: true, saveLastFocusedChild: true });
 
   if (items.length === 0) return null;
@@ -124,9 +151,20 @@ export function Row({
           <div
             ref={window_}
             // Clips; it does not scroll. Everything in it is carried by the
-            // layer below, which the compositor moves. The vertical padding is
-            // room for the focus ring, which is drawn outside a tile's box.
-            className="no-scrollbar overflow-hidden py-[6vh] -my-[4vh]"
+            // layer below, which the compositor moves.
+            //
+            // Padding on BOTH axes with matching negative margins, so the box
+            // does not move: a focus ring is drawn OUTSIDE a tile's box, and
+            // this element clips. Without the vertical half the top and bottom
+            // of the ring go; without the horizontal half the first and last
+            // tile lose their left and right edges - which is what happened
+            // when the 4vw inset moved out to the wrapper and took the only
+            // horizontal room with it.
+            //
+            // Small on purpose. It is the ring's allowance, not the inset: a
+            // tile sliding out of the row disappears 0.8vw past the margin
+            // rather than running to the screen edge.
+            className="no-scrollbar -mx-[0.8vw] -my-[4vh] overflow-hidden px-[0.8vw] py-[6vh]"
           >
             {/* `relative` is load-bearing, not spacing. A tile's offsetLeft is
               measured against the nearest POSITIONED ancestor, and the maths
@@ -151,7 +189,7 @@ export function Row({
                   aspect={aspect}
                   captionLines={captionLines}
                   onEnter={() => onSelect(item)}
-                  onArrowPress={onArrowFromFirst}
+                  onArrowPress={(dir) => wrapOrDelegate(dir, i)}
                   countdown={countdownFor?.id === item.id ? countdownFor.seconds : undefined}
                   // The rail moves itself; the browser must not also scroll it.
                   selfScroll={false}
