@@ -69,7 +69,8 @@
     "markUnwatched": "Jelöld nem nézettnek",
     "inThis": "Tartalma",
     "emptyCollection": "Ebben a gyűjteményben nincs semmi.",
-    "emptyPlaylist": "Ez a lejátszási lista üres."
+    "emptyPlaylist": "Ez a lejátszási lista üres.",
+    "upNext": "Következik"
   },
   "person": {
     "films": "Filmek",

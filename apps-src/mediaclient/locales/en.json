@@ -69,7 +69,8 @@
     "markUnwatched": "Mark as unwatched",
     "inThis": "In this",
     "emptyCollection": "There is nothing in this collection.",
-    "emptyPlaylist": "This playlist is empty."
+    "emptyPlaylist": "This playlist is empty.",
+    "upNext": "Up next"
   },
   "person": {
     "films": "Films",

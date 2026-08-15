@@ -210,3 +210,51 @@ describe("what Play starts", () => {
     expect(__toPlayableForTest(film, [])?.id).toBe("f1");
   });
 });
+
+describe("a screen that could not load", () => {
+  it("keeps the remote working, not just the highlight", async () => {
+    // The failure screen replaces the whole screen, so its button is the only
+    // key on it - and the fallback's predicate did not recognise it. Arrival
+    // was right and the FIRST arrow press yanked focus onto a key the failure
+    // screen never renders, so OK then did nothing. This is what a household
+    // sees when the server is down.
+    useApp.setState({
+      backend: {
+        kind: "plex",
+        item: async () => detail({ id: "s1", kind: "season", title: "S1" }),
+        children: async () => {
+          throw new Error("500");
+        },
+        posterUrl: () => undefined,
+        artUrl: () => undefined,
+        backdropUrl: () => undefined,
+        themeUrl: () => undefined,
+        imageHeaders: () => ({}),
+        markers: async () => [],
+      } as unknown as MediaBackend,
+      screen: { name: "item", itemId: "s1" },
+      history: [],
+      failure: null,
+    });
+    await act(async () => setFocus(""));
+    render(<Detail itemId="s1" />);
+    for (let i = 0; i < 3; i++) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await flushFocus();
+    }
+
+    const arrived = String(getCurrentFocusKey());
+    expect(arrived.startsWith("msg-"), `arrived on ${arrived}`).toBe(true);
+
+    // Every direction, because the fallback fires on any of them.
+    for (const press of [remote.down, remote.up, remote.right, remote.left]) {
+      await press();
+      await flushFocus();
+      const at = String(getCurrentFocusKey());
+      expect(doesFocusableExist(at), `after a press, focus was ${at}`).toBe(true);
+      expect(at.startsWith("msg-"), `after a press, focus was ${at}`).toBe(true);
+    }
+  });
+});

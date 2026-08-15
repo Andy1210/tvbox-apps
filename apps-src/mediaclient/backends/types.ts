@@ -416,6 +416,16 @@ export interface MediaBackend {
    * `imageHeaders()`, which carries an admin-level credential.
    */
   artUrl(path: string): string | undefined;
+  /**
+   * A sidecar subtitle as a FILE the player can open, or undefined.
+   *
+   * A sidecar has no position among the container's tracks, so it cannot be
+   * selected by index the way an embedded one is - the player has to be handed
+   * the file. Undefined when the track is embedded or its path is not one this
+   * backend will vouch for; the URL carries the credential and reaches another
+   * process, so it is bounded rather than passed through.
+   */
+  subtitleFileUrl(track: Track): string | undefined;
 
   // --- playback ---
   resolveStream(

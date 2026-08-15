@@ -106,7 +106,11 @@ export function Home(): React.JSX.Element {
       key.startsWith("lib-") ||
       key.startsWith("recent-") ||
       key.startsWith("playlists-") ||
-      key.startsWith("nav-"),
+      key.startsWith("nav-") ||
+      // The failure screen's own button, and on this screen it matters most:
+      // this is where a household lands when the server is down, and one arrow
+      // press took the cursor to a rail that is not rendered.
+      key.startsWith("msg-"),
     !playing,
   );
 

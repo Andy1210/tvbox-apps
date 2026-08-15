@@ -327,21 +327,40 @@ export const usePlayer = create<PlayerState>((set, get) => ({
 
     if (localSwitch) {
       set({ current: { ...cur, choice } });
-      void bridge()?.selectStreams?.({
-        audio: choice.audio,
-        sub: choice.subtitle === "none" ? -1 : choice.subtitle,
-      });
+      const v = cur.detail?.versions[choice.version];
+      // BY ORDINAL, not by array position. They agree for embedded tracks and
+      // they do not for a sidecar, whose ordinal is negative - so indexing with
+      // one read off the end and the choice was written nowhere.
+      const subTrack =
+        typeof choice.subtitle === "number" ? v?.subtitles.find((x) => x.ordinal === choice.subtitle) : undefined;
+      const subFile = subTrack ? currentBackend?.subtitleFileUrl(subTrack) : undefined;
+
+      // A sidecar is added to the running file by NAME, and the shell answers a
+      // selection carrying one with that alone - so an audio change made in the
+      // same press would be dropped. Sent as its own call ahead of it.
+      const tv = bridge();
+      if (subFile) {
+        if (choice.audio !== undefined) void tv?.selectStreams?.({ audio: choice.audio });
+        void tv?.selectStreams?.({ subFile });
+      } else {
+        void tv?.selectStreams?.({
+          audio: choice.audio,
+          // A sidecar we could not turn into a file must not travel as its
+          // ordinal: negative means "off" to the player, and the second sidecar
+          // of an item meant nothing at all - no command, while the menu showed
+          // the row as chosen.
+          sub: choice.subtitle === "none" || subTrack?.external ? -1 : choice.subtitle,
+        });
+      }
       if (currentBackend) {
-        const v = cur.detail?.versions[choice.version];
+        const subtitleId =
+          choice.subtitle === "none" ? "none" : choice.subtitle !== undefined ? subTrack?.id : undefined;
+        if (choice.subtitle !== undefined && choice.subtitle !== "none" && !subtitleId)
+          log.warn(`no subtitle track ${choice.subtitle} on version ${choice.version}`);
         void currentBackend
           .setTracks(cur.item.id, choice.version, {
             audioId: choice.audio !== undefined ? v?.audio[choice.audio]?.id : undefined,
-            subtitleId:
-              choice.subtitle === "none"
-                ? "none"
-                : choice.subtitle !== undefined
-                  ? v?.subtitles[choice.subtitle]?.id
-                  : undefined,
+            subtitleId,
           })
           .catch((e: unknown) => log.warn("could not remember track choice", e));
       }

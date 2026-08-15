@@ -189,7 +189,17 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     }
   }, [firstRow, lastRow, items, loadPage]);
 
-  const { ref: gridRef, focusKey } = useFocusable({ focusKey: `grid-${libraryId}`, saveLastFocusedChild: true });
+  // Not a place the arrows may land while the failure screen is up.
+  // `useFocusable` registers on the hook call, which is above the early return
+  // that swaps this screen for the error - so the container stayed registered
+  // with no node and a zero-sized box at the page origin, and one arrow press
+  // from "Try again" landed on it. It answers no OK, so the remote was dead
+  // with the button still highlighted.
+  const { ref: gridRef, focusKey } = useFocusable({
+    focusKey: `grid-${libraryId}`,
+    saveLastFocusedChild: true,
+    focusable: !failure,
+  });
 
   const poster = (item: MediaItem): string | undefined =>
     backend?.posterUrl(item, 300 * artworkScale(), 450 * artworkScale());
@@ -211,7 +221,12 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     // dead. The button is on screen in every state this screen has.
     "lib-arrange",
     (key) =>
-      key.startsWith("cell-") || key.startsWith("letter-") || key.startsWith("lib-") || key.startsWith("letter-"),
+      key.startsWith("cell-") ||
+      key.startsWith("letter-") ||
+      key.startsWith("lib-") ||
+      // The failure screen replaces this one entirely, so its button is the
+      // only key on it.
+      key.startsWith("msg-"),
     // Not while the panel is open: this is a window listener, and it stays armed
     // behind the panel. Its predicate rejects every panel key, so any press the
     // panel could not resolve - a row edge, and it wraps twenty-seven chips -

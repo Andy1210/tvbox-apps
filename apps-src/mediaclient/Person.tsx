@@ -52,7 +52,17 @@ export function Person({ personId, personName }: { personId: string; personName:
     };
   }, [backend, personId, personName, fail, reload]);
 
-  const { ref, focusKey } = useFocusable({ focusKey: `person-${personId}`, saveLastFocusedChild: true });
+  // Not a place the arrows may land while the failure screen is up.
+  // `useFocusable` registers on the hook call, which is above the early return
+  // that swaps this screen for the error - so the container stayed registered
+  // with no node and a zero-sized box at the page origin, and one arrow press
+  // from "Try again" landed on it. It answers no OK, so the remote was dead
+  // with the button still highlighted.
+  const { ref, focusKey } = useFocusable({
+    focusKey: `person-${personId}`,
+    saveLastFocusedChild: true,
+    focusable: !failure,
+  });
   const firstCredit = credits?.items.find((c) => c.kind === "movie") ?? credits?.items[0];
   const firstCreditKey = firstCredit
     ? `${firstCredit.kind === "movie" ? "films" : "series"}-${firstCredit.id}`
@@ -61,7 +71,12 @@ export function Person({ personId, personName }: { personId: string; personName:
   useInitialFocus(firstCreditKey, Boolean(credits));
   // Focus is set once; without a fallback anything that unmounts the focused
   // tile afterwards leaves the D-pad dead with only Back working.
-  useFocusFallback(firstCreditKey, (key) => key.startsWith("films-") || key.startsWith("series-"), !playing);
+  useFocusFallback(
+    firstCreditKey,
+    // "msg-" is the failure screen's own button, which replaces this screen.
+    (key) => key.startsWith("films-") || key.startsWith("series-") || key.startsWith("msg-"),
+    !playing,
+  );
 
   if (failure) return <Message failure={failure} onRetry={() => setReload((n) => n + 1)} />;
   if (!credits) return <Message loading />;
