@@ -5,8 +5,12 @@
     "hu": "Média",
     "en": "Media"
   },
-  "version": "0.54.0",
+  "version": "0.54.1",
   "changelog": [
+    {
+      "version": "0.54.1",
+      "notes": "Artwork keeps loading on a flaky network - a few stalled requests used to hold every slot for the rest of the evening - and nothing is fetched with the previous account's credentials after somebody signs out."
+    },
     {
       "version": "0.54.0",
       "notes": "A Jellyfin box no longer runs Plex's remote-control protocol in the background against it. Collections and the A-Z strip ask the right question on Jellyfin, a film chosen deliberately is reported as the one playing, and a request to a server that has gone away gives up instead of waiting for minutes."
