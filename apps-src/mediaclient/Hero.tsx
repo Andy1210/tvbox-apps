@@ -134,17 +134,23 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
 
           {art && (
             <div
-              className="pointer-events-none fixed top-0 right-0 h-[68vh] w-[58vw]"
+              className="pointer-events-none fixed top-[6vh] right-0 h-[72vh] w-[72vh]"
               aria-hidden="true"
               style={{
                 // A circle, not an ellipse: an ellipse stretched to the box takes
                 // the shape of the box, which is the thing the mask exists to hide.
-                // Sized in vh so it stays round whatever the panel's aspect is, and
-                // small enough to fade out INSIDE the 62vh box - a circle that runs
-                // past the edge is cut off there, which puts back the straight line
-                // the mask is for.
-                maskImage: "radial-gradient(circle 34vh at 70% 45%, #000 42%, transparent 88%)",
-                WebkitMaskImage: "radial-gradient(circle 34vh at 70% 45%, #000 42%, transparent 88%)",
+                // Sized in vh so it stays round whatever the panel's aspect is.
+                //
+                // The box is the circle's own bounding square and the circle is
+                // centred in it, which is what puts the ARTWORK's centre in the
+                // circle: `object-cover` centres what it crops, so an off-centre
+                // mask shows an off-centre piece of the picture - it was at 70%
+                // across, so every backdrop was seen through its right-hand third.
+                // The square also means the circle cannot run off an edge and be
+                // cut there, which would put back the straight line the mask is
+                // for; at 34vh in a 58vw box it was clipped on the right and top.
+                maskImage: "radial-gradient(circle 36vh at 50% 50%, #000 42%, transparent 88%)",
+                WebkitMaskImage: "radial-gradient(circle 36vh at 50% 50%, #000 42%, transparent 88%)",
               }}
             >
               <img src={art} alt="" className="h-full w-full object-cover" />
