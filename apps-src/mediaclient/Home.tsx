@@ -151,9 +151,15 @@ export function Home(): React.JSX.Element {
           reaching them meant finding the one column of the grid that happened to
           line up. In one row they are always one Left press away, and the
           libraries are where someone looks for them. */}
-        {/* Not focusable, so it cannot get in the way of the rail below it - but
-          something has to say which app this is. */}
-        <h1 className="shrink-0 px-[4vw] text-[2.2vh] font-semibold tracking-tight opacity-70">{t("app.name")}</h1>
+        {/* The app's name used to be written here, and it said nothing a person
+          on this screen did not know - they opened it. The SPACE it took is
+          kept: it is what separates the rail from the top of the panel, and the
+          hero's artwork reaches the top edge behind it.
+
+          A height rather than the text, so the two cannot drift: 2.2vh at the
+          1.5 line height it was rendered with. `aria-hidden` because it is now
+          a gap, and a gap is not something to announce. */}
+        <div className="h-[3.3vh] shrink-0" aria-hidden="true" />
 
         <TopRow
           onReachTop={toTop}
