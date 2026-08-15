@@ -306,6 +306,13 @@ export interface Profile {
 }
 
 export interface Session {
+  /**
+   * Which server this session belongs to.
+   *
+   * Optional because a session stored before there was a second backend does
+   * not carry it, and those are all Plex - see `backendFor`.
+   */
+  kind?: "plex" | "jellyfin";
   profileId: string;
   profileName: string;
   /** The token in use, which after a profile switch belongs to that profile. */

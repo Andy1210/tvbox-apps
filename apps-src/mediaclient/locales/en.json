@@ -15,7 +15,19 @@
     "waiting": "This screen carries on by itself once you have entered it.",
     "expired": "The code ran out before it was entered. Ask for a new one and try again.",
     "failed": "Your account could not be reached. Check the box is online, then try again.",
-    "retry": "Get a new code"
+    "retry": "Get a new code",
+    "chooseServer": "Which server are we signing into?",
+    "plexName": "Plex",
+    "jellyfinName": "Jellyfin",
+    "address": "The Jellyfin server's address",
+    "addressHint": "For example: 192.168.1.19:8096",
+    "checking": "Connecting to the server…",
+    "found": "{name} · Jellyfin {version}",
+    "notFound": "No Jellyfin server answered at that address. Check it and try again.",
+    "quickConnectOff": "Quick Connect is switched off on this Jellyfin server, and without it the box cannot sign in with a code. Turn it on in the server's settings and try again.",
+    "instructionJellyfin": "On your phone or computer open {url}, sign in, and enter this code:",
+    "otherServer": "Another server",
+    "changeAddress": "Change the address"
   },
   "home": {
     "continue": "Carry on watching",
