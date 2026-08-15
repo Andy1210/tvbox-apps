@@ -190,7 +190,10 @@ export interface PlayerState {
   is_playing?: boolean;
   shuffle: boolean;
   repeat: Repeat;
-  device?: string; // the Spotify Connect device the ACTIVE account is playing on
+  device?: string; // the Spotify Connect device this answer is about, "" if not the box
+  // The box is being driven by an account this box has not linked, so there is
+  // no player of ours to read and no command of ours that could reach it.
+  otherAccount?: boolean;
 }
 
 // Shuffle and repeat are player-wide settings that the cast metadata (the SSE
@@ -208,6 +211,7 @@ export async function playerState(): Promise<PlayerState> {
       shuffle: !!j.shuffle,
       repeat: (["off", "context", "track"].includes(j.repeat) ? j.repeat : "off") as Repeat,
       device: String(j.device || ""),
+      otherAccount: !!j.other_account,
     };
   } catch {
     return unknown;

@@ -69,6 +69,8 @@
     "notRegistered": "Spotify rejected this account: it is not added to your developer app. On developer.spotify.com open your app, Settings, User Management, and add the account's email.",
     "apiUnreachable": "Spotify is unreachable right now.",
     "apiError": "Spotify error: {error}",
+    "otherAccount": "The music is playing from another Spotify account. Stop it on the phone that started it, or link that account under Accounts.",
+    "boxUnreachable": "The box is not showing up as a Spotify device right now. Try again in a few seconds.",
     "searchInList": "Search this list",
     "clear": "Clear search",
     "sort": "Sort",

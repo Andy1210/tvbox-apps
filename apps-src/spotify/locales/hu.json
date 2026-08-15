@@ -69,6 +69,8 @@
     "notRegistered": "A Spotify elutasította ezt a fiókot: nincs hozzáadva a developer alkalmazáshoz. A developer.spotify.com oldalon nyisd meg az appot, Settings, User Management, és add hozzá a fiók e-mail-címét.",
     "apiUnreachable": "A Spotify most nem érhető el.",
     "apiError": "Spotify hiba: {error}",
+    "otherAccount": "Most egy másik Spotify-fiókról szól a zene. Arról a telefonról állítsd le, vagy kösd össze a fiókot a Fiókoknál.",
+    "boxUnreachable": "A box most nem látszik Spotify-eszközként. Próbáld újra pár másodperc múlva.",
     "searchInList": "Keresés a listában",
     "clear": "Keresés törlése",
     "sort": "Rendezés",

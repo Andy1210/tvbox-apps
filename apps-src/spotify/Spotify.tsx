@@ -82,8 +82,20 @@ export function Spotify({ onExit }: { onExit: () => void }) {
 
   // refresh connection status whenever we return to now-playing (e.g. after
   // connecting an account in settings) so the Browse entry appears
+  // Browse too, and not only to decide whether it is offered: the active account
+  // can change while this screen is up (the box follows whoever casts to it), and
+  // the library screen names the account it is showing.
   useEffect(() => {
-    if (view === "now") authStatus().then(setAuth);
+    if (view === "now" || view === "browse") authStatus().then(setAuth);
+  }, [view]);
+  // ...and re-read it while Browse is open, because the handover happens without
+  // anybody touching this screen. Naming the account is only worth doing if the
+  // name is the one whose rows are on display: stale, it is a false claim, and
+  // pressing a row would send that account's context to the new owner's player.
+  useEffect(() => {
+    if (view !== "browse") return;
+    const id = setInterval(() => void authStatus().then(setAuth), 10000);
+    return () => clearInterval(id);
   }, [view]);
 
   // Not enabled yet: offer the one-tap enable screen, with a Settings entry so
@@ -93,7 +105,8 @@ export function Spotify({ onExit }: { onExit: () => void }) {
   }
 
   if (view === "settings") return <SpotifySettings onBack={() => setView("now")} />;
-  if (view === "browse") return <Browser onBack={() => setView("now")} onPlayed={() => setView("now")} />;
+  if (view === "browse")
+    return <Browser onBack={() => setView("now")} onPlayed={() => setView("now")} account={auth?.user || ""} />;
   return (
     <NowPlaying
       connected={!!auth?.connected}

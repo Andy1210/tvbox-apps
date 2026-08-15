@@ -107,6 +107,60 @@ function markCastActive() {
   }
 }
 
+// ---- whose account the box is signed into ----
+// librespot holds exactly ONE account's session at a time — whoever last picked
+// the box in their Spotify app — and names it on session_connected as USER_NAME,
+// which is the same string the Web API calls that user's id. That account is the
+// only one any command about the box may be sent as: the account the launcher
+// happens to be browsing is a different question, and a command sent as that one
+// reaches whatever device IT is playing on, which can be a phone in another room.
+//
+// Empty means we have not been told. That is not "nobody": the device lists
+// answer the same question through Spotify, and spotify_api falls back to them
+// whenever this is empty or turns out not to hold.
+//
+// librespot 0.8 emits session_connected from handle_activate() ONLY - when the
+// box becomes the active Connect device, i.e. when somebody casts to it. It says
+// nothing at startup, so a box sitting on its cached credentials never reports an
+// owner here, and session_disconnected means "the box went idle", not "the box
+// lost its account" - the daemon stays signed in as the same user. So this is
+// cleared when the DAEMON goes (see clear()), not when playback moves away.
+//
+// `casting` is the second half of it, and the two are not the same question. A
+// name here outlives the session it came from, on purpose; whether that session
+// is still up is what says how much the name is worth. Only a LIVE session by an
+// account we have not linked may refuse the TV its buttons - a name left over
+// from a guest who cast once and went home must not, or the box refuses
+// everything until its daemon is restarted.
+let sessionUser = "";
+let sessionLive = false;
+let sessionUserCb = null;
+function onSessionUser(cb) {
+  sessionUserCb = cb;
+}
+function getSessionUser() {
+  return sessionUser;
+}
+// Is somebody using the box right now? Either signal is enough: the activation
+// event says so directly, and a cast that is playing says so even if that event
+// was lost (the hook swallows a failed post).
+function sessionActive() {
+  return sessionLive || casting;
+}
+function fireSessionUser() {
+  try {
+    if (sessionUserCb) sessionUserCb(sessionUser);
+  } catch (e) {
+    console.warn("[spotify] sessionUser cb:", e.message);
+  }
+}
+function setSessionUser(u) {
+  const v = String(u || "");
+  if (v === sessionUser) return;
+  sessionUser = v;
+  fireSessionUser();
+}
+
 // ---- librespot events (rich payload from spotify_event_hook.sh) ----
 function applyMeta(ev) {
   if (ev.track_id) {
@@ -127,12 +181,44 @@ function applyPos(ev) {
   const p = Number(ev.position_ms);
   if (Number.isFinite(p)) state.position_ms = p;
 }
-function handleEvent(ev) {
+// `trusted` says the event came from the daemon this process started (plugin.js
+// checks the key). Only the two session events read it, and they read it for the
+// same reason: between them they decide whether the box is somebody's right now,
+// which is what stands between a stranger's live cast and a play from the TV
+// taking the box off them. The rest of an event draws a screen and has never been
+// authenticated.
+function handleEvent(ev, trusted) {
   const e = String(ev.player_event || "").toLowerCase();
   const now = Date.now();
   switch (e) {
+    // Not a playback event, so there is nothing to render — but it is the moment
+    // the box changed hands, and everything the TV can do to it depends on that.
+    //
+    // An event with no name at all leaves the owner alone rather than clearing it:
+    // the name is the one field held to the daemon's key (plugin.js), so a forged
+    // event arrives here stripped of it, and taking that as "nobody owns the box"
+    // would hand the forger the same denial by the other door.
+    //
+    // Fired even when the name has not changed, because the DEVICE has: an
+    // activation follows a respawn, and the respawned daemon is a new device id
+    // under the same name — one Spotify accepts and quietly does nothing with.
+    case "session_connected":
+      if (!trusted || !ev.user_name) return;
+      sessionLive = true; // somebody's session is up, whoever they are
+      sessionUser = String(ev.user_name);
+      fireSessionUser();
+      return;
     case "stopped":
     case "session_disconnected":
+      // Neither of these ends the daemon's login (see sessionUser above), so the
+      // owner's NAME is left alone: forgetting it here would drop the fast path
+      // every time the music paused its way out of the room. What does end is the
+      // session, and that is what decides whether a name we cannot use may hold
+      // the TV's buttons — so it is lowered only by the daemon. Anyone on this
+      // origin can post one of these, and a forged one would say a box somebody
+      // is casting to is free: the play path adopts a free box, i.e. restarts
+      // librespot into the household's account, and the guest's session is gone.
+      if (e === "session_disconnected" && trusted) sessionLive = false;
       reset();
       casting = false;
       notify();
@@ -166,7 +252,7 @@ function handleEvent(ev) {
       state.pos_ts = 0;
       break;
     default:
-      return; // volume_changed / shuffle_changed / session_connected / ... — nothing to render
+      return; // volume_changed / shuffle_changed / session_client_changed / ... — nothing to render
   }
   notify();
 }
@@ -180,10 +266,30 @@ function pushState() {
 // Reset to idle and push. The shell calls this when it deliberately tears down
 // librespot (e.g. a rename respawn): a killed process emits no disconnect event,
 // so without this the UI would keep showing the last track until a reconnect.
+//
+// The owner goes with it, and only here: the daemon that was signed in is the one
+// being killed, and the next one comes up naming nobody until somebody casts to
+// it. Kept, it would address commands to a device id that no longer exists -
+// which Spotify accepts and silently does nothing with.
 function clear() {
   reset();
   casting = false;
+  sessionLive = false;
+  setSessionUser("");
   notify();
 }
 
-module.exports = { setConfig, getState, subscribe, handleEvent, deviceName, onCastStart, pushState, clear, setArtistImage };
+module.exports = {
+  setConfig,
+  getState,
+  subscribe,
+  handleEvent,
+  deviceName,
+  onCastStart,
+  onSessionUser,
+  sessionUser: getSessionUser,
+  sessionActive,
+  pushState,
+  clear,
+  setArtistImage,
+};
