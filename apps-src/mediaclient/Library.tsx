@@ -52,6 +52,15 @@ interface Letter {
  * different offset whenever the viewport is not a whole number of rows, so
  * quantising on the top alone would hold the last row back by up to one row.
  */
+/**
+ * Two presses closer together than this are a hold, not two steps.
+ *
+ * Comfortably above a remote's repeat interval - measured on this box's own
+ * remote at about 90 ms once a key repeats - and below the gap between two
+ * deliberate presses.
+ */
+const BURST_MS = 220;
+
 function sameWindow(a: number, b: number, rowHeight: number, viewport: number): boolean {
   if (rowHeight <= 0) return a === b;
   return (
@@ -86,6 +95,8 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   const [items, setItems] = useState<(MediaItem | null)[]>([]);
   const [total, setTotal] = useState<number | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
+  /** When the last arrow moved the grid, so a held press can be told from a step. */
+  const lastStep = useRef(0);
   const [viewport, setViewport] = useState(1080);
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -190,6 +201,35 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   }, [loadPage]);
 
   const rows = Math.ceil((total ?? items.length) / COLUMNS) || 0;
+  /**
+   * Animate a step, but never a hold.
+   *
+   * The scroller animates by default, and a tile's scrollIntoView inherits it -
+   * which is right for one press and wrong for twenty. The browser gives each
+   * focus change its OWN eased animation with a duration nobody can set, so a
+   * held arrow piles restarts on top of each other and the grid stutters
+   * instead of travelling.
+   *
+   * So the behaviour is decided per press, before the press moves anything:
+   * capture-phase keydown runs ahead of spatial navigation, which is what makes
+   * this reliable rather than a race with the tile's own effect. Inside a burst
+   * the scroll is instant, so a hold is a fast, even slide and the last press
+   * leaves the grid exactly on a row - which is the snap. A press on its own,
+   * after the burst, animates again.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+      const el = scroller.current;
+      if (!el) return;
+      const now = performance.now();
+      el.style.scrollBehavior = now - lastStep.current < BURST_MS ? "auto" : "";
+      lastStep.current = now;
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+
   const firstRow = Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN);
   const lastRow = Math.min(rows, Math.ceil((scrollTop + viewport) / rowHeight) + OVERSCAN);
 
