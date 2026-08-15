@@ -8,12 +8,16 @@
     "typecheck:files": "tsc --noEmit -p apps-src/files/tsconfig.json",
     "build:livetv": "vite build -c apps-src/livetv/vite.config.ts",
     "typecheck:livetv": "tsc --noEmit -p apps-src/livetv/tsconfig.json",
+    "build:mediaclient": "vite build -c apps-src/mediaclient/vite.config.ts",
+    "typecheck:mediaclient": "tsc --noEmit -p apps-src/mediaclient/tsconfig.json",
     "build:retroarch": "vite build -c apps-src/retroarch/vite.config.ts",
     "typecheck:retroarch": "tsc --noEmit -p apps-src/retroarch/tsconfig.json",
     "build:spotify": "vite build -c apps-src/spotify/vite.config.ts",
     "typecheck:spotify": "tsc --noEmit -p apps-src/spotify/tsconfig.json",
     "index": "node scripts/build-index.mjs",
-    "store:serve": "node scripts/serve-store.mjs"
+    "store:serve": "node scripts/serve-store.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@noriginmedia/norigin-spatial-navigation": "^3.2.1",
@@ -24,13 +28,17 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^26.1.1",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "happy-dom": "^20.10.6",
     "tailwindcss": "^4.3.2",
     "typescript": "^6.0.3",
-    "vite": "^8.1.4"
+    "vite": "^8.1.4",
+    "vitest": "^4.1.10"
   }
 }

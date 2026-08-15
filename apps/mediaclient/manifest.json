@@ -1,0 +1,95 @@
+{
+  "id": "mediaclient",
+  "manifestVersion": 1,
+  "name": {
+    "hu": "Média",
+    "en": "Media"
+  },
+  "version": "0.54.2",
+  "changelog": [
+    {
+      "version": "0.54.2",
+      "notes": "Try again after a failed search actually searches again. Clearing the search box stops the spinner. And a tile scrolling into place no longer shows the previous film's poster under the new film's title."
+    },
+    {
+      "version": "0.54.1",
+      "notes": "Artwork keeps loading on a flaky network - a few stalled requests used to hold every slot for the rest of the evening - and nothing is fetched with the previous account's credentials after somebody signs out."
+    },
+    {
+      "version": "0.54.0",
+      "notes": "A Jellyfin box no longer runs Plex's remote-control protocol in the background against it. Collections and the A-Z strip ask the right question on Jellyfin, a film chosen deliberately is reported as the one playing, and a request to a server that has gone away gives up instead of waiting for minutes."
+    },
+    {
+      "version": "0.53.1",
+      "notes": "The Jellyfin sort and filter names follow the language the box is set to, instead of always being Hungarian."
+    },
+    {
+      "version": "0.53.0",
+      "notes": "The A-Z strip works on a Jellyfin library, so a library of 1788 films has an end you can reach. Choosing another server no longer forgets the address you typed. The screen after the address keyboard highlights something again, and connecting to a wrong address gives up instead of sitting there. The track menu shows which audio and subtitle are playing, and a subtitle search on a server without one says so rather than reporting nothing found."
+    },
+    {
+      "version": "0.52.0",
+      "notes": "Jellyfin fixes found by review before anyone met them: a subtitle that sits beside the film as its own file can now actually be turned on - and when there are several, each is its own row instead of all of them being one. Choosing a different copy of a film plays that copy, and choosing an audio track survives a server that has to convert the film on the way. The server is also told properly what the box is playing and when it stops."
+    },
+    {
+      "version": "0.51.2",
+      "notes": "The remote works on the server chooser again. Coming back to it from the code screen left nothing highlighted, and a screen with nothing highlighted ignores every press."
+    },
+    {
+      "version": "0.51.1",
+      "notes": "After signing out you can pick the other server again. The choice is still remembered, so signing back into the same one asks nothing - but the way to the other one is now on the code screen too, instead of only appearing once the code had failed."
+    },
+    {
+      "version": "0.51.0",
+      "notes": "The app can now sign into a Jellyfin server as well as a Plex one: it asks which at sign-in, and for Jellyfin you type the server's address once and approve a six-digit code in Jellyfin's own web page - no password on the television. Everything the box was already signed into keeps working exactly as it did."
+    },
+    {
+      "version": "0.50.1",
+      "notes": "The screensaver now waits the whole time you asked for after it has been up a while - it was coming back about twenty seconds after the first button press. The A-Z strip marks the letter you pressed, which in a small library is the only sign the press did anything. A new search that happens to keep its top result opens at the beginning like any other. And a film asked for by voice can no longer start as whoever was signed in a moment ago while the profile picker is on screen."
+    },
+    {
+      "version": "0.50.0",
+      "notes": "The box's screensaver now comes up over the media client too, after the same few minutes of nothing happening that the launcher uses - but never over a film, and never over the sign-in code. Big libraries behave properly again: the row you are on is no longer cut off at the bottom of the screen, the last row can be reached, and jumping to a letter near the end of the alphabet fills the screen instead of leaving it mostly black. Searching again no longer opens a row of results scrolled past its own beginning. And a film started by voice is reported honestly - if it did not start, the house is told so rather than being told it is playing."
+    },
+    {
+      "version": "0.3.0",
+      "notes": "Pick who is watching when the box starts, so everyone's continue-watching row is their own - and turn that off in Settings if you would rather it just carried on as you. The libraries moved to the top, with search and settings beside them on the same row, so getting to them is one press sideways instead of hunting upwards. Reviews are a row you can move through with the remote. And a TV show that gained episodes now shows the series' own cover rather than four stills from it."
+    },
+    {
+      "version": "0.2.0",
+      "notes": "Sign in from the TV with a code, carry on where you left off, and browse a library by letter. Films and series show their cast - and pressing a face lists everything that person is in, films and series together, which the Plex app cannot do. Scores, reviews and trailers are there too. Playback has a scrub bar, skip buttons for the intro and the credits, and a menu on Down for the audio, the subtitles, and which copy to play when the library holds more than one."
+    },
+    {
+      "version": "0.1.0",
+      "notes": "First build of the box's own app for a Plex or Jellyfin server at home. It opens and comes back to the box with Back - there is nothing to watch with it yet."
+    }
+  ],
+  "type": "webclient",
+  "status": "ready",
+  "accent": "#cc7b19",
+  "icon": "<svg viewBox='0 0 24 24' fill='none' stroke='#cc7b19' stroke-width='2'><rect x='2.5' y='4' width='19' height='16' rx='2.5'/><path d='M10 9.5v5l4.5-2.5z' stroke-linejoin='round'/></svg>",
+  "tagline": {
+    "hu": "A saját médiaszervered",
+    "en": "Your own media server"
+  },
+  "description": {
+    "en": "Watch the films and series on your own Plex or Jellyfin server, with the box playing the video natively. Sign in once from the TV without typing, and it remembers where every film got to.",
+    "hu": "A saját Plex- vagy Jellyfin-szervereden lévő filmek és sorozatok nézése, a videót a box natívan játssza. Egyszeri belépés a TV-ről gépelés nélkül, és megjegyzi, hol tartottál minden filmben."
+  },
+  "requires": {
+    "bin": [
+      "mpv"
+    ]
+  },
+  "runtime": {
+    "serve": "local",
+    "entry": "index.html",
+    "bridge": "./bridge.js",
+    "transparentSelector": "#player-stage",
+    "capabilities": [
+      "nav",
+      "player",
+      "storage"
+    ]
+  }
+}
