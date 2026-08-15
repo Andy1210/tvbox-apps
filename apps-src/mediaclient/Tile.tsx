@@ -15,6 +15,9 @@ export interface TileProps {
   /** Called with this tile's element when it takes focus, so the container can
    *  scroll it into view on its own terms rather than the browser's. */
   onFocusedEl?: (el: HTMLElement) => void;
+  /** Whether the browser scrolls this into view. False when the container moves
+   *  itself - see the note at the hook below. */
+  selfScroll?: boolean;
   /**
    * Width as a multiple of the height. Default is a 2:3 poster.
    *
@@ -63,6 +66,7 @@ export function Tile({
   onEnter,
   heightVh = 26,
   onFocusedEl,
+  selfScroll = true,
   aspect = 2 / 3,
   captionLines = 2,
   onArrowPress,
@@ -72,7 +76,14 @@ export function Tile({
   // row gets its vertical scrolling from here and then supersedes the horizontal
   // half with its own scrollTo, which gives the focused tile some run-up. That
   // ordering holds only because this hook runs before the effect below.
-  const { ref, focused } = useFocusableItem({ focusKey, onEnterPress: onEnter, onArrowPress }, { block: "nearest" });
+  // `selfScroll: false` hands the movement to the container, and that is not a
+  // tidiness preference: a container that moves itself with a composited
+  // transform must not ALSO be scrolled by the browser underneath it, or the
+  // two fight and the transform animates against a moving origin.
+  const { ref, focused } = useFocusableItem(
+    { focusKey, onEnterPress: onEnter, onArrowPress },
+    selfScroll ? { block: "nearest" } : undefined,
+  );
   const el = useRef<HTMLDivElement | null>(null);
   const backend = useApp((s) => s.backend);
   const [src, setSrc] = useState<string | null>(null);

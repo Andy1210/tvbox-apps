@@ -255,43 +255,44 @@ describe("a row inside a scrolling column", () => {
 });
 
 describe("how the grid moves", () => {
-  it("does not animate, and carries the measurement that decided it", () => {
-    // Tried, measured, removed; tried again on a 40% lighter grid in case the
-    // cost was one bad frame rather than the whole animation; still a stutter
-    // in the room. Both attempts are in the file so the next person argues with
-    // data. The class list is what is asserted, not the file - the comment
-    // above it names the thing it is not doing.
+  it("moves itself with a transform instead of being scrolled", () => {
+    // Measured on the box: animating a native scroll cost the GPU process
+    // 111-118 ms a row against 18-23 ms for the same distance jumped, because a
+    // scrolling container whose contents are rebuilt underneath it re-rasters
+    // what a transform simply moves. Plex's own client on the same box does not
+    // scroll at all - no scrollIntoView and no scroll-behavior anywhere in its
+    // bundle - and reads as smooth.
     const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Library.tsx"), "utf8");
+
+    // The window clips; it does not scroll.
     const classes = src.match(/className="no-scrollbar relative flex-1[^"]*"/g) ?? [];
-    expect(classes.length, "the grid scroller is still identifiable").toBe(1);
+    expect(classes.length, "the grid window is still identifiable").toBe(1);
+    expect(classes[0]).toContain("overflow-hidden");
+    expect(classes[0]).not.toContain("overflow-y-auto");
     expect(classes[0]).not.toContain("scroll-smooth");
+
+    // Nothing may scroll it, and the tiles must not scroll themselves into view
+    // either - a container moving with a transform and a browser scrolling it
+    // fight, and the transform then animates against a moving origin.
+    expect(src).not.toContain("scrollTo(");
+    expect(src).toContain("selfScroll={false}");
     expect(src, "the numbers stay next to the decision").toContain("111-118 ms");
-
-    // The explicit scrolls say `instant` whether or not the arrows animate: it
-    // is what they always were, and inheriting is what broke them once.
-    const scrolls = src.match(/scroller\.current\?\.scrollTo\(\{[^}]*\}\)/g) ?? [];
-    expect(scrolls.length).toBeGreaterThanOrEqual(2);
-    for (const call of scrolls) expect(call, call).toContain('behavior: "instant"');
-  });
-
-  it("renders a window a television actually needs", () => {
-    // Three rows fit on screen. At OVERSCAN 2 that meant 7-8 rows and up to 56
-    // tiles, every one reconciled when the window moves - once per row of
-    // travel. This survived the animation being removed because it was never
-    // about the animation.
-    const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Library.tsx"), "utf8");
-    const over = Number(/const OVERSCAN = (\d+);/.exec(src)?.[1]);
-    expect(over, "one row of margin is the floor - below it a fast hold has no lead at all").toBe(1);
   });
 
   it("re-renders only when the window changes", () => {
-    // The other half of the same measurement: the virtualiser is driven from
-    // `scrollTop` in React state, and updating it on every scroll event
-    // re-rendered the whole visible grid per frame instead of per row.
+    // The virtualiser is computed from an offset in React state. Updating it on
+    // every move would re-render every tile to move a layer the compositor is
+    // already moving.
     const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Library.tsx"), "utf8");
-    expect(src).toContain("sameWindow(prev, top, rowHeight, viewport) ? prev : top");
+    expect(src).toContain("sameWindow(prev, to, rowHeight, viewport) ? prev : to");
     // Both edges, or the last row lags by up to a row when the viewport is not
     // a whole number of rows.
     expect(src).toMatch(/Math\.ceil\(\(a \+ viewport\)/);
+  });
+
+  it("renders a window a television actually needs", () => {
+    const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Library.tsx"), "utf8");
+    const over = Number(/const OVERSCAN = (\d+);/.exec(src)?.[1]);
+    expect(over, "one row of margin is the floor - below it a fast hold has no lead at all").toBe(1);
   });
 });
