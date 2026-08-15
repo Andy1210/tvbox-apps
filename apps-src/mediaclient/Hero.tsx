@@ -134,27 +134,45 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
 
           {art && (
             <div
-              className="pointer-events-none fixed top-[6vh] right-0 h-[72vh] w-[72vh]"
+              className="pointer-events-none fixed top-0 right-0 h-[66vh] w-[56vw]"
               aria-hidden="true"
               style={{
                 // A circle, not an ellipse: an ellipse stretched to the box takes
                 // the shape of the box, which is the thing the mask exists to hide.
                 // Sized in vh so it stays round whatever the panel's aspect is.
                 //
-                // The box is the circle's own bounding square and the circle is
-                // centred in it, which is what puts the ARTWORK's centre in the
-                // circle: `object-cover` centres what it crops, so an off-centre
-                // mask shows an off-centre piece of the picture - it was at 70%
-                // across, so every backdrop was seen through its right-hand third.
-                // The square also means the circle cannot run off an edge and be
-                // cut there, which would put back the straight line the mask is
-                // for; at 34vh in a 58vw box it was clipped on the right and top.
-                maskImage: "radial-gradient(circle 36vh at 50% 50%, #000 42%, transparent 88%)",
-                WebkitMaskImage: "radial-gradient(circle 36vh at 50% 50%, #000 42%, transparent 88%)",
+                // Centred just off the screen's top-right corner, so the picture
+                // runs off those two edges at full strength and softens only where
+                // it meets the page - to the left and downwards. A circle that
+                // fades on all four sides has to be small enough to complete
+                // inside its box, and a box that small crops a 16:9 backdrop to
+                // near-square: the middle 56% of its width, which is a 1.8x zoom
+                // into the centre of every frame. Here the fade only has to
+                // complete on two sides, so the box can keep the picture's own
+                // shape - the crop is 1.18x - and the circle can be half again as
+                // wide as it was.
+                //
+                // The core is opaque well past the top-right corner (9.1vh away,
+                // against a 26vh core), so those edges are a clean cut rather than
+                // a half-faded line.
+                maskImage: "radial-gradient(circle 62vh at 91% 3%, #000 42%, transparent 100%)",
+                WebkitMaskImage: "radial-gradient(circle 62vh at 91% 3%, #000 42%, transparent 100%)",
               }}
             >
               <img src={art} alt="" className="h-full w-full object-cover" />
             </div>
+          )}
+
+          {/* The rail's buttons sit on the brightest part of that picture now
+              that it reaches the top edge - measured, "Search" over a pale
+              backdrop was 2.09:1. A gradient to transparent, not a band: it is
+              gone by 15vh, and over a white patch the chip text still reads at
+              10:1. */}
+          {art && (
+            <div
+              className="pointer-events-none fixed inset-x-0 top-0 h-[15vh] bg-gradient-to-b from-bg-0/92 via-bg-0/62 to-transparent"
+              aria-hidden="true"
+            />
           )}
         </>,
         document.body,
