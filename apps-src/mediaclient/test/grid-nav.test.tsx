@@ -255,32 +255,34 @@ describe("a row inside a scrolling column", () => {
 });
 
 describe("how the grid moves", () => {
-  it("does not animate, and says why", () => {
-    // Animating a row was tried and measured on the box, with injected presses
-    // and /proc sampling, per row moved:
-    //
-    //   animated   renderer 73-85 ms   GPU process 111-118 ms
-    //   instant    renderer 34-47 ms   GPU process  18-23 ms
-    //
-    // Five to six times the GPU work, because the movement is spread over
-    // frames and each one re-rasters what a jump rasters once. At 111 ms a row
-    // it cannot hold a frame rate, so it reads as a stutter - worse than the
-    // jump cut it replaced. This asserts the absence, with the numbers next to
-    // it, so the next person to reach for `scroll-smooth` finds the answer
-    // rather than the idea.
+  it("keeps the measurement next to the decision", () => {
+    // Animating a row was tried, removed on the numbers, and tried again on a
+    // lighter grid. Whatever it ends up being, the measurement stays in the
+    // file - so the next person to change it argues with data rather than with
+    // an opinion.
     const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Library.tsx"), "utf8");
-    // On the class list, not on the file: the comment above it names the thing
-    // it is not doing, and a bare substring search finds that instead.
-    const classes = src.match(/className="no-scrollbar relative flex-1[^"]*"/g) ?? [];
-    expect(classes.length, "the grid scroller is still identifiable").toBe(1);
-    expect(classes[0]).not.toContain("scroll-smooth");
-    expect(src, "the measurement stays next to the decision").toContain("111-118 ms");
+    expect(src, "the numbers stay next to the class list").toContain("111-118 ms");
 
-    // The explicit scrolls keep saying `instant`: it is what they always were,
-    // and stating it costs nothing while inheriting is what broke them once.
+    // The explicit scrolls say `instant` whether or not the arrows animate: it
+    // is what they always were, and inheriting is what broke them once.
     const scrolls = src.match(/scroller\.current\?\.scrollTo\(\{[^}]*\}\)/g) ?? [];
     expect(scrolls.length).toBeGreaterThanOrEqual(2);
     for (const call of scrolls) expect(call, call).toContain('behavior: "instant"');
+  });
+
+  it("renders a window a television actually needs", () => {
+    // Three rows fit on screen. At OVERSCAN 2 that meant 7-8 rows and up to 56
+    // tiles, every one of them reconciled when the window moves - which happens
+    // once per row of travel, in the middle of a scroll.
+    const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Library.tsx"), "utf8");
+    const over = Number(/const OVERSCAN = (\d+);/.exec(src)?.[1]);
+    const cols = Number(/const COLUMNS = (\d+);/.exec(src)?.[1]);
+    expect(over, "one row of margin is the floor - below it a fast hold has no lead at all").toBe(1);
+    expect(cols).toBe(6);
+
+    // What that comes to, stated so a change to either number is visible here.
+    const rowsWorst = Math.ceil((100 + 34) / 34) - 0 + 2 * over;
+    expect(rowsWorst * cols).toBeLessThanOrEqual(36);
   });
 
   it("re-renders only when the window changes", () => {

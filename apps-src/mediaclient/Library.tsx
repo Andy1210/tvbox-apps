@@ -27,9 +27,27 @@ const TILE_VH = 26;
  * one row rather than two. grid-nav.test.tsx holds it to the same arithmetic.
  */
 const ROW_GAP_VH = 8;
-const COLUMNS = 7;
+/**
+ * Six, not seven. A row is what a scroll has to move and repaint, so its width
+ * in tiles is a cost as well as a layout - and at 26vh tall the seventh was
+ * making the grid denser than a television needs.
+ */
+const COLUMNS = 6;
 /** Rows kept mounted above and below the viewport. */
-const OVERSCAN = 2;
+/**
+ * Rows kept in the DOM beyond the visible ones, each side.
+ *
+ * Three rows fit on screen, so 2 meant 7-8 rows and up to 56 tiles for a
+ * three-row window - and every one of them is reconciled whenever the window
+ * moves, which is once per row of travel and lands in the middle of a scroll.
+ * At 1 it is 5-6 rows.
+ *
+ * It does NOT change when images are decoded: a tile fetches on mount, and
+ * mount happens when the window shifts, whatever the margin. What it costs is
+ * network lead - one row of it at a fast hold - so this is the floor rather
+ * than a number to keep lowering.
+ */
+const OVERSCAN = 1;
 
 interface Letter {
   key: string;
@@ -473,19 +491,22 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
             // Vertical padding, because the focus ring is drawn OUTSIDE the
             // tile's box and this element clips: without it the top row's ring
             // loses its upper edge against the scroller's own boundary.
-            // No `scroll-smooth`, and it was tried. Measured on the box with
-            // injected key presses and /proc sampling, per row moved:
+            // Animated again, on a grid that is now about 40% fewer tiles.
+            // Measured on the box before that change, per row moved:
             //
             //   animated   renderer 73-85 ms   GPU process 111-118 ms
             //   instant    renderer 34-47 ms   GPU process  18-23 ms
             //
-            // Five to six times the GPU work, because the movement is spread
-            // over frames and each one re-rasters content that a jump rasters
-            // once. At 111 ms a row this cannot hold a frame rate, so the
-            // animation reads as a stutter - which is worse than the jump cut
-            // it was meant to replace. A row here moves 34% of the screen (a
-            // 26vh tile plus an 8vh gap), which is why it is so much work.
-            className="no-scrollbar relative flex-1 overflow-y-auto px-[3vw] pt-[1.2vh] pb-[2vh] scroll-pt-[4vh] scroll-pb-[6vh]"
+            // Those totals cannot say whether the animation is uniformly heavy
+            // or whether one frame in it is - the window shifts once per row,
+            // and that reconcile plus a row of image decodes lands inside the
+            // animation. Fewer tiles makes exactly that frame cheaper, which is
+            // why it is worth asking the room again rather than settling it
+            // from the totals.
+            //
+            // Everything that is not travel overrides this with
+            // `behavior: "instant"` - the letter jump and the reset below.
+            className="no-scrollbar relative flex-1 scroll-smooth overflow-y-auto px-[3vw] pt-[1.2vh] pb-[2vh] scroll-pt-[4vh] scroll-pb-[6vh]"
           >
             {total === 0 && (
               <div className="flex h-full items-center justify-center text-[2.2vh] text-fg-dim">
