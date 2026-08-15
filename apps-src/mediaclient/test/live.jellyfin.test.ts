@@ -159,4 +159,36 @@ live("a real Jellyfin server", () => {
     const markers = await backend.markers(page.items[0].id);
     expect(Array.isArray(markers)).toBe(true);
   });
+
+
+  it("builds an A-Z strip whose letters land where they say", async () => {
+    // The strip is an accelerator, and an accelerator that arrives at the wrong
+    // letter is worse than none - the sibling backend records 14 of 29 buckets
+    // landing on the PREVIOUS letter when the offset was summed from the bucket
+    // sizes instead of asked for. So this checks the landing, not the arithmetic.
+    const libs = await backend.libraries();
+    const movies = libs.find((l) => l.kind === "movie") ?? libs[0];
+    const letters = await backend.letters(movies.id);
+    expect(letters.length).toBeGreaterThan(5);
+    expect(letters.every((l) => l.size > 0), "a letter nobody can press must not be shown").toBe(true);
+
+    const target = letters.find((l) => l.key === "S") ?? letters[letters.length - 1];
+    const offset = await backend.letterOffset(movies.id, target.key, {});
+    const page = await backend.libraryPage(movies.id, { offset, limit: 3, sort: "SortName" });
+
+    const first = (page.items[0]?.sortTitle || page.items[0]?.title || "").trim();
+    expect(first.slice(0, 1).toUpperCase(), `landing on ${target.key}`).toBe(target.key);
+  });
+
+  it("takes the screens' own default sort without the server refusing it", async () => {
+    // The screens seed the OTHER backend's key, `titleSort`, and pass it on
+    // every page. It is not a member of this server's sort enum, so it is
+    // either ignored or refused - and refused means every library tile opens
+    // onto "Try again".
+    const libs = await backend.libraries();
+    const movies = libs.find((l) => l.kind === "movie") ?? libs[0];
+    const seeded = await backend.libraryPage(movies.id, { offset: 0, limit: 3, sort: "titleSort" });
+    const named = await backend.libraryPage(movies.id, { offset: 0, limit: 3, sort: "SortName" });
+    expect(seeded.items.map((i) => i.id)).toEqual(named.items.map((i) => i.id));
+  });
 });

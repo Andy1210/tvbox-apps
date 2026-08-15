@@ -183,7 +183,10 @@ export function toItem(it: JellyfinItem): MediaItem {
     seriesTitle: it.SeriesName,
     seriesId: it.SeriesId,
     seriesThumb: imagePath(it.SeriesId || "", it.SeriesPrimaryImageTag),
-    thumb: imagePath(it.Id, it.ImageTags?.Primary),
+    // An episode with no still of its own borrows the series' poster rather
+    // than leaving a hole: the home screen's hero panel and its tint are drawn
+    // from this, and a "carry on watching" row is mostly episodes.
+    thumb: imagePath(it.Id, it.ImageTags?.Primary) ?? imagePath(it.SeriesId || "", it.SeriesPrimaryImageTag),
     art: imagePath(it.Id, it.BackdropImageTags?.[0], "Backdrop"),
     unwatchedCount: user.UnplayedItemCount,
   };
@@ -247,6 +250,12 @@ export interface JellyfinChapter {
  * `parts` always 1. The fields stay because the interface is shared with Plex,
  * where a split title is real and the two numbers differ.
  */
+/** Flag the track the server says is current. */
+function mark(tracks: Track[], index: number | undefined | null): Track[] {
+  if (typeof index !== "number") return tracks;
+  return tracks.map((t) => (t.id === String(index) ? { ...t, selected: true } : t));
+}
+
 export function toVersion(src: JellyfinMediaSource, index: number): MediaVersion {
   const video = (src.MediaStreams || []).find((s) => s.Type === "Video");
   const audio = (src.MediaStreams || []).find((s) => s.Type === "Audio");
@@ -269,8 +278,11 @@ export function toVersion(src: JellyfinMediaSource, index: number): MediaVersion
     bitrateKbps: src.Bitrate ? Math.round(src.Bitrate / 1000) : undefined,
     sizeBytes: src.Size,
     durationMs: ticksToMs(src.RunTimeTicks),
-    audio: toTracks(src.MediaStreams, "Audio"),
-    subtitles: toTracks(src.MediaStreams, "Subtitle"),
+    // Marked with the server's own choice, which is what the track menu draws
+    // its tick from: without it no row is ticked mid-film and "Off" is unticked
+    // even when the subtitles are off - the one thing that panel exists to say.
+    audio: mark(toTracks(src.MediaStreams, "Audio"), src.DefaultAudioStreamIndex),
+    subtitles: mark(toTracks(src.MediaStreams, "Subtitle"), src.DefaultSubtitleStreamIndex),
   };
 }
 
