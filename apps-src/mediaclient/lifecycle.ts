@@ -37,6 +37,18 @@ let releasedFor: ReleaseReason | null = null;
  *
  * Returns an unregister function.
  */
+/**
+ * Whether this app is the one on screen.
+ *
+ * The shell HIDES an app rather than closing it, and it refuses to start the
+ * player for an app that is not in front - silently, because the bridge
+ * discards the refusal. So anything that starts playback from outside the
+ * remote's own presses has to ask first, or it reports success over a launcher.
+ */
+export function isVisible(): boolean {
+  return releasedFor === null;
+}
+
 export function onRelease(fn: ReleaseFn): () => void {
   releasers.add(fn);
   return () => releasers.delete(fn);

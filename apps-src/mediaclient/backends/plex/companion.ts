@@ -40,10 +40,32 @@ const POLL_ARGS = {
  * spent on nothing. Short enough to be invisible when the server behaves.
  */
 const MIN_POLL_MS = 250;
+/**
+ * How long a command may take before the controller is told it failed.
+ *
+ * The loop does not poll while one runs, so an unbounded handler is not a slow
+ * command - it is the end of this box as a player, and every later command is
+ * dropped rather than queued because delivery is fire-once into whatever poll
+ * is registered at that instant.
+ */
+const COMMAND_TIMEOUT_MS = 12_000;
+/** An acknowledgement is a local round trip; it has no business taking longer. */
+const RESPOND_TIMEOUT_MS = 10_000;
 /** How long to wait after a failed poll before trying again. */
 const RETRY_MS = 5_000;
 /** Ceiling for the backoff, so a server that is down is asked about calmly. */
 const RETRY_MAX_MS = 60_000;
+
+/**
+ * What to tell the controller.
+ *
+ * Measured: the server proxies this XML to the controller VERBATIM, and the
+ * assistant reads the code - its own comment says "a client that rejects the
+ * command says so here, and reporting that as success would be a lie". So a
+ * command that could not be carried out must not answer 200, or the house says
+ * a film is playing while the television shows the launcher.
+ */
+export type CommandResult = { ok: true } | { ok: false; reason: string };
 
 export interface CompanionCommand {
   /** e.g. "/player/playback/playMedia" */
@@ -64,10 +86,14 @@ export function startCompanion(opts: {
   baseUrl: string;
   token: string;
   id: PlexIdentityHeaders;
-  onCommand: (cmd: CompanionCommand) => Promise<void> | void;
+  onCommand: (cmd: CompanionCommand) => Promise<CommandResult> | CommandResult;
+  /** The token stopped working. The loop ends; the app decides what to show. */
+  onUnauthorized?: () => void;
 }): () => void {
   let stopped = false;
   let controller: AbortController | null = null;
+  /** In-flight acknowledgements, so `stop()` can free a loop parked in one. */
+  const responders = new Set<AbortController>();
   let commandId = 0;
   let backoff = RETRY_MS;
 
@@ -79,17 +105,34 @@ export function startCompanion(opts: {
     Accept: "application/xml",
   });
 
-  const respond = async (id: string): Promise<void> => {
+  const respond = async (id: string, result: CommandResult): Promise<void> => {
     // What actually releases the controller. Without it the phone's press - or
     // the assistant's playMedia - hangs until ITS timeout, which reads as the
     // box having ignored the command even when the command has already run.
     const url = new URL("player/proxy/response", base(opts.baseUrl));
     url.searchParams.set("commandID", id);
-    await fetch(url.toString(), {
-      method: "POST",
-      headers: { ...headers(), "Content-Type": "text/xml" },
-      body: '<?xml version="1.0" encoding="utf-8"?>\n<Response code="200" status="OK" />',
-    });
+    const code = result.ok ? "200" : "500";
+    const status = result.ok ? "OK" : result.reason.slice(0, 120);
+    // Its own signal, and a timeout. `stop()` aborts the POLL, and a response
+    // that never settles left the loop parked in an in-flight request carrying
+    // the previous session's token - so sign-out did not actually stop it.
+    const timer = setTimeout(() => respondController.abort(), RESPOND_TIMEOUT_MS);
+    const respondController = new AbortController();
+    responders.add(respondController);
+    try {
+      const res = await fetch(url.toString(), {
+        method: "POST",
+        headers: { ...headers(), "Content-Type": "text/xml" },
+        body: `<?xml version="1.0" encoding="utf-8"?>\n<Response code="${code}" status="${escapeAttr(status)}" />`,
+        signal: respondController.signal,
+      });
+      // Checked, because a refused acknowledgement means the controller is
+      // still waiting and nothing else will tell us.
+      if (!res.ok) log.warn(`companion response answered ${res.status}`);
+    } finally {
+      clearTimeout(timer);
+      responders.delete(respondController);
+    }
   };
 
   const loop = async (): Promise<void> => {
@@ -105,21 +148,45 @@ export function startCompanion(opts: {
         // until it has something to say, which is what makes a command arrive
         // in the moment it is sent rather than on the next tick of a poll.
         const res = await fetch(url.toString(), { headers: headers(), signal: controller.signal });
+        // A dead credential is not a transient failure, and this is the one
+        // place in the app that would otherwise swallow it: everywhere else a
+        // 401 becomes "signed out" on screen. Here it would be a warning line
+        // every sixty seconds, forever, with the box looking fine.
+        if (res.status === 401 || res.status === 403) {
+          log.warn("companion poll rejected the credential; stopping");
+          opts.onUnauthorized?.();
+          return;
+        }
         if (!res.ok) throw new Error(`poll answered ${res.status}`);
         backoff = RETRY_MS;
 
-        for (const cmd of parse(await res.text())) {
+        const answer = (await res.text()).slice(0, MAX_ANSWER_BYTES);
+        for (const cmd of parse(answer)) {
           const id = cmd.params.commandID;
+          // Kept although THIS server ignores it: measured, PMS discards the
+          // poll's commandID and keeps its own per-controller sequence. The
+          // protocol defines it as "the last command processed", and answering
+          // it correctly costs a number.
           if (id) commandId = Math.max(commandId, Number(id) || 0);
+          // Without a number there is nothing to acknowledge, and the server
+          // would hand the same command over on the next poll - measured, a
+          // server answering an unnumbered command had the box run it about
+          // four times a second, forever. Run it once and move on.
+          if (!id && !once.add(cmd.path)) continue;
+          let result: CommandResult;
           try {
-            await opts.onCommand(cmd);
+            // Bounded, because the loop does not poll while a command runs: a
+            // handler that never settles ends the box's life as a player with
+            // nothing on screen to say so, and every later command is then
+            // lost rather than queued.
+            result = await withTimeout(opts.onCommand(cmd), COMMAND_TIMEOUT_MS);
           } catch (e) {
             log.warn("companion command failed", e);
+            result = { ok: false, reason: e instanceof Error ? e.message : "command failed" };
           }
-          // Answered even when it failed, and deliberately: the alternative is
-          // a controller that hangs, and "it did not work" is a better answer
-          // than no answer at all.
-          if (id) await respond(id).catch((e: unknown) => log.warn("companion response failed", e));
+          // Answered either way: the alternative is a controller that hangs,
+          // and "it did not work" is a better answer than no answer at all.
+          if (id) await respond(id, result).catch((e: unknown) => log.warn("companion response failed", e));
         }
         const took = Date.now() - startedAt;
         if (took < MIN_POLL_MS) await sleep(MIN_POLL_MS - took);
@@ -139,8 +206,22 @@ export function startCompanion(opts: {
   return () => {
     stopped = true;
     controller?.abort();
+    for (const r of responders) r.abort();
   };
 }
+
+/**
+ * How many commands one answer may carry.
+ *
+ * The server sends one at a time, measured - but the answer is parsed and every
+ * element in it dispatched, so a broken or hostile server could hand over an
+ * arbitrarily long list and be obeyed item by item. This app will sign into a
+ * server it does not own (an account with no server of its own uses a shared
+ * one), so "the server is trusted" is not a property to rely on here.
+ */
+const MAX_COMMANDS = 16;
+/** And how much of an answer to read at all. A real one is a few hundred bytes. */
+const MAX_ANSWER_BYTES = 64 * 1024;
 
 /** Commands arrive as attributes on a `<Command>` element, one per press. */
 function parse(xml: string): CompanionCommand[] {
@@ -156,14 +237,47 @@ function parse(xml: string): CompanionCommand[] {
     const path = el.getAttribute("path");
     if (!path) continue;
     const params: Record<string, string> = {};
+    // Verbatim. The server renames a controller's query arguments - `key`
+    // arrives as `queryKey` - and that renaming belongs to whoever reads them
+    // by name, not to the wire. See `arg()` in remoteControl.ts.
     for (const a of Array.from(el.attributes)) params[a.name] = a.value;
     out.push({ path, params });
+    if (out.length >= MAX_COMMANDS) break;
   }
   return out;
 }
 
 function base(url: string): string {
   return url.endsWith("/") ? url : `${url}/`;
+}
+
+/** Remembers the unnumbered commands already run, so they run once. */
+const once = {
+  seen: new Set<string>(),
+  add(path: string): boolean {
+    if (this.seen.has(path)) return false;
+    this.seen.add(path);
+    return true;
+  },
+};
+
+async function withTimeout<T>(work: Promise<T> | T, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve(work),
+      new Promise<never>((_r, reject) => {
+        timer = setTimeout(() => reject(new Error("command timed out")), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** An attribute value goes into XML the server hands on verbatim. */
+function escapeAttr(v: string): string {
+  return v.replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }
 
 function sleep(ms: number): Promise<void> {
