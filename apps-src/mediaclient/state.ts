@@ -10,6 +10,7 @@ import { PlexBackend } from "./backends/plex/backend";
 import { getIdentity, deviceName, type Identity } from "./identity";
 import { readJson, writeJson, removeRaw } from "./storage";
 import { clearImages } from "./posters";
+import { resetPlayer } from "./playback/player";
 import { log } from "./redact";
 
 const SESSION_KEY = "session";
@@ -144,8 +145,11 @@ export const useApp = create<State>((set, get) => ({
 
     const w = await writeJson(SESSION_KEY, named);
     if (!w.ok) log.warn("profile not persisted; the next launch will ask again");
-    // Artwork and everything cached under it belonged to the previous person.
+    // Artwork and everything cached under it belonged to the previous person -
+    // and so does anything the player is holding, including a countdown that
+    // would otherwise start a film as somebody else.
     clearImages();
+    resetPlayer();
     set({
       session: named,
       backend: new PlexBackend(named, { clientId: identity!.clientId, deviceName: deviceName(identity!.host) }),
@@ -178,6 +182,7 @@ export const useApp = create<State>((set, get) => ({
     // Artwork is held as blobs; without this the next person to sign in sees the
     // previous account's posters until the cache turns over.
     clearImages();
+    resetPlayer();
     set({ session: null, backend: null, screen: { name: "login" }, history: [], failure: null });
   },
 

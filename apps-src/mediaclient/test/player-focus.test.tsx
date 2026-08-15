@@ -219,3 +219,29 @@ describe("a seek that has been committed", () => {
     expect(usePlayer.getState().seekTargetMs).toBeNull();
   });
 });
+
+describe("the skip button", () => {
+  it("hands the cursor back when it goes away", async () => {
+    // It disappears by design - three seconds after a marker starts, when the
+    // marker passes, or when the overlay hides - and focus stays on a key that
+    // no longer exists, so every press after that is discarded. This is the
+    // same failure as every other vanishing focusable here, on the one that is
+    // MEANT to vanish.
+    render(<Player />);
+    await settle();
+
+    await act(async () => setFocus("skip"));
+    expect(getCurrentFocusKey()).toBe("skip");
+
+    // A real transition: the overlay hiding is one of the three ways the button
+    // goes away, and it is the one a test can drive.
+    await act(async () => {
+      usePlayer.setState({ overlay: false });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flushFocus();
+
+    expect(getCurrentFocusKey()).not.toBe("skip");
+    expect(getCurrentFocusKey()).toBeTruthy();
+  });
+});

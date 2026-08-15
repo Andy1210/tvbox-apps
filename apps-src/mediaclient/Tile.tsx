@@ -45,10 +45,7 @@ function label(item: MediaItem): string {
   // series you already know and nothing at all about the one you are choosing
   // from. The series title is dropped here: inside a season it is on the screen
   // already, and outside one the row's own heading carries it.
-  const s = item.parentIndex !== undefined ? `S${item.parentIndex}` : "";
-  const e = item.index !== undefined ? `E${item.index}` : "";
-  const number = [s, e].filter(Boolean).join("");
-  return [number, item.title].filter(Boolean).join(" · ");
+  return [episodeNumber(item), item.title].filter(Boolean).join(" · ");
 }
 
 /**
@@ -202,4 +199,18 @@ export function Tile({
       )}
     </div>
   );
+}
+
+/**
+ * "S2E34", or nothing when the server did not number it.
+ *
+ * Shared with the playback overlay rather than written twice: the two would
+ * drift, and a number that disagrees with itself between the list and the film
+ * is worse than no number.
+ */
+export function episodeNumber(item: MediaItem): string {
+  if (item.kind !== "episode") return "";
+  const s = item.parentIndex !== undefined ? `S${item.parentIndex}` : "";
+  const e = item.index !== undefined ? `E${item.index}` : "";
+  return `${s}${e}`;
 }

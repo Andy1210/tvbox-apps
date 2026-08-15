@@ -83,7 +83,12 @@ function Face({
   useEffect(() => {
     if (!role.thumb || absolute || !backend) return;
     let live = true;
-    void loadImage(role.thumb, backend.imageHeaders()).then((url) => live && url && setSrc(url));
+    // Through artUrl, so a relative path resolves against the SERVER. Handed to
+    // fetch as it stands, it resolved against the box's own shell origin - which
+    // answers with its web page, and takes the token with it.
+    const src = backend.artUrl(role.thumb);
+    if (!src) return;
+    void loadImage(src, backend.imageHeaders()).then((url) => live && url && setSrc(url));
     return () => {
       live = false;
     };
