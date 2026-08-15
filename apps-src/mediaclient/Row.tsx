@@ -1,5 +1,5 @@
 import { useFocusable, FocusContext, setFocus } from "@noriginmedia/norigin-spatial-navigation";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Tile } from "./Tile";
 import { createMover, nearest } from "./moveTo";
 import type { MediaItem } from "./backends/types";
@@ -99,6 +99,35 @@ export function Row({
     sc.scrollTop += row.top - top;
   }, []);
 
+  /**
+   * Put the rail back where a new list can be seen.
+   *
+   * The offset is only ever recomputed when a tile takes focus, and nothing
+   * re-clamps it when the list underneath changes - a native scroller got that
+   * from the browser, this is not one. Searching again while the first rail was
+   * scrolled therefore opened it on empty space: a heading with nothing under
+   * it, correcting itself only once something in it was focused.
+   *
+   * A different list starts at the beginning; the same list that grew or lost
+   * its tail keeps its place, clamped to what is left of it.
+   */
+  const firstId = items.length > 0 ? items[0].id : "";
+  useEffect(() => {
+    const box = window_.current;
+    if (!box) return;
+    const style = getComputedStyle(box);
+    const viewport =
+      box.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
+    const max = layer.current?.scrollWidth ?? box.clientWidth;
+    mover.to(Math.max(0, Math.min(mover.at, max - viewport)), false);
+  }, [items.length, mover]);
+  const started = useRef(firstId);
+  useEffect(() => {
+    if (started.current === firstId) return;
+    started.current = firstId;
+    mover.to(0, false);
+  }, [firstId, mover]);
+
   const onFocusChild = useCallback(
     (el: HTMLElement) => {
       onReached?.();
@@ -130,7 +159,8 @@ export function Row({
       // more than it can: it under-scrolled by exactly that, and the last tile
       // came up cropped by about two ring widths on the right.
       const style = getComputedStyle(box);
-      const viewport = box.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      const viewport =
+        box.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
       const to = nearest({
         at: mover.at,
         viewport,

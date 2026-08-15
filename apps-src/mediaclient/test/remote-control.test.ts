@@ -137,4 +137,110 @@ describe("a command from a controller", () => {
     expect(res).toMatchObject({ ok: false });
     expect(played.length, "nothing may be sent to the shared player").toBe(0);
   });
+  it("says so when the film did not start", async () => {
+    // The player reports both of its failures by putting them in state and
+    // returning normally, so awaiting the call proves nothing. An unconditional
+    // OK here is the same lie the visibility check above exists to prevent,
+    // reached down a different path: the assistant tells the house a film is
+    // playing while the television shows the launcher.
+    useApp.setState({
+      backend: backend({
+        resolveStream: async () => {
+          throw new Error("no stream for this");
+        },
+      }) as never,
+    });
+
+    const res = await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "1" },
+    });
+
+    expect(res).toMatchObject({ ok: false });
+    expect(played.length, "nothing reached the shared player").toBe(0);
+    expect(usePlayer.getState().current, "and nothing is claimed to be playing").toBeNull();
+  });
+
+  it("says so when this box has no player at all", async () => {
+    (globalThis as unknown as { tvbox: unknown }).tvbox = { panel: { width: 1920, height: 1080 } };
+
+    const res = await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "1" },
+    });
+
+    expect(res).toMatchObject({ ok: false });
+  });
+
+  it("does not answer for the next episode before it has been tried", async () => {
+    // skipNext went through the same call that swallows its failures, and did
+    // not even await it - so the answer was written before anything had been
+    // attempted at all.
+    // The second stream is the one that fails: the sibling is played through
+    // the backend the FIRST film was started with, held inside the player, so
+    // swapping the app's backend would not reach it.
+    let streams = 0;
+    useApp.setState({
+      backend: backend({
+        resolveStream: async (): Promise<StreamDecision> => {
+          streams += 1;
+          if (streams > 1) throw new Error("no stream for this");
+          return { url: "http://s/f.mkv", audio: "auto", sub: "no", session: "s", transcoded: false, version: 0 } as never;
+        },
+      }) as never,
+    });
+    await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "1" },
+    });
+    usePlayer.setState({
+      siblings: { next: { id: "9", kind: "episode", title: "Next" } },
+    });
+
+    const res = await runCompanionCommand({ path: "/player/playback/skipNext", params: { commandID: "2" } });
+    expect(res).toMatchObject({ ok: false });
+  });
+
+  it("will not start a film for the person who just left", async () => {
+    // Sign-out and the profile picker replace the backend, and a command whose
+    // item fetch is still in flight would otherwise play as whoever was signed
+    // in when it arrived - their history, their continue-watching - with the
+    // picker on screen.
+    const slow = backend({
+      item: async (id: string) => {
+        useApp.setState({ backend: backend() as never });
+        return {
+          id,
+          kind: "movie",
+          title: "Film",
+          versions: [{ mediaIndex: 0, label: "1080p", partId: "1", audio: [], subtitles: [] }],
+          roles: [],
+          extras: [],
+        };
+      },
+    });
+    useApp.setState({ backend: slow as never });
+
+    const res = await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "1" },
+    });
+
+    expect(res).toMatchObject({ ok: false });
+    expect(played.length, "nothing may play as the previous profile").toBe(0);
+  });
+
+  it("honours a small offset the controller named", async () => {
+    // The ten-second floor belongs to a RESUME point - resuming a film four
+    // seconds in is more surprising than starting it - and it was applied to an
+    // offset somebody asked for as well, so the film began at zero while the
+    // bar showed the offset.
+    await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/1", queryOffset: "5000", commandID: "1" },
+    });
+
+    expect(played[0]?.startSec).toBe(5);
+    expect(usePlayer.getState().positionMs).toBe(5000);
+  });
 });

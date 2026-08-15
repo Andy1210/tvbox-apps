@@ -113,6 +113,19 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
    */
   const [scrollTop, setScrollTop] = useState(0);
   const mover = useMemo(() => createMover("y"), []);
+  /**
+   * Two heights, because they answer two different questions.
+   *
+   * `windowH` is what a vh is worth: the tiles and the padding are sized in vh,
+   * so their pixel height follows the window whatever else is on the page.
+   *
+   * `viewport` is how much of the grid can be seen, and the grid is the flex
+   * child BELOW the header - about 92 px shorter than the window here. Using
+   * the window for it moved every row that far too little, so the row under the
+   * cursor sat with its caption cut off by the screen edge, and the end clamp
+   * left the last row permanently unreachable.
+   */
+  const [windowH, setWindowH] = useState(1080);
   const [viewport, setViewport] = useState(1080);
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -126,14 +139,30 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
 
   // Row height in pixels: tiles are sized in vh, so this has to follow the
   // window rather than be a constant.
-  const rowHeight = useMemo(() => Math.round(viewport * ((TILE_VH + ROW_GAP_VH) / 100)), [viewport]);
+  const rowHeight = useMemo(() => Math.round(windowH * ((TILE_VH + ROW_GAP_VH) / 100)), [windowH]);
+
+  /**
+   * The visible height of the grid, measured rather than assumed.
+   *
+   * Its own vertical padding is subtracted for the same reason the rails
+   * subtract theirs: `overflow` clips at the PADDING box, so `clientHeight`
+   * includes room that exists for the focus ring to be drawn outside a tile,
+   * and counting it as usable would move a row that far too little at the end.
+   */
+  const measure = useCallback((): void => {
+    setWindowH(window.innerHeight);
+    const box = scroller.current;
+    if (!box) return;
+    const style = getComputedStyle(box);
+    const inner = box.clientHeight - parseFloat(style.paddingTop || "0") - parseFloat(style.paddingBottom || "0");
+    if (inner > 0) setViewport(inner);
+  }, []);
 
   useEffect(() => {
-    const measure = (): void => setViewport(window.innerHeight);
     measure();
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
-  }, []);
+  }, [measure]);
 
   useEffect(() => {
     if (!backend) return;
@@ -231,7 +260,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
    */
   const showRow = useCallback(
     (row: number) => {
-      const padVh = (v: number): number => Math.round((v / 100) * viewport);
+      const padVh = (v: number): number => Math.round((v / 100) * windowH);
       const to = nearest({
         at: mover.at,
         viewport,
@@ -244,7 +273,13 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
       mover.to(to, true);
       setScrollTop((prev) => (sameWindow(prev, to, rowHeight, viewport) ? prev : to));
     },
-    [mover, viewport, rowHeight, rows],
+    [mover, viewport, windowH, rowHeight, rows],
+  );
+
+  /** Where the grid may sit at the very end: past this the rows run out. */
+  const maxOffset = useCallback(
+    (row: number) => Math.max(0, Math.min(row * rowHeight, rows * rowHeight - viewport)),
+    [rowHeight, rows, viewport],
   );
 
   const firstRow = Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN);
@@ -458,8 +493,14 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
         // the list, and animating that distance is a second of scenery on the
         // way to somewhere the person already chose - through a window that is
         // rebuilt as it passes, because the grid is virtualised.
-        mover.to(row * rowHeight, false);
-        setScrollTop(row * rowHeight);
+        // Clamped, because this is the one move that does not go through
+        // `nearest`. A letter whose first row falls inside the last screenful
+        // would otherwise put the grid past its end: pressing Z in a library of
+        // 256 left one row of posters at the top and the rest of the screen
+        // black, until some other press happened to correct it.
+        const to = maxOffset(row);
+        mover.to(to, false);
+        setScrollTop(to);
       })
       .catch((e) => log.warn("letter jump failed", e));
   };
@@ -517,6 +558,10 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
             ref={(node) => {
               scroller.current = node;
               (gridRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
+              // Measured here rather than only in an effect: the screen returns
+              // its loading state first, so on mount there is no grid to
+              // measure and nothing would run again once there is one.
+              if (node) measure();
             }}
             // Only when the WINDOW changes, not on every scroll event. The two
             // rows below are the whole use of `scrollTop`, and they move a row
