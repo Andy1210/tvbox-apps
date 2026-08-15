@@ -67,7 +67,9 @@
     "runtimeM": "{m} p",
     "markWatched": "Jelöld nézettnek",
     "markUnwatched": "Jelöld nem nézettnek",
-    "inThis": "Ebben"
+    "inThis": "Ebben",
+    "emptyCollection": "Ebben a gyűjteményben nincs semmi.",
+    "emptyPlaylist": "Ez a lejátszási lista üres."
   },
   "person": {
     "films": "Filmek",

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useI18n } from "@sdk";
 import { accentFrom } from "./accent";
 import { loadImage } from "./posters";
@@ -108,37 +109,48 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
 
   return (
     <>
-      {/* The tint and the artwork are FIXED, so they are the page's background
-          rather than one band's - the rows scroll over them and the screen keeps
-          its colour all the way down. Only the words below are in flow. */}
-      <div
-        className="pointer-events-none fixed inset-0 z-0 transition-[background] duration-500"
-        style={{ background: tint ?? "transparent" }}
-        aria-hidden="true"
-      />
+      {/* Portalled to the body, and that is the whole point rather than a tidy
+          detail. These are fixed layers with z-0, and the page renders inside a
+          `relative z-10` container - which forms a stacking context, where a
+          positioned child at z-0 paints AFTER the container's in-flow text. So
+          they covered the rail's buttons, the row headings and the tile
+          captions, while the posters survived because a tile's frame is itself
+          positioned. Outside every stacking context, they are simply behind.
+          Two earlier attempts read this as clipping and then as flexbox
+          squashing; it was neither. */}
+      {createPortal(
+        <>
+          <div
+            className="pointer-events-none fixed inset-0 transition-[background] duration-500"
+            style={{ background: tint ?? "transparent" }}
+            aria-hidden="true"
+          />
 
-      {/* The tint is the artwork's own colours, so it is dimmed rather than
+          {/* The tint is the artwork's own colours, so it is dimmed rather than
           shown: a scrim over it keeps every answer in the band the app's
           background lives in. */}
-      {tint && <div className="pointer-events-none fixed inset-0 z-0 bg-bg-0/72" aria-hidden="true" />}
+          {tint && <div className="pointer-events-none fixed inset-0 bg-bg-0/72" aria-hidden="true" />}
 
-      {art && (
-        <div
-          className="pointer-events-none fixed top-0 right-0 z-0 h-[62vh] w-[58vw]"
-          aria-hidden="true"
-          style={{
-            // A circle, not an ellipse: an ellipse stretched to the box takes
-            // the shape of the box, which is the thing the mask exists to hide.
-            // Sized in vh so it stays round whatever the panel's aspect is, and
-            // small enough to fade out INSIDE the 62vh box - a circle that runs
-            // past the edge is cut off there, which puts back the straight line
-            // the mask is for.
-            maskImage: "radial-gradient(circle 34vh at 70% 45%, #000 42%, transparent 88%)",
-            WebkitMaskImage: "radial-gradient(circle 34vh at 70% 45%, #000 42%, transparent 88%)",
-          }}
-        >
-          <img src={art} alt="" className="h-full w-full object-cover" />
-        </div>
+          {art && (
+            <div
+              className="pointer-events-none fixed top-0 right-0 h-[62vh] w-[58vw]"
+              aria-hidden="true"
+              style={{
+                // A circle, not an ellipse: an ellipse stretched to the box takes
+                // the shape of the box, which is the thing the mask exists to hide.
+                // Sized in vh so it stays round whatever the panel's aspect is, and
+                // small enough to fade out INSIDE the 62vh box - a circle that runs
+                // past the edge is cut off there, which puts back the straight line
+                // the mask is for.
+                maskImage: "radial-gradient(circle 34vh at 70% 45%, #000 42%, transparent 88%)",
+                WebkitMaskImage: "radial-gradient(circle 34vh at 70% 45%, #000 42%, transparent 88%)",
+              }}
+            >
+              <img src={art} alt="" className="h-full w-full object-cover" />
+            </div>
+          )}
+        </>,
+        document.body,
       )}
 
       <section className="relative z-10 flex h-[42vh] w-[46vw] shrink-0 flex-col justify-center gap-[1.2vh] px-[4vw]">
