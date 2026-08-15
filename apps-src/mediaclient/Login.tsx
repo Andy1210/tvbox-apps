@@ -14,6 +14,24 @@ import type { DeviceLogin } from "./backends/types";
 
 /** What was chosen last time, so a second sign-in does not ask twice. */
 const SERVER_KEY = "server";
+/** Long enough for a slow server, short enough to be a wrong address. */
+const CONNECT_TIMEOUT_MS = 8000;
+
+/** One signal that gives up either when the screen does or when time does. */
+function withTimeout(signal: AbortSignal, ms: number): AbortSignal {
+  // `AbortSignal.any` is what composes two reasons to stop; where it is
+  // missing, the screen's own signal still cancels and only the clock is lost.
+  const A = AbortSignal as unknown as {
+    any?: (s: AbortSignal[]) => AbortSignal;
+    timeout?: (ms: number) => AbortSignal;
+  };
+  if (typeof A.any !== "function" || typeof A.timeout !== "function") return signal;
+  try {
+    return A.any([signal, A.timeout(ms)]);
+  } catch {
+    return signal;
+  }
+}
 
 interface RememberedServer {
   kind: "plex" | "jellyfin";
@@ -51,6 +69,8 @@ export function Login(): React.JSX.Element {
   const [server, setServer] = useState<RememberedServer | null>(null);
   const [phase, setPhase] = useState<Phase>({ name: "choosing" });
   const [serverName, setServerName] = useState<{ name: string; version: string } | null>(null);
+  /** The last Jellyfin address this box knew, kept across a change of mind. */
+  const [lastAddress, setLastAddress] = useState("");
   const [qr, setQr] = useState<string | null>(null);
 
   // What was chosen last time. Until this has been read the screen shows the
@@ -60,6 +80,7 @@ export function Login(): React.JSX.Element {
     void readJson<RememberedServer>(SERVER_KEY).then((saved) => {
       if (!live || !saved) return;
       setServer(saved);
+      if (saved.baseUrl) setLastAddress(saved.baseUrl);
     });
     return () => {
       live = false;
@@ -90,10 +111,15 @@ export function Login(): React.JSX.Element {
           // Asked before a code is shown, because a server with Quick Connect
           // off answers the initiate with an error and the screen would show a
           // number nobody can do anything with.
-          const info = await serverInfo(base, id, abort.signal);
+          // Bounded, because the realistic failure is a typo in the last octet
+          // of a LAN address: nothing refuses the connection, the SYN is
+          // blackholed, and the screen sat on "connecting" for as long as
+          // anybody was willing to watch it - measured at eighteen seconds
+          // before somebody intervened.
+          const info = await serverInfo(base, id, withTimeout(abort.signal, CONNECT_TIMEOUT_MS));
           if (!live) return;
           setServerName(info.ServerName ? { name: info.ServerName, version: info.Version ?? "" } : null);
-          if (!(await quickConnectAvailable(base, id, abort.signal))) {
+          if (!(await quickConnectAvailable(base, id, withTimeout(abort.signal, CONNECT_TIMEOUT_MS)))) {
             if (live) setPhase({ name: "failed", why: "quickConnectOff" });
             return;
           }
@@ -141,7 +167,12 @@ export function Login(): React.JSX.Element {
   }, [round, server, signIn]);
 
   const choose = (kind: "plex" | "jellyfin"): void => {
-    const next: RememberedServer = kind === "plex" ? { kind } : { kind, baseUrl: server?.baseUrl };
+    // The address comes from what was last KNOWN, not from `server` - which the
+    // way back to this chooser sets to null two commits earlier, so choosing
+    // Jellyfin again wrote `{kind}` with no address and threw away the one
+    // thing on this screen that costs a minute of typing on a D-pad. The next
+    // launch then opened straight into an empty keyboard.
+    const next: RememberedServer = kind === "plex" ? { kind } : { kind, baseUrl: lastAddress || undefined };
     setServer(next);
     void writeJson(SERVER_KEY, next).then((w) => {
       if (!w.ok) log.warn("the chosen server was not remembered");
@@ -162,7 +193,13 @@ export function Login(): React.JSX.Element {
    * same commit, so the remote did nothing at all. Nothing errors, and a mouse
    * still works, which is how it reached a television.
    */
-  const wants = choosing ? "login-plex" : done ? "login-retry" : server ? "login-other" : undefined;
+  // Nothing while the keyboard is up: it owns focus, and naming a button that
+  // is not on screen both wasted the setFocus and - because the value did not
+  // CHANGE when the code screen replaced it - meant the effect never fired
+  // again. The screen after the keyboard had no focus ring at all, which is the
+  // same fault the chooser had, one screen along.
+  const wants =
+    phase.name === "address" ? undefined : choosing ? "login-plex" : done ? "login-retry" : server ? "login-other" : undefined;
   useEffect(() => {
     if (!wants) return;
     // The timeout is not a guess: `useFocusable` registers during its own
@@ -181,7 +218,7 @@ export function Login(): React.JSX.Element {
     return (
       <Osk
         title={`${t("login.address")} — ${t("login.addressHint")}`}
-        initial={server?.baseUrl ?? ""}
+        initial={server?.baseUrl ?? lastAddress}
         onDone={(value) => {
           const base = normaliseAddress(value);
           // Something that is not an address at all - a letter O where a zero
@@ -193,6 +230,7 @@ export function Login(): React.JSX.Element {
             return;
           }
           const next: RememberedServer = { kind: "jellyfin", baseUrl: base };
+          setLastAddress(base);
           setServer(next);
           setRound((r) => r + 1);
           void writeJson(SERVER_KEY, next);

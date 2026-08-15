@@ -77,6 +77,28 @@ const SORTS: { key: string; title: string }[] = [
   { key: "Random", title: "Véletlen" },
 ];
 
+/**
+ * A sort key this server will accept.
+ *
+ * The screens seed the OTHER backend's default (`titleSort`) and pass it on
+ * every page, and `sortBy` here is an array of a closed enum that does not
+ * contain it - verified against the server's own OpenAPI, where 30 members are
+ * declared and that is not one. Unknown keys therefore become the default
+ * rather than travelling: at best the server would ignore it and order the grid
+ * its own way while the button says nothing is chosen, at worst it refuses the
+ * request and every library opens onto "Try again".
+ */
+function sortKey(key: string | undefined): string {
+  return key && SORTS.some((s) => s.key === key) ? key : "SortName";
+}
+
+/** The letters a strip is built from. Latin only: the server buckets by the
+ *  first character of the sort name, and an accented initial sorts under its
+ *  base letter here. */
+const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+
+type Letter = { key: string; title: string; size: number };
+
 interface PlaybackInfoResponse {
   MediaSources?: JellyfinMediaSource[];
   PlaySessionId?: string;
@@ -202,21 +224,25 @@ export class JellyfinBackend implements MediaBackend {
    * arranged.
    */
   async libraryPage(libraryId: string, q: PageQuery): Promise<Page<MediaItem>> {
-    const res = await this.req<ItemsResponse>("Items", {
-      query: {
-        userId: this.userId,
-        parentId: libraryId,
-        recursive: true,
-        includeItemTypes: q.of === "collections" ? "BoxSet" : "Movie,Series",
-        startIndex: q.offset,
-        limit: q.limit,
-        sortBy: q.sort || "SortName",
-        sortOrder: q.desc ? "Descending" : "Ascending",
-        fields: LIST_FIELDS,
-        ...this.filterQuery(q.filters),
-      },
-    });
+    const res = await this.req<ItemsResponse>("Items", { query: this.itemsQuery(libraryId, q) });
     return { items: (res.Items || []).map(toItem), total: res.TotalRecordCount };
+  }
+
+  /** One page of a library, as query parameters. Shared so a letter page and an
+   *  ordinary page cannot drift apart in what they ask for. */
+  private itemsQuery(libraryId: string, q: PageQuery): Record<string, string | number | boolean | undefined> {
+    return {
+      userId: this.userId,
+      parentId: libraryId,
+      recursive: true,
+      includeItemTypes: q.of === "collections" ? "BoxSet" : "Movie,Series",
+      startIndex: q.offset,
+      limit: q.limit,
+      sortBy: sortKey(q.sort),
+      sortOrder: q.desc ? "Descending" : "Ascending",
+      fields: LIST_FIELDS,
+      ...this.filterQuery(q.filters),
+    };
   }
 
   /** The app's filter keys, in the query parameters Jellyfin names them with. */
@@ -253,7 +279,7 @@ export class JellyfinBackend implements MediaBackend {
         includeItemTypes: "BoxSet",
         startIndex: q.offset,
         limit: q.limit,
-        sortBy: q.sort || "SortName",
+        sortBy: sortKey(q.sort),
         sortOrder: q.desc ? "Descending" : "Ascending",
         fields: LIST_FIELDS,
       },
@@ -301,22 +327,82 @@ export class JellyfinBackend implements MediaBackend {
   /**
    * The A-Z strip.
    *
-   * Not implemented against this server yet: Jellyfin has no endpoint that
-   * answers with the buckets and their sizes, so the strip would have to be
-   * derived by counting - one request per letter. Returning nothing hides the
-   * strip, which is the honest state until that is measured rather than a
-   * broken strip that scrolls to the wrong place.
+   * Jellyfin has no endpoint that answers with the buckets and their sizes, so
+   * they are counted: one request per letter, each asking for NO items and only
+   * the total. Twenty-six tiny requests is a lot for one screen, so the answer
+   * is kept for as long as the library and its filters are the same - opening a
+   * library twice costs it once.
+   *
+   * A letter with nothing under it is dropped rather than shown greyed: a strip
+   * on a television is a column of targets, and one that cannot be pressed is a
+   * press that appears to do nothing.
    */
-  async letters(): Promise<{ key: string; title: string; size: number }[]> {
-    return [];
+  async letters(libraryId: string, filters?: Record<string, string>, of?: "collections"): Promise<Letter[]> {
+    const key = JSON.stringify([libraryId, filters ?? {}, of ?? ""]);
+    const cached = this.letterCache.get(key);
+    if (cached) return cached;
+    const counts = await Promise.all(
+      ALPHABET.map((letter) =>
+        this.count(libraryId, of, filters, { nameStartsWith: letter }).then((size) => ({
+          key: letter,
+          title: letter,
+          size,
+        })),
+      ),
+    );
+    const out = counts.filter((l) => l.size > 0);
+    // Only worth keeping when it worked: a strip counted during an outage is a
+    // strip with nothing in it, and it would then be remembered as empty.
+    if (out.length) this.letterCache.set(key, out);
+    return out;
   }
 
-  async letterOffset(): Promise<number> {
-    return 0;
+  /**
+   * Where a letter's items begin.
+   *
+   * Counted rather than summed from the bucket sizes, which is the mistake the
+   * sibling backend records: the strip and the sort have to agree about where
+   * an accented initial goes, and only the server can say. `nameLessThan` asks
+   * exactly that question - how many titles sort before this letter.
+   */
+  async letterOffset(
+    libraryId: string,
+    letterKey: string,
+    q: Omit<PageQuery, "offset" | "limit">,
+  ): Promise<number> {
+    return this.count(libraryId, q.of, q.filters, { nameLessThan: letterKey });
   }
 
-  async letterPage(libraryId: string, _letterKey: string, q: PageQuery): Promise<Page<MediaItem>> {
-    return this.libraryPage(libraryId, q);
+  async letterPage(libraryId: string, letterKey: string, q: PageQuery): Promise<Page<MediaItem>> {
+    const res = await this.req<ItemsResponse>("Items", {
+      query: {
+        ...this.itemsQuery(libraryId, q),
+        nameStartsWith: letterKey,
+      },
+    });
+    return { items: (res.Items || []).map(toItem), total: res.TotalRecordCount };
+  }
+
+  /** How many items match, without fetching any of them. */
+  private async count(
+    libraryId: string,
+    of: "collections" | undefined,
+    filters: Record<string, string> | undefined,
+    extra: Record<string, string>,
+  ): Promise<number> {
+    const res = await this.req<ItemsResponse>("Items", {
+      query: {
+        userId: this.userId,
+        parentId: libraryId,
+        recursive: true,
+        includeItemTypes: of === "collections" ? "BoxSet" : "Movie,Series",
+        limit: 0,
+        enableTotalRecordCount: true,
+        ...this.filterQuery(filters),
+        ...extra,
+      },
+    }).catch(() => ({}) as ItemsResponse);
+    return res.TotalRecordCount ?? 0;
   }
 
   async item(id: string): Promise<ItemDetail> {
@@ -599,9 +685,16 @@ export class JellyfinBackend implements MediaBackend {
   /** Jellyfin remembers a choice per playback rather than per item; nothing to send. */
   async setTracks(): Promise<void> {}
 
-  /** Subtitle search needs a provider plugin; none is configured on this server. */
+  /**
+   * Subtitles the server can fetch. Refused rather than answered empty.
+   *
+   * An empty list means "searched, found nothing", and the screen says exactly
+   * that - so somebody tries Hungarian, then English, then German, per film,
+   * against a search that never ran. A rejection is what reaches the honest
+   * string the locale already carries: this server has no subtitle service.
+   */
   async searchSubtitles(): Promise<Track[]> {
-    return [];
+    throw new Error("this server has no subtitle provider");
   }
 
   async addSubtitle(): Promise<void> {}
@@ -655,6 +748,8 @@ export class JellyfinBackend implements MediaBackend {
    * it issued - a stop with no item is a stop it cannot attribute, and its own
    * log says so ("PlaybackStopped reported with null media info").
    */
+  /** Counted strips, per library and filter set. See `letters`. */
+  private letterCache = new Map<string, Letter[]>();
   private playing: { session?: string; itemId?: string; started: boolean; stopped: boolean } = {
     started: false,
     stopped: false,

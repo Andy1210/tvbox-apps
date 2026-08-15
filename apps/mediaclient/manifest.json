@@ -5,8 +5,12 @@
     "hu": "Média",
     "en": "Media"
   },
-  "version": "0.52.0",
+  "version": "0.53.0",
   "changelog": [
+    {
+      "version": "0.53.0",
+      "notes": "The A-Z strip works on a Jellyfin library, so a library of 1788 films has an end you can reach. Choosing another server no longer forgets the address you typed. The screen after the address keyboard highlights something again, and connecting to a wrong address gives up instead of sitting there. The track menu shows which audio and subtitle are playing, and a subtitle search on a server without one says so rather than reporting nothing found."
+    },
     {
       "version": "0.52.0",
       "notes": "Jellyfin fixes found by review before anyone met them: a subtitle that sits beside the film as its own file can now actually be turned on - and when there are several, each is its own row instead of all of them being one. Choosing a different copy of a film plays that copy, and choosing an audio track survives a server that has to convert the film on the way. The server is also told properly what the box is playing and when it stops."
