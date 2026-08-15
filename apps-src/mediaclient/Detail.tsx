@@ -14,6 +14,7 @@ import { Backdrop } from "./Backdrop";
 import { useTheme } from "./theme";
 import { useFocusFallback, useInitialFocus, useScrollToTopOnFirst } from "./focus";
 import { usePlayer } from "./playback/player";
+import { rememberedVersion, useChosenVersion } from "./chosenVersion";
 import { classify, useApp } from "./state";
 import type { ItemDetail, MediaItem, MediaVersion } from "./backends/types";
 import { log } from "./redact";
@@ -99,7 +100,8 @@ export function Detail({
     setChildren([]);
     setSettled(false);
     // A different item has different versions; carrying an index across would
-    // play the wrong file, or none.
+    // play the wrong file, or none. Seeded from what was chosen for the NEW
+    // item a moment later, once its version list is known.
     setVersion(0);
 
     (async () => {
@@ -107,6 +109,10 @@ export function Detail({
         const d = await backend.item(itemId);
         if (!live) return;
         setDetail(d);
+        // Held to what this item actually has: a library can lose the file the
+        // choice pointed at, and an index with no version behind it resolves to
+        // no part - which fails when play is pressed rather than here.
+        setVersion(rememberedVersion(d.id, d.versions.length));
 
         // A series or season has something under it; a film does not, and asking
         // costs a round trip that shows as a pause before the screen settles.
@@ -510,7 +516,15 @@ export function Detail({
                 <FocusButton
                   key={v.index}
                   focusKey={`detail-version-${v.index}`}
-                  onEnter={() => setVersion(v.index)}
+                  onEnter={() => {
+                    setVersion(v.index);
+                    // Remembered against the item, so the next time this title
+                    // is opened it is already on the file this household
+                    // actually watches - the 1080p copy of a film is sometimes
+                    // a 3D encode, and picking round it every time is the app
+                    // asking a question it has already been answered.
+                    useChosenVersion.getState().remember(detail.id, v.index);
+                  }}
                   // A check, not a ring and not a fill. A white ring is what
                   // focus looks like on every poster in this app, so a ringed
                   // chip reads as the focused one from across a room; and the

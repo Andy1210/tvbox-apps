@@ -16,6 +16,7 @@ import { ChapterStrip } from "./ChapterStrip";
 import { NextIcon, PauseIcon, PlayIcon, PreviousIcon } from "./icons";
 import { episodeNumber } from "./Tile";
 import { applySubtitleStyle, usePrefs } from "./prefs";
+import { useChosenVersion } from "./chosenVersion";
 
 /**
  * Where focus rests while the overlay is just showing.
@@ -519,7 +520,14 @@ export function Player(): React.JSX.Element | null {
       <TrackMenu
         versions={current.detail.versions}
         current={current.choice as Choice}
-        onChoose={(next) => void usePlayer.getState().changeTracks(next)}
+        onChoose={(next) => {
+          // The same memory the detail screen writes. Switching file mid-film is
+          // the strongest statement of which one this title should use, and it
+          // used to be the one route that forgot.
+          if (next.version !== current.choice.version)
+            useChosenVersion.getState().remember(current.item.id, next.version);
+          void usePlayer.getState().changeTracks(next);
+        }}
         // Which column the overlay's button asked for. The search is a layer of
         // its own, not a column, so it names the one it came from - which is
         // also where Back puts the cursor on the way out.
