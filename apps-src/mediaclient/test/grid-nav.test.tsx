@@ -255,65 +255,42 @@ describe("a row inside a scrolling column", () => {
 });
 
 describe("how the grid moves", () => {
-  it("animates the arrows and jumps the letters", () => {
-    // Two different gestures that both end in a scroll. Moving a row is travel -
-    // animating it is what makes the grid read as a surface rather than a series
-    // of jump cuts. A letter is a destination somebody already chose, and a jump
-    // to "S" in a library of 1,700 crosses most of the list; animating that is a
-    // second of scenery, through a window the virtualiser rebuilds on every
-    // frame of it.
+  it("does not animate, and says why", () => {
+    // Animating a row was tried and measured on the box, with injected presses
+    // and /proc sampling, per row moved:
     //
-    // Asserted on the source, because the difference lives in CSS inheritance:
-    // a tile's own scrollIntoView passes no behaviour, so it takes the
-    // scroller's - which means the only thing separating the two gestures is
-    // that the jumps say `instant` and the arrows say nothing at all.
+    //   animated   renderer 73-85 ms   GPU process 111-118 ms
+    //   instant    renderer 34-47 ms   GPU process  18-23 ms
+    //
+    // Five to six times the GPU work, because the movement is spread over
+    // frames and each one re-rasters what a jump rasters once. At 111 ms a row
+    // it cannot hold a frame rate, so it reads as a stutter - worse than the
+    // jump cut it replaced. This asserts the absence, with the numbers next to
+    // it, so the next person to reach for `scroll-smooth` finds the answer
+    // rather than the idea.
     const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Library.tsx"), "utf8");
+    // On the class list, not on the file: the comment above it names the thing
+    // it is not doing, and a bare substring search finds that instead.
+    const classes = src.match(/className="no-scrollbar relative flex-1[^"]*"/g) ?? [];
+    expect(classes.length, "the grid scroller is still identifiable").toBe(1);
+    expect(classes[0]).not.toContain("scroll-smooth");
+    expect(src, "the measurement stays next to the decision").toContain("111-118 ms");
 
-    expect(src, "the scroller animates by default, which is what the arrows inherit").toContain("scroll-smooth");
-
-    // Every explicit scroll on this screen is a destination, so every one of
-    // them has to opt out of that.
+    // The explicit scrolls keep saying `instant`: it is what they always were,
+    // and stating it costs nothing while inheriting is what broke them once.
     const scrolls = src.match(/scroller\.current\?\.scrollTo\(\{[^}]*\}\)/g) ?? [];
-    expect(scrolls.length, "the explicit scrolls are still here").toBeGreaterThanOrEqual(2);
+    expect(scrolls.length).toBeGreaterThanOrEqual(2);
     for (const call of scrolls) expect(call, call).toContain('behavior: "instant"');
-
-    // And a tile must not name a behaviour of its own, or it would stop
-    // inheriting and the arrows would go back to jump cuts.
-    const tile = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Tile.tsx"), "utf8");
-    expect(tile).not.toContain("behavior:");
-  });
-});
-
-describe("holding an arrow", () => {
-  it("stops animating for the duration of the hold, and animates again after it", () => {
-    // The browser gives every focus change its own eased scroll with a duration
-    // nobody can set, so a held arrow piles restarts on top of each other and
-    // the grid stutters instead of travelling. The behaviour is therefore
-    // decided per press - and BEFORE the press moves anything, which is why the
-    // listener is capture phase: it has to run ahead of spatial navigation
-    // rather than race the tile's own effect.
-    const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Library.tsx"), "utf8");
-
-    // Capture phase, or the decision lands after the scroll it was meant to
-    // decide.
-    expect(src).toMatch(/addEventListener\("keydown",\s*onKey,\s*true\)/);
-    // Instant inside a burst; empty string, not "smooth" - it has to fall back
-    // to the class so the two never disagree about what smooth means.
-    expect(src).toContain('el.style.scrollBehavior = now - lastStep.current < BURST_MS ? "auto" : ""');
-    // And only the vertical arrows: sideways travel inside a row is the row's
-    // own business.
-    expect(src).toContain('if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;');
   });
 
-  it("uses a threshold above the remote's repeat rate", () => {
-    // Below the repeat interval the burst is never detected and every row of a
-    // hold animates again; far above it, two deliberate presses are mistaken for
-    // a hold and neither animates.
+  it("re-renders only when the window changes", () => {
+    // The other half of the same measurement: the virtualiser is driven from
+    // `scrollTop` in React state, and updating it on every scroll event
+    // re-rendered the whole visible grid per frame instead of per row.
     const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Library.tsx"), "utf8");
-    const m = /const BURST_MS = (\d+);/.exec(src);
-    expect(m, "the threshold is named, not inline").toBeTruthy();
-    const ms = Number(m![1]);
-    expect(ms).toBeGreaterThan(120);
-    expect(ms).toBeLessThan(400);
+    expect(src).toContain("sameWindow(prev, top, rowHeight, viewport) ? prev : top");
+    // Both edges, or the last row lags by up to a row when the viewport is not
+    // a whole number of rows.
+    expect(src).toMatch(/Math\.ceil\(\(a \+ viewport\)/);
   });
 });
