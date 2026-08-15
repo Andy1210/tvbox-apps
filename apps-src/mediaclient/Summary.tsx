@@ -22,6 +22,14 @@ import { useFocusableItem } from "@sdk";
 const LINES = 3;
 /** text-[2vh] at leading-relaxed (1.625). */
 const LINE_VH = 3.25;
+/**
+ * Where the cut is softened.
+ *
+ * 92%, not 62%: three lines occupy 9.75vh and the third line's descenders end
+ * at about 9.1vh, so anything earlier fades the glyphs themselves rather than
+ * the space under them.
+ */
+const FADE = "linear-gradient(to bottom, #000 92%, transparent 100%)";
 
 export function Summary({ text }: { text: string }): React.JSX.Element {
   const [open, setOpen] = useState(false);
@@ -68,14 +76,25 @@ export function Summary({ text }: { text: string }): React.JSX.Element {
         className={`overflow-hidden text-[2vh] leading-relaxed ${open ? "overflow-y-auto" : ""}`}
         style={
           open
-            ? { maxHeight: "34vh" }
+            ? {
+                maxHeight: "34vh",
+                // The same fade when even the opened box does not hold it all.
+                // Nothing in here is focusable, so the D-pad cannot scroll it -
+                // a flush cut was the one state with no cue at all.
+                maskImage: clipped ? FADE : undefined,
+                WebkitMaskImage: clipped ? FADE : undefined,
+              }
             : {
                 height: `${LINES * LINE_VH}vh`,
                 // Fades the cut line instead of ending on a sliced letter. A
                 // mask rather than a gradient overlay, because what is behind
                 // this text is artwork, not a known colour.
-                maskImage: clipped ? "linear-gradient(to bottom, #000 62%, transparent 100%)" : undefined,
-                WebkitMaskImage: clipped ? "linear-gradient(to bottom, #000 62%, transparent 100%)" : undefined,
+                // Opaque through the third line's descenders and fading only
+                // in the gap under it. At 62% the ramp began at 6.05vh, which
+                // is above that line's cap height - so its baseline sat at
+                // 2.3:1 and the box gave two readable lines out of three.
+                maskImage: clipped ? FADE : undefined,
+                WebkitMaskImage: clipped ? FADE : undefined,
               }
         }
       >

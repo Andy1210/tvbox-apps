@@ -59,3 +59,58 @@ describe("the home screen when the server cannot be reached", () => {
     }
   });
 });
+
+describe("the search screen when the server cannot be reached", () => {
+  it("answers the remote after the first press, not only before it", async () => {
+    // Detail, Library and Person were each given `focusable: !failure` on the
+    // container that stays registered above their `if (failure) return` - and
+    // Search has the identical shape and was missed. It is the screen a
+    // household reaches by typing while the server is down.
+    const { Search } = await import("../Search");
+    useApp.setState({
+      backend: {
+        kind: "plex",
+        search: async () => {
+          throw new Error("connection refused");
+        },
+        posterUrl: () => undefined,
+        artUrl: () => undefined,
+        backdropUrl: () => undefined,
+        themeUrl: () => undefined,
+        imageHeaders: () => ({}),
+      } as unknown as MediaBackend,
+      screen: { name: "search" },
+      history: [],
+      failure: { kind: "unreachable" },
+    });
+    await act(async () => setFocus(""));
+    render(<Search />);
+    for (let i = 0; i < 3; i++) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await flushFocus();
+    }
+
+    // The keyboard opens first and owns the screen, so Back closes it - and what
+    // is behind it, with the server down, is the error.
+    await remote.back();
+    for (let i = 0; i < 3; i++) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await flushFocus();
+    }
+    await act(async () => setFocus("msg-retry"));
+    await flushFocus();
+    expect(String(getCurrentFocusKey()), "the error's own button is what is on screen").toBe("msg-retry");
+
+    for (const press of [remote.down, remote.right, remote.up, remote.left]) {
+      await press();
+      await flushFocus();
+      const at = String(getCurrentFocusKey());
+      expect(doesFocusableExist(at), `focus went to ${at}, which is not on screen`).toBe(true);
+      expect(at.startsWith("msg-"), `focus went to ${at}`).toBe(true);
+    }
+  });
+});

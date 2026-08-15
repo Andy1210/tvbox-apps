@@ -90,10 +90,34 @@ describe("artwork the server points elsewhere", () => {
     // answers its own CORS preflight.
     expect(backend.artUrl("https://attacker.example.com/collect")).toBeUndefined();
     expect(backend.artUrl("http://192.168.1.99:32400/library/x")).toBeUndefined();
-    // A protocol-relative URL is not absolute by this test, so it resolves
-    // against the server and stays there - which is the safe outcome.
-    const relative = backend.artUrl("//attacker.example.com/x")!;
-    expect(new URL(relative).origin).toBe("http://192.168.1.10:32400");
+    // A protocol-relative URL resolves against the server, and is then dropped
+    // by the path bound rather than fetched - the host name became a path
+    // segment, which is not an artwork path.
+    expect(backend.artUrl("//attacker.example.com/x")).toBeUndefined();
+  });
+
+  it("will not let an artwork path reach another endpoint", () => {
+    // The origin was the only bound, and it is not enough: this URL is fetched
+    // with the account token as a header, so the server chose WHICH of its own
+    // endpoints the box called. The traversal form matters most - it looks like
+    // a real chapter thumbnail right up to the point where it collapses onto a
+    // state-changing GET the server accepts.
+    for (const bad of [
+      "/library/media/1/chapterImages/../../../../:/scrobble?key=301",
+      "/:/scrobble?key=301&identifier=com.plexapp.plugins.library",
+      "/security/token?type=delegation&scope=all",
+      "/library/sections/1/refresh?force=1",
+      "/library/metadata/1/clearLogo/2?X-Plex-Token=attacker",
+      "/library/metadata/1/clearLogo/2#/../..",
+      "/library/../:/prefs",
+    ]) {
+      expect(backend.artUrl(bad), bad).toBeUndefined();
+    }
+
+    // The two shapes that actually occur, measured over 80 items on this
+    // server: a chapter still and a clear logo.
+    expect(backend.artUrl("/library/media/151484/chapterImages/3")).toContain("/library/media/151484/chapterImages/3");
+    expect(backend.artUrl("/library/metadata/27009/clearLogo/1699887223")).toContain("clearLogo");
   });
 
   it("still resolves the server's own artwork", () => {

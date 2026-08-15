@@ -179,7 +179,18 @@ export interface Track {
  * language first when the versions differ in it.
  */
 export interface MediaVersion {
-  index: number;
+  /**
+   * Plex's own index for the MEDIA entry this row came from - NOT the position
+   * of this row in `versions`.
+   *
+   * They differ whenever one media entry holds several parts: a film on two
+   * discs is one media and two rows, so the array runs 0,1 while this reads
+   * 0,0. The decision endpoint wants this one; everything that looks a row up
+   * wants the array position, and the two were the same field until a title
+   * held that way showed they are not - both chips claimed one focus key, so
+   * the second disc could not be reached with the remote at all.
+   */
+  mediaIndex: number;
   /** Which part of that media entry, when a film is split across two files. */
   partIndex: number;
   /** How many parts that media entry has. More than one means the title is
@@ -426,6 +437,8 @@ export interface MediaBackend {
    * process, so it is bounded rather than passed through.
    */
   subtitleFileUrl(track: Track): string | undefined;
+  /** A chapter still at the size it will be drawn, or undefined. */
+  chapterThumbUrl(thumb: string, w: number, h: number): string | undefined;
 
   // --- playback ---
   resolveStream(
