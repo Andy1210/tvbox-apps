@@ -102,8 +102,15 @@ export function Player(): React.JSX.Element | null {
    * thing to be asked for, not a thing to be dismissed.
    */
   const [chapters, setChapters] = useState(false);
+  // These three mirror a value the key handler needs without re-binding the
+  // handler on every change. Written in an EFFECT rather than during render:
+  // React may start a render and discard it, and a discarded render still
+  // leaves a ref it wrote behind - so the window handler would route keys from
+  // state that was never committed.
   const chaptersRef = useRef(false);
-  chaptersRef.current = chapters;
+  useEffect(() => {
+    chaptersRef.current = chapters;
+  }, [chapters]);
   const hasChaptersRef = useRef(false);
 
   const { ref, focusKey } = useFocusable({ focusKey: "player", saveLastFocusedChild: true, isFocusBoundary: true });
@@ -299,7 +306,10 @@ export function Player(): React.JSX.Element | null {
     };
   }, [current, menu]);
 
-  hasChaptersRef.current = (current?.detail?.chapters?.length ?? 0) > 0;
+  const hasChapters = (current?.detail?.chapters?.length ?? 0) > 0;
+  useEffect(() => {
+    hasChaptersRef.current = hasChapters;
+  }, [hasChapters]);
   // Closed when the film changes, and when the overlay goes away: it is a thing
   // that was asked for, and neither of those is the same request.
   useEffect(() => setChapters(false), [current?.item.id]);
@@ -335,7 +345,9 @@ export function Player(): React.JSX.Element | null {
 
   const marker = current ? usePlayer.getState().activeMarker() : null;
   const skippable = Boolean(marker && (marker.type === "intro" || (marker.type === "credits" && !marker.final)));
-  skippableRef.current = skippable;
+  useEffect(() => {
+    skippableRef.current = skippable;
+  }, [skippable]);
 
   /**
    * The skip button announces itself, then gets out of the way.

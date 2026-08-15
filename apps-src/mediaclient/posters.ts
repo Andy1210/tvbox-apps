@@ -91,6 +91,16 @@ function evictIfNeeded(): void {
  * without a burst that the server answers by dropping.
  */
 const MAX_INFLIGHT = 6;
+/**
+ * How long one image may take before its slot is taken back.
+ *
+ * A hung connection is not a slow one: a server that goes away mid-request
+ * leaves the socket to TCP for minutes, and six of those hold every slot there
+ * is - artwork then stops loading for the rest of the session with nothing on
+ * screen to say why. Generous, because a 4K backdrop over wifi is genuinely
+ * slow.
+ */
+const IMAGE_TIMEOUT_MS = 20_000;
 let active = 0;
 const waiting: (() => void)[] = [];
 
@@ -99,13 +109,29 @@ async function slot(): Promise<void> {
     active += 1;
     return;
   }
+  // The slot is HANDED to the waiter rather than released and taken again:
+  // `release` used to decrement and then resolve, and a fresh caller reaching
+  // here in the microtask before the waiter resumed saw a free slot and took it
+  // too - so the count went past the limit exactly during the mount burst this
+  // exists to bound.
   await new Promise<void>((resolve) => waiting.push(resolve));
-  active += 1;
 }
 
 function release(): void {
-  active -= 1;
-  waiting.shift()?.();
+  const next = waiting.shift();
+  // Passed on with the count untouched: the waiter is already accounted for.
+  if (next) next();
+  else active -= 1;
+}
+
+/** A signal that gives up on a stalled image, where the runtime has one. */
+function imageDeadline(): AbortSignal | undefined {
+  const A = AbortSignal as unknown as { timeout?: (ms: number) => AbortSignal };
+  try {
+    return typeof A.timeout === "function" ? A.timeout(IMAGE_TIMEOUT_MS) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function loadImage(url: string, headers: Record<string, string>): Promise<string | null> {
@@ -122,11 +148,17 @@ export async function loadImage(url: string, headers: Record<string, string>): P
   const task = (async () => {
     await slot();
     try {
+      // Checked again here, not only after the answer: the wait for a slot can
+      // outlast a sign-out, and starting the request then sends the previous
+      // account's headers to the server after the box has left it.
+      if (mine !== generation) return null;
       // One retry, because the failure this guards against is a burst losing a
       // connection rather than a poster that does not exist - and a 404 comes
       // back as !ok, which is not retried.
-      let res = await fetch(url, { headers }).catch(() => null);
-      if (!res) res = await fetch(url, { headers }).catch(() => null);
+      const once = (): Promise<Response | null> =>
+        fetch(url, { headers, signal: imageDeadline() }).catch(() => null);
+      let res = await once();
+      if (!res) res = await once();
       if (!res || !res.ok) return null;
       const blob = await res.blob();
       // Signed out while this was in flight: the answer belongs to the previous
