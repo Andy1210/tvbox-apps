@@ -5,8 +5,12 @@
     "hu": "Média",
     "en": "Media"
   },
-  "version": "0.51.0",
+  "version": "0.51.1",
   "changelog": [
+    {
+      "version": "0.51.1",
+      "notes": "After signing out you can pick the other server again. The choice is still remembered, so signing back into the same one asks nothing - but the way to the other one is now on the code screen too, instead of only appearing once the code had failed."
+    },
     {
       "version": "0.51.0",
       "notes": "The app can now sign into a Jellyfin server as well as a Plex one: it asks which at sign-in, and for Jellyfin you type the server's address once and approve a six-digit code in Jellyfin's own web page - no password on the television. Everything the box was already signed into keeps working exactly as it did."
