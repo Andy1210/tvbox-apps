@@ -396,11 +396,22 @@ export function Player(): React.JSX.Element | null {
     // overlay sits by default, so requiring the bar meant the button appeared
     // with the cursor nowhere near it and OK did something else.
     const at = getCurrentFocusKey();
-    // Only while it is on screen. Focusing a button nobody can see means the
-    // next OK does something invisible.
-    if (showSkip && !menu && usePlayer.getState().scrubMs === null && (!at || at === IDLE_KEY || at === "scrub"))
+    // While it is ANNOUNCING itself, not merely while it is on screen. Those are
+    // different: the button is also on screen whenever the overlay is up, and
+    // the overlay comes up on every keypress - so keying this on visibility
+    // re-took the cursor on every press for the whole two minutes of a marker.
+    // Measured against the previous build: Right seeked once and then stopped
+    // moving the film at all, and OK-OK skipped the intro instead of pausing.
+    // The announcement is the one moment the button is worth interrupting for.
+    if (
+      announcing &&
+      skippable &&
+      !menu &&
+      usePlayer.getState().scrubMs === null &&
+      (!at || at === IDLE_KEY || at === "scrub")
+    )
       setFocus("skip");
-  }, [showSkip, menu]);
+  }, [announcing, skippable, menu]);
 
   if (!current) return null;
 
@@ -563,11 +574,17 @@ export function Player(): React.JSX.Element | null {
 /**
  * Somewhere for focus to sit while nothing is chosen.
  *
- * Invisible and unreachable by the arrows - the handler moves focus on and off
- * it deliberately - so it never appears in the D-pad's geometry.
+ * `focusable: false` is what keeps it out of the arrows' reach, and being
+ * invisible is not: the button row hands Left and Right to spatial navigation
+ * so the five transport buttons can be walked, and a zero-sized element at the
+ * page origin is a perfectly good LEFT candidate from the leftmost of them -
+ * measured, one Left press from the only button on a film with no siblings put
+ * the highlight nowhere and silently turned the arrows back into a ten-second
+ * seek. Focus can still be SENT here: norigin filters candidates by `focusable`
+ * but `setFocus` does not consult it.
  */
 function IdleAnchor(): React.JSX.Element {
-  const { ref } = useFocusableItem({ focusKey: IDLE_KEY });
+  const { ref } = useFocusableItem({ focusKey: IDLE_KEY, focusable: false });
   return <div ref={ref} className="pointer-events-none absolute h-0 w-0" aria-hidden="true" />;
 }
 

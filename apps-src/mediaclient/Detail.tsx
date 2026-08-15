@@ -34,7 +34,15 @@ function runtime(ms: number | undefined, t: (key: string, vars?: Record<string, 
  * only way into the person pages, and those are the thing a media server's own
  * client cannot do.
  */
-export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?: string }): React.JSX.Element {
+export function Detail({
+  itemId,
+  focusChildId,
+  queueFrom,
+}: {
+  itemId: string;
+  focusChildId?: string;
+  queueFrom?: MediaItem[];
+}): React.JSX.Element {
   const { t } = useI18n();
   const backend = useApp((s) => s.backend);
   const go = useApp((s) => s.go);
@@ -71,12 +79,22 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
   const [detail, setDetail] = useState<ItemDetail | null>(null);
   const [busy, setBusy] = useState(false);
   const [children, setChildren] = useState<MediaItem[]>([]);
+  /**
+   * Whether the screen knows what it holds.
+   *
+   * Which key the one-shot initial focus aims at depends on the children - a
+   * show has no Play button and must open on a season - and they arrive a round
+   * trip after the item does. Firing on `detail` alone aimed at a button that
+   * did not exist yet.
+   */
+  const [settled, setSettled] = useState(false);
 
   useEffect(() => {
     if (!backend) return;
     let live = true;
     setDetail(null);
     setChildren([]);
+    setSettled(false);
     // A different item has different versions; carrying an index across would
     // play the wrong file, or none.
     setVersion(0);
@@ -110,6 +128,7 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
           if (kids[0] && d.kind === "season") void backend.item(kids[0].id).then((k) => live && setFirstChild(k));
           if (live) setChildren(kids);
         }
+        if (live) setSettled(true);
       } catch (e) {
         if (!live) return;
         log.warn("detail failed", e);
@@ -156,16 +175,22 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
   // Whatever this screen actually has: the episode someone arrived pointing at,
   // the first child on a group, the play button on a film - and on a group with
   // nothing in it, the message's own way out, because none of the others exist.
+  // Aimed at the Play button only where one is RENDERED, and by the same test
+  // the render uses. They were two different tests, and a show passed one and
+  // failed the other: `playableKind` says a show is a thing to play, the button
+  // asks `toPlayable` as well and gets nothing. norigin returns a key it does
+  // not know unchanged, so focus parked on a component that did not exist and
+  // every press was discarded with nothing to report it - on all 256 series.
   const first = upNext
     ? `children-${itemId}-${upNext.item.id}`
     : focusChildId
       ? `children-${itemId}-${focusChildId}`
-      : detail && !playableKind(detail)
-        ? children[0]
+      : detail && hasPlayButton(detail, children)
+        ? "detail-play"
+        : children[0]
           ? `children-${itemId}-${children[0].id}`
-          : "detail-back"
-        : "detail-play";
-  useInitialFocus(first, Boolean(detail));
+          : "detail-back";
+  useInitialFocus(first, settled);
 
   // A countdown arrives on a screen that never unmounted - the browse tree is
   // hidden during playback, not thrown away - so the one-shot initial focus has
@@ -257,11 +282,15 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
   // A group is a list of things to play, not a thing to play - and a show is a
   // list of seasons, which are lists too. An empty season has nothing to start
   // either, and a button that accepts OK and does nothing is worse than none.
-  const playable =
-    detail.kind !== "collection" &&
-    detail.kind !== "playlist" &&
-    detail.kind !== "show" &&
-    Boolean(toPlayable(detail, children));
+  const playable = hasPlayButton(detail, children);
+  /**
+   * The running order Play hands over.
+   *
+   * A list screen's own children ARE the order; a film has none, so it uses the
+   * list it was opened from. `children` first, because a season opened from a
+   * collection is a list in its own right and its episodes are the order there.
+   */
+  const order = children.length ? children : (queueFrom ?? []);
   /**
    * What Play starts.
    *
@@ -367,7 +396,7 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
                 onEnter={() =>
                   backend &&
                   toPlay &&
-                  void usePlayer.getState().play(backend, toPlay, { version, ...pick(tracksFrom), queue: children })
+                  void usePlayer.getState().play(backend, toPlay, { version, ...pick(tracksFrom), queue: order })
                 }
                 className="rounded-[1vh] bg-white/15 px-[2.4vw] py-[1.4vh] text-[2.1vh]"
               >
@@ -386,7 +415,7 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
                   toPlay &&
                   void usePlayer
                     .getState()
-                    .play(backend, toPlay, { resume: false, version, ...pick(tracksFrom), queue: children })
+                    .play(backend, toPlay, { resume: false, version, ...pick(tracksFrom), queue: order })
                 }
                 className="rounded-[1vh] bg-white/10 px-[2vw] py-[1.4vh] text-[2.1vh]"
               >
@@ -517,7 +546,15 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
                 );
                 return;
               }
-              go({ name: "item", itemId: item.id });
+              // A film opens its own screen, and that screen has no children to
+              // make a running order from - so the list it was opened from is
+              // carried over. Only from a list of things to play: a season's
+              // episodes never take this route, and a show is not an order.
+              go({
+                name: "item",
+                itemId: item.id,
+                queueFrom: detail.kind === "playlist" || detail.kind === "collection" ? children : undefined,
+              });
             }}
           />
         )}
@@ -566,6 +603,17 @@ export function Detail({ itemId, focusChildId }: { itemId: string; focusChildId?
 /** Whether an item is a thing to play rather than a list of them. */
 function playableKind(d: ItemDetail): boolean {
   return d.kind !== "collection" && d.kind !== "playlist";
+}
+
+/**
+ * Whether this screen renders a Play button.
+ *
+ * One test, used by both the render and the focus target. Kept as a function
+ * rather than a local so the two can never drift apart again - they did, and
+ * the D-pad went dead on every show.
+ */
+function hasPlayButton(d: ItemDetail, kids: MediaItem[]): boolean {
+  return playableKind(d) && Boolean(toPlayable(d, kids));
 }
 
 /** What Play would start on this screen, or nothing. Mirrors `toPlay`. */

@@ -76,6 +76,14 @@ const THEME_PATH = /^\/library\/metadata\/\d+\/theme\/\d+$/;
  */
 const PART_PATH = /^\/library\/parts\/\d+\/\d+\/[^/\\?#]*$/;
 /**
+ * Where a sidecar subtitle lives. Checked against every external subtitle in a
+ * sample of this server's films - all of them are exactly this.
+ *
+ * Bounded for the same reason as PART_PATH: this URL carries the token and is
+ * handed to the mpv process.
+ */
+const STREAM_PATH = /^\/library\/streams\/\d+$/;
+/**
  * A path the server may send us back to.
  *
  * Bounded because it comes from the server and becomes a request URL: a section
@@ -770,10 +778,18 @@ export class PlexBackend implements MediaBackend {
     // file, so "off" is something the PLAYER is told, above.
     if (chosen && (opts.audio !== undefined || opts.subtitle !== undefined)) {
       const audioId = opts.audio !== undefined ? chosen.audio[opts.audio]?.id : undefined;
+      // Undefined and "none" are different answers, and collapsing them wrote
+      // subtitleStreamID=0 whenever only an AUDIO language was chosen - which is
+      // what the language picker sends most often. Measured on this server: an
+      // item with a subtitle selected lost that selection to a call that never
+      // mentioned subtitles. The parameter is omitted when nothing was said, the
+      // same way the audio one already was.
       const subtitleId =
-        opts.subtitle === undefined || opts.subtitle === "none"
-          ? "none"
-          : chosen.subtitles.find((t) => t.ordinal === opts.subtitle)?.id;
+        opts.subtitle === undefined
+          ? undefined
+          : opts.subtitle === "none"
+            ? "none"
+            : chosen.subtitles.find((t) => t.ordinal === opts.subtitle)?.id;
 
       // An ordinal that resolves to nothing must not be dropped in silence: the
       // parameter would simply be omitted, which the server reads as "no
@@ -799,6 +815,30 @@ export class PlexBackend implements MediaBackend {
     const decision = part?.decision ?? "transcode";
     const burned = (media?.Part?.[0]?.Stream ?? []).some((s) => s.streamType === 3 && s.decision === "burn");
 
+    // A sidecar subtitle is a FILE, not a position among the container's tracks,
+    // and its ordinal is negative to say so. Passing that on as a track index
+    // turned subtitles OFF - the player reads a negative sid as "no" - so an
+    // explicit choice became silence, and the languages that live only in a
+    // sidecar could not be selected at all. It is handed over as a file instead,
+    // which is the only way to use one; the shell prefers a sub file over a
+    // track index, so the two cannot both apply.
+    const external =
+      typeof opts.subtitle === "number" && opts.subtitle < 0
+        ? chosen?.subtitles.find((t) => t.ordinal === opts.subtitle)
+        : undefined;
+    if (external && !(external.key && STREAM_PATH.test(external.key)))
+      log.warn("external subtitle has no usable path; left off");
+    // Not while the server is burning one in: that would be the same subtitle
+    // twice, once in the picture and once over it.
+    const subFile =
+      !burned && external?.key && STREAM_PATH.test(external.key)
+        ? buildUrl(this.base, external.key.replace(/^\//, ""), { "X-Plex-Token": this.session.token })
+        : undefined;
+    // A negative ordinal never reaches the player: either it became a sub file
+    // above, or it could not be used and off is the honest answer.
+    const sub: number | "no" =
+      burned || subFile ? "no" : typeof opts.subtitle === "number" && opts.subtitle >= 0 ? opts.subtitle : "no";
+
     if (decision === "directplay" && part?.key) {
       // The part key is used as given - it carries a timestamp segment between
       // the id and the filename, and a reconstructed path without it is a 404 -
@@ -822,7 +862,8 @@ export class PlexBackend implements MediaBackend {
         // remembers is irrelevant - and mpv's "auto" turns on whichever track
         // carries the container's default flag, which 20 of 40 films here have.
         // The shell's own comment says the same: saying nothing is not off.
-        sub: burned ? "no" : opts.subtitle !== undefined && opts.subtitle !== "none" ? opts.subtitle : "no",
+        sub,
+        subFile,
         subtitlesBurnedIn: burned,
         session: opts.session,
         location: this.session.location,
@@ -842,7 +883,8 @@ export class PlexBackend implements MediaBackend {
         "X-Plex-Token": this.session.token,
       }),
       audio: "auto",
-      sub: burned ? "no" : opts.subtitle !== undefined && opts.subtitle !== "none" ? opts.subtitle : "no",
+      sub,
+      subFile,
       subtitlesBurnedIn: burned,
       session: opts.session,
       location: this.session.location,

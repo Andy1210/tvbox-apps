@@ -365,6 +365,11 @@ export const usePlayer = create<PlayerState>((set, get) => ({
           audio: choice.audio,
           maxBitrateKbps: choice.maxBitrateKbps,
           subtitle: choice.subtitle,
+          // `play` sets the running order from what it is handed, so a restart
+          // that omits it clears it: changing quality or audio part-way through
+          // a playlist took the next and previous buttons away, and on an
+          // episode replaced the playlist's order with the series' own.
+          queue: get().queue,
         },
       );
     } finally {
@@ -577,7 +582,13 @@ async function handleFinished(reason: string | undefined, get: () => PlayerState
     upNextTimer = null;
     const still = usePlayer.getState().upNext;
     usePlayer.setState({ upNext: null });
-    if (still && backend) void usePlayer.getState().play(backend, still.item, { resume: false });
+    // The running order travels with the auto-advance too. Without it a
+    // playlist advanced exactly once and then stopped, because the item it
+    // landed on had no queue to find a next in; on an episode it was worse than
+    // stopping, because the fallback re-derives the order from the SERIES and
+    // the playlist's order was silently replaced by it.
+    if (still && backend)
+      void usePlayer.getState().play(backend, still.item, { resume: false, queue: usePlayer.getState().queue });
   }, UP_NEXT_MS);
 }
 

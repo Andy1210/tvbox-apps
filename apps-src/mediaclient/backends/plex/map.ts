@@ -507,8 +507,18 @@ export function toVersions(m: PlexMetadata & { Media?: PlexMediaEntry[] }): Medi
         // and giving it one the player then looks for selects a track that is
         // not there - measured, one item here has six of them and not one could
         // be turned on. An external one is handed over as a file instead.
+        // Each sidecar gets its OWN negative ordinal rather than a shared -1.
+        // The ordinal is how a choice is named on the way back down, and 3 films
+        // in 80 on this server carry more than one external subtitle, which a
+        // single -1 cannot tell apart.
         const external = Boolean(s.key);
-        subtitles.push(toTrack(s, external ? -1 : subtitles.filter((x) => !x.external).length, "subtitle"));
+        subtitles.push(
+          toTrack(
+            s,
+            external ? -(subtitles.filter((x) => x.external).length + 1) : subtitles.filter((x) => !x.external).length,
+            "subtitle",
+          ),
+        );
       }
     }
     return { audio, subtitles };
