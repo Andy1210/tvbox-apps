@@ -21,6 +21,13 @@ vi.mock("../storage", () => ({
 }));
 
 const { useChosenVersion, rememberedVersion } = await import("../chosenVersion");
+// At module scope, not inside a test. `setupRemote` registers `beforeAll(init)`
+// - a hook added while a test is already running never runs, so spatial
+// navigation was left with no layout adapter and its own async measurement
+// rejected into nowhere: twenty unhandled rejections, tests all green, and
+// vitest exiting 1. The suite passed and the run failed.
+const { setupRemote, flushFocus } = await import("./remote");
+setupRemote();
 
 beforeEach(() => {
   store.data.clear();
@@ -106,11 +113,9 @@ describe("the detail screen", () => {
     const { configureI18n } = await import("@sdk");
     const { Detail } = await import("../Detail");
     const { useApp } = await import("../state");
-    const { setupRemote, flushFocus } = await import("./remote");
     const en = (await import("../locales/en.json")).default;
     const hu = (await import("../locales/hu.json")).default;
     configureI18n({ hu, en }, { fallback: "en" });
-    setupRemote();
 
     const versions = [
       { mediaIndex: 0, label: "1080p 3D", partId: "1", parts: 1, partIndex: 0, audio: [], subtitles: [] },
@@ -171,11 +176,9 @@ describe("the version chips", () => {
     const { doesFocusableExist } = await import("@noriginmedia/norigin-spatial-navigation");
     const { Detail } = await import("../Detail");
     const { useApp } = await import("../state");
-    const { setupRemote, flushFocus } = await import("./remote");
     const en = (await import("../locales/en.json")).default;
     const hu = (await import("../locales/hu.json")).default;
     configureI18n({ hu, en }, { fallback: "en" });
-    setupRemote();
 
     const versions = [
       { mediaIndex: 0, partIndex: 0, parts: 2, label: "SD · 1/2", partId: "108049", audio: [], subtitles: [] },
