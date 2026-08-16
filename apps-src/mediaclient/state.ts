@@ -5,13 +5,14 @@
 // session, which everything needs.
 
 import { create } from "zustand";
-import type { MediaBackend, MediaItem, Session } from "./backends/types";
+import type { ItemKind, MediaBackend, MediaItem, Session } from "./backends/types";
 import { backendFor } from "./backends/factory";
 import { getIdentity, type Identity } from "./identity";
 import { readJson, writeJson, removeRaw } from "./storage";
 import { clearImages } from "./posters";
 import { clearLibraryViews } from "./libraryView";
 import { resetPlayer } from "./playback/player";
+import { resetMusic } from "./playback/music";
 import { useChosenVersion } from "./chosenVersion";
 import { log } from "./redact";
 
@@ -50,8 +51,22 @@ export type Screen =
       queueFrom?: MediaItem[];
     }
   | { name: "person"; personId: string; personName: string }
+  /**
+   * A music library.
+   *
+   * Separate from "library" rather than a mode of it: the film grid is a grid of
+   * posters with a filter panel, and none of that is what a music library wants.
+   * Which screen a library opens is decided by its `kind`, once, in Home.
+   */
+  | { name: "music"; libraryId: string; title: string }
+  | { name: "musicList"; libraryId: string; lens: MusicLens; title: string }
+  | { name: "musicItem"; itemId: string; kind: ItemKind; title: string; libraryId: string }
+  | { name: "nowPlaying" }
   | { name: "search" }
   | { name: "settings" };
+
+/** The three depths of a music library, as the screens name them. */
+export type MusicLens = "tracks" | "albums" | "artists";
 
 /** What went wrong, in terms a person on a sofa can act on. */
 export type Failure = { kind: "unreachable" | "signed-out" | "no-server" | "unknown"; detail?: string };
@@ -172,6 +187,7 @@ export const useApp = create<State>((set, get) => ({
     // would otherwise start a film as somebody else.
     clearImages();
     resetPlayer();
+    resetMusic();
     set({
       session: named,
       backend: backendFor(named, identity!),
@@ -213,6 +229,7 @@ export const useApp = create<State>((set, get) => ({
     clearImages();
     clearLibraryViews();
     resetPlayer();
+    resetMusic();
     // The remembered version of a title goes too. It is a household fact rather
     // than a personal one, so a PROFILE switch keeps it - but a rating key is a
     // per-SERVER id and they collide across servers, so another account signing

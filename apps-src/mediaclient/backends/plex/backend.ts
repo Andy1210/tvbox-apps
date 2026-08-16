@@ -17,6 +17,7 @@ import type {
   DeviceLogin,
   SortOption,
   FilterOption,
+  ListLens,
 } from "../types";
 import { buildUrl, container, request, type PlexIdentityHeaders } from "./http";
 import { beginDeviceLogin, listHomeUsers, switchHomeUser } from "./auth";
@@ -62,6 +63,24 @@ const FILTER_KEY = /^[A-Za-z][A-Za-z0-9_.]{0,40}$/;
 /** Parameter names that are ours to set. Plex has no filter by these names. */
 /** Plex's own number for a collection. */
 const COLLECTION_TYPE = 18;
+
+/**
+ * The server's item type for a lens, or nothing for the library's own items.
+ *
+ * A music section's own items are its ARTISTS, so albums and tracks are two
+ * further depths of the same section rather than lists of their own - which is
+ * what lets them page, sort and bucket by letter through the same calls. The
+ * numbers are the server's: 9 albums, 10 tracks, 18 collections.
+ */
+const LENS_TYPE: Record<ListLens, number> = {
+  collections: COLLECTION_TYPE,
+  albums: 9,
+  tracks: 10,
+};
+
+function lensType(of?: ListLens): Record<string, number> {
+  return of ? { type: LENS_TYPE[of] } : {};
+}
 /** What a theme path looks like. Verified against every one this server offers. */
 const THEME_PATH = /^\/library\/metadata\/\d+\/theme\/\d+$/;
 /**
@@ -223,7 +242,12 @@ export class PlexBackend implements MediaBackend {
 
   async libraries(): Promise<Library[]> {
     const c = container<MetadataContainer>(await this.req("library/sections"));
-    return (c.Directory ?? []).map(toLibrary).filter((l) => l.kind === "movie" || l.kind === "show");
+    // Photos and anything unrecognised are still left out: they have no screen
+    // here, and a library chip that opens an empty grid is worse than one that
+    // is missing.
+    return (c.Directory ?? [])
+      .map(toLibrary)
+      .filter((l) => l.kind === "movie" || l.kind === "show" || l.kind === "music");
   }
 
   async onDeck(): Promise<MediaItem[]> {
@@ -256,10 +280,10 @@ export class PlexBackend implements MediaBackend {
         // Direction rides on the sort key itself, which is what the server
         // expects: a separate parameter is ignored.
         sort: `${q.sort ?? "titleSort"}${q.desc ? ":desc" : ""}`,
-        // 18 is the collection type. Asking for them through the ordinary list
-        // is what lets the A-Z strip, the paging and the order work on them
-        // without a second implementation of each.
-        ...(q.of === "collections" ? { type: COLLECTION_TYPE } : {}),
+        // Asking for a lens through the ordinary list is what lets the A-Z
+        // strip, the paging and the order work on it without a second
+        // implementation of each.
+        ...lensType(q.of),
         ...page(q.offset, q.limit),
       }),
     );
@@ -277,12 +301,12 @@ export class PlexBackend implements MediaBackend {
   async letters(
     libraryId: string,
     filters?: Record<string, string>,
-    of?: "collections",
+    of?: ListLens,
   ): Promise<{ key: string; title: string; size: number }[]> {
     const c = container<MetadataContainer>(
       await this.req(`library/sections/${libraryId}/firstCharacter`, {
         ...safeFilters(filters),
-        ...(of === "collections" ? { type: COLLECTION_TYPE } : {}),
+        ...lensType(of),
       }),
     );
     // Accented initials are merged into the plain letter. The server keeps some
@@ -345,8 +369,15 @@ export class PlexBackend implements MediaBackend {
    */
   private static readonly COLLECTION_FILTERS = new Set(["contentRating"]);
 
-  async sortOptions(libraryId: string, of?: "collections"): Promise<SortOption[]> {
-    const c = container<MetadataContainer>(await this.req(`library/sections/${libraryId}/sorts`));
+  async sortOptions(libraryId: string, of?: ListLens): Promise<SortOption[]> {
+    const c = container<MetadataContainer>(
+      // The lens goes to the server for music, because the sets differ per depth
+      // - measured on this section, tracks offer mediaBitrate and ratingCount
+      // while albums offer the artist/album/disc order, and the section's own
+      // answer mentions none of them. Collections keep asking WITHOUT a type and
+      // narrowing afterwards, which is the pairing that was measured for them.
+      await this.req(`library/sections/${libraryId}/sorts`, of === "collections" ? {} : lensType(of)),
+    );
     return (
       (c.Directory ?? [])
         // "random" is offered and is not usable here: the grid is virtualised, so
@@ -360,8 +391,10 @@ export class PlexBackend implements MediaBackend {
     );
   }
 
-  async filterOptions(libraryId: string, of?: "collections"): Promise<FilterOption[]> {
-    const c = container<MetadataContainer>(await this.req(`library/sections/${libraryId}/filters`));
+  async filterOptions(libraryId: string, of?: ListLens): Promise<FilterOption[]> {
+    const c = container<MetadataContainer>(
+      await this.req(`library/sections/${libraryId}/filters`, of === "collections" ? {} : lensType(of)),
+    );
     return (
       (c.Directory ?? [])
         // A filter key becomes both a PATH SEGMENT and a QUERY NAME later, and it
@@ -464,7 +497,7 @@ export class PlexBackend implements MediaBackend {
     const c = container<MetadataContainer>(
       await this.req(
         `library/sections/${libraryId}/firstCharacter/${encodeLetterKey(letterKey)}`,
-        page(q.offset, q.limit),
+        { ...lensType(q.of), ...page(q.offset, q.limit) },
       ),
     );
     return { items: (c.Metadata ?? []).map(toItem), total: c.totalSize };
@@ -524,14 +557,71 @@ export class PlexBackend implements MediaBackend {
     return this.libraryPage(libraryId, { ...q, of: "collections" });
   }
 
-  async playlists(): Promise<MediaItem[]> {
-    const c = container<MetadataContainer>(await this.req("playlists", { playlistType: "video" }));
+  async playlists(kind?: "audio" | "video"): Promise<MediaItem[]> {
+    const c = container<MetadataContainer>(await this.req("playlists", kind ? { playlistType: kind } : {}));
     return (c.Metadata ?? []).map(toItem);
   }
 
   async playlistItems(id: string): Promise<MediaItem[]> {
     const c = container<MetadataContainer>(await this.req(`playlists/${encodeURIComponent(id)}/items`));
     return (c.Metadata ?? []).map(toItem);
+  }
+
+  /**
+   * The server's own name for a set of its items, which is what both playlist
+   * writes are addressed with.
+   *
+   * `serverId` is the machine identifier - verified against `/identity` and the
+   * account's resource list, which agree. A wrong one is not an error: the
+   * server accepts the call and creates an EMPTY playlist, so this is built from
+   * the session rather than assembled at each call site.
+   */
+  private itemsUri(itemIds: string[]): string {
+    // Held to what a rating key is, at the one place ids become a URI. They
+    // arrive from list responses today, but this string is a server-side
+    // selector carrying an admin token, and a comma-joined free-form id would
+    // let one entry address something else entirely.
+    const ids = itemIds.filter((id) => /^\d+$/.test(id));
+    if (!ids.length) throw new Error("no playable ids for a playlist");
+    return `server://${this.session.serverId}/com.plexapp.plugins.library/library/metadata/${ids.join(",")}`;
+  }
+
+  async createPlaylist(title: string, itemIds: string[], kind: "audio" | "video"): Promise<MediaItem> {
+    const c = container<MetadataContainer>(
+      await request<MetadataContainer>(this.base, "playlists", this.id, {
+        method: "POST",
+        token: this.session.token,
+        // smart=0 is required: without it the server answers 400 rather than
+        // defaulting, so a playlist created from the box would never appear.
+        query: { type: kind, title, smart: 0, uri: this.itemsUri(itemIds) },
+      }),
+    );
+    const made = (c.Metadata ?? []).map(toItem)[0];
+    if (!made) throw new Error("the server created no playlist");
+    return made;
+  }
+
+  async addToPlaylist(playlistId: string, itemIds: string[]): Promise<void> {
+    if (!/^\d+$/.test(playlistId)) throw new Error("not a playlist id");
+    await request(this.base, `playlists/${encodeURIComponent(playlistId)}/items`, this.id, {
+      method: "PUT",
+      token: this.session.token,
+      query: { uri: this.itemsUri(itemIds) },
+    });
+  }
+
+  /**
+   * A track's own file, with the credential in the URL.
+   *
+   * Nothing is negotiated: an audio file direct-plays, and the profile this
+   * client sends already tells the server so. That is also why this does not go
+   * through `resolveStream` - there is no session to start, and starting one per
+   * track would leave a trail of transcode sessions to reap for playback that
+   * never transcoded.
+   */
+  trackUrl(item: MediaItem): string | undefined {
+    if (!item.mediaKey) return undefined;
+    return buildUrl(this.base, item.mediaKey.replace(/^\//, ""), { "X-Plex-Token": this.session.token });
   }
 
   /**

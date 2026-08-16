@@ -68,6 +68,15 @@ export interface PlexMetadata {
   Writer?: PlexTag[];
   Genre?: PlexTag[];
   Marker?: PlexMarker[];
+  /**
+   * The files behind this item.
+   *
+   * A film's listing omits it and its detail carries it, which is why the video
+   * path reads versions off the detail. A TRACK carries it in the plain listing
+   * - measured on this server - and that is what lets a queue be built from a
+   * page of tracks without a request each.
+   */
+  Media?: PlexMediaEntry[];
 }
 
 export interface PlexTag {
@@ -133,6 +142,9 @@ const KINDS: Record<string, ItemKind> = {
   episode: "episode",
   collection: "collection",
   playlist: "playlist",
+  artist: "artist",
+  album: "album",
+  track: "track",
 };
 
 export function toKind(t: string | undefined): ItemKind {
@@ -162,10 +174,10 @@ export function toItem(m: PlexMetadata): MediaItem {
     kind: toKind(m.type),
     title: m.title ?? "",
     parentTitle: m.parentTitle,
-    seriesTitle: m.grandparentTitle,
+    grandparentTitle: m.grandparentTitle,
     parentId: m.parentRatingKey !== undefined ? String(m.parentRatingKey) : undefined,
-    seriesId: m.grandparentRatingKey !== undefined ? String(m.grandparentRatingKey) : undefined,
-    seriesThumb: m.grandparentThumb,
+    grandparentId: m.grandparentRatingKey !== undefined ? String(m.grandparentRatingKey) : undefined,
+    grandparentThumb: m.grandparentThumb,
     sortTitle: m.titleSort,
     year: m.year,
     thumb,
@@ -175,6 +187,11 @@ export function toItem(m: PlexMetadata): MediaItem {
     theme: m.theme ?? m.parentTheme ?? m.grandparentTheme,
     colors: toColors(m.UltraBlurColors),
     durationMs: m.duration,
+    // Only where the listing carries it, which in practice is a track. Left
+    // undefined rather than guessed: `trackUrl` answers undefined for an item
+    // with no file, and a fabricated path would instead reach the player and
+    // fail there, where nothing can explain it.
+    mediaKey: m.Media?.[0]?.Part?.[0]?.key,
     viewOffsetMs: m.viewOffset,
     viewCount: m.viewCount,
     lastViewedAt: m.lastViewedAt,
@@ -347,15 +364,15 @@ export function rollUpEpisodes(items: MediaItem[]): MediaItem[] {
     // under a series title, and asking a server for an episode's children is an
     // error rather than an empty list. Dedupe on it too - two distinct series
     // can share a name, and titles would collapse them into one.
-    const seriesId = it.seriesId;
-    if (!seriesId || !it.seriesTitle || seenSeries.has(seriesId)) continue;
-    seenSeries.add(seriesId);
+    const grandparentId = it.grandparentId;
+    if (!grandparentId || !it.grandparentTitle || seenSeries.has(grandparentId)) continue;
+    seenSeries.add(grandparentId);
     out.push({
-      id: seriesId,
+      id: grandparentId,
       kind: "show",
-      title: it.seriesTitle,
+      title: it.grandparentTitle,
       // The series' own poster; an episode's thumb is a still from that episode.
-      thumb: it.seriesThumb,
+      thumb: it.grandparentThumb,
       // The episode's dates are not the series', and carrying them would sort a
       // series by whichever episode happened to come back first.
     });

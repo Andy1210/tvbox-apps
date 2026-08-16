@@ -10,6 +10,7 @@ import { create } from "zustand";
 import type { ItemDetail, MediaBackend, Marker, MediaItem, PlaybackState, StreamDecision } from "../backends/types";
 import { PlaybackScheduler, type NowPlayingReport } from "./scheduler";
 import { onRelease, onResume } from "../lifecycle";
+import { claimPlayer, heldByAnother, releasePlayer, whenPlayerLost } from "./owner";
 import { log } from "../redact";
 
 /** Auto-advance starts the next episode this long before the file truly ends. */
@@ -316,6 +317,10 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     wirePlayerEvents(set, get);
     wireLifecycle();
 
+    // Immediately before the URL goes out, so a film started over music silences
+    // the queue rather than leaving it advancing into the film's own audio.
+    claimPlayer("video");
+
     tv.play(
       decision.url,
       {
@@ -491,6 +496,8 @@ export const usePlayer = create<PlayerState>((set, get) => ({
 
   async stop() {
     if (!get().current) return;
+    // Before the bridge call, so an event racing the stop is already ignored.
+    releasePlayer("video");
     bridge()?.stop?.();
     unsubscribePlayer?.();
     unsubscribePlayer = null;
@@ -549,11 +556,41 @@ function nowPlayingFor(s: PlayerState): NowPlayingReport {
     title: item.title,
     // The series and episode number is what makes the card readable elsewhere.
     artist:
-      item.seriesTitle && item.parentIndex !== undefined && item.index !== undefined
-        ? `${item.seriesTitle} — S${item.parentIndex}E${item.index}`
-        : item.seriesTitle,
+      item.grandparentTitle && item.parentIndex !== undefined && item.index !== undefined
+        ? `${item.grandparentTitle} — S${item.parentIndex}E${item.index}`
+        : item.grandparentTitle,
   };
 }
+
+/**
+ * Music took the player.
+ *
+ * The film is already gone - the shell replaced what it was playing - so this
+ * tidies up after it rather than stopping anything: the server session is ended,
+ * the overlay comes down, and an armed "next episode" countdown is cancelled.
+ * That countdown is the one that would otherwise bite: five seconds after
+ * somebody put music on, it would start an episode over it.
+ */
+whenPlayerLost("video", () => {
+  const s = usePlayer.getState();
+  usePlayer.getState().cancelUpNext();
+  if (!s.current) return;
+  void scheduler?.end();
+  scheduler = null;
+  const session = s.current.decision.session;
+  if (session && currentBackend) void currentBackend.endSession(session).catch(() => {});
+  postNowPlaying({ state: "idle" });
+  usePlayer.setState({
+    current: null,
+    state: "stopped",
+    positionMs: 0,
+    seekTargetMs: null,
+    seekFromMs: null,
+    scrubMs: null,
+    overlay: false,
+    buffering: false,
+  });
+});
 
 type Setter = (partial: Partial<PlayerState>) => void;
 
@@ -563,6 +600,11 @@ function wirePlayerEvents(set: Setter, get: () => PlayerState): void {
   unsubscribePlayer?.();
 
   unsubscribePlayer = tv.onPlayer((ev) => {
+    // Every listener hears every event, and music drives the same player. Without
+    // this, a song ending arrives here as a film that finished nowhere near its
+    // end - which is the one case that calls stop(), so the next track would be
+    // silenced a moment after it started.
+    if (heldByAnother("video")) return;
     switch (ev.type) {
       case "position": {
         const ms = ev.ms ?? 0;

@@ -429,10 +429,10 @@ export function Detail({
         className="relative z-10 flex h-full flex-col gap-[2.4vh] overflow-y-auto py-[3vh] scroll-pt-[16vh] scroll-pb-[12vh]"
       >
         <header className="flex flex-col gap-[1.2vh] px-[4vw]">
-          <TitleArt title={shown.seriesTitle ?? shown.title} logo={shown.logo} />
+          <TitleArt title={shown.grandparentTitle ?? shown.title} logo={shown.logo} />
           {/* The episode's own name under the series art, so the page names what
               it is describing rather than only what it belongs to. */}
-          {shown !== detail || shown.seriesTitle ? <p className="text-[2vh] text-fg-dim">{shown.title}</p> : null}
+          {shown !== detail || shown.grandparentTitle ? <p className="text-[2vh] text-fg-dim">{shown.title}</p> : null}
           {shown.tagline && <p className="text-[1.9vh] text-fg-dim italic">{shown.tagline}</p>}
 
           <div className="flex flex-wrap items-center gap-[1.4vw] text-[1.7vh] text-fg-dim">
