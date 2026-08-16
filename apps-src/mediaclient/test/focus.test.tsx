@@ -72,7 +72,17 @@ describe("the remote", () => {
     // Without this, every arrow press is discarded and the app is a picture.
     // What you were watching, because that is what an evening usually starts
     // with; the top rail is one press up from it.
-    expect(getCurrentFocusKey()).toBe("ondeck-i1");
+    //
+    // Waited for rather than asserted after a fixed settle. This failed once on
+    // CI - `expected null to be "ondeck-i1"` - on a commit whose other run of
+    // the same tree passed, and it did not reproduce locally in 8 runs under 4x
+    // CPU load, with or without this change. So this is not a proven fix: it
+    // removes the fixed-tick assumption that is the usual cause of exactly that
+    // failure, and waits for the condition the test is actually about.
+    await waitFor(async () => {
+      await flushFocus();
+      expect(getCurrentFocusKey()).toBe("ondeck-i1");
+    });
   });
 
   it("moves along a row when Right is pressed", async () => {
