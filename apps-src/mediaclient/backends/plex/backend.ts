@@ -233,8 +233,11 @@ export class PlexBackend implements MediaBackend {
     // switch would then try to list the household with it.
     this.session = { ...this.session, token: profileToken, accountToken: this.accountToken, profileId: id };
     // Anything cached was fetched as somebody else: watch state, on deck and the
-    // resume points all belong to whoever was signed in a moment ago.
+    // resume points all belong to whoever was signed in a moment ago. The letter
+    // strip counts belong to them too - a restricted profile sees fewer items,
+    // so its alphabet is not the same alphabet.
     this.metaCache.clear();
+    this.letterCache.clear();
     return this.session;
   }
 
@@ -370,7 +373,11 @@ export class PlexBackend implements MediaBackend {
     const hit = this.letterCache.get(cacheKey);
     if (hit) return hit;
 
-    const counted = await Promise.all(
+    // Settled, not all-or-nothing. One letter timing out used to lose the whole
+    // strip - measured: 26 of 27 succeeded and the list came back empty, so a
+    // 582-song list had no way to jump at all. A strip missing one letter is a
+    // far smaller failure than a strip missing every letter.
+    const counted = await Promise.allSettled(
       PlexBackend.MUSIC_LETTERS.map(async (key) => {
         const c = await container<MetadataContainer>(
           await this.req(`library/sections/${libraryId}/firstCharacter/${encodeLetterKey(key)}`, {
@@ -381,10 +388,14 @@ export class PlexBackend implements MediaBackend {
         );
         return { key, title: key, size: c.totalSize ?? 0 };
       }),
-    ).catch(() => null);
+    );
 
-    if (!counted) return [];
-    const out = counted.filter((l) => l.size > 0);
+    const failed = counted.filter((r) => r.status === "rejected").length;
+    if (failed) log.warn(`letter strip: ${failed} of ${PlexBackend.MUSIC_LETTERS.length} buckets did not answer`);
+    const out = counted.flatMap((r) => (r.status === "fulfilled" ? [r.value] : [])).filter((l) => l.size > 0);
+    // A partial sweep is not remembered: the missing letters would then be
+    // missing until the app restarts.
+    if (failed) return out;
     if (out.length) this.letterCache.set(cacheKey, out);
     return out;
   }
@@ -695,8 +706,28 @@ export class PlexBackend implements MediaBackend {
     // Undefined rather than thrown: a queue is built from a page of items, and
     // one malformed key must skip that song rather than end the list. `playAt`
     // already treats a track with no URL as one to step over.
-    if (!item.mediaKey || !PART_PATH.test(item.mediaKey)) return undefined;
-    return buildUrl(this.base, item.mediaKey.replace(/^\//, ""), { "X-Plex-Token": this.session.token });
+    if (!item.mediaKey) return undefined;
+    // Checked on the RESOLVED path, the way artUrl does it, rather than on the
+    // raw string. Its note says why: two parsers read one value and they
+    // disagree - a leading tab is not absolute to a pattern and is absolute to
+    // the URL parser. Nothing gets past the raw test today, but the safer of the
+    // two rules belongs on the URL that carries the token.
+    let url: URL;
+    try {
+      url = new URL(item.mediaKey.replace(/^\//, ""), this.base.endsWith("/") ? this.base : this.base + "/");
+    } catch {
+      return undefined;
+    }
+    if (
+      url.origin !== new URL(this.session.baseUrl).origin ||
+      !PART_PATH.test(url.pathname) ||
+      url.search ||
+      url.hash
+    ) {
+      log.warn("track URL is not a media path on this server; dropped");
+      return undefined;
+    }
+    return buildUrl(this.base, url.pathname.replace(/^\//, ""), { "X-Plex-Token": this.session.token });
   }
 
   /**

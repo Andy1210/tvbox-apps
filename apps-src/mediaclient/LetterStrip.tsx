@@ -34,7 +34,12 @@ export function LetterStrip({
 }): React.JSX.Element {
   const { ref, focusKey } = useFocusable({
     focusKey: key,
-    saveLastFocusedChild: true,
+    // NOT remembered. Measured on the box: after the strip had been used once,
+    // arriving at it again landed on whatever letter was pressed last - Right
+    // from the top of the list went to Z - because the remembered child beats
+    // the preferred one. The letter the list is actually on is always the right
+    // place to enter, which is what `preferredChildFocusKey` below names.
+    saveLastFocusedChild: false,
     // Enter where the list already is, not at the top of the alphabet. From the
     // M's, reaching M otherwise cost up to twenty-six presses down a strip whose
     // whole purpose is to be faster than scrolling.

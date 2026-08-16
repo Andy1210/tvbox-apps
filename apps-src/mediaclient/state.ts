@@ -11,8 +11,8 @@ import { getIdentity, type Identity } from "./identity";
 import { readJson, writeJson, removeRaw } from "./storage";
 import { clearImages } from "./posters";
 import { clearLibraryViews } from "./libraryView";
-import { resetPlayer } from "./playback/player";
-import { resetMusic } from "./playback/music";
+import { resetPlayer, usePlayer } from "./playback/player";
+import { resetMusic, useMusic } from "./playback/music";
 import { useChosenVersion } from "./chosenVersion";
 import { log } from "./redact";
 
@@ -166,20 +166,24 @@ export const useApp = create<State>((set, get) => ({
   async chooseProfile(id, pin, name) {
     const { backend, identity } = get();
     if (!backend) return;
-    // BEFORE the switch, not after it.
+    // STOPPED before the switch, ERASED after it. Two different things, and the
+    // first attempt did both here, which broke the ordinary case: a mistyped PIN
+    // throws below and the person stays on the pad - with the music silenced and
+    // their queue gone, having never passed the gate.
     //
-    // `switchProfile` mutates the backend in place, and the music store and its
-    // scheduler hold that same object - so a final progress report flushed after
-    // the switch is the PREVIOUS person's song written with the NEW person's
-    // token, and the running 5-second timer does the same while the switch is in
-    // flight. That puts one person's listening into another's history and
-    // "recently played", across the boundary the PIN exists to draw.
+    // Stopping first is not optional though. `switchProfile` mutates the backend
+    // in place, and the music store and its scheduler hold that same object - so
+    // a final progress report sent afterwards is the PREVIOUS person's song
+    // written with the NEW person's token, which is exactly the boundary the PIN
+    // draws. The real guarantee is narrow and worth naming: `reportProgress`
+    // reads `session.token` and builds its URL BEFORE its first await, so the
+    // request is committed while the old token is still in place. Anything that
+    // later adds an await ahead of that read reopens this.
     //
-    // Music is the first thing on this box that plays while the browsing UI is
-    // live, so this is only reachable now: a film hides every other screen, and
-    // you cannot walk to the profile picker while one is loaded.
-    await Promise.resolve(resetMusic());
-    resetPlayer();
+    // Music is why this is reachable at all - it is the first thing on this box
+    // that plays while the browsing UI is live.
+    await useMusic.getState().stop();
+    await usePlayer.getState().stop();
     const session = await backend.switchProfile(id, pin);
     // Here rather than further down: from this line the backend is holding the
     // new profile's token, so anything that throws between here and the end
@@ -196,10 +200,12 @@ export const useApp = create<State>((set, get) => ({
 
     const w = await writeJson(SESSION_KEY, named);
     if (!w.ok) log.warn("profile not persisted; the next launch will ask again");
-    // Artwork and everything cached under it belonged to the previous person.
-    // The two players were already stopped above, before the token changed under
-    // them - doing it here as well would only be a second, later flush.
+    // Past the gate: now the previous person's things go. Artwork, and what the
+    // two players were holding - a queue is a record of what somebody listened
+    // to, and a countdown would otherwise start a film as the new person.
     clearImages();
+    resetPlayer();
+    resetMusic();
     set({
       session: named,
       backend: backendFor(named, identity!),

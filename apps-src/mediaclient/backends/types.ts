@@ -14,15 +14,7 @@ export interface Library {
 }
 
 export type ItemKind =
-  | "movie"
-  | "show"
-  | "season"
-  | "episode"
-  | "collection"
-  | "playlist"
-  | "artist"
-  | "album"
-  | "track";
+  "movie" | "show" | "season" | "episode" | "collection" | "playlist" | "artist" | "album" | "track";
 
 export interface MediaItem {
   id: string;
@@ -87,6 +79,16 @@ export interface MediaItem {
   summary?: string;
   /** Unwatched leaves below this item (a series or season). */
   unwatchedCount?: number;
+  /**
+   * How many leaves this item holds: a playlist's items, an album's tracks.
+   *
+   * Worth carrying because it is the only honest answer to "what did the server
+   * actually save". A playlist write drops ids it cannot resolve and duplicates
+   * it already has - measured, five ids became three tracks and two unresolvable
+   * ones became an EMPTY playlist under a 200 - so a screen that reports what it
+   * asked for reports a number that is not on the other device.
+   */
+  childCount?: number;
 }
 
 export interface PageQuery {

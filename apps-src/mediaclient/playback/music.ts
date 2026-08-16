@@ -29,6 +29,23 @@ export type RepeatMode = "off" | "all" | "one";
  */
 const NEAR_END_MS = 4_000;
 
+/**
+ * How long a start may take before it is treated as one that never happened.
+ *
+ * `window.tvbox.play()` returns nothing and reports nothing: the shell answers
+ * its own IPC with `{ok:false}` when the calling app is not the foreground one,
+ * and the preload discards that answer. Measured on the box - twice in five
+ * attempts the shell refused, no mpv started, and the screen sat at 0:00 reading
+ * "pause" for ever, while the scheduler told Plex and the household's
+ * now-playing topic that a silent track was playing. The shell's auto-update
+ * idle gate reads that topic, so the box also stops applying OTA updates.
+ *
+ * The film path learned this already and checks that playback really started.
+ * Generous, because a cold network start on this library was measured just under
+ * a second and a slow one is not a failure.
+ */
+const START_TIMEOUT_MS = 12_000;
+
 function bridge(): NonNullable<Window["tvbox"]> | undefined {
   return typeof window === "undefined" ? undefined : window.tvbox;
 }
@@ -105,6 +122,13 @@ let unsubscribe: (() => void) | null = null;
 let lifecycleWired = false;
 /** Which start is current, so a slow one cannot report over a newer one. */
 let token = 0;
+/** Armed at every start, disarmed by the first sign of life from the box. */
+let startWatchdog: ReturnType<typeof setTimeout> | null = null;
+
+function disarmWatchdog(): void {
+  if (startWatchdog) clearTimeout(startWatchdog);
+  startWatchdog = null;
+}
 
 export const useMusic = create<MusicState>((set, get) => ({
   queue: [],
@@ -147,7 +171,13 @@ export const useMusic = create<MusicState>((set, get) => ({
       // which one, and the advance is not automatic past the end.
       log.warn("no file for track", item.title);
       set({ error: item.title, index });
-      if (index + 1 < queue.length) await get().playAt(index + 1);
+      if (index + 1 < queue.length) return get().playAt(index + 1);
+      // Nowhere left to step to. Without this the store stayed "playing" on a
+      // track that never started: the previous track's scheduler kept reporting
+      // progress at a frozen position, the household's now-playing topic kept
+      // naming a silent song, and the shell's auto-update idle gate reads that
+      // topic - so the box would never look idle and OTA updates would stop.
+      await get().stop();
       return;
     }
 
@@ -170,6 +200,19 @@ export const useMusic = create<MusicState>((set, get) => ({
 
     claimPlayer("music");
     tv?.play?.(url);
+
+    // Nothing above answers, so this is the only thing that can notice a start
+    // that did not happen. Disarmed by the first position or playing event.
+    disarmWatchdog();
+    startWatchdog = setTimeout(() => {
+      startWatchdog = null;
+      if (mine !== token) return;
+      const s = get();
+      if (s.state !== "playing" || s.positionMs > 0) return;
+      log.warn("the box never started this track", item.title);
+      set({ error: item.title });
+      void get().stop();
+    }, START_TIMEOUT_MS);
 
     scheduler?.stopTimer();
     scheduler = new PlaybackScheduler({
@@ -229,8 +272,13 @@ export const useMusic = create<MusicState>((set, get) => ({
 
   async stop() {
     if (get().index < 0 && get().state === "stopped") return;
+    disarmWatchdog();
+    // Only OUR player. The queue survives a stop now, so the old guard - index
+    // below zero and already stopped - no longer fires, and a second stop while
+    // a film holds the box would otherwise reach the shared mpv and stop the
+    // film. Ownership is asked before the bridge is touched, not after.
+    if (ownsPlayer("music")) bridge()?.stop?.();
     releasePlayer("music");
-    bridge()?.stop?.();
     unsubscribe?.();
     unsubscribe = null;
     await scheduler?.end();
@@ -240,7 +288,10 @@ export const useMusic = create<MusicState>((set, get) => ({
     // focusable at all, and the only way out was Back. Keeping it means the
     // screen still shows what was on and Play starts it again - the same
     // decision already made for a film taking the player away.
-    set({ state: "stopped", positionMs: 0, durationMs: 0, buffering: false });
+    // The LENGTH is kept with the queue. Zeroing it left the player screen
+    // showing the track it still names at 0:00 / 0:00, which reads as a broken
+    // item rather than a stopped one.
+    set({ state: "stopped", positionMs: 0, buffering: false });
   },
 
   enqueue(tracks, where) {
@@ -318,6 +369,7 @@ function wireEvents(): void {
     if (!ownsPlayer("music")) return;
     switch (ev.type) {
       case "position":
+        disarmWatchdog();
         useMusic.setState({ positionMs: ev.ms ?? 0 });
         break;
       case "duration":

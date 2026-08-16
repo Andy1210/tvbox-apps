@@ -206,6 +206,7 @@ export function toItem(m: PlexMetadata): MediaItem {
       typeof leaf === "number" && (toKind(m.type) === "show" || toKind(m.type) === "season")
         ? leaf - (viewedLeaf ?? 0)
         : undefined,
+    childCount: leaf,
   };
 }
 

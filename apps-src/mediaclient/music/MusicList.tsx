@@ -57,7 +57,11 @@ export function MusicList({
   const fail = useApp((s) => s.fail);
   const failure = useApp((s) => s.failure);
   const playQueue = useMusic((s) => s.playQueue);
-  const playingId = useMusic((s) => s.queue[s.index]?.id);
+  // Only while it is actually playing. The queue survives a stop now, so reading
+  // it alone left the header offering "Most szól" and a row still drawn bold
+  // after Stop - three surfaces telling two stories, with the mini bar correctly
+  // gone.
+  const playingId = useMusic((s) => (s.state === "stopped" ? undefined : s.queue[s.index]?.id));
 
   const [total, setTotal] = useState<number | null>(null);
   const [pages, setPages] = useState<Map<number, MediaItem[]>>(new Map());
@@ -65,7 +69,6 @@ export function MusicList({
   const [cursor, setCursor] = useState(0);
   const [reload, setReload] = useState(0);
   const inflight = useRef<Set<number>>(new Set());
-  const rowEls = useRef(new Map<number, HTMLElement>());
   /**
    * Where Up from the top of the list goes.
    *
@@ -140,14 +143,10 @@ export function MusicList({
 
   const at = (index: number): MediaItem | undefined => pages.get(Math.floor(index / PAGE))?.[index % PAGE];
 
-  // The cursor row is brought into view here rather than by the browser: these
-  // rows are plain buttons, and the window they sit in is a slice of a much
-  // taller list, so the element only exists once the window has moved to it.
-  // "nearest" is what keeps a step down from moving the list by a whole screen.
-  useEffect(() => {
-    rowEls.current.get(cursor)?.scrollIntoView({ block: "nearest" });
-  }, [cursor, start]);
-
+  // No scrolling from here. Every row is a FocusButton, and the SDK already
+  // brings the focused one into view with `block: "nearest"` - scrolling it a
+  // second time from a cursor effect is what let spatial navigation resolve
+  // against a layout that had just moved.
   const rows = useMemo(() => {
     const out: number[] = [];
     for (let i = start; i < end; i++) out.push(i);
@@ -252,14 +251,7 @@ export function MusicList({
             {rows.map((i) => {
               const item = at(i);
               return (
-                <li
-                  key={i}
-                  ref={(el) => {
-                    if (el) rowEls.current.set(i, el);
-                    else rowEls.current.delete(i);
-                  }}
-                  style={{ height: `${TRACK_ROW_VH}vh` }}
-                >
+                <li key={i} style={{ height: `${TRACK_ROW_VH}vh` }}>
                   {item ? (
                     <TrackRow
                       item={item}
@@ -268,21 +260,25 @@ export function MusicList({
                       artUrl={square(item)}
                       playing={lens === "tracks" && item.id === playingId}
                       onEnter={() => void openOrPlay(i)}
+                      // The cursor FOLLOWS focus; it does not lead it.
+                      //
+                      // Leading it was measured on the box and was worse than the
+                      // bug it replaced: the handler moved the cursor, the cursor
+                      // scrolled the list, and then `return true` let spatial
+                      // navigation resolve as well - on the layout that had just
+                      // moved under it. One Down press advanced three rows and one
+                      // Up two, so about two songs in three could not be reached
+                      // at all. It looked correct before the list had to scroll,
+                      // because `scrollIntoView` is a no-op there.
+                      //
+                      // Now the only mover is spatial navigation, and this reports
+                      // where it landed. The window, the strip's highlight and the
+                      // focus fallback all read the cursor, so they follow too.
+                      onFocused={() => setCursor(i)}
                       onArrowPress={(dir) => {
                         if (dir === "up" && i === 0 && topKey) {
                           setFocus(topKey);
                           return false;
-                        }
-                        // Clamped to rows that exist. The cursor drives the
-                        // mounted window, the scroll, the strip's highlight AND
-                        // the focus fallback, so letting it run past either end -
-                        // which it did on the last row, and on the first row of
-                        // the album and artist lenses where there is no header to
-                        // catch Up - pointed the fallback at `mrow-<out of range>`,
-                        // a key that can never mount. That is the dead remote.
-                        if (dir === "down" || dir === "up") {
-                          const to = dir === "down" ? i + 1 : i - 1;
-                          setCursor(Math.max(0, Math.min(to, total - 1)));
                         }
                         return true;
                       }}

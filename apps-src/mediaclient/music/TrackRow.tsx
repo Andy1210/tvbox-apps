@@ -35,6 +35,7 @@ export function TrackRow({
   /** Position in the list, drawn where there is no artwork to draw. */
   ordinal,
   onArrowPress,
+  onFocused,
 }: {
   item: MediaItem;
   focusKey: string;
@@ -43,6 +44,9 @@ export function TrackRow({
   playing?: boolean;
   ordinal?: number;
   onArrowPress?: (direction: string) => boolean;
+  /** Called when this row takes focus. A windowed list learns where it is from
+   *  this rather than by counting presses - see MusicList. */
+  onFocused?: () => void;
 }): React.JSX.Element {
   const artist = item.grandparentTitle ?? item.parentTitle;
   const art = useArtwork(artUrl);
@@ -51,6 +55,7 @@ export function TrackRow({
       focusKey={focusKey}
       onEnter={onEnter}
       onArrowPress={onArrowPress}
+      onFocused={onFocused}
       // Full width and left-aligned: a row of text centred on a television reads
       // as a heading, and the eye then has to find where each line starts.
       className={`flex w-full items-center gap-[1.2vw] rounded-[1vh] px-[1.5vw] py-[1.1vh] text-left ${

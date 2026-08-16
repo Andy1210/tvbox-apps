@@ -9,7 +9,7 @@
 // pressed a song a moment ago; what they want next is pause or skip, not the
 // bottom of a list.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, Osk, useI18n } from "@sdk";
 import { Message } from "../Message";
@@ -21,6 +21,9 @@ import { useMusic, type RepeatMode } from "../playback/music";
 import { useArtwork } from "./useArtwork";
 import { clock } from "../time";
 import { log } from "../redact";
+
+/** How much of the queue is drawn. See the note where it is used. */
+const QUEUE_ROWS = 60;
 
 export function NowPlaying(): React.JSX.Element {
   const { t } = useI18n();
@@ -89,8 +92,13 @@ export function NowPlaying(): React.JSX.Element {
       // what was saved has to be resolved here rather than left as a surprise on
       // another device.
       const ids = [...new Set(queue.map((x) => x.id))];
-      await backend.createPlaylist(title, ids, "audio");
-      setNote(t("music.saved", { title, n: String(ids.length) }));
+      const made = await backend.createPlaylist(title, ids, "audio");
+      // The count the SERVER wrote, not the count we asked for. Deduplicating
+      // here is not enough: it also drops any id it cannot resolve - a track
+      // removed since the queue was built, or a rating key changed by a rescan -
+      // and answers 200 either way. Measured: five ids became three tracks, and
+      // two unresolvable ones became an empty playlist.
+      setNote(t("music.saved", { title, n: String(made.childCount ?? ids.length) }));
     } catch (e) {
       log.warn("saving the playlist failed", e);
       setNote(t("music.saveFailed"));
@@ -151,8 +159,15 @@ export function NowPlaying(): React.JSX.Element {
         <h2 className="shrink-0 px-[1.5vw] pb-[1vh] text-[2.4vh] text-fg-dim">
           {t("music.upNext")} · {Math.max(0, queue.length - index - 1)}
         </h2>
-        <ul className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
-          {queue.slice(index).map((x, i) => (
+        {/* py, because the focus ring scales a row by 4% and the container's own
+            edge clipped the top one in half. */}
+        <ul className="no-scrollbar min-h-0 flex-1 overflow-y-auto py-[0.6vh]">
+          {/* Bounded. A shuffle of this library is 572 rows, and every one of
+              them would otherwise be a mounted focusable that spatial navigation
+              measures on each press - the songs list windows for the same
+              reason. What is past here is still in the queue and still plays; it
+              is only not drawn. */}
+          {queue.slice(index, index + QUEUE_ROWS).map((x, i) => (
             <li key={`${x.id}-${index + i}`} style={{ height: `${TRACK_ROW_VH}vh` }}>
               <TrackRow
                 item={x}
@@ -202,44 +217,131 @@ function Transport({
 }): React.JSX.Element {
   const { t } = useI18n();
   const { ref, focusKey } = useFocusable({ focusKey: "np-transport", saveLastFocusedChild: true });
+  const box = useRef<HTMLDivElement | null>(null);
   const chip = "shrink-0 rounded-[1vh] px-[1.6vw] py-[1.1vh] text-[2.2vh]";
+
+  /**
+   * Swallow an arrow that has nowhere to go inside this row.
+   *
+   * Measured on the box: Left on the first chip left the screen with NOTHING
+   * focused - still gone half a second later - and the next press recovered it
+   * somewhere else entirely; Up on play/pause threw the cursor across into the
+   * queue, because nothing above the transport is focusable so navigation
+   * searched globally.
+   *
+   * Decided by geometry at press time rather than by position in the list,
+   * because this row WRAPS: which chip is first on a line depends on the panel,
+   * so Up from the second line has to keep working while Up from the first has
+   * to be consumed.
+   */
+  const atEdge = (key: string, dir: "up" | "left"): boolean => {
+    const here = box.current?.querySelector<HTMLElement>(`[data-sfocus="${key}"]`);
+    if (!here || !box.current) return false;
+    const mine = here.getBoundingClientRect();
+    const siblings = [...box.current.querySelectorAll<HTMLElement>("[data-sfocus]")].filter((el) => el !== here);
+    return !siblings.some((el) => {
+      const r = el.getBoundingClientRect();
+      // A tolerance, because a focused chip is scaled by 4% and its box moves.
+      return dir === "up" ? r.bottom <= mine.top + 2 : Math.abs(r.top - mine.top) < 4 && r.right <= mine.left + 2;
+    });
+  };
+  const edgeGuard =
+    (key: string) =>
+    (dir: string): boolean =>
+      (dir === "up" || dir === "left") && atEdge(key, dir) ? false : true;
   const on = "bg-white/25";
   const off = "bg-white/10";
 
   return (
     <FocusContext.Provider value={focusKey}>
-      <div ref={ref} className="mt-[2.5vh] flex flex-wrap items-center gap-[0.8vw]">
-        <FocusButton focusKey="np-prev" onEnter={onPrevious} className={`${chip} ${off}`}>
+      <div
+        // Two refs on one element: spatial navigation's, and ours for measuring
+        // where a chip sits when an arrow reaches the edge of the row.
+        ref={(el) => {
+          box.current = el;
+          (ref as React.MutableRefObject<HTMLDivElement | null>).current = el;
+        }}
+        className="mt-[2.5vh] flex flex-wrap items-center gap-[0.8vw]"
+      >
+        <FocusButton
+          focusKey="np-prev"
+          onArrowPress={edgeGuard("np-prev")}
+          onEnter={onPrevious}
+          className={`${chip} ${off}`}
+        >
           {t("music.previous")}
         </FocusButton>
-        <FocusButton focusKey="np-toggle" onEnter={onToggle} className={`${chip} ${off}`}>
-          {state === "playing" ? t("music.pause") : t("music.resume")}
+        <FocusButton
+          focusKey="np-toggle"
+          onArrowPress={edgeGuard("np-toggle")}
+          onEnter={onToggle}
+          className={`${chip} ${off}`}
+        >
+          {/* Three states, not two. Stopped-with-a-queue restarts the track from
+              the beginning, so calling it "Resume" promised something it does
+              not do. */}
+          {state === "playing" ? t("music.pause") : state === "paused" ? t("music.resume") : t("music.play")}
         </FocusButton>
-        <FocusButton focusKey="np-next" onEnter={onNext} className={`${chip} ${off}`}>
+        <FocusButton
+          focusKey="np-next"
+          onArrowPress={edgeGuard("np-next")}
+          onEnter={onNext}
+          className={`${chip} ${off}`}
+        >
           {t("music.next")}
         </FocusButton>
         {/* There was no way to move inside a song at all: the progress bar is a
             picture, and Previous/Next change the track. A long mix or a podcast
             episode needs a step, and two chips are what a D-pad can aim at. */}
-        <FocusButton focusKey="np-back10" onEnter={() => onSeek(-10_000)} className={`${chip} ${off}`}>
+        <FocusButton
+          focusKey="np-back10"
+          onArrowPress={edgeGuard("np-back10")}
+          onEnter={() => onSeek(-10_000)}
+          className={`${chip} ${off}`}
+        >
           {t("music.back10")}
         </FocusButton>
-        <FocusButton focusKey="np-fwd10" onEnter={() => onSeek(10_000)} className={`${chip} ${off}`}>
+        <FocusButton
+          focusKey="np-fwd10"
+          onArrowPress={edgeGuard("np-fwd10")}
+          onEnter={() => onSeek(10_000)}
+          className={`${chip} ${off}`}
+        >
           {t("music.forward10")}
         </FocusButton>
         {/* The two modes show their state in the chip rather than in an icon:
             a filled shape means nothing to someone who has not been told, and
             this is the only place either mode can be read. */}
-        <FocusButton focusKey="np-shuffle" onEnter={onShuffle} className={`${chip} ${shuffle ? on : off}`}>
+        <FocusButton
+          focusKey="np-shuffle"
+          onArrowPress={edgeGuard("np-shuffle")}
+          onEnter={onShuffle}
+          className={`${chip} ${shuffle ? on : off}`}
+        >
           {t("music.shuffle")}
         </FocusButton>
-        <FocusButton focusKey="np-repeat" onEnter={onRepeat} className={`${chip} ${repeat === "off" ? off : on}`}>
+        <FocusButton
+          focusKey="np-repeat"
+          onArrowPress={edgeGuard("np-repeat")}
+          onEnter={onRepeat}
+          className={`${chip} ${repeat === "off" ? off : on}`}
+        >
           {repeat === "one" ? t("music.repeatOne") : t("music.repeat")}
         </FocusButton>
-        <FocusButton focusKey="np-save" onEnter={onSave} className={`${chip} ${off}`}>
+        <FocusButton
+          focusKey="np-save"
+          onArrowPress={edgeGuard("np-save")}
+          onEnter={onSave}
+          className={`${chip} ${off}`}
+        >
           {t("music.saveAsPlaylist")}
         </FocusButton>
-        <FocusButton focusKey="np-stop" onEnter={onStop} className={`${chip} ${off}`}>
+        <FocusButton
+          focusKey="np-stop"
+          onArrowPress={edgeGuard("np-stop")}
+          onEnter={onStop}
+          className={`${chip} ${off}`}
+        >
           {t("music.stop")}
         </FocusButton>
       </div>
