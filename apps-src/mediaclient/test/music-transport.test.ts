@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useMusic, resetMusic } from "../playback/music";
 import { usePlayer, resetPlayer } from "../playback/player";
 import { resetPlayerOwner } from "../playback/owner";
-import { handleMusicKey } from "../playback/mediakeys";
+import { renderHook } from "@testing-library/react";
+import { handleMusicKey, useMusicMediaKeys } from "../playback/mediakeys";
 import type { MediaBackend, MediaItem } from "../backends/types";
 
 /**
@@ -254,5 +255,45 @@ describe("the transport buttons on the remote", () => {
     expect(handleMusicKey("ArrowDown")).toBe(false);
     expect(handleMusicKey("Enter")).toBe(false);
     expect(handleMusicKey("AudioVolumeUp")).toBe(false);
+  });
+});
+
+describe("the listener that carries those presses", () => {
+  // The decision above can be perfect while the remote stays dead, because
+  // nothing in it attaches a listener. These press a real event at the window
+  // instead, which is the path the box actually uses.
+  const dispatch = (key: string): KeyboardEvent => {
+    const ev = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+    window.dispatchEvent(ev);
+    return ev;
+  };
+
+  it("acts on a press and marks it handled", async () => {
+    await start([track("a")]);
+    const { unmount } = renderHook(() => useMusicMediaKeys());
+    const ev = dispatch("MediaPlayPause");
+    expect(pauses).toBe(1);
+    expect(useMusic.getState().state).toBe("paused");
+    // Handled means handled: whatever else listens must not act on it too.
+    expect(ev.defaultPrevented).toBe(true);
+    unmount();
+  });
+
+  it("leaves a key it does not own alone", async () => {
+    await start([track("a")]);
+    const { unmount } = renderHook(() => useMusicMediaKeys());
+    const ev = dispatch("ArrowDown");
+    // Not swallowed - spatial navigation is downstream of this listener.
+    expect(ev.defaultPrevented).toBe(false);
+    unmount();
+  });
+
+  it("stops listening when it goes away", async () => {
+    await start([track("a")]);
+    const { unmount } = renderHook(() => useMusicMediaKeys());
+    unmount();
+    dispatch("MediaPlayPause");
+    expect(pauses).toBe(0);
+    expect(useMusic.getState().state).toBe("playing");
   });
 });

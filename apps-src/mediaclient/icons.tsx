@@ -131,7 +131,19 @@ export function Back10Icon({ className = "h-[2.6vh] w-[2.6vh]" }: { className?: 
   return (
     <svg viewBox="0 0 24 24" className={className} {...STROKE} strokeWidth={2.1} aria-hidden="true">
       <path d="M7.5 6 3.5 12l4 6" />
-      <text x="16.5" y="16.4" textAnchor="middle" fontSize="11.5" fontWeight="700" fill="currentColor" stroke="none">
+      <text
+        x="16.5"
+        y="16.4"
+        textAnchor="middle"
+        // SVG text does not inherit the page font stack the way HTML text does
+        // in every engine, and the UA default can win. These digits were sized
+        // against the shipping font; another family changes their width.
+        fontFamily="inherit"
+        fontSize="11.5"
+        fontWeight="700"
+        fill="currentColor"
+        stroke="none"
+      >
         10
       </text>
     </svg>
@@ -141,7 +153,16 @@ export function Back10Icon({ className = "h-[2.6vh] w-[2.6vh]" }: { className?: 
 export function Forward10Icon({ className = "h-[2.6vh] w-[2.6vh]" }: { className?: string }): React.JSX.Element {
   return (
     <svg viewBox="0 0 24 24" className={className} {...STROKE} strokeWidth={2.1} aria-hidden="true">
-      <text x="7.5" y="16.4" textAnchor="middle" fontSize="11.5" fontWeight="700" fill="currentColor" stroke="none">
+      <text
+        x="7.5"
+        y="16.4"
+        textAnchor="middle"
+        fontFamily="inherit"
+        fontSize="11.5"
+        fontWeight="700"
+        fill="currentColor"
+        stroke="none"
+      >
         10
       </text>
       <path d="M16.5 6 20.5 12l-4 6" />

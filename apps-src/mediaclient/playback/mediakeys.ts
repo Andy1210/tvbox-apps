@@ -38,8 +38,15 @@ const STEP_MS = 10_000;
  *   KEY_FASTFORWARD 208 -> MediaFastForward
  *
  * `code` came back identical to `key` for all five. The older spellings
- * (MediaNextTrack/MediaPreviousTrack) are therefore NOT listed: they cannot
- * arrive here, and a branch that can never run is worse than no branch.
+ * (MediaNextTrack/MediaPreviousTrack) are therefore NOT listed: they are
+ * alternative names for keys whose real name is now known, so they can never
+ * arrive, and a branch that cannot run is worse than no branch.
+ *
+ * MediaPlay, MediaPause and MediaStop are a different case and stay although
+ * they were not injected: they are separate BUTTONS rather than other spellings
+ * of a measured one, and this remote declares the codes behind two of them
+ * (KEY_PLAY 207, KEY_STOPCD 166) alongside the five above. Dropping them would
+ * lose coverage; dropping a synonym loses nothing.
  */
 const ACTIONS = {
   MediaPlayPause: "toggle",
@@ -66,7 +73,10 @@ export function handleMusicKey(key: string): boolean {
   // whose play button doubles as something else still does that.
   if (!m.queue.length) return false;
 
-  const action = (ACTIONS as Record<string, string | undefined>)[key];
+  // Looked up without widening to `string`, so the switch below still has to
+  // handle every action the table can produce.
+  const action: (typeof ACTIONS)[keyof typeof ACTIONS] | undefined =
+    key in ACTIONS ? ACTIONS[key as keyof typeof ACTIONS] : undefined;
   if (!action) return false;
 
   switch (action) {
@@ -100,8 +110,18 @@ export function handleMusicKey(key: string): boolean {
     case "stop":
       void m.stop();
       break;
+    default:
+      // Unreachable, and typed so: adding a row to the table without a case
+      // here stops compiling rather than silently reporting the press handled
+      // while nothing happened - which is the failure this whole module exists
+      // to undo.
+      return assertNever(action);
   }
   return true;
+}
+
+function assertNever(x: never): never {
+  throw new Error(`unhandled music key action: ${String(x)}`);
 }
 
 export function useMusicMediaKeys(): void {
