@@ -63,16 +63,23 @@ export function LibraryFilters({
   const [sorts, setSorts] = useState<SortOption[]>([]);
   const [filters, setFilters] = useState<FilterOption[]>([]);
   /** Which list filter is open, and its values once they arrive. */
+  const [settled, setSettled] = useState(false);
   const [openFilter, setOpenFilter] = useState<FilterOption | null>(null);
   const [values, setValues] = useState<SortOption[] | null>(null);
 
   const { ref, focusKey } = useFocusable({ focusKey: "libfilters", saveLastFocusedChild: true, isFocusBoundary: true });
-  useInitialFocus("lf-sort-0", sorts.length > 0);
+  // Whatever the panel actually has, in the order somebody would want it. A
+  // server that answers with no orders still has filters worth reaching, and
+  // opening with nothing focused leaves the only highlight on screen behind the
+  // dimmed overlay.
+  const home = sorts.length > 0 ? "lf-sort-0" : filters.length > 0 ? "lf-filter-0" : "lf-close";
+  useInitialFocus(home, sorts.length > 0 || filters.length > 0);
   // The first sort chip, not the close button: a fallback that lands on "leave"
-  // turns a lost cursor into an accidental exit. With nothing to choose from -
-  // which is what an unanswered request looks like - the close button is all
-  // there is, and it beats a cursor on nothing.
-  useFocusFallback(sorts.length > 0 ? "lf-sort-0" : "lf-close", (k) => k.startsWith("lf-"), true);
+  // turns a lost cursor into an accidental exit. While the options are still in
+  // flight that is exactly what naming the close button would do on a slow
+  // server, so the chip is named until the answer has actually arrived - a key
+  // that has not mounted yet takes the cursor by itself once it does.
+  useFocusFallback(settled ? home : "lf-sort-0", (k) => k.startsWith("lf-"), true);
   useBackspace(() => {
     // The value list is a layer over the panel, so Back closes that first.
     if (openFilter) {
@@ -86,13 +93,19 @@ export function LibraryFilters({
   useEffect(() => {
     if (!backend) return;
     let live = true;
+    setSettled(false);
     void Promise.all([backend.sortOptions(libraryId, of), backend.filterOptions(libraryId, of)])
       .then(([s, f]) => {
         if (!live) return;
         setSorts(s);
         setFilters(f);
       })
-      .catch((e) => log.warn("could not read sort and filter options", e));
+      .catch((e) => log.warn("could not read sort and filter options", e))
+      .finally(() => {
+        // Whether the answer arrived is a different question from whether it had
+        // anything in it, and the cursor's home depends on the first.
+        if (live) setSettled(true);
+      });
     return () => {
       live = false;
     };
@@ -187,7 +200,9 @@ export function LibraryFilters({
           </div>
 
           <div className="no-scrollbar -mx-[0.6vw] flex flex-col gap-[2.4vh] overflow-y-auto px-[0.6vw]">
-            <section className="flex flex-col gap-[1vh]">
+            {/* Both halves keep their own counsel: a heading over an empty box
+                says a control is there. */}
+            <section className={`flex flex-col gap-[1vh] ${sorts.length === 0 ? "hidden" : ""}`}>
               <h3 className="text-[2.1vh] font-semibold text-fg-dim">{t("library.sort")}</h3>
               <div // A strict grid, not a wrapped flex. Spatial navigation resolves by
                 // rectangles, and chips of different widths wrapping onto ragged

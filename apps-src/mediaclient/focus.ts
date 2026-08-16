@@ -65,13 +65,14 @@ export function useFocusFallback(
       if (!on.current || !NAV_KEYS.has(e.key) || !key.current) return;
       const current = getCurrentFocusKey();
       if (current && mine.current(current) && doesFocusableExist(current)) return;
-      // Only onto something that is actually mounted. setFocus to a key that is
-      // not leaves the cursor there and every later press aborts inside
-      // smartNavigate: a remote that does nothing at all, with no error and only
-      // Back escaping. Measured on the arrange panel when the server never
-      // answered - the panel came up with its close button alone, and the first
-      // arrow parked the cursor on a chip that did not exist.
-      if (!doesFocusableExist(key.current)) return;
+      // A key that has not mounted YET is fine to name: the library re-focuses a
+      // preset key the moment that component registers (focusOnPresetKey, on by
+      // default), so the cursor lands there on its own and only this one press
+      // is lost. A key that will NEVER mount is the dead remote - every later
+      // press aborts inside smartNavigate, silently, with only Back escaping.
+      // Telling those apart needs to know whether the thing is still coming, so
+      // it belongs to the caller; refusing the park here loses the recovery as
+      // well as the failure.
       setFocus(key.current);
     };
     window.addEventListener("keydown", onKey, true);

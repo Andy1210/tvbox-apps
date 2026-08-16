@@ -11,7 +11,7 @@ import { PlexBackend } from "../backends/plex/backend";
 import { clearLibraryViews } from "../libraryView";
 import { useFocusFallback } from "../focus";
 import { FocusButton } from "@sdk";
-import type { MediaBackend, MediaItem, Session } from "../backends/types";
+import type { MediaBackend, MediaItem, Session, SortOption } from "../backends/types";
 
 // What a collection list may be narrowed by, and what happens on the way back.
 //
@@ -308,19 +308,109 @@ describe("a panel whose options never arrived", () => {
 });
 
 describe("the fallback that catches a lost cursor", () => {
-  it("will not put it somewhere that does not exist", async () => {
-    // The panel is one caller; the guard belongs in the helper, because every
-    // screen that uses it can reach the same state - a key naming something
-    // that has not mounted, or has just unmounted.
-    function Screen(): React.ReactElement {
-      useFocusFallback("fb-missing", (k) => k.startsWith("fb-"), true);
-      return <FocusButton focusKey="fb-real" onEnter={() => {}}>{"Here"}</FocusButton>;
+  it("may name something that has not mounted yet, and it lands there when it does", async () => {
+    // This is what lets the panel name its first chip while the server is still
+    // answering: the library re-focuses a preset key as soon as that component
+    // registers. Pinned because the whole design of the panel's fallback rests
+    // on it - refusing to name an unmounted key would cost a press and gain
+    // nothing.
+    function Screen({ ready }: { ready: boolean }): React.ReactElement {
+      useFocusFallback("fb-late", (k) => k.startsWith("fb-"), true);
+      return (
+        <>
+          <FocusButton focusKey="fb-other" onEnter={() => {}}>
+            {"Other"}
+          </FocusButton>
+          {ready && (
+            <FocusButton focusKey="fb-late" onEnter={() => {}}>
+              {"Late"}
+            </FocusButton>
+          )}
+        </>
+      );
     }
     await act(async () => setFocus(""));
-    render(<Screen />);
+    const { rerender } = render(<Screen ready={false} />);
     await act(async () => {
       await remote.down();
     });
-    expect(getCurrentFocusKey(), "a cursor on nothing swallows every press after it").not.toBe("fb-missing");
+    // It arrives.
+    await act(async () => rerender(<Screen ready={true} />));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(getCurrentFocusKey()).toBe("fb-late");
+  });
+});
+
+describe("a panel whose options have not arrived yet", () => {
+  it("does not put the cursor on the way out", async () => {
+    // "No orders yet" and "no orders at all" are the same length of list and a
+    // different situation. Naming the close button for the first means an arrow
+    // then an OK closes the panel on a slow server - the accidental exit the
+    // code two lines above says it avoids.
+    let answer: (v: SortOption[]) => void = () => {};
+    const backend = {
+      kind: "plex",
+      sortOptions: () => new Promise<SortOption[]>((r) => (answer = r)),
+      filterOptions: async () => [],
+      filterValues: async () => [],
+    } as unknown as MediaBackend;
+    useApp.setState({ backend });
+    let closed = 0;
+    render(
+      <LibraryFilters
+        libraryId="1"
+        view={{ sort: "titleSort", desc: false, filters: {}, labels: {} }}
+        onApply={() => {}}
+        onClose={() => {
+          closed += 1;
+        }}
+      />,
+    );
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    await act(async () => {
+      await remote.down();
+    });
+    expect(getCurrentFocusKey(), "the way out is not where a lost cursor belongs").not.toBe("lf-close");
+    await act(async () => {
+      await remote.ok();
+    });
+    expect(closed, "and an OK in that window must not close the panel").toBe(0);
+
+    // Once the orders arrive the cursor is on the first of them, by itself.
+    await act(async () => {
+      answer([{ key: "titleSort", title: "Name" }]);
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(getCurrentFocusKey()).toBe("lf-sort-0");
+  });
+
+  it("reaches the filters when the orders came back empty", async () => {
+    // A server that names no order still has filters worth reaching, and a panel
+    // that opens with nothing focused leaves the only highlight on screen behind
+    // its own dimmed overlay.
+    const backend = {
+      kind: "plex",
+      sortOptions: async () => [],
+      filterOptions: async () => [{ key: "hdr", title: "HDR", kind: "flag" }],
+      filterValues: async () => [],
+    } as unknown as MediaBackend;
+    useApp.setState({ backend });
+    render(
+      <LibraryFilters
+        libraryId="1"
+        view={{ sort: "titleSort", desc: false, filters: {}, labels: {} }}
+        onApply={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    await waitFor(() => expect(document.body.textContent).toContain("HDR"));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(getCurrentFocusKey()).toBe("lf-filter-0");
   });
 });
