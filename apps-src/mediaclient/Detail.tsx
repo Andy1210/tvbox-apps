@@ -103,6 +103,24 @@ export function Detail({
     // play the wrong file, or none. Seeded from what was chosen for the NEW
     // item a moment later, once its version list is known.
     setVersion(0);
+    // Everything else this screen holds for ONE item, cleared with the rest.
+    //
+    // Defensive rather than a fix for something reachable today: `MediaClient`
+    // renders this with `key={screen.itemId}`, so opening another item remounts
+    // it and nothing can carry over. What this effect really serves is the paths
+    // that re-run it on a LIVE mount - "try again" after a failure, and a
+    // backend replaced under it - plus the day somebody drops that key.
+    //
+    // `subId` is the one with teeth if that day comes: a track id is only
+    // meaningful within its own item, and on Jellyfin it is the stream's index -
+    // so "2" on the next film is a different subtitle, baked into a converted
+    // stream at start.
+    setFocused(null);
+    setFirstChild(null);
+    setAudioLang(undefined);
+    setSubLang(undefined);
+    setSubId(undefined);
+    setPicking(false);
 
     (async () => {
       try {

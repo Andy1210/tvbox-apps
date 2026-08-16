@@ -64,16 +64,40 @@ let clock = 0;
 // write its result into the cache the next one reads.
 let generation = 0;
 
+/**
+ * How long an evicted blob is left alive.
+ *
+ * Long enough for an <img> that is still decoding the one it was given, short
+ * enough that a scroll through a library does not strand hundreds of megabytes.
+ */
+const REVOKE_DELAY_MS = 30_000;
+
 function evictIfNeeded(): void {
   if (cache.size <= MAX_ENTRIES) return;
   const victims = [...cache.entries()].sort((a, b) => a[1].used - b[1].used).slice(0, cache.size - MAX_ENTRIES);
-  for (const [key] of victims) {
-    // Dropped, not revoked. The coldest entries are the ones that loaded first,
-    // which on a long screen are still on display - revoking one under an <img>
-    // that has not finished decoding makes it fail permanently, and a tile that
-    // has latched onto a broken image never recovers without a remount. The
-    // browser reclaims an unreferenced blob on its own.
+  for (const [key, entry] of victims) {
+    // Dropped now, revoked LATER. The coldest entries are the ones that loaded
+    // first, which on a long screen are still on display - revoking one under an
+    // <img> that has not finished decoding makes it fail permanently, and a tile
+    // that has latched onto a broken image never recovers without a remount.
+    //
+    // But the browser does NOT reclaim it on its own, whatever this comment used
+    // to say: a blob URL is held by the origin's blob store until it is revoked.
+    // Measured, a thousand posters through here left a thousand alive and 240 in
+    // the cache - about 155 MB of a 1,694-film library stranded for the life of
+    // the window, which the shell HIDES rather than destroys when the app is
+    // left. The delay is what keeps the original reason intact.
     cache.delete(key);
+    const dead = entry.objectUrl;
+    setTimeout(() => {
+      // Unless the same URL came back in the meantime and is holding it again.
+      if ([...cache.values()].some((e) => e.objectUrl === dead)) return;
+      try {
+        URL.revokeObjectURL(dead);
+      } catch {
+        /* nothing else to do about it */
+      }
+    }, REVOKE_DELAY_MS);
   }
 }
 
