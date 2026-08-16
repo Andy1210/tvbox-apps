@@ -14,18 +14,53 @@
 // travel inside index.json.
 import { readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, existsSync, lstatSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+// `--root <dir>`: stage a registry that lives outside this repo. See
+// build-index.mjs, which takes the same option and has to be given the same one.
+const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
+const root = rootArg(process.argv, "usage: stage-site.mjs [--root DIR]") ?? repo;
 const site = join(root, "_site");
 const indexPath = join(root, "index.json");
+
+// `--root` in both spellings, and nothing else. An ignored typo would stage the
+// wrong registry - and, below, delete a directory in it.
+function rootArg(argv, usage) {
+  let out = null;
+  for (let i = 2; i < argv.length; i++) {
+    const a = argv[i];
+    let v = null;
+    if (a === "--root") v = argv[++i];
+    else if (a.startsWith("--root=")) v = a.slice("--root=".length);
+    else {
+      console.error(`unknown arg: ${a}\n${usage}`);
+      process.exit(1);
+    }
+    if (!v || v.startsWith("--")) {
+      console.error("--root needs a directory");
+      process.exit(1);
+    }
+    out = resolve(v);
+  }
+  return out;
+}
 
 if (!existsSync(indexPath)) {
   console.error("index.json is missing - run scripts/build-index.mjs first");
   process.exit(1);
 }
 const index = JSON.parse(readFileSync(indexPath, "utf8"));
+
+// `_site` is about to be deleted whole, and `_site` is also what Jekyll and
+// friends call their output. Since --root points anywhere an operator types,
+// "there is SOME json here" is not enough to have earned that: the file has to
+// be a registry index. Measured before this - a directory holding an unrelated
+// index.json lost its _site tree and the script reported success.
+if (index.registryVersion !== 1 || !Array.isArray(index.apps)) {
+  console.error(`${indexPath} is not a registry index (registryVersion 1 + apps[]) - refusing to stage ${site}`);
+  process.exit(1);
+}
 
 rmSync(site, { recursive: true, force: true });
 mkdirSync(site, { recursive: true });
@@ -53,7 +88,13 @@ for (const [id, pkg] of Object.entries(index.packages || {})) {
     // disagrees with the bytes here, the box would reject the file - better to
     // find that now than to publish a package nobody can install.
     const sha = createHash("sha256").update(readFileSync(from)).digest("hex");
-    if (sha !== f.sha256) errors.push(`${id}/${f.path}: sha256 in index.json does not match the file`);
+    if (sha !== f.sha256) {
+      // Not copied. The staging fails either way, but a half-written _site is
+      // still being SERVED by a running store, and a file that disagrees with
+      // the index beside it is the one state the box cannot make sense of.
+      errors.push(`${id}/${f.path}: sha256 in index.json does not match the file`);
+      continue;
+    }
     mkdirSync(dirname(to), { recursive: true });
     copyFileSync(from, to);
     copied++;

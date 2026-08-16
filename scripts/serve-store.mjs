@@ -7,7 +7,7 @@
 // in Settings -> Apps -> Store sources on a box and the apps in this checkout
 // appear next to the official ones, without publishing anything.
 //
-//   npm run store:serve                 # build, stage, serve on 0.0.0.0:8790
+//   npm run store:serve -- --root DIR   # serve a registry kept off git
 //   npm run store:serve -- --watch      # rebuild the index when a manifest changes
 //   npm run store:serve -- --port 9000
 //
@@ -16,20 +16,30 @@
 // which is exactly the line this stays on.
 import { createServer } from "node:http";
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync, existsSync, statSync, watch } from "node:fs";
+import { readFileSync, readdirSync, existsSync, realpathSync, statSync, watch } from "node:fs";
 import { join, dirname, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { networkInterfaces } from "node:os";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const site = join(root, "_site");
+const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
+// Which registry is being served. `--root <dir>` points at one that is not this
+// repo - same layout, its own apps/ - so an app retired from the official store
+// can still be installed on a box from here. See build-index.mjs.
+let root = repo;
 
 let port = 8790;
 let doWatch = false;
 for (let i = 2; i < process.argv.length; i++) {
   const a = process.argv[i];
   if (a === "--watch") doWatch = true;
-  else if (a === "--port") {
+  else if (a === "--root") {
+    const v = process.argv[++i];
+    if (!v || v.startsWith("--")) {
+      console.error("--root needs a directory");
+      process.exit(1);
+    }
+    root = resolve(v);
+  } else if (a === "--port") {
     // A port that silently falls back to the default is worse than no port at
     // all: the address printed below is the one typed into a box, and it would
     // be the wrong one.
@@ -45,11 +55,23 @@ for (let i = 2; i < process.argv.length; i++) {
   }
 }
 
+// After the arguments, because --root decides it. It is the served tree AND the
+// boundary every request path is checked against, so it has to be one value.
+const site = join(root, "_site");
+// Two boundaries, because a path is checked twice and the two checks cannot
+// share one: lexically against the written path, then really against the
+// resolved one. Collapsing them would refuse every request whenever the served
+// tree itself sits behind a link.
+const lexSite = resolve(site);
+const realSite = existsSync(site) ? realpathSync(site) : lexSite;
+
 function build() {
   // The same two scripts CI runs, in the same order: what is served here is what
   // would be published, rather than a second idea of it.
-  execFileSync(process.execPath, [join(root, "scripts", "build-index.mjs")], { stdio: "inherit" });
-  execFileSync(process.execPath, [join(root, "scripts", "stage-site.mjs")], { stdio: "inherit" });
+  // The scripts always come from this repo; only the registry they act on moves.
+  const where = root === repo ? [] : ["--root", root];
+  execFileSync(process.execPath, [join(repo, "scripts", "build-index.mjs"), ...where], { stdio: "inherit" });
+  execFileSync(process.execPath, [join(repo, "scripts", "stage-site.mjs"), ...where], { stdio: "inherit" });
 }
 
 const TYPES = {
@@ -93,16 +115,36 @@ const server = createServer((req, res) => {
   // whatever an app package ships, and "starts with the root string" would accept
   // a sibling directory that merely shares the prefix.
   const target = resolve(join(site, at === "/" ? "index.json" : at));
-  if (target !== resolve(site) && !target.startsWith(resolve(site) + sep)) {
+  // Lexically first - that rejects `..` before anything touches the disk - and
+  // then as a REAL path, because resolve() does not follow a symlink and
+  // readFileSync does. A link dropped into the served tree pointed at this
+  // host's .env and was served over a socket bound to every interface.
+  const under = (p, dir) => p === dir || p.startsWith(dir + sep);
+  if (!under(target, lexSite)) {
+    res.writeHead(403);
+    res.end("no");
+    return;
+  }
+  let real;
+  try {
+    real = realpathSync(target);
+  } catch {
+    res.writeHead(404);
+    res.end("not found");
+    return;
+  }
+  if (!under(real, realSite)) {
     res.writeHead(403);
     return res.end("no");
   }
-  if (!existsSync(target) || !statSync(target).isFile()) {
+  if (!statSync(real).isFile()) {
     res.writeHead(404);
     return res.end("not found");
   }
   try {
-    serveFile(res, target);
+    // The vetted path, not the written one: they are the same file, and only one
+    // of them has been checked.
+    serveFile(res, real);
   } catch (e) {
     res.writeHead(500);
     res.end(String(e.message || e));
