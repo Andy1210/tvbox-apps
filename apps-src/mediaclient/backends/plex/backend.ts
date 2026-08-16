@@ -328,6 +328,23 @@ export class PlexBackend implements MediaBackend {
    */
   private static readonly COLLECTION_SORTS = new Set(["titleSort", "addedAt"]);
 
+  /**
+   * The filters a collection list actually honours.
+   *
+   * Swept against this server on a library with 461 collections: of the filters
+   * the film library offers, all but one return nothing at all, and "unwatched"
+   * returns every collection - ignored, so the chip would claim a filter that is
+   * not in effect. Only `contentRating` narrows the list, and it partitions it:
+   * its 26 values sum to 460 of the 461, disjointly, and the rows come back as
+   * collections carrying that rating. Eight of those values match nothing, which
+   * is why an empty grid has to name the filter rather than the library.
+   *
+   * Asking the server which filters a collection takes does NOT answer this:
+   * `/filters?type=18` says none, while the same endpoint for sorts says only
+   * `titleSort` even though `addedAt` demonstrably reorders them.
+   */
+  private static readonly COLLECTION_FILTERS = new Set(["contentRating"]);
+
   async sortOptions(libraryId: string, of?: "collections"): Promise<SortOption[]> {
     const c = container<MetadataContainer>(await this.req(`library/sections/${libraryId}/sorts`));
     return (
@@ -338,12 +355,12 @@ export class PlexBackend implements MediaBackend {
         // different films, and scrolling back re-shuffled again. A shuffled
         // library is a fine idea and would need a fetched-once list, not a window.
         .filter((d) => d.key && d.key !== "random")
-        .filter((d) => !of || PlexBackend.COLLECTION_SORTS.has(String(d.key)))
+        .filter((d) => of !== "collections" || PlexBackend.COLLECTION_SORTS.has(String(d.key)))
         .map((d) => ({ key: String(d.key), title: d.title ?? String(d.key) }))
     );
   }
 
-  async filterOptions(libraryId: string): Promise<FilterOption[]> {
+  async filterOptions(libraryId: string, of?: "collections"): Promise<FilterOption[]> {
     const c = container<MetadataContainer>(await this.req(`library/sections/${libraryId}/filters`));
     return (
       (c.Directory ?? [])
@@ -361,6 +378,7 @@ export class PlexBackend implements MediaBackend {
           // list of values that has to be fetched before it can be offered.
           kind: d.filterType === "boolean" ? ("flag" as const) : ("list" as const),
         }))
+        .filter((f) => of !== "collections" || PlexBackend.COLLECTION_FILTERS.has(f.key))
     );
   }
 

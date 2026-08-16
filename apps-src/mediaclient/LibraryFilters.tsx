@@ -9,6 +9,12 @@ import { log } from "./redact";
 /** How many values one filter offers before the list stops being a control. */
 const VALUE_CAP = 120;
 
+/**
+ * How long the panel waits for its options before it stops holding the cursor
+ * for them.
+ */
+export const OPTIONS_DEADLINE_MS = 4000;
+
 export interface LibraryView {
   sort: string;
   desc: boolean;
@@ -62,15 +68,28 @@ export function LibraryFilters({
 
   const [sorts, setSorts] = useState<SortOption[]>([]);
   const [filters, setFilters] = useState<FilterOption[]>([]);
+  /**
+   * Whether the options request has finished - or waited long enough that
+   * pretending it is still coming would cost the remote. See the effect below.
+   */
+  const [settled, setSettled] = useState(false);
   /** Which list filter is open, and its values once they arrive. */
   const [openFilter, setOpenFilter] = useState<FilterOption | null>(null);
   const [values, setValues] = useState<SortOption[] | null>(null);
 
   const { ref, focusKey } = useFocusable({ focusKey: "libfilters", saveLastFocusedChild: true, isFocusBoundary: true });
-  useInitialFocus("lf-sort-0", sorts.length > 0);
+  // Whatever the panel actually has, in the order somebody would want it. A
+  // server that answers with no orders still has filters worth reaching, and
+  // opening with nothing focused leaves the only highlight on screen behind the
+  // dimmed overlay.
+  const home = sorts.length > 0 ? "lf-sort-0" : filters.length > 0 ? "lf-filter-0" : "lf-close";
+  useInitialFocus(home, settled);
   // The first sort chip, not the close button: a fallback that lands on "leave"
-  // turns a lost cursor into an accidental exit.
-  useFocusFallback("lf-sort-0", (k) => k.startsWith("lf-"), true);
+  // turns a lost cursor into an accidental exit. While the options are still in
+  // flight that is exactly what naming the close button would do on a slow
+  // server, so the chip is named until the answer has actually arrived - a key
+  // that has not mounted yet takes the cursor by itself once it does.
+  useFocusFallback(settled ? home : "lf-sort-0", (k) => k.startsWith("lf-"), true);
   useBackspace(() => {
     // The value list is a layer over the panel, so Back closes that first.
     if (openFilter) {
@@ -84,15 +103,31 @@ export function LibraryFilters({
   useEffect(() => {
     if (!backend) return;
     let live = true;
-    void Promise.all([backend.sortOptions(libraryId, of), backend.filterOptions(libraryId)])
+    setSettled(false);
+    // A hung request settles nothing. `req` carries no deadline of its own, so
+    // without this the cursor waits on a chip that never mounts and every press
+    // is discarded - which is the whole failure this panel is being fixed for,
+    // reached by a stalled connection rather than an error. Far beyond a healthy
+    // answer on this LAN, which is 11 ms warm and 86 ms cold.
+    const deadline = setTimeout(() => {
+      if (live) setSettled(true);
+    }, OPTIONS_DEADLINE_MS);
+    void Promise.all([backend.sortOptions(libraryId, of), backend.filterOptions(libraryId, of)])
       .then(([s, f]) => {
         if (!live) return;
         setSorts(s);
         setFilters(f);
       })
-      .catch((e) => log.warn("could not read sort and filter options", e));
+      .catch((e) => log.warn("could not read sort and filter options", e))
+      .finally(() => {
+        // Whether the answer arrived is a different question from whether it had
+        // anything in it, and the cursor's home depends on the first.
+        clearTimeout(deadline);
+        if (live) setSettled(true);
+      });
     return () => {
       live = false;
+      clearTimeout(deadline);
     };
   }, [backend, libraryId, of]);
 
@@ -185,7 +220,12 @@ export function LibraryFilters({
           </div>
 
           <div className="no-scrollbar -mx-[0.6vw] flex flex-col gap-[2.4vh] overflow-y-auto px-[0.6vw]">
-            <section className="flex flex-col gap-[1vh]">
+            {/* Otherwise an empty panel means either "still asking" or "nothing
+                to ask for", and they look the same from a sofa. */}
+            {!settled && <p className="text-[2.1vh] text-fg-dim">{t("common.loading")}</p>}
+            {/* Both halves keep their own counsel: a heading over an empty box
+                says a control is there. */}
+            <section className={`flex flex-col gap-[1vh] ${sorts.length === 0 ? "hidden" : ""}`}>
               <h3 className="text-[2.1vh] font-semibold text-fg-dim">{t("library.sort")}</h3>
               <div // A strict grid, not a wrapped flex. Spatial navigation resolves by
                 // rectangles, and chips of different widths wrapping onto ragged
@@ -213,7 +253,9 @@ export function LibraryFilters({
               </div>
             </section>
 
-            <section className="flex flex-col gap-[1vh]">
+            {/* A heading over nothing is a promise the list does not keep: a
+                collection cannot be narrowed at all here. */}
+            <section className={`flex flex-col gap-[1vh] ${filters.length === 0 ? "hidden" : ""}`}>
               <h3 className="text-[2.1vh] font-semibold text-fg-dim">{t("library.filter")}</h3>
               <div // A strict grid, not a wrapped flex. Spatial navigation resolves by
                 // rectangles, and chips of different widths wrapping onto ragged
@@ -233,7 +275,13 @@ export function LibraryFilters({
                       // and the state still read at a glance.
                       label={f.kind === "flag" || !chosen ? f.title : `${f.title}: ${view.labels[f.key] ?? chosen}`}
                       onEnter={() => {
-                        if (f.kind === "flag") setFilter(f.key, chosen ? null : "1");
+                        if (f.kind === "flag") {
+                          // The title as the label, because the VALUE of a flag is
+                          // "1" and the button outside falls back to the value when
+                          // a filter has no name - so turning one on read
+                          // "Sort and filter · 1".
+                          setFilter(f.key, chosen ? null : "1", f.title);
+                        }
                         else setOpenFilter(f);
                       }}
                     />

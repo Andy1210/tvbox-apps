@@ -113,6 +113,18 @@ const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
 type Letter = { key: string; title: string; size: number };
 
+/**
+ * Orders that mean nothing for a box set.
+ *
+ * `Random` for the reason the sibling backend gives - a virtualised grid asks
+ * for a page at a time and the server reshuffles between them - and the two
+ * that describe a FILE rather than a collection of them. Not measured against
+ * this server the way the Plex list was; it is a narrowing of what is offered,
+ * so the cost of being wrong is an order somebody cannot choose rather than a
+ * grid that empties.
+ */
+const COLLECTION_UNFIT = new Set(["Random", "Runtime", "DatePlayed"]);
+
 interface PlaybackInfoResponse {
   MediaSources?: JellyfinMediaSource[];
   PlaySessionId?: string;
@@ -275,12 +287,15 @@ export class JellyfinBackend implements MediaBackend {
     };
   }
 
-  async sortOptions(): Promise<SortOption[]> {
+  async sortOptions(_libraryId?: string, of?: "collections"): Promise<SortOption[]> {
     // A fixed list rather than an asked one: Jellyfin has no endpoint that
     // names its sorts, so unlike the Plex side there is nothing to ask. The
     // keys are the server's own; only the labels are ours. Read at call time,
     // so a change of language reaches a screen that is already open.
-    return SORTS.map((s) => ({ key: s.key, title: s.title() }));
+    return SORTS.filter((s) => !(of === "collections" && COLLECTION_UNFIT.has(s.key))).map((s) => ({
+      key: s.key,
+      title: s.title(),
+    }));
   }
 
   /**
@@ -302,6 +317,10 @@ export class JellyfinBackend implements MediaBackend {
         sortBy: sortKey(q.sort),
         sortOrder: q.desc ? "Descending" : "Ascending",
         fields: LIST_FIELDS,
+        // The A-Z strip counts this list through `count()`, which applies these.
+        // Left out here, the strip and the grid describe two different lists and
+        // a letter press jumps to an offset in the one you cannot see.
+        ...this.filterQuery(q.filters),
       },
     });
     return { items: (res.Items || []).map(toItem), total: res.TotalRecordCount };
@@ -327,7 +346,12 @@ export class JellyfinBackend implements MediaBackend {
     return (res.Items || []).map(toItem);
   }
 
-  async filterOptions(): Promise<FilterOption[]> {
+  async filterOptions(_libraryId?: string, of?: "collections"): Promise<FilterOption[]> {
+    // Nothing for a collection list, because nothing here is measured. Which
+    // filters a BoxSet honours on this server is unknown - and the A-Z strip
+    // counts through a different query than the grid pages through, so a filter
+    // that only one of them applies puts a letter jump on the wrong list.
+    if (of === "collections") return [];
     return [
       { key: "genre", title: label("jellyfin.genre"), kind: "list" },
       { key: "unwatched", title: label("jellyfin.unwatched"), kind: "flag" },

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { recallLibraryView, rememberLibraryView, type LibraryState } from "./libraryView";
 import { FocusContext, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, useI18n } from "@sdk";
 import { Tile } from "./Tile";
@@ -88,7 +89,10 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   const playing = usePlayer((s) => s.current !== null);
 
   const [letters, setLetters] = useState<Letter[]>([]);
-  const [view, setView] = useState<LibraryView>({ sort: "titleSort", desc: false, filters: {}, labels: {} });
+  const kept = useRef(recallLibraryView(libraryId));
+  const [view, setView] = useState<LibraryView>(
+    kept.current?.view ?? { sort: "titleSort", desc: false, filters: {}, labels: {} },
+  );
   const [arranging, setArranging] = useState(false);
   /**
    * Browsing the library's collections instead of its films.
@@ -97,11 +101,21 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
    * way, it is the same shape, and this server holds 461 of them - which is a
    * grid, not a row on the home screen.
    */
-  const [mode, setMode] = useState<"items" | "collections">("items");
+  const [mode, setMode] = useState<"items" | "collections">(kept.current?.mode ?? "items");
   /** Sort key to its translated name, for the button. Empty until asked for. */
   const [sortNames, setSortNames] = useState<Record<string, string>>({});
   /** Which (library, mode, sort) the names have been asked for. See below. */
   const asked = useRef(new Set<string>());
+  /** How the films were arranged, kept for the way back out of the collections. */
+  const saved = useRef<LibraryView | null>(kept.current?.saved ?? null);
+  // Opening anything from here unmounts this screen, so what was chosen is
+  // written out as it changes rather than on the way out - there is no way out
+  // to hook.
+  useEffect(() => {
+    const state: LibraryState = { view, mode, saved: saved.current };
+    rememberLibraryView(libraryId, state);
+  }, [libraryId, view, mode]);
+
   /** Which letter search may still act. See jumpToLetter. */
   const jump = useRef(0);
   /** The letter last pressed, until the cursor moves off it. See activeLetter. */
@@ -585,16 +599,23 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
           <FocusButton
             focusKey="lib-mode"
             onEnter={() => {
-              // Filters do not carry across: measured, every list filter returns
-              // nothing against collections, so the grid emptied while the
-              // button still named the filter that emptied it.
+              // Nothing carries INTO a collection list: measured, every list
+              // filter returns nothing against collections, and half the orders
+              // a film can be put in do not exist for one either - the server
+              // answers those with an empty list, which this screen reports as
+              // "this library has no collections".
               //
-              // Nor does the ORDER, for the same reason and with the same
-              // symptom: half the orders a film can be put in do not exist for a
-              // collection, and the server answers those with an empty list -
-              // which this screen reports as "this library has no collections".
-              setView((v) => ({ ...v, filters: {}, labels: {}, sort: "titleSort", desc: false }));
-              setMode((m) => (m === "items" ? "collections" : "items"));
+              // Coming back is not the same act, though. Clearing there threw
+              // away an order somebody had chosen for the films, with nothing on
+              // screen to say so, so it is put back instead.
+              if (mode === "items") {
+                saved.current = view;
+                setView({ sort: "titleSort", desc: false, filters: {}, labels: {} });
+                setMode("collections");
+              } else {
+                setView(saved.current ?? { sort: "titleSort", desc: false, filters: {}, labels: {} });
+                setMode("items");
+              }
             }}
             className="rounded-[1vh] bg-white/10 px-[2vw] py-[1vh] text-[2vh]"
           >
@@ -645,10 +666,15 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
           >
             {total === 0 && (
               <div className="flex h-full items-center justify-center text-[2.2vh] text-fg-dim">
-                {mode === "collections"
-                  ? t("library.noCollections")
-                  : Object.keys(view.filters).length
-                    ? t("library.emptyFiltered")
+                {/* A filter is the likelier reason for an empty grid, and it is
+                    the one somebody can undo - so it is named first. Saying "this
+                    library has no collections" while a filter is on is a claim
+                    about the library, and 8 of the content ratings a collection
+                    list offers do return nothing. */}
+                {Object.keys(view.filters).length
+                  ? t("library.emptyFiltered")
+                  : mode === "collections"
+                    ? t("library.noCollections")
                     : t("library.empty")}
               </div>
             )}

@@ -10,6 +10,7 @@ import { backendFor } from "./backends/factory";
 import { getIdentity, type Identity } from "./identity";
 import { readJson, writeJson, removeRaw } from "./storage";
 import { clearImages } from "./posters";
+import { clearLibraryViews } from "./libraryView";
 import { resetPlayer } from "./playback/player";
 import { useChosenVersion } from "./chosenVersion";
 import { log } from "./redact";
@@ -151,6 +152,12 @@ export const useApp = create<State>((set, get) => ({
     const { backend, identity } = get();
     if (!backend) return;
     const session = await backend.switchProfile(id, pin);
+    // Here rather than further down: from this line the backend is holding the
+    // new profile's token, so anything that throws between here and the end
+    // would otherwise leave the previous person's remembered filters on screen
+    // under someone else's session. A filter label names a genre or an age
+    // rating.
+    clearLibraryViews();
     // The caller had the list in hand, so its name is used before asking again.
     // Without it a failed re-list falls back to session.profileName, which the
     // switch carried over from the PREVIOUS person - and the box would then
@@ -201,8 +208,10 @@ export const useApp = create<State>((set, get) => ({
     // survived is worth a line in the log, because the next boot will use it.
     if (!dropped.ok) log.warn("sign-out did not remove the stored session");
     // Artwork is held as blobs; without this the next person to sign in sees the
-    // previous account's posters until the cache turns over.
+    // previous account's posters until the cache turns over. The same goes for
+    // how a library was left: a filter label names a genre or an age rating.
     clearImages();
+    clearLibraryViews();
     resetPlayer();
     // The remembered version of a title goes too. It is a household fact rather
     // than a personal one, so a PROFILE switch keeps it - but a rating key is a
