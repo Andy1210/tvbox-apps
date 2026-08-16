@@ -428,7 +428,10 @@ describe("a panel whose options are slow, stuck or lost", () => {
     });
     expect(closed, "not while the answer may still arrive").toBe(0);
 
-    // Past the point where waiting costs more than it buys.
+    // Past the point where waiting costs more than it buys. In real time, not on
+    // a fake clock: the effect's timer is created before a test could install
+    // one, so advancing a fake clock never fires it - measured, this assertion
+    // fails against the working code that way.
     await act(async () => {
       await new Promise((r) => setTimeout(r, OPTIONS_DEADLINE_MS + 200));
     });
