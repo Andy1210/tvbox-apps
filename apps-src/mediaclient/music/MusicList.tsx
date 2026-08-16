@@ -242,7 +242,11 @@ export function MusicList({
       />
 
       <div className="flex min-h-0 flex-1">
-        <div className="no-scrollbar min-w-0 flex-1 overflow-y-auto px-[3vw]">
+        {/* scroll-padding, so the row the cursor is on is never flush against an
+            edge. `block: "nearest"` stops as soon as a row is technically
+            visible, which on a television leaves it touching the bottom with
+            nothing after it to say the list continues. */}
+        <div className="no-scrollbar min-w-0 flex-1 scroll-py-[10vh] overflow-y-auto px-[3vw]">
           {/* The spacer above and below is what makes a window of 36 rows behave
               like a list of thousands: the scroll height, and therefore the
               position within the library, stays honest. */}
