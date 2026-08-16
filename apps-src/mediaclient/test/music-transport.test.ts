@@ -256,6 +256,18 @@ describe("the transport buttons on the remote", () => {
     expect(handleMusicKey("Enter")).toBe(false);
     expect(handleMusicKey("AudioVolumeUp")).toBe(false);
   });
+
+  it("is not fooled by a key named after something every object has", async () => {
+    // The table is a plain object, so `"toString" in ACTIONS` is TRUE and hands
+    // back a function - which is truthy, matches no case, and reached a branch
+    // that threw. Inside a window listener that is an uncaught error on a press.
+    await start([track("a")]);
+    for (const key of ["toString", "constructor", "valueOf", "hasOwnProperty", "__proto__"]) {
+      expect([key, handleMusicKey(key)]).toEqual([key, false]);
+    }
+    expect(pauses).toBe(0);
+    expect(useMusic.getState().state).toBe("playing");
+  });
 });
 
 describe("the listener that carries those presses", () => {
