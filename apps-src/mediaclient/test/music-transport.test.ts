@@ -113,6 +113,19 @@ describe("the cursor on the bar", () => {
     expect(useMusic.getState().scrubMs).toBe(200_000);
   });
 
+  it("refuses to move at all when the song has no known length", async () => {
+    // The bar has no scale yet, so the mark would sit at 0% while the clock
+    // beside it ran away - and committing would seek to a time the song does not
+    // have. A track can arrive with no duration: the library carries none and
+    // the box has not read the header.
+    await start([track("a", { durationMs: undefined })]);
+    expect(useMusic.getState().durationMs).toBe(0);
+    useMusic.getState().scrubBy(5_000);
+    expect(useMusic.getState().scrubMs).toBeNull();
+    useMusic.getState().commitScrub();
+    expect(seeks).toEqual([]);
+  });
+
   it("goes where it points when it is committed, and puts itself away", async () => {
     await start([track("a")]);
     useMusic.getState().scrubBy(40_000);

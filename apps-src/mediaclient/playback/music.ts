@@ -290,10 +290,17 @@ export const useMusic = create<MusicState>((set, get) => ({
 
   scrubBy(deltaMs) {
     const { positionMs, durationMs, scrubMs } = get();
+    // A cursor that cannot be DRAWN must not move. With no length yet - the
+    // library carried none and the box has not read the header - the bar has no
+    // scale, so the mark would sit at 0% while the clock beside it ran away, and
+    // committing would seek to a time the song does not have. The film player
+    // falls back to MAX_SAFE_INTEGER here, which it can afford because a film
+    // always arrives with a duration; a track does not.
+    if (durationMs <= 0) return;
     // From where the cursor already is, so holding an arrow accelerates through
     // the song rather than fighting the position the box keeps reporting.
     const from = scrubMs ?? positionMs;
-    set({ scrubMs: Math.max(0, Math.min(durationMs || Number.MAX_SAFE_INTEGER, from + deltaMs)) });
+    set({ scrubMs: Math.max(0, Math.min(durationMs, from + deltaMs)) });
   },
 
   commitScrub() {

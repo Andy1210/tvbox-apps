@@ -160,7 +160,7 @@ export function NowPlaying(): React.JSX.Element {
           onScrub={(delta) => music.scrubBy(delta)}
           onCommit={() => music.commitScrub()}
           onToggle={() => music.toggle()}
-          onFocusedChange={(on) => on && setHint(t("music.seekHint"))}
+          onFocused={() => setHint(t("music.seekHint"))}
         />
 
         {(buffering || error || note) && (
@@ -242,7 +242,7 @@ function ScrubBar({
   onScrub,
   onCommit,
   onToggle,
-  onFocusedChange,
+  onFocused,
 }: {
   positionMs: number;
   durationMs: number;
@@ -250,7 +250,7 @@ function ScrubBar({
   onScrub: (deltaMs: number) => void;
   onCommit: () => void;
   onToggle: () => void;
-  onFocusedChange: (focused: boolean) => void;
+  onFocused: () => void;
 }): React.JSX.Element {
   const scrubbing = scrubMs !== null;
   const shown = scrubMs ?? positionMs;
@@ -268,6 +268,10 @@ function ScrubBar({
     },
     onArrowPress: (direction: string) => {
       if (direction === "left" || direction === "right") {
+        // The store refuses to move a cursor it has no scale for, and the press
+        // is still consumed: the alternative is that Left and Right move FOCUS
+        // for the fraction of a second before the box reports a length, so the
+        // one press that behaves differently is the one nobody could predict.
         onScrub(direction === "left" ? -SCRUB_STEP_MS : SCRUB_STEP_MS);
         return false;
       }
@@ -277,15 +281,13 @@ function ScrubBar({
       if (direction === "up") return false;
       return true;
     },
+    // Reported through spatial navigation's own callback, so the line under the
+    // buttons can name this row too. NOT compared during render: setting parent
+    // state from a child's render body is what React warns about, and it is a
+    // real hazard rather than a style note - the parent re-renders this child,
+    // which is the shape a render loop is made of.
+    onFocus: () => onFocused(),
   });
-
-  // Reported rather than read from here, so the line under the buttons can name
-  // this row too. Effect-free on purpose: the parent only ever stores a string.
-  const wasFocused = useRef(false);
-  if (focused !== wasFocused.current) {
-    wasFocused.current = focused;
-    onFocusedChange(focused);
-  }
 
   return (
     <div
@@ -396,8 +398,15 @@ function Transport({
     const siblings = [...box.current.querySelectorAll<HTMLElement>("[data-sfocus]")].filter((el) => el !== here);
     return !siblings.some((el) => {
       const r = el.getBoundingClientRect();
-      // A tolerance, because a focused button is scaled by 4% and its box moves.
-      return dir === "up" ? r.bottom <= mine.top + 2 : Math.abs(r.top - mine.top) < 4 && r.right <= mine.left + 2;
+      // Same line means the two boxes OVERLAP vertically - not that their tops
+      // agree. Measured on the box: play/pause is the big button, so its top sits
+      // 6px above its neighbours' while a comparison of tops allowed 4px, and
+      // every neighbour was judged to be on another line. Left was therefore
+      // swallowed as an edge and shuffle, previous and -10 could not be reached
+      // from where focus starts. A tolerance is still wanted at the boundary,
+      // because a focused button is scaled by 4% and its box moves.
+      const sameLine = r.bottom > mine.top + 2 && r.top < mine.bottom - 2;
+      return dir === "up" ? r.bottom <= mine.top + 2 : sameLine && r.right <= mine.left + 2;
     });
   };
   const edgeGuard =
