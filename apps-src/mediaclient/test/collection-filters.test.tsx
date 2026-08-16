@@ -9,9 +9,10 @@ import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import { PlexBackend } from "../backends/plex/backend";
 import { clearLibraryViews } from "../libraryView";
+import { OPTIONS_DEADLINE_MS } from "../LibraryFilters";
 import { useFocusFallback } from "../focus";
 import { FocusButton } from "@sdk";
-import type { MediaBackend, MediaItem, Session, SortOption } from "../backends/types";
+import type { MediaBackend, MediaItem, Session, SortOption, FilterOption } from "../backends/types";
 
 // What a collection list may be narrowed by, and what happens on the way back.
 //
@@ -275,7 +276,7 @@ describe("opening something from the library", () => {
   });
 });
 
-describe("a panel whose options never arrived", () => {
+describe("a panel with nothing to choose from", () => {
   it("does not park the cursor on a chip that is not there", async () => {
     // The worst failure this app can have: setFocus to an unmounted key leaves
     // the cursor there and every later press aborts inside smartNavigate, so
@@ -343,7 +344,7 @@ describe("the fallback that catches a lost cursor", () => {
   });
 });
 
-describe("a panel whose options have not arrived yet", () => {
+describe("a panel whose options are slow, stuck or lost", () => {
   it("does not put the cursor on the way out", async () => {
     // "No orders yet" and "no orders at all" are the same length of list and a
     // different situation. Naming the close button for the first means an arrow
@@ -386,6 +387,108 @@ describe("a panel whose options have not arrived yet", () => {
       await new Promise((r) => setTimeout(r, 20));
     });
     expect(getCurrentFocusKey()).toBe("lf-sort-0");
+  });
+
+  it("stops waiting for an answer that never comes", async () => {
+    // A request that is accepted and never answered settles nothing, so naming
+    // the first chip "until the answer arrives" named it for ever - and a chip
+    // that never mounts is the dead remote: every press discarded inside
+    // smartNavigate, nothing lit anywhere, only Back out. Reached by a stalled
+    // connection rather than by an error, which is an ordinary way for these
+    // boxes to lose a request.
+    const backend = {
+      kind: "plex",
+      sortOptions: () => new Promise<SortOption[]>(() => {}),
+      filterOptions: () => new Promise<FilterOption[]>(() => {}),
+      filterValues: async () => [],
+    } as unknown as MediaBackend;
+    useApp.setState({ backend });
+    let closed = 0;
+    render(
+      <LibraryFilters
+        libraryId="1"
+        view={{ sort: "titleSort", desc: false, filters: {}, labels: {} }}
+        onApply={() => {}}
+        onClose={() => {
+          closed += 1;
+        }}
+      />,
+    );
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    // While it may still be coming, the cursor is held for the chip - that is
+    // what keeps an arrow from landing on "leave" on a slow server.
+    await act(async () => {
+      await remote.down();
+    });
+    expect(getCurrentFocusKey()).toBe("lf-sort-0");
+    await act(async () => {
+      await remote.ok();
+    });
+    expect(closed, "not while the answer may still arrive").toBe(0);
+
+    // Past the point where waiting costs more than it buys.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, OPTIONS_DEADLINE_MS + 200));
+    });
+    await act(async () => {
+      await remote.down();
+    });
+    expect(getCurrentFocusKey(), "a cursor on nothing swallows every press after it").toBe("lf-close");
+    await act(async () => {
+      await remote.ok();
+    });
+    expect(closed, "and there is a way out of a panel that never filled").toBe(1);
+  }, 15000);
+
+  it("opens on the way out when the request failed outright", async () => {
+    // Both lists empty is exactly the case the initial focus did not cover: its
+    // condition was "there is something to focus", which is false precisely when
+    // the only thing to focus is the way out. The panel opened with nothing lit
+    // and the only highlight on screen was behind its own dimmed overlay.
+    const backend = {
+      kind: "plex",
+      sortOptions: async () => {
+        throw new Error("server said no");
+      },
+      filterOptions: async () => {
+        throw new Error("server said no");
+      },
+      filterValues: async () => [],
+    } as unknown as MediaBackend;
+    useApp.setState({ backend });
+
+    // The cursor starts somewhere else and has to MOVE. Asserting where it ends
+    // up is otherwise decided by whatever ran before this: setFocus("") does not
+    // clear the cursor, and the test above leaves it on this very key.
+    function Screen({ open }: { open: boolean }): React.ReactElement {
+      return (
+        <>
+          <FocusButton focusKey="outside-panel" onEnter={() => {}}>
+            {"Behind"}
+          </FocusButton>
+          {open && (
+            <LibraryFilters
+              libraryId="1"
+              view={{ sort: "titleSort", desc: false, filters: {}, labels: {} }}
+              onApply={() => {}}
+              onClose={() => {}}
+            />
+          )}
+        </>
+      );
+    }
+    const { rerender } = render(<Screen open={false} />);
+    await setFocus("outside-panel");
+    expect(getCurrentFocusKey()).toBe("outside-panel");
+
+    // No press: this is about what is lit when it opens.
+    await act(async () => rerender(<Screen open={true} />));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(getCurrentFocusKey()).toBe("lf-close");
   });
 
   it("reaches the filters when the orders came back empty", async () => {

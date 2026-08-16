@@ -9,7 +9,7 @@
   "changelog": [
     {
       "version": "0.55.2",
-      "notes": "A library now stays as you left it: open a film or a collection, press Back, and the order and filters you chose are still there instead of an alphabetical list from the top. The Collections view no longer offers the filters that belong to the films - of the 27 on offer, only the age rating does anything to a collection, and the rest turned 461 collections into \"this library has no collections\" at one press. An empty grid blames the filter that emptied it rather than the library, and turning on a filter like HDR names it on the button instead of showing a bare 1."
+      "notes": "A library now keeps how it was arranged: open a film or a collection, press Back, and the order and filters you chose are still in effect. (It still returns you to the top of the list, not to the row you were on.) The Collections view no longer offers the filters that belong to the films - of the 27 on offer, only the age rating does anything to a collection, and the rest turned 461 collections into \"this library has no collections\" at one press. An empty grid blames the filter that emptied it rather than the library, and turning on a filter like HDR names it on the button instead of showing a bare 1. The sort panel also says when it is still loading, instead of looking like a library with nothing to sort by."
     },
     {
       "version": "0.55.1",

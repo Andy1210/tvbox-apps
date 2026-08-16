@@ -9,6 +9,12 @@ import { log } from "./redact";
 /** How many values one filter offers before the list stops being a control. */
 const VALUE_CAP = 120;
 
+/**
+ * How long the panel waits for its options before it stops holding the cursor
+ * for them.
+ */
+export const OPTIONS_DEADLINE_MS = 4000;
+
 export interface LibraryView {
   sort: string;
   desc: boolean;
@@ -62,8 +68,12 @@ export function LibraryFilters({
 
   const [sorts, setSorts] = useState<SortOption[]>([]);
   const [filters, setFilters] = useState<FilterOption[]>([]);
-  /** Which list filter is open, and its values once they arrive. */
+  /**
+   * Whether the options request has finished - or waited long enough that
+   * pretending it is still coming would cost the remote. See the effect below.
+   */
   const [settled, setSettled] = useState(false);
+  /** Which list filter is open, and its values once they arrive. */
   const [openFilter, setOpenFilter] = useState<FilterOption | null>(null);
   const [values, setValues] = useState<SortOption[] | null>(null);
 
@@ -73,7 +83,7 @@ export function LibraryFilters({
   // opening with nothing focused leaves the only highlight on screen behind the
   // dimmed overlay.
   const home = sorts.length > 0 ? "lf-sort-0" : filters.length > 0 ? "lf-filter-0" : "lf-close";
-  useInitialFocus(home, sorts.length > 0 || filters.length > 0);
+  useInitialFocus(home, settled);
   // The first sort chip, not the close button: a fallback that lands on "leave"
   // turns a lost cursor into an accidental exit. While the options are still in
   // flight that is exactly what naming the close button would do on a slow
@@ -94,6 +104,14 @@ export function LibraryFilters({
     if (!backend) return;
     let live = true;
     setSettled(false);
+    // A hung request settles nothing. `req` carries no deadline of its own, so
+    // without this the cursor waits on a chip that never mounts and every press
+    // is discarded - which is the whole failure this panel is being fixed for,
+    // reached by a stalled connection rather than an error. Far beyond a healthy
+    // answer on this LAN, which is 11 ms warm and 86 ms cold.
+    const deadline = setTimeout(() => {
+      if (live) setSettled(true);
+    }, OPTIONS_DEADLINE_MS);
     void Promise.all([backend.sortOptions(libraryId, of), backend.filterOptions(libraryId, of)])
       .then(([s, f]) => {
         if (!live) return;
@@ -104,10 +122,12 @@ export function LibraryFilters({
       .finally(() => {
         // Whether the answer arrived is a different question from whether it had
         // anything in it, and the cursor's home depends on the first.
+        clearTimeout(deadline);
         if (live) setSettled(true);
       });
     return () => {
       live = false;
+      clearTimeout(deadline);
     };
   }, [backend, libraryId, of]);
 
@@ -200,6 +220,9 @@ export function LibraryFilters({
           </div>
 
           <div className="no-scrollbar -mx-[0.6vw] flex flex-col gap-[2.4vh] overflow-y-auto px-[0.6vw]">
+            {/* Otherwise an empty panel means either "still asking" or "nothing
+                to ask for", and they look the same from a sofa. */}
+            {!settled && <p className="text-[2.1vh] text-fg-dim">{t("common.loading")}</p>}
             {/* Both halves keep their own counsel: a heading over an empty box
                 says a control is there. */}
             <section className={`flex flex-col gap-[1vh] ${sorts.length === 0 ? "hidden" : ""}`}>
