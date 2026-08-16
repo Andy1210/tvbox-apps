@@ -166,6 +166,20 @@ export const useApp = create<State>((set, get) => ({
   async chooseProfile(id, pin, name) {
     const { backend, identity } = get();
     if (!backend) return;
+    // BEFORE the switch, not after it.
+    //
+    // `switchProfile` mutates the backend in place, and the music store and its
+    // scheduler hold that same object - so a final progress report flushed after
+    // the switch is the PREVIOUS person's song written with the NEW person's
+    // token, and the running 5-second timer does the same while the switch is in
+    // flight. That puts one person's listening into another's history and
+    // "recently played", across the boundary the PIN exists to draw.
+    //
+    // Music is the first thing on this box that plays while the browsing UI is
+    // live, so this is only reachable now: a film hides every other screen, and
+    // you cannot walk to the profile picker while one is loaded.
+    await Promise.resolve(resetMusic());
+    resetPlayer();
     const session = await backend.switchProfile(id, pin);
     // Here rather than further down: from this line the backend is holding the
     // new profile's token, so anything that throws between here and the end
@@ -182,12 +196,10 @@ export const useApp = create<State>((set, get) => ({
 
     const w = await writeJson(SESSION_KEY, named);
     if (!w.ok) log.warn("profile not persisted; the next launch will ask again");
-    // Artwork and everything cached under it belonged to the previous person -
-    // and so does anything the player is holding, including a countdown that
-    // would otherwise start a film as somebody else.
+    // Artwork and everything cached under it belonged to the previous person.
+    // The two players were already stopped above, before the token changed under
+    // them - doing it here as well would only be a second, later flush.
     clearImages();
-    resetPlayer();
-    resetMusic();
     set({
       session: named,
       backend: backendFor(named, identity!),
@@ -217,7 +229,9 @@ export const useApp = create<State>((set, get) => ({
     // racing the state that carries its token. It cannot fail the sign-out: a
     // server that is off must not leave somebody staring at a library they
     // asked to leave.
-    await get().backend?.revokeSession?.().catch(() => {});
+    await get()
+      .backend?.revokeSession?.()
+      .catch(() => {});
     const dropped = await removeRaw(SESSION_KEY);
     // The screen returns to sign-in either way - leaving someone looking at a
     // library they asked to leave would be worse - but a credential that

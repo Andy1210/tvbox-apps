@@ -298,7 +298,12 @@ function nowPlayingFor(s: MusicState): NowPlayingReport {
     state: s.state === "playing" ? "playing" : s.state === "paused" ? "paused" : "idle",
     title: item?.title,
     artist: item?.grandparentTitle ?? item?.parentTitle,
-    image: item && backend ? backend.posterUrl(item, 300, 300) : undefined,
+    // No artwork, matching the film path. This report is republished as a
+    // RETAINED MQTT message on a broker with no ACL, and a poster URL carries the
+    // server's LAN address and its certificate hash - which is more than the
+    // topic said before, for a picture on a card. The title and artist are what
+    // the household actually reads there.
+    image: undefined,
   };
 }
 
