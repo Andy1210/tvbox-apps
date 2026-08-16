@@ -5,8 +5,12 @@
     "hu": "Média",
     "en": "Media"
   },
-  "version": "0.56.0",
+  "version": "0.57.0",
   "changelog": [
+    {
+      "version": "0.57.0",
+      "notes": "The music player got its buttons redrawn as icons, with a line under them naming whichever one you are on - so a shape is never a guess, and shuffle and repeat say in words whether they are on. The progress bar can be moved now, the same way it works on a film: press Up onto it, the arrows carry a marker along the song while it keeps playing, OK jumps there and Back leaves it where it was. And the transport buttons on your remote drive the music at last - play/pause, next and previous, plus ten seconds either way on the wind buttons - not only on the player screen but while you are browsing for the next thing."
+    },
     {
       "version": "0.56.0",
       "notes": "Your music is here. The library opens on one press to shuffle everything, with rows for what you played and added recently, your artists, albums and playlists. Songs, albums and artists each have a full list with the A-Z strip beside it, sized for a library of thousands. The player shows what is next while it plays, steps ten seconds either way inside a song, shuffles and repeats, and can save the running order back to your server as a playlist. Music keeps playing while you browse, and a bar along the bottom says what is on."
