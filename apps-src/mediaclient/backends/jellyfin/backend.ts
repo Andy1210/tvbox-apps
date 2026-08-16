@@ -317,6 +317,10 @@ export class JellyfinBackend implements MediaBackend {
         sortBy: sortKey(q.sort),
         sortOrder: q.desc ? "Descending" : "Ascending",
         fields: LIST_FIELDS,
+        // The A-Z strip counts this list through `count()`, which applies these.
+        // Left out here, the strip and the grid describe two different lists and
+        // a letter press jumps to an offset in the one you cannot see.
+        ...this.filterQuery(q.filters),
       },
     });
     return { items: (res.Items || []).map(toItem), total: res.TotalRecordCount };
@@ -342,7 +346,12 @@ export class JellyfinBackend implements MediaBackend {
     return (res.Items || []).map(toItem);
   }
 
-  async filterOptions(): Promise<FilterOption[]> {
+  async filterOptions(_libraryId?: string, of?: "collections"): Promise<FilterOption[]> {
+    // Nothing for a collection list, because nothing here is measured. Which
+    // filters a BoxSet honours on this server is unknown - and the A-Z strip
+    // counts through a different query than the grid pages through, so a filter
+    // that only one of them applies puts a letter jump on the wrong list.
+    if (of === "collections") return [];
     return [
       { key: "genre", title: label("jellyfin.genre"), kind: "list" },
       { key: "unwatched", title: label("jellyfin.unwatched"), kind: "flag" },

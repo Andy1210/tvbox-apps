@@ -328,6 +328,21 @@ export class PlexBackend implements MediaBackend {
    */
   private static readonly COLLECTION_SORTS = new Set(["titleSort", "addedAt"]);
 
+  /**
+   * The filters a collection list actually honours.
+   *
+   * Swept against this server on a library with 461 collections: of the 27 the
+   * film library offers, 25 return nothing at all, and "unwatched" returns all
+   * 461 - ignored, so the chip would claim a filter that is not in effect. Only
+   * `contentRating` narrows the list, and it partitions it exactly (its values
+   * sum to 461, and the rows come back as collections carrying that rating).
+   *
+   * Asking the server which filters a collection takes does NOT answer this:
+   * `/filters?type=18` says none, while the same endpoint for sorts says only
+   * `titleSort` even though `addedAt` demonstrably reorders them.
+   */
+  private static readonly COLLECTION_FILTERS = new Set(["contentRating"]);
+
   async sortOptions(libraryId: string, of?: "collections"): Promise<SortOption[]> {
     const c = container<MetadataContainer>(await this.req(`library/sections/${libraryId}/sorts`));
     return (
@@ -344,12 +359,6 @@ export class PlexBackend implements MediaBackend {
   }
 
   async filterOptions(libraryId: string, of?: "collections"): Promise<FilterOption[]> {
-    // None, for a collection. Measured against this server on a library with 461
-    // of them: genre, year, decade, content rating, HDR and "in progress" each
-    // return 0 rows, and "unwatched" returns all 461 - it is ignored, so the chip
-    // would claim a filter that is not in effect. An empty half-panel is the
-    // honest answer; an offered filter that empties the grid is not.
-    if (of === "collections") return [];
     const c = container<MetadataContainer>(await this.req(`library/sections/${libraryId}/filters`));
     return (
       (c.Directory ?? [])
@@ -367,6 +376,7 @@ export class PlexBackend implements MediaBackend {
           // list of values that has to be fetched before it can be offered.
           kind: d.filterType === "boolean" ? ("flag" as const) : ("list" as const),
         }))
+        .filter((f) => !of || PlexBackend.COLLECTION_FILTERS.has(f.key))
     );
   }
 
