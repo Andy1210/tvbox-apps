@@ -19,8 +19,6 @@ that every box fetches over HTTPS (HOME → "Get more apps", or Settings → Sto
 | ------------------------------ | -------------------------------------- | ------------------------------------------------------------- |
 | [files](apps/files/)           | package (own UI)                       | The box's own folders, USB sticks, a NAS share, and photos    |
 | [livetv](apps/livetv/)         | package (own UI + plugin)              | IPTV over Xtream Codes or M3U, with an XMLTV guide            |
-| [plex](apps/plex/)             | manifest + bridge, bundle from flatpak | The official Plex HTPC client, driven by the box's mpv        |
-| [jellyfin](apps/jellyfin.json) | manifest only (remote)                 | Your own Jellyfin server                                      |
 | [youtube](apps/youtube.json)   | manifest only (remote)                 | `youtube.com/tv`, with a smart-TV user agent                  |
 | [xcloud](apps/xcloud.json)     | manifest only (remote)                 | Xbox Cloud Gaming                                             |
 | [spotify](apps/spotify/)       | package (own UI + plugin)              | A Spotify Connect speaker, and optional account browsing      |
@@ -98,6 +96,16 @@ This is the way to test anything that changes what a box installs, including a
 breaking change, without publishing it first. Flags go after `--`, so npm passes
 them on: `npm run store:serve -- --watch` rebuilds the index when a manifest
 changes, and `npm run store:serve -- --port 9000` moves it off 8790.
+
+`npm run store:serve -- --root DIR` serves a registry that is **not** this repo:
+same layout (`DIR/apps/<id>/…`), its own `index.json`, nothing published. That is
+where an app retired from this registry can go on living, installable on a box
+that has it as a store source, without standing in the official store. The
+builders take the same option (`node scripts/build-index.mjs --root DIR`).
+
+`mediaclient` replaced both `plex` and `jellyfin`, which were removed from this
+registry on 2026-08-16. The Plex app's package is preserved off-git in a local
+registry on the household host; git history has both.
 
 ## Layout
 

@@ -14,10 +14,18 @@
 // travel inside index.json.
 import { readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, existsSync, lstatSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+// `--root <dir>`: stage a registry that lives outside this repo. See
+// build-index.mjs, which takes the same option and has to be given the same one.
+const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
+const rootIdx = process.argv.indexOf("--root");
+if (rootIdx !== -1 && (!process.argv[rootIdx + 1] || process.argv[rootIdx + 1].startsWith("--"))) {
+  console.error("--root needs a directory");
+  process.exit(1);
+}
+const root = rootIdx === -1 ? repo : resolve(process.argv[rootIdx + 1]);
 const site = join(root, "_site");
 const indexPath = join(root, "index.json");
 
