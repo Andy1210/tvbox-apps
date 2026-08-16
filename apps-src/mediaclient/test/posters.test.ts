@@ -97,3 +97,33 @@ describe("an image queued behind the limit", () => {
     await expect(queued).resolves.toBeNull();
   });
 });
+
+describe("a poster that falls out of the cache", () => {
+  it("is given back, not left alive for the life of the window", async () => {
+    // A blob URL is held by the origin's store until it is revoked - the browser
+    // does not reclaim it. Measured before this: a thousand posters left a
+    // thousand alive with 240 in the cache, which on this library is about
+    // 155 MB stranded for as long as the window exists. And the shell HIDES the
+    // window when the app is left rather than destroying it, so it accumulates.
+    vi.useFakeTimers();
+    const revoked: string[] = [];
+    let made = 0;
+    vi.stubGlobal("fetch", async () => new Response(blob(), { status: 200 }));
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL: () => `blob:${++made}`,
+      revokeObjectURL: (u: string) => revoked.push(u),
+    });
+
+    // Past the cache's own size, so the coldest ones are dropped.
+    for (let i = 0; i < 300; i += 1) {
+      await loadImage(`http://s/p${i}`, {});
+    }
+    expect(revoked, "not while an <img> may still be decoding it").toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect(revoked.length, "the evicted ones are handed back").toBeGreaterThan(0);
+    vi.useRealTimers();
+  });
+});
+
