@@ -100,6 +100,8 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   const [mode, setMode] = useState<"items" | "collections">("items");
   /** Sort key to its translated name, for the button. Empty until asked for. */
   const [sortNames, setSortNames] = useState<Record<string, string>>({});
+  /** Which (library, mode, sort) the names have been asked for. See below. */
+  const asked = useRef(new Set<string>());
   /** Which letter search may still act. See jumpToLetter. */
   const jump = useRef(0);
   /** The letter last pressed, until the cursor moves off it. See activeLetter. */
@@ -183,18 +185,29 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   // server's own word for it, and asking for that on every library open would
   // be a request nobody reads.
   useEffect(() => {
-    if (!backend || (view.sort === "titleSort" && !view.desc) || sortNames[view.sort]) return;
+    // Keyed on what has been ASKED, not on what came back. The guard used to be
+    // "do I have a name for this sort", with `sortNames` in the dependency list
+    // - so a key the server does not name never satisfied it: the answer set a
+    // fresh object, the effect ran again, and the library asked forever. A sort
+    // remembered from the OTHER backend is exactly such a key, which is how a
+    // Plex order carried onto a Jellyfin server would have spun.
+    const want = `${libraryId}:${mode}:${view.sort}`;
+    if (!backend || (view.sort === "titleSort" && !view.desc) || asked.current.has(want)) return;
+    asked.current.add(want);
     let live = true;
     void backend
-      .sortOptions(libraryId)
-      .then((o) => live && setSortNames(Object.fromEntries(o.map((x) => [x.key, x.title]))))
+      .sortOptions(libraryId, mode === "collections" ? "collections" : undefined)
+      .then((o) => live && setSortNames((prev) => ({ ...prev, ...Object.fromEntries(o.map((x) => [x.key, x.title])) })))
       .catch(() => {
-        /* the button falls back to the raw key */
+        // The button falls back to the raw key, and the ask is forgotten so a
+        // later open can try again - a server that was down once is not a
+        // server without names.
+        asked.current.delete(want);
       });
     return () => {
       live = false;
     };
-  }, [backend, libraryId, view.sort, view.desc, sortNames]);
+  }, [backend, libraryId, mode, view.sort, view.desc]);
 
   // Loading a page. `letter` selects between the whole library and one bucket;
   // both are asked of the server rather than derived from the other, because the
@@ -375,6 +388,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     <LibraryFilters
       libraryId={libraryId}
       view={view}
+      of={mode === "collections" ? "collections" : undefined}
       // A new order or filter is a new list, so the grid resets to the top on
       // its own; the strip needs nothing, because it holds no state now.
       onApply={setView}
