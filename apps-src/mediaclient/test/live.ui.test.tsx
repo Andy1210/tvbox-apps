@@ -64,7 +64,7 @@ describe.skipIf(!BASE || !TOKEN)("screens against a live server", () => {
     const deck = await backend.onDeck();
     if (deck.length > 0) {
       const first = deck[0];
-      const label = first.seriesTitle ?? first.title;
+      const label = first.grandparentTitle ?? first.title;
       await waitFor(() => expect(screen.getAllByTitle(new RegExp(escapeRe(label))).length).toBeGreaterThan(0), {
         timeout: 20_000,
       });

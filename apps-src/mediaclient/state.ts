@@ -5,13 +5,14 @@
 // session, which everything needs.
 
 import { create } from "zustand";
-import type { MediaBackend, MediaItem, Session } from "./backends/types";
+import type { ItemKind, MediaBackend, MediaItem, Session } from "./backends/types";
 import { backendFor } from "./backends/factory";
 import { getIdentity, type Identity } from "./identity";
 import { readJson, writeJson, removeRaw } from "./storage";
 import { clearImages } from "./posters";
 import { clearLibraryViews } from "./libraryView";
-import { resetPlayer } from "./playback/player";
+import { resetPlayer, usePlayer } from "./playback/player";
+import { resetMusic, useMusic } from "./playback/music";
 import { useChosenVersion } from "./chosenVersion";
 import { log } from "./redact";
 
@@ -50,8 +51,22 @@ export type Screen =
       queueFrom?: MediaItem[];
     }
   | { name: "person"; personId: string; personName: string }
+  /**
+   * A music library.
+   *
+   * Separate from "library" rather than a mode of it: the film grid is a grid of
+   * posters with a filter panel, and none of that is what a music library wants.
+   * Which screen a library opens is decided by its `kind`, once, in Home.
+   */
+  | { name: "music"; libraryId: string; title: string }
+  | { name: "musicList"; libraryId: string; lens: MusicLens; title: string }
+  | { name: "musicItem"; itemId: string; kind: ItemKind; title: string; libraryId: string }
+  | { name: "nowPlaying" }
   | { name: "search" }
   | { name: "settings" };
+
+/** The three depths of a music library, as the screens name them. */
+export type MusicLens = "tracks" | "albums" | "artists";
 
 /** What went wrong, in terms a person on a sofa can act on. */
 export type Failure = { kind: "unreachable" | "signed-out" | "no-server" | "unknown"; detail?: string };
@@ -151,6 +166,24 @@ export const useApp = create<State>((set, get) => ({
   async chooseProfile(id, pin, name) {
     const { backend, identity } = get();
     if (!backend) return;
+    // STOPPED before the switch, ERASED after it. Two different things, and the
+    // first attempt did both here, which broke the ordinary case: a mistyped PIN
+    // throws below and the person stays on the pad - with the music silenced and
+    // their queue gone, having never passed the gate.
+    //
+    // Stopping first is not optional though. `switchProfile` mutates the backend
+    // in place, and the music store and its scheduler hold that same object - so
+    // a final progress report sent afterwards is the PREVIOUS person's song
+    // written with the NEW person's token, which is exactly the boundary the PIN
+    // draws. The real guarantee is narrow and worth naming: `reportProgress`
+    // reads `session.token` and builds its URL BEFORE its first await, so the
+    // request is committed while the old token is still in place. Anything that
+    // later adds an await ahead of that read reopens this.
+    //
+    // Music is why this is reachable at all - it is the first thing on this box
+    // that plays while the browsing UI is live.
+    await useMusic.getState().stop();
+    await usePlayer.getState().stop();
     const session = await backend.switchProfile(id, pin);
     // Here rather than further down: from this line the backend is holding the
     // new profile's token, so anything that throws between here and the end
@@ -167,11 +200,12 @@ export const useApp = create<State>((set, get) => ({
 
     const w = await writeJson(SESSION_KEY, named);
     if (!w.ok) log.warn("profile not persisted; the next launch will ask again");
-    // Artwork and everything cached under it belonged to the previous person -
-    // and so does anything the player is holding, including a countdown that
-    // would otherwise start a film as somebody else.
+    // Past the gate: now the previous person's things go. Artwork, and what the
+    // two players were holding - a queue is a record of what somebody listened
+    // to, and a countdown would otherwise start a film as the new person.
     clearImages();
     resetPlayer();
+    resetMusic();
     set({
       session: named,
       backend: backendFor(named, identity!),
@@ -201,7 +235,9 @@ export const useApp = create<State>((set, get) => ({
     // racing the state that carries its token. It cannot fail the sign-out: a
     // server that is off must not leave somebody staring at a library they
     // asked to leave.
-    await get().backend?.revokeSession?.().catch(() => {});
+    await get()
+      .backend?.revokeSession?.()
+      .catch(() => {});
     const dropped = await removeRaw(SESSION_KEY);
     // The screen returns to sign-in either way - leaving someone looking at a
     // library they asked to leave would be worse - but a credential that
@@ -213,6 +249,7 @@ export const useApp = create<State>((set, get) => ({
     clearImages();
     clearLibraryViews();
     resetPlayer();
+    resetMusic();
     // The remembered version of a title goes too. It is a household fact rather
     // than a personal one, so a PROFILE switch keeps it - but a rating key is a
     // per-SERVER id and they collide across servers, so another account signing

@@ -5,6 +5,11 @@ import { Home } from "./Home";
 import { Library } from "./Library";
 import { Login } from "./Login";
 import { Message } from "./Message";
+import { MiniPlayer } from "./music/MiniPlayer";
+import { MusicHome } from "./music/MusicHome";
+import { MusicItem } from "./music/MusicItem";
+import { MusicList } from "./music/MusicList";
+import { NowPlaying } from "./music/NowPlaying";
 import { Person } from "./Person";
 import { Player } from "./Player";
 import { Profiles } from "./Profiles";
@@ -212,8 +217,35 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
         {screen.name === "person" && (
           <Person key={screen.personId} personId={screen.personId} personName={screen.personName} />
         )}
+        {screen.name === "music" && (
+          <MusicHome key={screen.libraryId} libraryId={screen.libraryId} title={screen.title} />
+        )}
+        {screen.name === "musicList" && (
+          // Keyed on the lens too: songs, albums and artists are three different
+          // lists, and reusing the mounted one would show the old rows and the
+          // old letter strip while the new ones load.
+          <MusicList
+            key={`${screen.libraryId}-${screen.lens}`}
+            libraryId={screen.libraryId}
+            lens={screen.lens}
+            title={screen.title}
+          />
+        )}
+        {screen.name === "musicItem" && (
+          <MusicItem
+            key={screen.itemId}
+            itemId={screen.itemId}
+            kind={screen.kind}
+            title={screen.title}
+            libraryId={screen.libraryId}
+          />
+        )}
+        {screen.name === "nowPlaying" && <NowPlaying />}
         {screen.name === "search" && <Search />}
         {screen.name === "settings" && <Settings />}
+        {/* Outside the screens, because it belongs to none of them: it is what
+            says the music is still on while you browse for the next thing. */}
+        <MiniPlayer />
       </main>
     </div>
   );

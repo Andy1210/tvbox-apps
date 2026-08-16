@@ -17,6 +17,7 @@ import type {
   DeviceLogin,
   SortOption,
   FilterOption,
+  ListLens,
 } from "../types";
 import { buildUrl, container, request, type PlexIdentityHeaders } from "./http";
 import { beginDeviceLogin, listHomeUsers, switchHomeUser } from "./auth";
@@ -62,6 +63,24 @@ const FILTER_KEY = /^[A-Za-z][A-Za-z0-9_.]{0,40}$/;
 /** Parameter names that are ours to set. Plex has no filter by these names. */
 /** Plex's own number for a collection. */
 const COLLECTION_TYPE = 18;
+
+/**
+ * The server's item type for a lens, or nothing for the library's own items.
+ *
+ * A music section's own items are its ARTISTS, so albums and tracks are two
+ * further depths of the same section rather than lists of their own - which is
+ * what lets them page, sort and bucket by letter through the same calls. The
+ * numbers are the server's: 9 albums, 10 tracks, 18 collections.
+ */
+const LENS_TYPE: Record<ListLens, number> = {
+  collections: COLLECTION_TYPE,
+  albums: 9,
+  tracks: 10,
+};
+
+function lensType(of?: ListLens): Record<string, number> {
+  return of ? { type: LENS_TYPE[of] } : {};
+}
 /** What a theme path looks like. Verified against every one this server offers. */
 const THEME_PATH = /^\/library\/metadata\/\d+\/theme\/\d+$/;
 /**
@@ -214,8 +233,11 @@ export class PlexBackend implements MediaBackend {
     // switch would then try to list the household with it.
     this.session = { ...this.session, token: profileToken, accountToken: this.accountToken, profileId: id };
     // Anything cached was fetched as somebody else: watch state, on deck and the
-    // resume points all belong to whoever was signed in a moment ago.
+    // resume points all belong to whoever was signed in a moment ago. The letter
+    // strip counts belong to them too - a restricted profile sees fewer items,
+    // so its alphabet is not the same alphabet.
     this.metaCache.clear();
+    this.letterCache.clear();
     return this.session;
   }
 
@@ -223,7 +245,12 @@ export class PlexBackend implements MediaBackend {
 
   async libraries(): Promise<Library[]> {
     const c = container<MetadataContainer>(await this.req("library/sections"));
-    return (c.Directory ?? []).map(toLibrary).filter((l) => l.kind === "movie" || l.kind === "show");
+    // Photos and anything unrecognised are still left out: they have no screen
+    // here, and a library chip that opens an empty grid is worse than one that
+    // is missing.
+    return (c.Directory ?? [])
+      .map(toLibrary)
+      .filter((l) => l.kind === "movie" || l.kind === "show" || l.kind === "music");
   }
 
   async onDeck(): Promise<MediaItem[]> {
@@ -256,10 +283,10 @@ export class PlexBackend implements MediaBackend {
         // Direction rides on the sort key itself, which is what the server
         // expects: a separate parameter is ignored.
         sort: `${q.sort ?? "titleSort"}${q.desc ? ":desc" : ""}`,
-        // 18 is the collection type. Asking for them through the ordinary list
-        // is what lets the A-Z strip, the paging and the order work on them
-        // without a second implementation of each.
-        ...(q.of === "collections" ? { type: COLLECTION_TYPE } : {}),
+        // Asking for a lens through the ordinary list is what lets the A-Z
+        // strip, the paging and the order work on it without a second
+        // implementation of each.
+        ...lensType(q.of),
         ...page(q.offset, q.limit),
       }),
     );
@@ -277,12 +304,29 @@ export class PlexBackend implements MediaBackend {
   async letters(
     libraryId: string,
     filters?: Record<string, string>,
-    of?: "collections",
+    of?: ListLens,
   ): Promise<{ key: string; title: string; size: number }[]> {
+    // A music DEPTH has to be counted rather than asked for.
+    //
+    // Measured: `firstCharacter?type=9` and `?type=10` return the ARTIST strip -
+    // the same 16 keys as the artists lens, with sizes that are albums and tracks
+    // grouped by their artist's initial. The per-letter endpoint is the one that
+    // is right: it buckets by the item's own title. The two disagree badly. On
+    // this library the strip claimed V held 331 tracks where it holds 12, and it
+    // never offered `# F H I J O Q T U W Y` at all - 175 of 572 songs with no
+    // letter to reach them, and seven of the sixteen letters it DID offer jumped
+    // to the wrong place, because a title whose initial is missing from the key
+    // list scores 0 and makes the search's ordering non-monotonic.
+    //
+    // 27 requests, measured at 0.07 s against this server, and cached. Asking for
+    // a page of ZERO is what makes it cheap: the container still carries
+    // totalSize. Both paging parameters are still sent - a size alone is ignored
+    // and the whole bucket arrives.
+    if (of === "albums" || of === "tracks") return this.musicLetters(libraryId, of, filters);
     const c = container<MetadataContainer>(
       await this.req(`library/sections/${libraryId}/firstCharacter`, {
         ...safeFilters(filters),
-        ...(of === "collections" ? { type: COLLECTION_TYPE } : {}),
+        ...lensType(of),
       }),
     );
     // Accented initials are merged into the plain letter. The server keeps some
@@ -305,6 +349,61 @@ export class PlexBackend implements MediaBackend {
     // read "... X Y Z U" and five letters jumped to the same wrong place.
     return [...merged.values()].sort((a, b) => (a.key === "#" ? -1 : b.key === "#" ? 1 : a.key.localeCompare(b.key)));
   }
+
+  /**
+   * The strip for a music depth, counted a letter at a time.
+   *
+   * A letter with nothing under it is left out rather than shown greyed, which is
+   * the same rule the other strip follows: on a television a strip is a column of
+   * targets, and one that cannot be pressed is a press that appears to do nothing.
+   *
+   * Cached because it is 27 requests and a library's alphabet does not move
+   * between screens. A failed sweep is NOT cached: a strip counted during an
+   * outage is an empty strip, and remembering that would leave the list with no
+   * way to jump until the app restarts.
+   */
+  private letterCache = new Map<string, { key: string; title: string; size: number }[]>();
+
+  private async musicLetters(
+    libraryId: string,
+    of: ListLens,
+    filters?: Record<string, string>,
+  ): Promise<{ key: string; title: string; size: number }[]> {
+    const cacheKey = JSON.stringify([libraryId, of, filters ?? {}]);
+    const hit = this.letterCache.get(cacheKey);
+    if (hit) return hit;
+
+    // Settled, not all-or-nothing. One letter timing out used to lose the whole
+    // strip - measured: 26 of 27 succeeded and the list came back empty, so a
+    // 582-song list had no way to jump at all. A strip missing one letter is a
+    // far smaller failure than a strip missing every letter.
+    const counted = await Promise.allSettled(
+      PlexBackend.MUSIC_LETTERS.map(async (key) => {
+        const c = await container<MetadataContainer>(
+          await this.req(`library/sections/${libraryId}/firstCharacter/${encodeLetterKey(key)}`, {
+            ...safeFilters(filters),
+            ...lensType(of),
+            ...page(0, 0),
+          }),
+        );
+        return { key, title: key, size: c.totalSize ?? 0 };
+      }),
+    );
+
+    const failed = counted.filter((r) => r.status === "rejected").length;
+    if (failed) log.warn(`letter strip: ${failed} of ${PlexBackend.MUSIC_LETTERS.length} buckets did not answer`);
+    const out = counted.flatMap((r) => (r.status === "fulfilled" ? [r.value] : [])).filter((l) => l.size > 0);
+    // A partial sweep is not remembered: the missing letters would then be
+    // missing until the app restarts.
+    if (failed) return out;
+    if (out.length) this.letterCache.set(cacheKey, out);
+    return out;
+  }
+
+  /** "#" then A-Z. Measured on this library: those 27 buckets account for every
+   *  track, so the server folds an accented initial into its plain letter here
+   *  exactly as it does for the other strip. */
+  private static readonly MUSIC_LETTERS = ["#", ...Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i))];
 
   /**
    * Orders that actually take effect.
@@ -345,8 +444,15 @@ export class PlexBackend implements MediaBackend {
    */
   private static readonly COLLECTION_FILTERS = new Set(["contentRating"]);
 
-  async sortOptions(libraryId: string, of?: "collections"): Promise<SortOption[]> {
-    const c = container<MetadataContainer>(await this.req(`library/sections/${libraryId}/sorts`));
+  async sortOptions(libraryId: string, of?: ListLens): Promise<SortOption[]> {
+    const c = container<MetadataContainer>(
+      // The lens goes to the server for music, because the sets differ per depth
+      // - measured on this section, tracks offer mediaBitrate and ratingCount
+      // while albums offer the artist/album/disc order, and the section's own
+      // answer mentions none of them. Collections keep asking WITHOUT a type and
+      // narrowing afterwards, which is the pairing that was measured for them.
+      await this.req(`library/sections/${libraryId}/sorts`, of === "collections" ? {} : lensType(of)),
+    );
     return (
       (c.Directory ?? [])
         // "random" is offered and is not usable here: the grid is virtualised, so
@@ -360,8 +466,10 @@ export class PlexBackend implements MediaBackend {
     );
   }
 
-  async filterOptions(libraryId: string, of?: "collections"): Promise<FilterOption[]> {
-    const c = container<MetadataContainer>(await this.req(`library/sections/${libraryId}/filters`));
+  async filterOptions(libraryId: string, of?: ListLens): Promise<FilterOption[]> {
+    const c = container<MetadataContainer>(
+      await this.req(`library/sections/${libraryId}/filters`, of === "collections" ? {} : lensType(of)),
+    );
     return (
       (c.Directory ?? [])
         // A filter key becomes both a PATH SEGMENT and a QUERY NAME later, and it
@@ -462,10 +570,10 @@ export class PlexBackend implements MediaBackend {
    */
   async letterPage(libraryId: string, letterKey: string, q: PageQuery): Promise<Page<MediaItem>> {
     const c = container<MetadataContainer>(
-      await this.req(
-        `library/sections/${libraryId}/firstCharacter/${encodeLetterKey(letterKey)}`,
-        page(q.offset, q.limit),
-      ),
+      await this.req(`library/sections/${libraryId}/firstCharacter/${encodeLetterKey(letterKey)}`, {
+        ...lensType(q.of),
+        ...page(q.offset, q.limit),
+      }),
     );
     return { items: (c.Metadata ?? []).map(toItem), total: c.totalSize };
   }
@@ -524,14 +632,102 @@ export class PlexBackend implements MediaBackend {
     return this.libraryPage(libraryId, { ...q, of: "collections" });
   }
 
-  async playlists(): Promise<MediaItem[]> {
-    const c = container<MetadataContainer>(await this.req("playlists", { playlistType: "video" }));
+  async playlists(kind?: "audio" | "video"): Promise<MediaItem[]> {
+    const c = container<MetadataContainer>(await this.req("playlists", kind ? { playlistType: kind } : {}));
     return (c.Metadata ?? []).map(toItem);
   }
 
   async playlistItems(id: string): Promise<MediaItem[]> {
     const c = container<MetadataContainer>(await this.req(`playlists/${encodeURIComponent(id)}/items`));
     return (c.Metadata ?? []).map(toItem);
+  }
+
+  /**
+   * The server's own name for a set of its items, which is what both playlist
+   * writes are addressed with.
+   *
+   * `serverId` is the machine identifier - verified against `/identity` and the
+   * account's resource list, which agree. A wrong one is not an error: the
+   * server accepts the call and creates an EMPTY playlist, so this is built from
+   * the session rather than assembled at each call site.
+   */
+  private itemsUri(itemIds: string[]): string {
+    // Held to what a rating key is, at the one place ids become a URI. They
+    // arrive from list responses today, but this string is a server-side
+    // selector carrying an admin token, and a comma-joined free-form id would
+    // let one entry address something else entirely.
+    const ids = itemIds.filter((id) => /^\d+$/.test(id));
+    if (!ids.length) throw new Error("no playable ids for a playlist");
+    return `server://${this.session.serverId}/com.plexapp.plugins.library/library/metadata/${ids.join(",")}`;
+  }
+
+  async createPlaylist(title: string, itemIds: string[], kind: "audio" | "video"): Promise<MediaItem> {
+    const c = container<MetadataContainer>(
+      await request<MetadataContainer>(this.base, "playlists", this.id, {
+        method: "POST",
+        token: this.session.token,
+        // smart=0 is required: without it the server answers 400 rather than
+        // defaulting, so a playlist created from the box would never appear.
+        query: { type: kind, title, smart: 0, uri: this.itemsUri(itemIds) },
+      }),
+    );
+    const made = (c.Metadata ?? []).map(toItem)[0];
+    if (!made) throw new Error("the server created no playlist");
+    return made;
+  }
+
+  async addToPlaylist(playlistId: string, itemIds: string[]): Promise<void> {
+    if (!/^\d+$/.test(playlistId)) throw new Error("not a playlist id");
+    await request(this.base, `playlists/${encodeURIComponent(playlistId)}/items`, this.id, {
+      method: "PUT",
+      token: this.session.token,
+      query: { uri: this.itemsUri(itemIds) },
+    });
+  }
+
+  /**
+   * A track's own file, with the credential in the URL.
+   *
+   * Nothing is negotiated: an audio file direct-plays, and the profile this
+   * client sends already tells the server so. That is also why this does not go
+   * through `resolveStream` - there is no session to start, and starting one per
+   * track would leave a trail of transcode sessions to reap for playback that
+   * never transcoded.
+   */
+  trackUrl(item: MediaItem): string | undefined {
+    // The FOURTH call site of the rule stated at resolveStream, and the one where
+    // it matters most. `buildUrl` is `new URL(path, base)`, so an ABSOLUTE value
+    // here replaces the base entirely - and this URL carries the account token in
+    // its query string and is handed to mpv, which has no same-origin policy and
+    // no CORS to refuse it. A server that named `https://elsewhere/collect` would
+    // simply be sent the credential. A relative `../../:/scrobble` stays on the
+    // server and aims it at any endpoint on it, which is not a bound either.
+    //
+    // Undefined rather than thrown: a queue is built from a page of items, and
+    // one malformed key must skip that song rather than end the list. `playAt`
+    // already treats a track with no URL as one to step over.
+    if (!item.mediaKey) return undefined;
+    // Checked on the RESOLVED path, the way artUrl does it, rather than on the
+    // raw string. Its note says why: two parsers read one value and they
+    // disagree - a leading tab is not absolute to a pattern and is absolute to
+    // the URL parser. Nothing gets past the raw test today, but the safer of the
+    // two rules belongs on the URL that carries the token.
+    let url: URL;
+    try {
+      url = new URL(item.mediaKey.replace(/^\//, ""), this.base.endsWith("/") ? this.base : this.base + "/");
+    } catch {
+      return undefined;
+    }
+    if (
+      url.origin !== new URL(this.session.baseUrl).origin ||
+      !PART_PATH.test(url.pathname) ||
+      url.search ||
+      url.hash
+    ) {
+      log.warn("track URL is not a media path on this server; dropped");
+      return undefined;
+    }
+    return buildUrl(this.base, url.pathname.replace(/^\//, ""), { "X-Plex-Token": this.session.token });
   }
 
   /**

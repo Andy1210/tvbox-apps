@@ -180,9 +180,9 @@ export function toItem(it: JellyfinItem): MediaItem {
     // An episode's "parent" reads as its series on screen even though its parent
     // in the tree is the season, which is what the season name is for.
     parentTitle: kind === "episode" ? it.SeasonName : undefined,
-    seriesTitle: it.SeriesName,
-    seriesId: it.SeriesId,
-    seriesThumb: imagePath(it.SeriesId || "", it.SeriesPrimaryImageTag),
+    grandparentTitle: it.SeriesName,
+    grandparentId: it.SeriesId,
+    grandparentThumb: imagePath(it.SeriesId || "", it.SeriesPrimaryImageTag),
     // An episode with no still of its own borrows the series' poster rather
     // than leaving a hole: the home screen's hero panel and its tint are drawn
     // from this, and a "carry on watching" row is mostly episodes.

@@ -17,6 +17,7 @@ import { NextIcon, PauseIcon, PlayIcon, PreviousIcon } from "./icons";
 import { episodeNumber } from "./Tile";
 import { applySubtitleStyle, usePrefs } from "./prefs";
 import { useChosenVersion } from "./chosenVersion";
+import { clock } from "./time";
 
 /**
  * Where focus rests while the overlay is just showing.
@@ -33,15 +34,6 @@ const IDLE_KEY = "player-idle";
 const STEPS_MS = [10_000, 30_000, 60_000];
 /** The overlay hides itself this long after the last press. */
 const IDLE_HIDE_MS = 4_000;
-
-function clock(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  const mm = h ? String(m).padStart(2, "0") : String(m);
-  return `${h ? `${h}:` : ""}${mm}:${String(s).padStart(2, "0")}`;
-}
 
 /**
  * What is on screen while something plays.
@@ -632,9 +624,9 @@ export function Player(): React.JSX.Element | null {
           <div className="flex flex-col gap-[1.4vh]">
             <div className="flex items-baseline gap-[1.2vw]">
               <h2 className="text-[2.8vh] font-semibold tracking-tight [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]">
-                {current.item.seriesTitle ?? current.item.title}
+                {current.item.grandparentTitle ?? current.item.title}
               </h2>
-              {current.item.seriesTitle && (
+              {current.item.grandparentTitle && (
                 <span className="text-[2.1vh] text-white/80 [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]">
                   {/* The number before the name. Halfway through a series it is
                       the thing being checked - "which one is this" - and the

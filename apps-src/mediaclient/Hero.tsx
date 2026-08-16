@@ -35,7 +35,7 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
 
   // The series, when the cursor is on an episode: its art, its name and its
   // cast are what someone is choosing between, not one episode's.
-  const artId = item?.seriesId ?? item?.id;
+  const artId = item?.grandparentId ?? item?.id;
 
   useEffect(() => {
     // Cleared first. Held, the previous title's picture stayed under the new
@@ -105,8 +105,8 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
     : accent;
 
   const cast = (detail?.roles ?? []).slice(0, 4).map((r) => r.name);
-  const title = item.seriesTitle ?? item.title;
-  const sub = item.seriesTitle ? item.title : null;
+  const title = item.grandparentTitle ?? item.title;
+  const sub = item.grandparentTitle ? item.title : null;
 
   return (
     <>

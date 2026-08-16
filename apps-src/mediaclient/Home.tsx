@@ -64,7 +64,10 @@ export function Home(): React.JSX.Element {
         // After the first paint, not before it: the account may have none, and
         // nobody should wait on that answer to see what they were watching.
         void backend
-          .playlists()
+          // Video only: this row sits under films and series, and a music
+          // playlist opened from here would land on a screen built for them.
+          // The music library has a row of its own.
+          .playlists("video")
           .then((p) => live && setData((d) => (d ? { ...d, playlists: p } : d)))
           .catch(() => {
             /* a row that does not appear is the right failure here */
@@ -127,7 +130,7 @@ export function Home(): React.JSX.Element {
    */
   const deckPoster = (item: MediaItem): string | undefined =>
     backend?.posterUrl(
-      item.seriesThumb ? { ...item, thumb: item.seriesThumb } : item,
+      item.grandparentThumb ? { ...item, thumb: item.grandparentThumb } : item,
       300 * artworkScale(),
       450 * artworkScale(),
     );
@@ -164,7 +167,16 @@ export function Home(): React.JSX.Element {
         <TopRow
           onReachTop={toTop}
           libraries={data.libraries}
-          onLibrary={(l) => go({ name: "library", libraryId: l.id, title: l.title })}
+          // Which screen a library opens is decided here, once, from its kind.
+          // A music library on the film grid would be a wall of album covers
+          // with a filter panel offering resolutions and content ratings.
+          onLibrary={(l) =>
+            go(
+              l.kind === "music"
+                ? { name: "music", libraryId: l.id, title: l.title }
+                : { name: "library", libraryId: l.id, title: l.title },
+            )
+          }
           onSearch={() => go({ name: "search" })}
           onSettings={() => go({ name: "settings" })}
         />

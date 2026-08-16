@@ -48,6 +48,7 @@ import type {
   StreamDecision,
   Track,
   DeviceLogin,
+  ListLens,
 } from "../types";
 import { beginQuickConnect } from "./auth";
 import { log } from "../../redact";
@@ -287,7 +288,7 @@ export class JellyfinBackend implements MediaBackend {
     };
   }
 
-  async sortOptions(_libraryId?: string, of?: "collections"): Promise<SortOption[]> {
+  async sortOptions(_libraryId?: string, of?: ListLens): Promise<SortOption[]> {
     // A fixed list rather than an asked one: Jellyfin has no endpoint that
     // names its sorts, so unlike the Plex side there is nothing to ask. The
     // keys are the server's own; only the labels are ours. Read at call time,
@@ -326,7 +327,16 @@ export class JellyfinBackend implements MediaBackend {
     return { items: (res.Items || []).map(toItem), total: res.TotalRecordCount };
   }
 
-  async playlists(): Promise<MediaItem[]> {
+  /**
+   * The account's playlists.
+   *
+   * An audio playlist is answered with nothing rather than with a list: this
+   * backend leaves music libraries out (see `libraries`), so a music playlist
+   * here would open onto items no screen can reach. Returning them and letting
+   * the screen fail later is the silent version of the same gap.
+   */
+  async playlists(kind?: "audio" | "video"): Promise<MediaItem[]> {
+    if (kind === "audio") return [];
     const res = await this.req<ItemsResponse>("Items", {
       query: {
         userId: this.userId,
@@ -346,7 +356,7 @@ export class JellyfinBackend implements MediaBackend {
     return (res.Items || []).map(toItem);
   }
 
-  async filterOptions(_libraryId?: string, of?: "collections"): Promise<FilterOption[]> {
+  async filterOptions(_libraryId?: string, of?: ListLens): Promise<FilterOption[]> {
     // Nothing for a collection list, because nothing here is measured. Which
     // filters a BoxSet honours on this server is unknown - and the A-Z strip
     // counts through a different query than the grid pages through, so a filter
@@ -381,7 +391,7 @@ export class JellyfinBackend implements MediaBackend {
    * on a television is a column of targets, and one that cannot be pressed is a
    * press that appears to do nothing.
    */
-  async letters(libraryId: string, filters?: Record<string, string>, of?: "collections"): Promise<Letter[]> {
+  async letters(libraryId: string, filters?: Record<string, string>, of?: ListLens): Promise<Letter[]> {
     const key = JSON.stringify([libraryId, filters ?? {}, of ?? ""]);
     const cached = this.letterCache.get(key);
     if (cached) return cached;
@@ -430,7 +440,7 @@ export class JellyfinBackend implements MediaBackend {
   /** How many items match, without fetching any of them. */
   private async count(
     libraryId: string,
-    of: "collections" | undefined,
+    of: ListLens | undefined,
     filters: Record<string, string> | undefined,
     extra: Record<string, string>,
   ): Promise<number> {
@@ -470,6 +480,28 @@ export class JellyfinBackend implements MediaBackend {
   /** Jellyfin holds no soundtrack listing; the screen draws nothing for empty. */
   async soundtrack(): Promise<MediaItem[]> {
     return [];
+  }
+
+  /**
+   * Music: not surfaced by this backend yet.
+   *
+   * Jellyfin has all three of these - playlist writes and an audio stream URL -
+   * so these are unbuilt rather than impossible. They refuse loudly instead of
+   * answering emptily because every caller is a music screen, and a music screen
+   * is only reachable when `libraries` offers a music library, which this
+   * backend does not. Reaching one of these means that filter was removed and
+   * the rest of this was not written.
+   */
+  async createPlaylist(): Promise<MediaItem> {
+    throw new Error("this backend does not write playlists yet");
+  }
+
+  async addToPlaylist(): Promise<void> {
+    throw new Error("this backend does not write playlists yet");
+  }
+
+  trackUrl(): string | undefined {
+    return undefined;
   }
 
   async search(query: string): Promise<MediaItem[]> {

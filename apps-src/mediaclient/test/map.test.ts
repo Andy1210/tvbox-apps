@@ -134,9 +134,9 @@ describe("episode roll-up", () => {
     // "what else were they in".
     const credits: MediaItem[] = [
       { id: "1", kind: "movie", title: "A film" },
-      { id: "2", kind: "episode", title: "Ep 1", seriesTitle: "A series", seriesId: "100" },
-      { id: "3", kind: "episode", title: "Ep 2", seriesTitle: "A series", seriesId: "100" },
-      { id: "4", kind: "episode", title: "Ep 1", seriesTitle: "Another series", seriesId: "200" },
+      { id: "2", kind: "episode", title: "Ep 1", grandparentTitle: "A series", grandparentId: "100" },
+      { id: "3", kind: "episode", title: "Ep 2", grandparentTitle: "A series", grandparentId: "100" },
+      { id: "4", kind: "episode", title: "Ep 1", grandparentTitle: "Another series", grandparentId: "200" },
     ];
 
     const rolled = rollUpEpisodes(credits);
@@ -154,10 +154,10 @@ describe("episode roll-up", () => {
         id: "39451",
         kind: "episode",
         title: "Chapter 8",
-        seriesTitle: "A series",
-        seriesId: "39432",
+        grandparentTitle: "A series",
+        grandparentId: "39432",
         thumb: "/still",
-        seriesThumb: "/poster",
+        grandparentThumb: "/poster",
       },
     ]);
 
@@ -169,7 +169,7 @@ describe("episode roll-up", () => {
   it("does not duplicate a series that is already listed in its own right", () => {
     const rolled = rollUpEpisodes([
       { id: "100", kind: "show", title: "A series" },
-      { id: "e", kind: "episode", title: "Ep 1", seriesTitle: "A series", seriesId: "100" },
+      { id: "e", kind: "episode", title: "Ep 1", grandparentTitle: "A series", grandparentId: "100" },
     ]);
 
     expect(rolled).toHaveLength(1);
@@ -179,15 +179,15 @@ describe("episode roll-up", () => {
   it("keeps two series apart when they share a name", () => {
     // Deduping on the title would collapse a remake into its original.
     const rolled = rollUpEpisodes([
-      { id: "e1", kind: "episode", title: "Ep", seriesTitle: "Same Name", seriesId: "1" },
-      { id: "e2", kind: "episode", title: "Ep", seriesTitle: "Same Name", seriesId: "2" },
+      { id: "e1", kind: "episode", title: "Ep", grandparentTitle: "Same Name", grandparentId: "1" },
+      { id: "e2", kind: "episode", title: "Ep", grandparentTitle: "Same Name", grandparentId: "2" },
     ]);
 
     expect(rolled.map((r) => r.id).sort()).toEqual(["1", "2"]);
   });
 
   it("drops an episode with no series id rather than linking somewhere wrong", () => {
-    expect(rollUpEpisodes([{ id: "e", kind: "episode", title: "Ep", seriesTitle: "A series" }])).toEqual([]);
+    expect(rollUpEpisodes([{ id: "e", kind: "episode", title: "Ep", grandparentTitle: "A series" }])).toEqual([]);
   });
 });
 
