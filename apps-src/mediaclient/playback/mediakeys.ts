@@ -75,8 +75,14 @@ export function handleMusicKey(key: string): boolean {
 
   // Looked up without widening to `string`, so the switch below still has to
   // handle every action the table can produce.
-  const action: (typeof ACTIONS)[keyof typeof ACTIONS] | undefined =
-    key in ACTIONS ? ACTIONS[key as keyof typeof ACTIONS] : undefined;
+  //
+  // `hasOwn` rather than `in`: the table is a plain object, so `"toString" in
+  // ACTIONS` is TRUE and hands back a function - truthy, matching no case, and
+  // straight into the branch below. A key named after anything on
+  // Object.prototype would have thrown inside a window listener.
+  const action: (typeof ACTIONS)[keyof typeof ACTIONS] | undefined = Object.hasOwn(ACTIONS, key)
+    ? ACTIONS[key as keyof typeof ACTIONS]
+    : undefined;
   if (!action) return false;
 
   switch (action) {
@@ -110,18 +116,21 @@ export function handleMusicKey(key: string): boolean {
     case "stop":
       void m.stop();
       break;
-    default:
-      // Unreachable, and typed so: adding a row to the table without a case
-      // here stops compiling rather than silently reporting the press handled
-      // while nothing happened - which is the failure this whole module exists
-      // to undo.
-      return assertNever(action);
+    default: {
+      // Adding a row to the table without a case here stops COMPILING rather
+      // than silently reporting the press handled while nothing happened, which
+      // is the failure this whole module exists to undo.
+      //
+      // At runtime it answers "not ours" instead of throwing. This runs inside a
+      // window keydown listener, where an exception is an uncaught error on an
+      // ordinary press - a far worse outcome than a key that does nothing, and
+      // the exact damage the prototype hole above would have done.
+      const unreachable: never = action;
+      void unreachable;
+      return false;
+    }
   }
   return true;
-}
-
-function assertNever(x: never): never {
-  throw new Error(`unhandled music key action: ${String(x)}`);
 }
 
 export function useMusicMediaKeys(): void {
