@@ -84,7 +84,7 @@ export function LibraryFilters({
   useEffect(() => {
     if (!backend) return;
     let live = true;
-    void Promise.all([backend.sortOptions(libraryId, of), backend.filterOptions(libraryId)])
+    void Promise.all([backend.sortOptions(libraryId, of), backend.filterOptions(libraryId, of)])
       .then(([s, f]) => {
         if (!live) return;
         setSorts(s);
@@ -213,7 +213,9 @@ export function LibraryFilters({
               </div>
             </section>
 
-            <section className="flex flex-col gap-[1vh]">
+            {/* A heading over nothing is a promise the list does not keep: a
+                collection cannot be narrowed at all here. */}
+            <section className={`flex flex-col gap-[1vh] ${filters.length === 0 ? "hidden" : ""}`}>
               <h3 className="text-[2.1vh] font-semibold text-fg-dim">{t("library.filter")}</h3>
               <div // A strict grid, not a wrapped flex. Spatial navigation resolves by
                 // rectangles, and chips of different widths wrapping onto ragged
@@ -233,7 +235,13 @@ export function LibraryFilters({
                       // and the state still read at a glance.
                       label={f.kind === "flag" || !chosen ? f.title : `${f.title}: ${view.labels[f.key] ?? chosen}`}
                       onEnter={() => {
-                        if (f.kind === "flag") setFilter(f.key, chosen ? null : "1");
+                        if (f.kind === "flag") {
+                          // The title as the label, because the VALUE of a flag is
+                          // "1" and the button outside falls back to the value when
+                          // a filter has no name - so turning one on read
+                          // "Sort and filter · 1".
+                          setFilter(f.key, chosen ? null : "1", f.title);
+                        }
                         else setOpenFilter(f);
                       }}
                     />

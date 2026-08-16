@@ -101,6 +101,8 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   /** Sort key to its translated name, for the button. Empty until asked for. */
   const [sortNames, setSortNames] = useState<Record<string, string>>({});
   /** Which (library, mode, sort) the names have been asked for. See below. */
+  /** How the films were arranged, kept for the way back out of the collections. */
+  const saved = useRef<LibraryView | null>(null);
   const asked = useRef(new Set<string>());
   /** Which letter search may still act. See jumpToLetter. */
   const jump = useRef(0);
@@ -585,16 +587,23 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
           <FocusButton
             focusKey="lib-mode"
             onEnter={() => {
-              // Filters do not carry across: measured, every list filter returns
-              // nothing against collections, so the grid emptied while the
-              // button still named the filter that emptied it.
+              // Nothing carries INTO a collection list: measured, every list
+              // filter returns nothing against collections, and half the orders
+              // a film can be put in do not exist for one either - the server
+              // answers those with an empty list, which this screen reports as
+              // "this library has no collections".
               //
-              // Nor does the ORDER, for the same reason and with the same
-              // symptom: half the orders a film can be put in do not exist for a
-              // collection, and the server answers those with an empty list -
-              // which this screen reports as "this library has no collections".
-              setView((v) => ({ ...v, filters: {}, labels: {}, sort: "titleSort", desc: false }));
-              setMode((m) => (m === "items" ? "collections" : "items"));
+              // Coming back is not the same act, though. Clearing there threw
+              // away an order somebody had chosen for the films, with nothing on
+              // screen to say so, so it is put back instead.
+              if (mode === "items") {
+                saved.current = view;
+                setView({ sort: "titleSort", desc: false, filters: {}, labels: {} });
+                setMode("collections");
+              } else {
+                setView(saved.current ?? { sort: "titleSort", desc: false, filters: {}, labels: {} });
+                setMode("items");
+              }
             }}
             className="rounded-[1vh] bg-white/10 px-[2vw] py-[1vh] text-[2vh]"
           >

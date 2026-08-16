@@ -343,7 +343,13 @@ export class PlexBackend implements MediaBackend {
     );
   }
 
-  async filterOptions(libraryId: string): Promise<FilterOption[]> {
+  async filterOptions(libraryId: string, of?: "collections"): Promise<FilterOption[]> {
+    // None, for a collection. Measured against this server on a library with 461
+    // of them: genre, year, decade, content rating, HDR and "in progress" each
+    // return 0 rows, and "unwatched" returns all 461 - it is ignored, so the chip
+    // would claim a filter that is not in effect. An empty half-panel is the
+    // honest answer; an offered filter that empties the grid is not.
+    if (of === "collections") return [];
     const c = container<MetadataContainer>(await this.req(`library/sections/${libraryId}/filters`));
     return (
       (c.Directory ?? [])
