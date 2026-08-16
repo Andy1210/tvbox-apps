@@ -16,7 +16,7 @@
 // which is exactly the line this stays on.
 import { createServer } from "node:http";
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync, existsSync, statSync, watch } from "node:fs";
+import { readFileSync, readdirSync, existsSync, realpathSync, statSync, watch } from "node:fs";
 import { join, dirname, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { networkInterfaces } from "node:os";
@@ -58,6 +58,12 @@ for (let i = 2; i < process.argv.length; i++) {
 // After the arguments, because --root decides it. It is the served tree AND the
 // boundary every request path is checked against, so it has to be one value.
 const site = join(root, "_site");
+// Two boundaries, because a path is checked twice and the two checks cannot
+// share one: lexically against the written path, then really against the
+// resolved one. Collapsing them would refuse every request whenever the served
+// tree itself sits behind a link.
+const lexSite = resolve(site);
+const realSite = existsSync(site) ? realpathSync(site) : lexSite;
 
 function build() {
   // The same two scripts CI runs, in the same order: what is served here is what
@@ -109,16 +115,36 @@ const server = createServer((req, res) => {
   // whatever an app package ships, and "starts with the root string" would accept
   // a sibling directory that merely shares the prefix.
   const target = resolve(join(site, at === "/" ? "index.json" : at));
-  if (target !== resolve(site) && !target.startsWith(resolve(site) + sep)) {
+  // Lexically first - that rejects `..` before anything touches the disk - and
+  // then as a REAL path, because resolve() does not follow a symlink and
+  // readFileSync does. A link dropped into the served tree pointed at this
+  // host's .env and was served over a socket bound to every interface.
+  const under = (p, dir) => p === dir || p.startsWith(dir + sep);
+  if (!under(target, lexSite)) {
+    res.writeHead(403);
+    res.end("no");
+    return;
+  }
+  let real;
+  try {
+    real = realpathSync(target);
+  } catch {
+    res.writeHead(404);
+    res.end("not found");
+    return;
+  }
+  if (!under(real, realSite)) {
     res.writeHead(403);
     return res.end("no");
   }
-  if (!existsSync(target) || !statSync(target).isFile()) {
+  if (!statSync(real).isFile()) {
     res.writeHead(404);
     return res.end("not found");
   }
   try {
-    serveFile(res, target);
+    // The vetted path, not the written one: they are the same file, and only one
+    // of them has been checked.
+    serveFile(res, real);
   } catch (e) {
     res.writeHead(500);
     res.end(String(e.message || e));

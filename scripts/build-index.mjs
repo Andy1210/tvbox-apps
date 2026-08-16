@@ -17,20 +17,37 @@ import { fileURLToPath } from "node:url";
 // index.json), somewhere the published site never sees. That is what keeps a
 // retired app installable on a box without it standing in the official store.
 const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
-const root = rootArg(process.argv) ?? repo;
+const root = rootArg(process.argv, "usage: build-index.mjs [--root DIR]") ?? repo;
 const appsDir = join(root, "apps");
 
-function rootArg(argv) {
-  const i = argv.indexOf("--root");
-  if (i === -1) return null;
-  const v = argv[i + 1];
-  // A --root that silently falls back to the repo would publish the wrong
-  // registry, quietly, which is the one outcome this option exists to avoid.
-  if (!v || v.startsWith("--")) {
-    console.error("--root needs a directory");
-    process.exit(1);
+// `--root` in both spellings, and nothing else. An unrecognised flag used to be
+// ignored, which meant `--root=DIR` - and any typo - quietly built THIS repo and
+// exited 0: the one silent-wrong-registry outcome the option exists to prevent.
+function rootArg(argv, usage) {
+  let root = null;
+  for (let i = 2; i < argv.length; i++) {
+    const a = argv[i];
+    let v = null;
+    if (a === "--root") v = argv[++i];
+    else if (a.startsWith("--root=")) v = a.slice("--root=".length);
+    else {
+      console.error(`unknown arg: ${a}\n${usage}`);
+      process.exit(1);
+    }
+    if (!v || v.startsWith("--")) {
+      console.error("--root needs a directory");
+      process.exit(1);
+    }
+    root = resolve(v);
   }
-  return resolve(v);
+  return root;
+}
+
+// A registry with no apps/ is a mistyped --root far more often than it is an
+// empty registry, and the raw ENOENT this used to throw reads as a crash.
+if (!existsSync(appsDir)) {
+  console.error(`no apps/ directory in ${root} - is that the registry you meant?`);
+  process.exit(1);
 }
 
 const errors = [];
@@ -140,6 +157,16 @@ const apps = [];
 const packages = {};
 for (const entry of readdirSync(appsDir).sort()) {
   const full = join(appsDir, entry);
+  // The app itself, before anything inside it. `statSync` follows a link, so a
+  // symlinked package directory used to be walked, hashed and published under
+  // that app's name - carrying whatever else lived beside its manifest. The
+  // refusal further down only ever inspects entries INSIDE a package it has
+  // already entered. Keeping a registry in sync by linking a directory is the
+  // obvious thing to do with an off-git one, so this is the likely way in.
+  if (lstatSync(full).isSymbolicLink()) {
+    err(entry, "an app must not be a symlink");
+    continue;
+  }
   if (statSync(full).isDirectory()) {
     // package app: apps/<id>/manifest.json + its files
     const manifestPath = join(full, "manifest.json");
