@@ -152,6 +152,12 @@ export const useApp = create<State>((set, get) => ({
     const { backend, identity } = get();
     if (!backend) return;
     const session = await backend.switchProfile(id, pin);
+    // Here rather than further down: from this line the backend is holding the
+    // new profile's token, so anything that throws between here and the end
+    // would otherwise leave the previous person's remembered filters on screen
+    // under someone else's session. A filter label names a genre or an age
+    // rating.
+    clearLibraryViews();
     // The caller had the list in hand, so its name is used before asking again.
     // Without it a failed re-list falls back to session.profileName, which the
     // switch carried over from the PREVIOUS person - and the box would then
@@ -163,10 +169,8 @@ export const useApp = create<State>((set, get) => ({
     if (!w.ok) log.warn("profile not persisted; the next launch will ask again");
     // Artwork and everything cached under it belonged to the previous person -
     // and so does anything the player is holding, including a countdown that
-    // would otherwise start a film as somebody else. A library's remembered
-    // filter goes with them: its label carries a genre or an age rating.
+    // would otherwise start a film as somebody else.
     clearImages();
-    clearLibraryViews();
     resetPlayer();
     set({
       session: named,
