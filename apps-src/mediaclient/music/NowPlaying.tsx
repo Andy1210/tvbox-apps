@@ -288,7 +288,14 @@ function ScrubBar({
   }
 
   return (
-    <div ref={ref} className="mt-[2.5vh] flex items-center gap-[1vw]">
+    <div
+      ref={ref}
+      // The focus key in the DOM, as every FocusButton carries one: without a
+      // marker nothing outside React can tell which row has the cursor, and a
+      // navigation check with nothing to point at is decided by nothing at all.
+      data-sfocus="np-scrub"
+      className="mt-[2.5vh] flex items-center gap-[1vw]"
+    >
       <span className="w-[8vw] text-[2vh] text-fg-dim tabular-nums">{clock(shown)}</span>
       <div
         className={`relative flex-1 rounded-full bg-white/15 transition-all ${

@@ -83,8 +83,17 @@ export function ShuffleIcon({ className = "h-[2.6vh] w-[2.6vh]" }: { className?:
   );
 }
 
-/** The loop, with a `1` inside it for repeat-one - which is a different mode,
- *  not a brighter version of the same one. */
+/**
+ * The loop, marked in the middle for repeat-one - which is a different mode, not
+ * a brighter version of the same one.
+ *
+ * A dot rather than the `1` every other player draws, for the reason set out on
+ * the steppers below: rendered at the size it is really drawn, a digit inside
+ * this loop has about four pixels of height and merges into the strokes above
+ * and below it. A disc is the one mark that still reads there. Nothing is lost
+ * by not spelling it, because the line under the row names the mode in words -
+ * without that line this would have to stay a `1` and be illegible.
+ */
 export function RepeatIcon({
   one = false,
   className = "h-[2.6vh] w-[2.6vh]",
@@ -98,48 +107,31 @@ export function RepeatIcon({
       <path d="M14.5 3.5 17.5 6l-3 2.5" />
       <path d="M20 14v1a3 3 0 0 1-3 3H7" />
       <path d="M9.5 20.5 6.5 18l3-2.5" />
-      {one && (
-        // Smaller than it wants to be, and lifted: the loop encloses twelve
-        // units and a digit sized to fill them sits ON its lower stroke -
-        // rendered and looked at, not reasoned about. It is a mark that says
-        // "not the other one" rather than something read across a room; what
-        // says WHICH mode at that distance is the accent fill and the line
-        // naming the focused button.
-        <text
-          x="12"
-          y="14.6"
-          textAnchor="middle"
-          fontSize="8"
-          fontWeight="700"
-          fill="currentColor"
-          stroke="none"
-          // The box's UI font, not a family name that may not be installed: a
-          // missing one falls back per-glyph and the digit changes size between
-          // the two states, which reads as the icon jumping.
-          fontFamily="inherit"
-        >
-          1
-        </text>
-      )}
+      {one && <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />}
     </svg>
   );
 }
 
 /**
- * Ten seconds either way: the circular arrow everything else uses, with the
- * number inside it.
+ * Ten seconds either way: the number, and a chevron saying which way.
  *
- * The number carries the meaning and the arc only says which way, so the arc is
- * left almost closed - a gap wide enough for the head and nothing more. Without
- * the digits these were two more triangles next to the steppers, which is the
- * confusion the thick end bar above already exists to prevent.
+ * NOT the circular arrow every player draws, and that was decided by rendering
+ * these at the size they are actually drawn - about thirty pixels - rather than
+ * at the magnification an icon is designed at. Enclosed in a ring, the digits
+ * have four or five pixels of height to live in and turn into a smudge; the ring
+ * survives and says nothing, because the ring is the half that carries no
+ * meaning. Given the whole box the digits are legible, and a thin chevron is in
+ * no danger of being read as the filled triangle-and-bar next to it.
+ *
+ * The number leads in the direction of travel - chevron first going back, digits
+ * first going forward - so the pair mirror each other rather than both reading
+ * left to right.
  */
 export function Back10Icon({ className = "h-[2.6vh] w-[2.6vh]" }: { className?: string }): React.JSX.Element {
   return (
-    <svg viewBox="0 0 24 24" className={className} {...STROKE} aria-hidden="true">
-      <path d="M12 4A8 8 0 1 1 9.9 4.3" />
-      <path d="M14 2l-2 2 2 2" />
-      <text x="12" y="15.4" textAnchor="middle" fontSize="9" fontWeight="700" fill="currentColor" stroke="none">
+    <svg viewBox="0 0 24 24" className={className} {...STROKE} strokeWidth={2.1} aria-hidden="true">
+      <path d="M7.5 6 3.5 12l4 6" />
+      <text x="16.5" y="16.4" textAnchor="middle" fontSize="11.5" fontWeight="700" fill="currentColor" stroke="none">
         10
       </text>
     </svg>
@@ -148,12 +140,11 @@ export function Back10Icon({ className = "h-[2.6vh] w-[2.6vh]" }: { className?: 
 
 export function Forward10Icon({ className = "h-[2.6vh] w-[2.6vh]" }: { className?: string }): React.JSX.Element {
   return (
-    <svg viewBox="0 0 24 24" className={className} {...STROKE} aria-hidden="true">
-      <path d="M12 4A8 8 0 1 0 14.1 4.3" />
-      <path d="M10 2l2 2-2 2" />
-      <text x="12" y="15.4" textAnchor="middle" fontSize="9" fontWeight="700" fill="currentColor" stroke="none">
+    <svg viewBox="0 0 24 24" className={className} {...STROKE} strokeWidth={2.1} aria-hidden="true">
+      <text x="7.5" y="16.4" textAnchor="middle" fontSize="11.5" fontWeight="700" fill="currentColor" stroke="none">
         10
       </text>
+      <path d="M16.5 6 20.5 12l-4 6" />
     </svg>
   );
 }

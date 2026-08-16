@@ -28,23 +28,25 @@ const STEP_MS = 10_000;
 /**
  * What one press is asking for, by the name the browser gives the key.
  *
- * Two spellings per stepper on purpose. The remote's own capabilities were read
- * off the box - it really does send KEY_PLAYPAUSE, KEY_NEXTSONG,
- * KEY_PREVIOUSSONG, KEY_REWIND and KEY_FASTFORWARD - but what the browser then
- * calls them is its business, and `MediaNextTrack`/`MediaPreviousTrack` were the
- * names before the current spec settled on `MediaTrackNext`/`MediaTrackPrevious`.
- * Accepting both costs nothing and is the difference between a working button
- * and a dead one; the film player and the Spotify app each accept one set only,
- * which is a thing to fix there rather than to copy.
+ * These names are measured rather than assumed, because no amount of reading
+ * says what Chromium calls a key. A uinput device declaring the same codes the
+ * box's own remote bridge declares was used to send each button, and the page
+ * was asked what arrived:
+ *
+ *   KEY_PLAYPAUSE 164 -> MediaPlayPause      KEY_NEXTSONG 163 -> MediaTrackNext
+ *   KEY_REWIND    168 -> MediaRewind         KEY_PREVIOUSSONG 165 -> MediaTrackPrevious
+ *   KEY_FASTFORWARD 208 -> MediaFastForward
+ *
+ * `code` came back identical to `key` for all five. The older spellings
+ * (MediaNextTrack/MediaPreviousTrack) are therefore NOT listed: they cannot
+ * arrive here, and a branch that can never run is worse than no branch.
  */
 const ACTIONS = {
   MediaPlayPause: "toggle",
   MediaPlay: "play",
   MediaPause: "pause",
   MediaTrackNext: "next",
-  MediaNextTrack: "next",
   MediaTrackPrevious: "previous",
-  MediaPreviousTrack: "previous",
   MediaFastForward: "forward",
   MediaRewind: "rewind",
   MediaStop: "stop",

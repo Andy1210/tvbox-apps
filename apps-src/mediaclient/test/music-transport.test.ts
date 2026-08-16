@@ -184,16 +184,21 @@ describe("the transport buttons on the remote", () => {
     expect(useMusic.getState().index).toBe(0);
   });
 
-  it("answers to the older spelling of the steppers too", async () => {
-    // What the remote sends was read off the box; what the browser CALLS it is
-    // the browser's business, and these were the names before the current spec.
+  it("answers to the names the box's browser really sends", async () => {
+    // Measured by injecting the remote's own key codes through uinput and asking
+    // the page what arrived - see the table in mediakeys.ts. A test over made-up
+    // names would pass while every button on the remote stayed dead.
     await start([track("a"), track("b")]);
-    expect(handleMusicKey("MediaNextTrack")).toBe(true);
-    await settle();
-    expect(useMusic.getState().index).toBe(1);
-    expect(handleMusicKey("MediaPreviousTrack")).toBe(true);
-    await settle();
-    expect(useMusic.getState().index).toBe(0);
+    for (const key of [
+      "MediaPlayPause",
+      "MediaTrackNext",
+      "MediaTrackPrevious",
+      "MediaFastForward",
+      "MediaRewind",
+    ]) {
+      expect([key, handleMusicKey(key)]).toEqual([key, true]);
+      await settle();
+    }
   });
 
   it("winds inside the song rather than between songs", async () => {
