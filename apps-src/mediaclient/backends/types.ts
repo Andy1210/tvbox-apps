@@ -13,23 +13,33 @@ export interface Library {
   kind: "movie" | "show" | "music" | "photo" | "other";
 }
 
-export type ItemKind = "movie" | "show" | "season" | "episode" | "collection" | "playlist";
+export type ItemKind =
+  "movie" | "show" | "season" | "episode" | "collection" | "playlist" | "artist" | "album" | "track";
 
 export interface MediaItem {
   id: string;
   kind: ItemKind;
   title: string;
-  /** Series title for an episode, show title for a season. */
+  /** The parent's title: the series for an episode, the show for a season, the
+   *  album for a track, the artist for an album. */
   parentTitle?: string;
-  /** Series title for an episode (its grandparent). */
-  seriesTitle?: string;
-  /** The season this episode belongs to. */
+  /**
+   * The grandparent's title: the series for an episode, the ARTIST for a track.
+   *
+   * Named for the relationship rather than for television because both servers
+   * name it that way and both use the one slot for both domains - Plex calls a
+   * track's artist `grandparentTitle`, the same field an episode's series
+   * arrives in.
+   */
+  grandparentTitle?: string;
+  /** The season this episode belongs to; the album a track sits on. */
   parentId?: string;
-  /** The series an episode belongs to. Needed because an episode's own id opens
-   *  an episode, and a credit list wants the series. */
-  seriesId?: string;
-  /** The series' own poster, as opposed to the episode still. */
-  seriesThumb?: string;
+  /** The grandparent's id: the series for an episode, the artist for a track.
+   *  Needed because an episode's own id opens an episode, and a credit list
+   *  wants the series. */
+  grandparentId?: string;
+  /** The grandparent's own poster, as opposed to the episode still. */
+  grandparentThumb?: string;
   /** Theme music, where the server has any. Series mostly; films rarely. */
   theme?: string;
   /**
@@ -47,6 +57,15 @@ export interface MediaItem {
   thumb?: string;
   art?: string;
   durationMs?: number;
+  /**
+   * The file behind a playable leaf, as the server keys it. Tracks only.
+   *
+   * Carried on the list item rather than fetched, because a queue is built from
+   * a list: asking the server for each track's file would turn "shuffle the
+   * library" into one request per track. Measured on this server, the track
+   * listing already returns it, so it costs nothing to keep.
+   */
+  mediaKey?: string;
   /** Seconds into the item, when it was left partway. */
   viewOffsetMs?: number;
   /** How many times it has been watched through. 0 or absent = unwatched. */
@@ -60,6 +79,16 @@ export interface MediaItem {
   summary?: string;
   /** Unwatched leaves below this item (a series or season). */
   unwatchedCount?: number;
+  /**
+   * How many leaves this item holds: a playlist's items, an album's tracks.
+   *
+   * Worth carrying because it is the only honest answer to "what did the server
+   * actually save". A playlist write drops ids it cannot resolve and duplicates
+   * it already has - measured, five ids became three tracks and two unresolvable
+   * ones became an EMPTY playlist under a 200 - so a screen that reports what it
+   * asked for reports a number that is not on the other device.
+   */
+  childCount?: number;
 }
 
 export interface PageQuery {
@@ -73,11 +102,23 @@ export interface PageQuery {
   /**
    * What to list. Absent means the library's own items.
    *
-   * "collections" is the same list under a different lens, which is why it
-   * pages, sorts, filters and buckets by letter exactly as the items do.
+   * Every value here is the same list under a different lens, which is why they
+   * page, sort, filter and bucket by letter exactly as the items do - one lens
+   * rather than one implementation each. A music library's own items are its
+   * artists, so "albums" and "tracks" are the two other depths of the same
+   * section.
    */
-  of?: "collections";
+  of?: "collections" | "albums" | "tracks";
 }
+
+/**
+ * Which lens a list is being viewed through.
+ *
+ * Named so the set widens in one place: every signature that takes a lens takes
+ * this, and adding a depth (music did) then cannot leave one of them behind
+ * accepting only the old values.
+ */
+export type ListLens = NonNullable<PageQuery["of"]>;
 
 /** One way to order a library, as the server itself describes it. */
 export interface SortOption {
@@ -359,7 +400,7 @@ export interface MediaBackend {
   letters(
     libraryId: string,
     filters?: Record<string, string>,
-    of?: "collections",
+    of?: ListLens,
   ): Promise<{ key: string; title: string; size: number }[]>;
 
   /**
@@ -369,7 +410,7 @@ export interface MediaBackend {
    * - a series library orders by unwatched episode count, a film library by
    * resolution - and a fixed list would offer orders the server rejects.
    */
-  sortOptions(libraryId: string, of?: "collections"): Promise<SortOption[]>;
+  sortOptions(libraryId: string, of?: ListLens): Promise<SortOption[]>;
 
   /**
    * The library's collections, as items in their own right.
@@ -378,10 +419,35 @@ export interface MediaBackend {
    * grid rather than a row.
    */
   collections(libraryId: string, q: PageQuery): Promise<Page<MediaItem>>;
-  /** Every playlist on the account. Few enough to be one request. */
-  playlists(): Promise<MediaItem[]>;
+  /**
+   * Every playlist on the account, or only the audio or video ones.
+   *
+   * The filter is the server's, not ours: a music screen offering to add a song
+   * to a film playlist is an offer the server would take and nobody wants.
+   */
+  playlists(kind?: "audio" | "video"): Promise<MediaItem[]>;
   /** A playlist's items. Not `children` - the metadata path answers nothing. */
   playlistItems(id: string): Promise<MediaItem[]>;
+  /**
+   * Make a playlist holding these items, and answer with it.
+   *
+   * Separate from `addToPlaylist` because the server's create and append are
+   * different calls. `kind` is asked for rather than inferred: the caller knows
+   * which screen it is on, while inferring would mean a lookup per id for an
+   * answer that is never in doubt.
+   */
+  createPlaylist(title: string, itemIds: string[], kind: "audio" | "video"): Promise<MediaItem>;
+  /** Append to an existing playlist. */
+  addToPlaylist(playlistId: string, itemIds: string[]): Promise<void>;
+  /**
+   * A playable URL for one track, or undefined when the item carries no file.
+   *
+   * Synchronous and credential-bearing, unlike `resolveStream`: the player is
+   * another process that cannot set a header, and a queue cannot afford a round
+   * trip per track. Nothing is decided here - an audio file plays directly, so
+   * there is no transcode to negotiate.
+   */
+  trackUrl(item: MediaItem): string | undefined;
   /**
    * How this list can be narrowed.
    *
@@ -391,7 +457,7 @@ export interface MediaBackend {
    * that offers them turns 461 collections into "this library has no
    * collections", which is a sentence about the library.
    */
-  filterOptions(libraryId: string, of?: "collections"): Promise<FilterOption[]>;
+  filterOptions(libraryId: string, of?: ListLens): Promise<FilterOption[]>;
   /** The values a `list` filter can take. */
   filterValues(libraryId: string, filter: string, path?: string): Promise<SortOption[]>;
 

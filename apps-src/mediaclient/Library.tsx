@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { recallLibraryView, rememberLibraryView, type LibraryState } from "./libraryView";
-import { FocusContext, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
+import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, useI18n } from "@sdk";
 import { Tile } from "./Tile";
 import { Message } from "./Message";
@@ -10,6 +10,7 @@ import { usePlayer } from "./playback/player";
 import { classify, useApp } from "./state";
 import { createMover, nearest } from "./moveTo";
 import { LibraryFilters, type LibraryView } from "./LibraryFilters";
+import { LetterStrip, type Letter } from "./LetterStrip";
 import type { MediaItem } from "./backends/types";
 import { log } from "./redact";
 
@@ -50,12 +51,6 @@ const COLUMNS = 7;
  * than a number to keep lowering.
  */
 const OVERSCAN = 1;
-
-interface Letter {
-  key: string;
-  title: string;
-  size: number;
-}
 
 /**
  * A whole library, as a grid.
@@ -698,75 +693,9 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
               answers firstCharacter for them too - so the strip works in both
               modes without a second implementation. */}
           {letters.length > 1 && view.sort === "titleSort" && !view.desc && (
-            <LetterStrip letters={letters} onPick={jumpToLetter} active={activeLetter} />
+            <LetterStrip letters={letters} onPick={jumpToLetter} active={activeLetter} upTargetKey="lib-arrange" />
           )}
         </div>
-      </div>
-    </FocusContext.Provider>
-  );
-}
-
-function LetterStrip({
-  letters,
-  onPick,
-  active,
-}: {
-  letters: Letter[];
-  onPick: (key: string) => void;
-  active: string | null;
-}): React.JSX.Element {
-  const { ref, focusKey } = useFocusable({
-    focusKey: "letters",
-    saveLastFocusedChild: true,
-    // Enter where the grid already is, not at "#". From the M's, reaching M
-    // otherwise cost up to twenty-six presses down a strip whose whole purpose
-    // is to be faster than scrolling.
-    preferredChildFocusKey: active ? `letter-${active}` : undefined,
-  });
-  return (
-    <FocusContext.Provider value={focusKey}>
-      <div
-        // Every letter at once, and no scrolling. A strip you have to scroll
-        // through is slower than scrolling the grid it is meant to shortcut -
-        // so the letters shrink to fit the height instead, which they can
-        // because each is one character.
-        // overflow-y-auto is a backstop, not the plan: 29 letters fit, but a
-        // library with every Hungarian accented bucket would exceed the column
-        // and the ends would otherwise be clipped while still focusable - which
-        // is a dead remote rather than a cosmetic problem.
-        className="no-scrollbar flex h-full flex-col items-stretch justify-center gap-[0.1vh] overflow-y-auto py-[1vh] pr-[1vw] pl-[0.4vw]"
-        ref={ref}
-      >
-        {letters.map((l, i) => (
-          <FocusButton
-            key={l.key}
-            focusKey={`letter-${l.key}`}
-            onEnter={() => onPick(l.key)}
-            onArrowPress={(dir) => {
-              // Up from the first letter goes to the header rather than into
-              // the grid. Geometry says the grid - it is what lies up and to
-              // the left - but the strip is a column of its own, and its top is
-              // where someone reaches for the controls above it.
-              if (dir === "up" && i === 0) {
-                setFocus("lib-arrange");
-                return false;
-              }
-              return true;
-            }}
-            // A bare character, not a button-shaped box: thirty of those made a
-            // second column down the side of the screen. Focus still fills, as
-            // it does everywhere else.
-            // Bigger than it was, and tighter, because those trade against each
-            // other: 29 letters have to fit the column height without scrolling,
-            // and at leading 1.35 that capped the size below the 24px floor a
-            // television wants for body text. Tighter leading buys the size.
-            className={`rounded-[0.5vh] px-[0.6vw] text-center text-[2.4vh] leading-[1.15] ${
-              l.key === active ? "font-bold" : "text-fg-dim"
-            }`}
-          >
-            {l.title}
-          </FocusButton>
-        ))}
       </div>
     </FocusContext.Provider>
   );

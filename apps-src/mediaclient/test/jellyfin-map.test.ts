@@ -87,10 +87,10 @@ describe("an item", () => {
       SeriesPrimaryImageTag: "stag",
     });
     expect(ep.kind).toBe("episode");
-    expect(ep.seriesTitle).toBe("Sorozat");
+    expect(ep.grandparentTitle).toBe("Sorozat");
     expect(ep.parentTitle, "the season, which is what sits under an episode's title").toBe("1. évad");
-    expect(ep.seriesId).toBe("s1");
-    expect(ep.seriesThumb).toContain("Items/s1/Images/Primary");
+    expect(ep.grandparentId).toBe("s1");
+    expect(ep.grandparentThumb).toContain("Items/s1/Images/Primary");
     expect(ep.index).toBe(1);
     expect(ep.parentIndex).toBe(2);
   });
