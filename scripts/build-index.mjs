@@ -10,11 +10,28 @@
 // verifies on install). No deps — full JSON Schema validation runs in CI (ajv).
 import { readFileSync, writeFileSync, readdirSync, statSync, lstatSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { dirname, join, basename, relative, sep } from "node:path";
+import { dirname, join, basename, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+// `--root <dir>` builds a registry that is NOT this repo: same layout (apps/ +
+// index.json), somewhere the published site never sees. That is what keeps a
+// retired app installable on a box without it standing in the official store.
+const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
+const root = rootArg(process.argv) ?? repo;
 const appsDir = join(root, "apps");
+
+function rootArg(argv) {
+  const i = argv.indexOf("--root");
+  if (i === -1) return null;
+  const v = argv[i + 1];
+  // A --root that silently falls back to the repo would publish the wrong
+  // registry, quietly, which is the one outcome this option exists to avoid.
+  if (!v || v.startsWith("--")) {
+    console.error("--root needs a directory");
+    process.exit(1);
+  }
+  return resolve(v);
+}
 
 const errors = [];
 const err = (f, msg) => errors.push(`${f}: ${msg}`);
