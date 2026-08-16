@@ -39,11 +39,21 @@ export interface LibraryView {
 export function LibraryFilters({
   libraryId,
   view,
+  of,
   onApply,
   onClose,
 }: {
   libraryId: string;
   view: LibraryView;
+  /**
+   * Which list this panel is arranging.
+   *
+   * Passed on to `sortOptions`, which restricts the orders when it is
+   * "collections" - a collection has no resolution and no unwatched count, and
+   * the backend keeps a shorter list for exactly that reason. Both call sites
+   * omitted it, so that shorter list was never once used.
+   */
+  of?: "collections";
   onApply: (next: LibraryView) => void;
   onClose: () => void;
 }): React.JSX.Element {
@@ -74,7 +84,7 @@ export function LibraryFilters({
   useEffect(() => {
     if (!backend) return;
     let live = true;
-    void Promise.all([backend.sortOptions(libraryId), backend.filterOptions(libraryId)])
+    void Promise.all([backend.sortOptions(libraryId, of), backend.filterOptions(libraryId)])
       .then(([s, f]) => {
         if (!live) return;
         setSorts(s);

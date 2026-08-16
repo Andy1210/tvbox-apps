@@ -103,6 +103,13 @@ export function Detail({
     // play the wrong file, or none. Seeded from what was chosen for the NEW
     // item a moment later, once its version list is known.
     setVersion(0);
+    // The same reasoning, and the same commit missed them: this screen is REUSED
+    // for the next item rather than remounted, so the cast member under the
+    // cursor and the first episode's own detail belonged to the item that was
+    // just left. The tracks menu reads `firstChild`, so a season opened after
+    // another one offered the previous season's audio.
+    setFocused(null);
+    setFirstChild(null);
 
     (async () => {
       try {

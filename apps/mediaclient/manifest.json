@@ -5,8 +5,12 @@
     "hu": "Média",
     "en": "Media"
   },
-  "version": "0.54.2",
+  "version": "0.55.0",
   "changelog": [
+    {
+      "version": "0.55.0",
+      "notes": "Three older faults, found by review and fixed together: the library could keep asking the server what an order is called, for as long as the screen was open; a film opened after another one could carry the previous one's cast selection and its first episode's tracks; and the collection view now offers the orders a collection can actually have."
+    },
     {
       "version": "0.54.2",
       "notes": "Try again after a failed search actually searches again. Clearing the search box stops the spinner. And a tile scrolling into place no longer shows the previous film's poster under the new film's title."
