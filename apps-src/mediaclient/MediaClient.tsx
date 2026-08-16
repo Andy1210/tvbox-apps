@@ -16,6 +16,7 @@ import { Profiles } from "./Profiles";
 import { Search } from "./Search";
 import { Settings } from "./Settings";
 import { usePlayer } from "./playback/player";
+import { useMusicMediaKeys } from "./playback/mediakeys";
 import { useApp } from "./state";
 import { deviceName } from "./identity";
 import { usePrefs } from "./prefs";
@@ -185,6 +186,10 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
     if (usePlayer.getState().current) return;
     if (!back()) onExit();
   });
+
+  // Here rather than on the player screen, because the screen is not mounted
+  // for most of the time music is playing. See the module's own note.
+  useMusicMediaKeys();
 
   return (
     <div className="flex h-full flex-col">

@@ -10,8 +10,8 @@
 // bottom of a list.
 
 import { useRef, useState } from "react";
-import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
-import { FocusButton, Osk, useI18n } from "@sdk";
+import { FocusContext, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
+import { FocusButton, Osk, useBackspace, useFocusableItem, useI18n } from "@sdk";
 import { Message } from "../Message";
 import { TrackRow, TRACK_ROW_VH } from "./TrackRow";
 import { artworkScale } from "../posters";
@@ -21,9 +21,31 @@ import { useMusic, type RepeatMode } from "../playback/music";
 import { useArtwork } from "./useArtwork";
 import { clock } from "../time";
 import { log } from "../redact";
+import {
+  Back10Icon,
+  Forward10Icon,
+  NextIcon,
+  PauseIcon,
+  PlayIcon,
+  PlaylistAddIcon,
+  PreviousIcon,
+  RepeatIcon,
+  ShuffleIcon,
+  StopIcon,
+} from "../icons";
 
 /** How much of the queue is drawn. See the note where it is used. */
 const QUEUE_ROWS = 60;
+
+/**
+ * How far one press moves the scrub cursor.
+ *
+ * Five seconds, where the film player's step is larger: a song is three minutes,
+ * so this crosses one end to the other in about forty presses - and the remote
+ * repeats while a key is held, so that is a second or two of holding rather than
+ * forty deliberate presses.
+ */
+const SCRUB_STEP_MS = 5_000;
 
 export function NowPlaying(): React.JSX.Element {
   const { t } = useI18n();
@@ -34,6 +56,7 @@ export function NowPlaying(): React.JSX.Element {
   const state = useMusic((s) => s.state);
   const positionMs = useMusic((s) => s.positionMs);
   const durationMs = useMusic((s) => s.durationMs);
+  const scrubMs = useMusic((s) => s.scrubMs);
   const buffering = useMusic((s) => s.buffering);
   const shuffle = useMusic((s) => s.shuffle);
   const repeat = useMusic((s) => s.repeat);
@@ -42,6 +65,9 @@ export function NowPlaying(): React.JSX.Element {
 
   const [naming, setNaming] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  // What the focused control is called. The row is icons now, and an icon row
+  // with nothing naming it is a row of guesses - see the note on the row itself.
+  const [hint, setHint] = useState<string | null>(null);
 
   const item = queue[index];
   // Before either early return below: a hook cannot be called conditionally, and
@@ -61,6 +87,11 @@ export function NowPlaying(): React.JSX.Element {
     (key) => key.startsWith("np-") || key.startsWith("nq-") || key.startsWith("msg-"),
     !naming,
   );
+  // Back takes the cursor back to the song before it leaves the screen. Enabled
+  // only while the cursor is out, so it sits on top of the app's own Back handler
+  // exactly then and hands it back afterwards - the stack fires only the newest
+  // enabled one.
+  useBackspace(() => music.cancelScrub(), scrubMs !== null);
 
   if (naming) {
     return (
@@ -108,7 +139,6 @@ export function NowPlaying(): React.JSX.Element {
   if (!item) return <Message text={t("music.nothingPlaying")} />;
 
   const artist = item.grandparentTitle ?? item.parentTitle;
-  const pct = durationMs > 0 ? Math.min(100, (positionMs / durationMs) * 100) : 0;
 
   return (
     <div className="relative z-10 flex h-full gap-[3vw] px-[5vw] py-[4vh]">
@@ -116,20 +146,22 @@ export function NowPlaying(): React.JSX.Element {
           once on purpose: "what is next" is the question this screen gets asked
           most, and a queue behind a button is a queue nobody looks at. */}
       <div className="flex min-w-0 flex-1 flex-col justify-center">
-        {cover && <img src={cover} alt="" className="mb-[2.5vh] h-[38vh] w-[38vh] rounded-[1.5vh] object-cover" />}
+        {cover && <img src={cover} alt="" className="mb-[2.5vh] h-[34vh] w-[34vh] rounded-[1.5vh] object-cover" />}
         <h1 className="truncate text-[4.4vh] font-bold">{item.title}</h1>
         {artist && <p className="truncate text-[2.6vh] text-fg-dim">{artist}</p>}
         {item.parentTitle && item.parentTitle !== artist && (
           <p className="truncate text-[2.2vh] text-fg-dim">{item.parentTitle}</p>
         )}
 
-        <div className="mt-[2.5vh] flex items-center gap-[1vw]">
-          <span className="w-[8vw] text-[2vh] text-fg-dim tabular-nums">{clock(positionMs)}</span>
-          <div className="h-[0.7vh] flex-1 overflow-hidden rounded-full bg-white/15">
-            <div className="h-full rounded-full bg-white/80" style={{ width: `${pct}%` }} />
-          </div>
-          <span className="w-[8vw] text-right text-[2vh] text-fg-dim tabular-nums">{clock(durationMs)}</span>
-        </div>
+        <ScrubBar
+          positionMs={positionMs}
+          durationMs={durationMs}
+          scrubMs={scrubMs}
+          onScrub={(delta) => music.scrubBy(delta)}
+          onCommit={() => music.commitScrub()}
+          onToggle={() => music.toggle()}
+          onFocused={() => setHint(t("music.seekHint"))}
+        />
 
         {(buffering || error || note) && (
           <p className="mt-[1vh] text-[2vh] text-fg-dim">
@@ -141,6 +173,7 @@ export function NowPlaying(): React.JSX.Element {
           state={state}
           shuffle={shuffle}
           repeat={repeat}
+          onHint={setHint}
           onToggle={() => music.toggle()}
           onNext={() => void music.next()}
           onPrevious={() => void music.previous()}
@@ -153,6 +186,11 @@ export function NowPlaying(): React.JSX.Element {
             back();
           }}
         />
+
+        {/* One line, reserved whether or not there is anything in it: without a
+            fixed height the whole column shifted up and down by its height as
+            the cursor moved between the bar and the buttons. */}
+        <p className="mt-[1.2vh] h-[2.8vh] truncate text-[2.1vh] text-fg-dim">{hint}</p>
       </div>
 
       <div className="flex w-[34vw] min-w-0 flex-col">
@@ -189,10 +227,129 @@ function nextRepeat(mode: RepeatMode): RepeatMode {
   return mode === "off" ? "all" : mode === "all" ? "one" : "off";
 }
 
+/**
+ * The bar, and the cursor on it.
+ *
+ * Focusable in its own right, which is what lets Left and Right mean two
+ * different things on two rows without a mode nobody can see: what has focus
+ * says which. Same shape as the film player's, minus the frame preview - there
+ * is no picture to show, and a song has nothing to look at on the way past.
+ */
+function ScrubBar({
+  positionMs,
+  durationMs,
+  scrubMs,
+  onScrub,
+  onCommit,
+  onToggle,
+  onFocused,
+}: {
+  positionMs: number;
+  durationMs: number;
+  scrubMs: number | null;
+  onScrub: (deltaMs: number) => void;
+  onCommit: () => void;
+  onToggle: () => void;
+  onFocused: () => void;
+}): React.JSX.Element {
+  const scrubbing = scrubMs !== null;
+  const shown = scrubMs ?? positionMs;
+  const pct = durationMs > 0 ? Math.min(100, (shown / durationMs) * 100) : 0;
+  const playedPct = durationMs > 0 ? Math.min(100, (positionMs / durationMs) * 100) : 0;
+
+  const { ref, focused } = useFocusableItem({
+    focusKey: "np-scrub",
+    onEnterPress: () => {
+      // Committing comes first: while the cursor is out, OK is the only way to
+      // go where it points, and pausing there would be an odd answer to a press
+      // that was aiming at a place in the song.
+      if (scrubbing) onCommit();
+      else onToggle();
+    },
+    onArrowPress: (direction: string) => {
+      if (direction === "left" || direction === "right") {
+        // The store refuses to move a cursor it has no scale for, and the press
+        // is still consumed: the alternative is that Left and Right move FOCUS
+        // for the fraction of a second before the box reports a length, so the
+        // one press that behaves differently is the one nobody could predict.
+        onScrub(direction === "left" ? -SCRUB_STEP_MS : SCRUB_STEP_MS);
+        return false;
+      }
+      // Nothing is above the bar, and letting the press go unhandled sent the
+      // cursor across into the queue - navigation searches globally when it
+      // finds no candidate in the direction asked for.
+      if (direction === "up") return false;
+      return true;
+    },
+    // Reported through spatial navigation's own callback, so the line under the
+    // buttons can name this row too. NOT compared during render: setting parent
+    // state from a child's render body is what React warns about, and it is a
+    // real hazard rather than a style note - the parent re-renders this child,
+    // which is the shape a render loop is made of.
+    onFocus: () => onFocused(),
+  });
+
+  return (
+    <div
+      ref={ref}
+      // The focus key in the DOM, as every FocusButton carries one: without a
+      // marker nothing outside React can tell which row has the cursor, and a
+      // navigation check with nothing to point at is decided by nothing at all.
+      data-sfocus="np-scrub"
+      className="mt-[2.5vh] flex items-center gap-[1vw]"
+    >
+      <span className="w-[8vw] text-[2vh] text-fg-dim tabular-nums">{clock(shown)}</span>
+      <div
+        className={`relative flex-1 rounded-full bg-white/15 transition-all ${
+          focused ? "h-[1.1vh] ring-[0.3vh] ring-white/70" : "h-[0.7vh]"
+        }`}
+      >
+        <div className="absolute top-0 left-0 h-full rounded-full bg-white/80" style={{ width: `${playedPct}%` }} />
+        {/* Two marks while the cursor is out: where the song IS, and where the
+            cursor points. Without the first there is no way back to it. They
+            differ in SHAPE rather than in size - at three metres a size
+            difference alone is a few arc-minutes and reads as one mark that
+            moved. */}
+        {scrubbing && (
+          <div
+            className="absolute top-1/2 h-[2.2vh] w-[0.35vh] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white"
+            style={{ left: `${playedPct}%` }}
+          />
+        )}
+        <div
+          className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-[0_0_1.5vh_rgba(0,0,0,0.7)] ${
+            scrubbing
+              ? "h-[2.6vh] w-[2.6vh] border-[0.3vh] border-white bg-[var(--color-accent)]"
+              : focused
+                ? "h-[1.8vh] w-[1.8vh] bg-white"
+                : "h-[1.4vh] w-[1.4vh] bg-white"
+          }`}
+          style={{ left: `${pct}%` }}
+        />
+      </div>
+      <span className="w-[8vw] text-right text-[2vh] text-fg-dim tabular-nums">{clock(durationMs)}</span>
+    </div>
+  );
+}
+
+/**
+ * One round button per thing the player can do.
+ *
+ * Icons rather than words: a word is wider and slower to read across a room than
+ * the shape everyone already knows from every other player, and nine of them in
+ * a row wrapped onto two lines. Inline SVG, never a font glyph or an emoji -
+ * this Chromium has no colour-emoji font and draws a hollow box in its place.
+ *
+ * What the icons cost is that a shape says nothing about STATE, and shuffle and
+ * repeat have state that is readable nowhere else. So the row is paired with a
+ * line under it naming whatever has focus, and for those two it names the state
+ * as well.
+ */
 function Transport({
   state,
   shuffle,
   repeat,
+  onHint,
   onToggle,
   onNext,
   onPrevious,
@@ -205,6 +362,7 @@ function Transport({
   state: string;
   shuffle: boolean;
   repeat: RepeatMode;
+  onHint: (text: string) => void;
   onToggle: () => void;
   onNext: () => void;
   onPrevious: () => void;
@@ -218,21 +376,20 @@ function Transport({
   const { t } = useI18n();
   const { ref, focusKey } = useFocusable({ focusKey: "np-transport", saveLastFocusedChild: true });
   const box = useRef<HTMLDivElement | null>(null);
-  const chip = "shrink-0 rounded-[1vh] px-[1.6vw] py-[1.1vh] text-[2.2vh]";
 
   /**
-   * Swallow an arrow that has nowhere to go inside this row.
+   * Where an arrow goes when it has nowhere to go inside this row.
    *
-   * Measured on the box: Left on the first chip left the screen with NOTHING
+   * Measured on the box: Left on the first button left the screen with NOTHING
    * focused - still gone half a second later - and the next press recovered it
-   * somewhere else entirely; Up on play/pause threw the cursor across into the
-   * queue, because nothing above the transport is focusable so navigation
-   * searched globally.
+   * somewhere else entirely; Up threw the cursor across into the queue, because
+   * navigation searches globally when it finds no candidate in the direction
+   * asked for.
    *
    * Decided by geometry at press time rather than by position in the list,
-   * because this row WRAPS: which chip is first on a line depends on the panel,
-   * so Up from the second line has to keep working while Up from the first has
-   * to be consumed.
+   * because this row can WRAP on a narrow panel: which button is first on a line
+   * depends on the panel, so Up from the second line has to keep working while
+   * Up from the first has to reach the bar.
    */
   const atEdge = (key: string, dir: "up" | "left"): boolean => {
     const here = box.current?.querySelector<HTMLElement>(`[data-sfocus="${key}"]`);
@@ -241,110 +398,183 @@ function Transport({
     const siblings = [...box.current.querySelectorAll<HTMLElement>("[data-sfocus]")].filter((el) => el !== here);
     return !siblings.some((el) => {
       const r = el.getBoundingClientRect();
-      // A tolerance, because a focused chip is scaled by 4% and its box moves.
-      return dir === "up" ? r.bottom <= mine.top + 2 : Math.abs(r.top - mine.top) < 4 && r.right <= mine.left + 2;
+      // Same line means the two boxes OVERLAP vertically - not that their tops
+      // agree. Measured on the box: play/pause is the big button, so its top sits
+      // 6px above its neighbours' while a comparison of tops allowed 4px, and
+      // every neighbour was judged to be on another line. Left was therefore
+      // swallowed as an edge and shuffle, previous and -10 could not be reached
+      // from where focus starts. A tolerance is still wanted at the boundary,
+      // because a focused button is scaled by 4% and its box moves.
+      const sameLine = r.bottom > mine.top + 2 && r.top < mine.bottom - 2;
+      return dir === "up" ? r.bottom <= mine.top + 2 : sameLine && r.right <= mine.left + 2;
     });
   };
   const edgeGuard =
     (key: string) =>
-    (dir: string): boolean =>
-      (dir === "up" || dir === "left") && atEdge(key, dir) ? false : true;
-  const on = "bg-white/25";
-  const off = "bg-white/10";
+    (dir: string): boolean => {
+      // Up from the top line is the way ONTO the bar. Named rather than left to
+      // geometry: the queue is up and to the right of this row and would win.
+      if (dir === "up" && atEdge(key, "up")) {
+        setFocus("np-scrub");
+        return false;
+      }
+      return !(dir === "left" && atEdge(key, "left"));
+    };
+
+  const on = t("music.on");
+  const off = t("music.off");
+  const playLabel = state === "playing" ? t("music.pause") : state === "paused" ? t("music.resume") : t("music.play");
+  const repeatLabel =
+    repeat === "one" ? t("music.repeatOne") : `${t("music.repeat")} · ${repeat === "all" ? on : off}`;
 
   return (
     <FocusContext.Provider value={focusKey}>
       <div
         // Two refs on one element: spatial navigation's, and ours for measuring
-        // where a chip sits when an arrow reaches the edge of the row.
+        // where a button sits when an arrow reaches the edge of the row.
         ref={(el) => {
           box.current = el;
           (ref as React.MutableRefObject<HTMLDivElement | null>).current = el;
         }}
-        className="mt-[2.5vh] flex flex-wrap items-center gap-[0.8vw]"
+        className="mt-[2.5vh] flex flex-wrap items-center gap-[1vw]"
       >
-        <FocusButton
-          focusKey="np-prev"
-          onArrowPress={edgeGuard("np-prev")}
-          onEnter={onPrevious}
-          className={`${chip} ${off}`}
-        >
-          {t("music.previous")}
-        </FocusButton>
-        <FocusButton
-          focusKey="np-toggle"
-          onArrowPress={edgeGuard("np-toggle")}
-          onEnter={onToggle}
-          className={`${chip} ${off}`}
-        >
-          {/* Three states, not two. Stopped-with-a-queue restarts the track from
-              the beginning, so calling it "Resume" promised something it does
-              not do. */}
-          {state === "playing" ? t("music.pause") : state === "paused" ? t("music.resume") : t("music.play")}
-        </FocusButton>
-        <FocusButton
-          focusKey="np-next"
-          onArrowPress={edgeGuard("np-next")}
-          onEnter={onNext}
-          className={`${chip} ${off}`}
-        >
-          {t("music.next")}
-        </FocusButton>
-        {/* There was no way to move inside a song at all: the progress bar is a
-            picture, and Previous/Next change the track. A long mix or a podcast
-            episode needs a step, and two chips are what a D-pad can aim at. */}
-        <FocusButton
-          focusKey="np-back10"
-          onArrowPress={edgeGuard("np-back10")}
-          onEnter={() => onSeek(-10_000)}
-          className={`${chip} ${off}`}
-        >
-          {t("music.back10")}
-        </FocusButton>
-        <FocusButton
-          focusKey="np-fwd10"
-          onArrowPress={edgeGuard("np-fwd10")}
-          onEnter={() => onSeek(10_000)}
-          className={`${chip} ${off}`}
-        >
-          {t("music.forward10")}
-        </FocusButton>
-        {/* The two modes show their state in the chip rather than in an icon:
-            a filled shape means nothing to someone who has not been told, and
-            this is the only place either mode can be read. */}
-        <FocusButton
+        <Button
           focusKey="np-shuffle"
-          onArrowPress={edgeGuard("np-shuffle")}
+          label={`${t("music.shuffle")} · ${shuffle ? on : off}`}
+          active={shuffle}
+          onHint={onHint}
           onEnter={onShuffle}
-          className={`${chip} ${shuffle ? on : off}`}
+          onArrow={edgeGuard("np-shuffle")}
         >
-          {t("music.shuffle")}
-        </FocusButton>
-        <FocusButton
+          <ShuffleIcon className="h-[2.8vh] w-[2.8vh]" />
+        </Button>
+        <Button
+          focusKey="np-prev"
+          label={t("music.previous")}
+          onHint={onHint}
+          onEnter={onPrevious}
+          onArrow={edgeGuard("np-prev")}
+        >
+          <PreviousIcon className="h-[2.8vh] w-[2.8vh]" />
+        </Button>
+        {/* There was no way to move inside a song from the buttons alone: the
+            steppers change the track. The bar above takes the careful case; these
+            two are the reflex. */}
+        <Button
+          focusKey="np-back10"
+          label={t("music.back10")}
+          onHint={onHint}
+          onEnter={() => onSeek(-10_000)}
+          onArrow={edgeGuard("np-back10")}
+        >
+          <Back10Icon className="h-[2.8vh] w-[2.8vh]" />
+        </Button>
+        <Button
+          focusKey="np-toggle"
+          // Three states, not two. Stopped-with-a-queue restarts the track from
+          // the beginning, so calling it "Resume" promised something it does not
+          // do.
+          label={playLabel}
+          big
+          onHint={onHint}
+          onEnter={onToggle}
+          onArrow={edgeGuard("np-toggle")}
+        >
+          {state === "playing" ? (
+            <PauseIcon className="h-[3.6vh] w-[3.6vh]" />
+          ) : (
+            <PlayIcon className="h-[3.6vh] w-[3.6vh]" />
+          )}
+        </Button>
+        <Button
+          focusKey="np-fwd10"
+          label={t("music.forward10")}
+          onHint={onHint}
+          onEnter={() => onSeek(10_000)}
+          onArrow={edgeGuard("np-fwd10")}
+        >
+          <Forward10Icon className="h-[2.8vh] w-[2.8vh]" />
+        </Button>
+        <Button
+          focusKey="np-next"
+          label={t("music.next")}
+          onHint={onHint}
+          onEnter={onNext}
+          onArrow={edgeGuard("np-next")}
+        >
+          <NextIcon className="h-[2.8vh] w-[2.8vh]" />
+        </Button>
+        <Button
           focusKey="np-repeat"
-          onArrowPress={edgeGuard("np-repeat")}
+          label={repeatLabel}
+          active={repeat !== "off"}
+          onHint={onHint}
           onEnter={onRepeat}
-          className={`${chip} ${repeat === "off" ? off : on}`}
+          onArrow={edgeGuard("np-repeat")}
         >
-          {repeat === "one" ? t("music.repeatOne") : t("music.repeat")}
-        </FocusButton>
-        <FocusButton
+          <RepeatIcon one={repeat === "one"} className="h-[2.8vh] w-[2.8vh]" />
+        </Button>
+        <Button
           focusKey="np-save"
-          onArrowPress={edgeGuard("np-save")}
+          label={t("music.saveAsPlaylist")}
+          onHint={onHint}
           onEnter={onSave}
-          className={`${chip} ${off}`}
+          onArrow={edgeGuard("np-save")}
         >
-          {t("music.saveAsPlaylist")}
-        </FocusButton>
-        <FocusButton
+          <PlaylistAddIcon className="h-[2.8vh] w-[2.8vh]" />
+        </Button>
+        <Button
           focusKey="np-stop"
-          onArrowPress={edgeGuard("np-stop")}
+          label={t("music.stop")}
+          onHint={onHint}
           onEnter={onStop}
-          className={`${chip} ${off}`}
+          onArrow={edgeGuard("np-stop")}
         >
-          {t("music.stop")}
-        </FocusButton>
+          <StopIcon className="h-[2.8vh] w-[2.8vh]" />
+        </Button>
       </div>
     </FocusContext.Provider>
+  );
+}
+
+/** A round icon button, and the one place the row's sizing lives. */
+function Button({
+  focusKey,
+  label,
+  active = false,
+  big = false,
+  onHint,
+  onEnter,
+  onArrow,
+  children,
+}: {
+  focusKey: string;
+  /** Spoken name, and what the line under the row says while this has focus. */
+  label: string;
+  active?: boolean;
+  big?: boolean;
+  onHint: (text: string) => void;
+  onEnter: () => void;
+  onArrow: (direction: string) => boolean;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <FocusButton
+      focusKey={focusKey}
+      label={label}
+      onEnter={onEnter}
+      onArrowPress={onArrow}
+      onFocused={() => onHint(label)}
+      className={[
+        "flex shrink-0 items-center justify-center rounded-full",
+        big ? "h-[7.4vh] w-[7.4vh]" : "h-[6vh] w-[6vh]",
+        // A mode that is ON is filled with the accent. Focus overrides it with
+        // white, which is correct: focus has to stay the one unmistakable
+        // highlight, and the line under the row is what says "on" in words.
+        active ? "bg-[var(--color-accent)]" : "bg-white/10",
+      ].join(" ")}
+    >
+      {children}
+    </FocusButton>
   );
 }

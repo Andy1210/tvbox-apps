@@ -96,6 +96,15 @@ interface MusicState {
   repeat: RepeatMode;
   /** Set when a track could not be started; cleared by the next one that can. */
   error: string | null;
+  /**
+   * Where the scrub cursor points, while it is out.
+   *
+   * Null means there is no cursor and the bar simply shows the song. Held here
+   * rather than in the screen because the screen unmounts - browsing away and
+   * coming back must not leave a cursor nobody can see pointing at a seek that
+   * was never asked for.
+   */
+  scrubMs: number | null;
 
   playQueue(
     backend: MediaBackend,
@@ -109,6 +118,11 @@ interface MusicState {
   previous(): Promise<void>;
   toggle(): void;
   seek(ms: number): void;
+  /** Move the cursor without moving the music. */
+  scrubBy(deltaMs: number): void;
+  /** Go where the cursor points. */
+  commitScrub(): void;
+  cancelScrub(): void;
   stop(): Promise<void>;
   enqueue(tracks: MediaItem[], where: "next" | "end"): void;
   removeAt(index: number): void;
@@ -141,6 +155,7 @@ export const useMusic = create<MusicState>((set, get) => ({
   shuffle: false,
   repeat: "off",
   error: null,
+  scrubMs: null,
 
   async playQueue(be, tracks, opts) {
     if (!tracks.length) return;
@@ -196,6 +211,9 @@ export const useMusic = create<MusicState>((set, get) => ({
       durationMs: item.durationMs ?? 0,
       buffering: true,
       error: null,
+      // A cursor belongs to the song it was opened on. Carried into the next
+      // track it would point at a second somewhere in the previous one's length.
+      scrubMs: null,
     });
 
     claimPlayer("music");
@@ -266,8 +284,33 @@ export const useMusic = create<MusicState>((set, get) => ({
   seek(ms) {
     const at = Math.max(0, Math.min(ms, get().durationMs || ms));
     bridge()?.seek?.(Math.floor(at / 1000));
-    set({ positionMs: at });
+    set({ positionMs: at, scrubMs: null });
     void scheduler?.flush("seek");
+  },
+
+  scrubBy(deltaMs) {
+    const { positionMs, durationMs, scrubMs } = get();
+    // A cursor that cannot be DRAWN must not move. With no length yet - the
+    // library carried none and the box has not read the header - the bar has no
+    // scale, so the mark would sit at 0% while the clock beside it ran away, and
+    // committing would seek to a time the song does not have. The film player
+    // falls back to MAX_SAFE_INTEGER here, which it can afford because a film
+    // always arrives with a duration; a track does not.
+    if (durationMs <= 0) return;
+    // From where the cursor already is, so holding an arrow accelerates through
+    // the song rather than fighting the position the box keeps reporting.
+    const from = scrubMs ?? positionMs;
+    set({ scrubMs: Math.max(0, Math.min(durationMs, from + deltaMs)) });
+  },
+
+  commitScrub() {
+    const { scrubMs } = get();
+    if (scrubMs === null) return;
+    get().seek(scrubMs);
+  },
+
+  cancelScrub() {
+    set({ scrubMs: null });
   },
 
   async stop() {
@@ -291,7 +334,7 @@ export const useMusic = create<MusicState>((set, get) => ({
     // The LENGTH is kept with the queue. Zeroing it left the player screen
     // showing the track it still names at 0:00 / 0:00, which reads as a broken
     // item rather than a stopped one.
-    set({ state: "stopped", positionMs: 0, buffering: false });
+    set({ state: "stopped", positionMs: 0, buffering: false, scrubMs: null });
   },
 
   enqueue(tracks, where) {
@@ -440,14 +483,22 @@ whenPlayerLost("music", () => {
   scheduler = null;
   unsubscribe?.();
   unsubscribe = null;
-  useMusic.setState({ state: "stopped", buffering: false, positionMs: 0 });
+  useMusic.setState({ state: "stopped", buffering: false, positionMs: 0, scrubMs: null });
 });
 
 /** Forget everything. Called when the identity behind the queue changes. */
 export function resetMusic(): void {
   void useMusic.getState().stop();
   backend = null;
-  useMusic.setState({ queue: [], source: [], index: -1, shuffle: false, repeat: "off", error: null });
+  useMusic.setState({
+    queue: [],
+    source: [],
+    index: -1,
+    shuffle: false,
+    repeat: "off",
+    error: null,
+    scrubMs: null,
+  });
 }
 
 /** Wire the bridge's events without starting playback. Tests only. */

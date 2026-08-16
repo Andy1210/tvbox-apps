@@ -7,15 +7,14 @@
 // the list is a guess. The way to the player is a named chip in each music
 // screen's header, which is somewhere the cursor already goes.
 
-import { useI18n } from "@sdk";
 import { useMusic } from "../playback/music";
 import { artworkScale } from "../posters";
 import { useApp } from "../state";
 import { useArtwork } from "./useArtwork";
 import { clock } from "../time";
+import { PauseIcon } from "../icons";
 
 export function MiniPlayer(): React.JSX.Element | null {
-  const { t } = useI18n();
   const backend = useApp((s) => s.backend);
   const screen = useApp((s) => s.screen);
   const queue = useMusic((s) => s.queue);
@@ -64,10 +63,13 @@ export function MiniPlayer(): React.JSX.Element | null {
       <span className="h-[0.5vh] w-[12vw] shrink-0 overflow-hidden rounded-full bg-white/15">
         <span className="block h-full rounded-full bg-white/70" style={{ width: `${pct}%` }} />
       </span>
-      {/* A word, not a glyph. This Chromium has no guaranteed font coverage for
-          symbol codepoints - the same reason the launcher bans emoji - and a
-          missing one draws a tofu box where the state should be. */}
-      {state === "paused" && <span className="shrink-0 text-[1.9vh] text-fg-dim">{t("music.pause")}</span>}
+      {/* Drawn, not typed. A symbol CODEPOINT is what this Chromium has no
+          guaranteed font coverage for - the same reason the launcher bans emoji,
+          and a missing one draws a tofu box where the state should be - but an
+          inline SVG carries its own shape and cannot be missing. Nothing is lost
+          by not naming it: this whole bar is aria-hidden, because every word in
+          it is repeated - larger and reachable - on the player screen. */}
+      {state === "paused" && <PauseIcon className="h-[2.2vh] w-[2.2vh] shrink-0 text-fg-dim" />}
     </div>
   );
 }
