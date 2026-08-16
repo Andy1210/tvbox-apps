@@ -4,10 +4,13 @@ import { configureI18n } from "@sdk";
 import { Library } from "../Library";
 import { LibraryFilters } from "../LibraryFilters";
 import { useApp } from "../state";
-import { setupRemote, setFocus, remote } from "./remote";
+import { setupRemote, setFocus, remote, getCurrentFocusKey } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import { PlexBackend } from "../backends/plex/backend";
+import { clearLibraryViews } from "../libraryView";
+import { useFocusFallback } from "../focus";
+import { FocusButton } from "@sdk";
 import type { MediaBackend, MediaItem, Session } from "../backends/types";
 
 // What a collection list may be narrowed by, and what happens on the way back.
@@ -57,6 +60,7 @@ function stub(seen?: (of: string | undefined) => void): MediaBackend {
 }
 
 beforeEach(async () => {
+  clearLibraryViews();
   useApp.setState({ backend: stub(), screen: { name: "home" }, history: [], failure: null });
   await act(async () => setFocus(""));
 });
@@ -227,5 +231,96 @@ describe("coming back from the collections", () => {
     expect(container.textContent, "the order chosen for the films was not the collections' to discard").toContain(
       "Date added",
     );
+  });
+});
+
+describe("opening something from the library", () => {
+  it("leaves it arranged the way it was when you come back", async () => {
+    // This screen is unmounted whenever anything is opened from it - a film, an
+    // episode, a collection - because one screen is rendered at a time. So the
+    // order somebody chose used to live until the first thing they opened, and
+    // Back put them at the top of an alphabetical list. The mode button was the
+    // only exit that kept it, which is not the exit people use.
+    const first = render(<Library libraryId="1" title="Movies" />);
+    await waitFor(() => expect(first.container.textContent).toContain("Film 0"));
+    await setFocus("lib-arrange");
+    await act(async () => {
+      await remote.ok();
+    });
+    await waitFor(() => expect(document.body.textContent).toContain("Date added"));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    await setFocus("lf-sort-1");
+    await act(async () => {
+      await remote.ok();
+    });
+    await act(async () => {
+      await remote.back();
+    });
+    await waitFor(() => expect(first.container.textContent).toContain("Date added"));
+
+    // Something is opened, and the screen goes.
+    first.unmount();
+    const again = render(<Library libraryId="1" title="Movies" />);
+    await waitFor(() => expect(again.container.textContent).toContain("Film 0"));
+    expect(again.container.textContent, "back from a film, into the list as it was left").toContain("Date added");
+    again.unmount();
+
+    // And it belongs to the person who chose it.
+    clearLibraryViews();
+    const third = render(<Library libraryId="1" title="Movies" />);
+    await waitFor(() => expect(third.container.textContent).toContain("Film 0"));
+    expect(third.container.textContent, "the next person to sign in starts clean").not.toContain("Date added");
+  });
+});
+
+describe("a panel whose options never arrived", () => {
+  it("does not park the cursor on a chip that is not there", async () => {
+    // The worst failure this app can have: setFocus to an unmounted key leaves
+    // the cursor there and every later press aborts inside smartNavigate, so
+    // the remote does nothing at all and only Back escapes.
+    const backend = {
+      kind: "plex",
+      sortOptions: async () => [],
+      filterOptions: async () => [],
+      filterValues: async () => [],
+    } as unknown as MediaBackend;
+    useApp.setState({ backend });
+    render(
+      <LibraryFilters
+        libraryId="1"
+        view={{ sort: "titleSort", desc: false, filters: {}, labels: {} }}
+        onApply={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    await act(async () => {
+      await remote.down();
+    });
+    // The close button is the only thing mounted, and it is where the cursor
+    // has to be - "leave" beats nothing at all when there is nothing to choose.
+    expect(getCurrentFocusKey()).toBe("lf-close");
+  });
+});
+
+describe("the fallback that catches a lost cursor", () => {
+  it("will not put it somewhere that does not exist", async () => {
+    // The panel is one caller; the guard belongs in the helper, because every
+    // screen that uses it can reach the same state - a key naming something
+    // that has not mounted, or has just unmounted.
+    function Screen(): React.ReactElement {
+      useFocusFallback("fb-missing", (k) => k.startsWith("fb-"), true);
+      return <FocusButton focusKey="fb-real" onEnter={() => {}}>{"Here"}</FocusButton>;
+    }
+    await act(async () => setFocus(""));
+    render(<Screen />);
+    await act(async () => {
+      await remote.down();
+    });
+    expect(getCurrentFocusKey(), "a cursor on nothing swallows every press after it").not.toBe("fb-missing");
   });
 });

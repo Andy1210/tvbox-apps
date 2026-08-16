@@ -65,6 +65,13 @@ export function useFocusFallback(
       if (!on.current || !NAV_KEYS.has(e.key) || !key.current) return;
       const current = getCurrentFocusKey();
       if (current && mine.current(current) && doesFocusableExist(current)) return;
+      // Only onto something that is actually mounted. setFocus to a key that is
+      // not leaves the cursor there and every later press aborts inside
+      // smartNavigate: a remote that does nothing at all, with no error and only
+      // Back escaping. Measured on the arrange panel when the server never
+      // answered - the panel came up with its close button alone, and the first
+      // arrow parked the cursor on a chip that did not exist.
+      if (!doesFocusableExist(key.current)) return;
       setFocus(key.current);
     };
     window.addEventListener("keydown", onKey, true);

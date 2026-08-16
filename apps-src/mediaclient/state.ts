@@ -10,6 +10,7 @@ import { backendFor } from "./backends/factory";
 import { getIdentity, type Identity } from "./identity";
 import { readJson, writeJson, removeRaw } from "./storage";
 import { clearImages } from "./posters";
+import { clearLibraryViews } from "./libraryView";
 import { resetPlayer } from "./playback/player";
 import { useChosenVersion } from "./chosenVersion";
 import { log } from "./redact";
@@ -162,8 +163,10 @@ export const useApp = create<State>((set, get) => ({
     if (!w.ok) log.warn("profile not persisted; the next launch will ask again");
     // Artwork and everything cached under it belonged to the previous person -
     // and so does anything the player is holding, including a countdown that
-    // would otherwise start a film as somebody else.
+    // would otherwise start a film as somebody else. A library's remembered
+    // filter goes with them: its label carries a genre or an age rating.
     clearImages();
+    clearLibraryViews();
     resetPlayer();
     set({
       session: named,
@@ -201,8 +204,10 @@ export const useApp = create<State>((set, get) => ({
     // survived is worth a line in the log, because the next boot will use it.
     if (!dropped.ok) log.warn("sign-out did not remove the stored session");
     // Artwork is held as blobs; without this the next person to sign in sees the
-    // previous account's posters until the cache turns over.
+    // previous account's posters until the cache turns over. The same goes for
+    // how a library was left: a filter label names a genre or an age rating.
     clearImages();
+    clearLibraryViews();
     resetPlayer();
     // The remembered version of a title goes too. It is a household fact rather
     // than a personal one, so a PROFILE switch keeps it - but a rating key is a
