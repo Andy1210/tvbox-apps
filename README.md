@@ -19,6 +19,7 @@ that every box fetches over HTTPS (HOME → "Get more apps", or Settings → Sto
 | ------------------------------ | -------------------------------------- | ------------------------------------------------------------- |
 | [files](apps/files/)           | package (own UI)                       | The box's own folders, USB sticks, a NAS share, and photos    |
 | [livetv](apps/livetv/)         | package (own UI + plugin)              | IPTV over Xtream Codes or M3U, with an XMLTV guide            |
+| [mediaclient](apps/mediaclient/) | package (own UI)                     | Plex and Jellyfin, in the box's own client                    |
 | [youtube](apps/youtube.json)   | manifest only (remote)                 | `youtube.com/tv`, with a smart-TV user agent                  |
 | [xcloud](apps/xcloud.json)     | manifest only (remote)                 | Xbox Cloud Gaming                                             |
 | [spotify](apps/spotify/)       | package (own UI + plugin)              | A Spotify Connect speaker, and optional account browsing      |

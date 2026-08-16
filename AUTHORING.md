@@ -20,8 +20,9 @@ release — push a new version here and boxes pick it up (they poll `index.json`
 ## The two kinds of app
 
 1. **Manifest-only** — a single `apps/<id>.json`. Enough for a **remote** web app
-   you don't host (YouTube, Jellyfin: the shell just loads their URL in a hardened
-   window) or an app whose bundle its own install recipe fetches (Plex).
+   you don't host (YouTube: the shell just loads their URL in a hardened
+   window) or an app whose bundle its own install recipe fetches (the retired
+   Plex app did this; nothing in the registry does today).
 2. **Package** — a directory `apps/<id>/` that ships its own code/UI: a `web/`
    bundle, an optional host `plugin.js`, pairing pages, etc. This is what you
    want for a first-party app with a custom 10-foot UI (see `apps/livetv/`,
