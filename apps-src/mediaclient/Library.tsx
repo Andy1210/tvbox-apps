@@ -188,25 +188,32 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     // Keyed on what has been ASKED, not on what came back. The guard used to be
     // "do I have a name for this sort", with `sortNames` in the dependency list
     // - so a key the server does not name never satisfied it: the answer set a
-    // fresh object, the effect ran again, and the library asked forever. A sort
-    // remembered from the OTHER backend is exactly such a key, which is how a
-    // Plex order carried onto a Jellyfin server would have spun.
+    // fresh object, the effect ran again, and the library asked forever.
+    //
+    // What makes such a key reachable is the `of` argument below, added in the
+    // same change: an order chosen for the films - release date, critic rating,
+    // audience rating, last viewed - is not in the shorter list the server
+    // names for collections. Before that argument existed both call sites asked
+    // for the same full list and the loop could not be reached, which is why
+    // the two halves belong in one commit.
     const want = `${libraryId}:${mode}:${view.sort}`;
     if (!backend || (view.sort === "titleSort" && !view.desc) || asked.current.has(want)) return;
     asked.current.add(want);
-    let live = true;
     void backend
       .sortOptions(libraryId, mode === "collections" ? "collections" : undefined)
-      .then((o) => live && setSortNames((prev) => ({ ...prev, ...Object.fromEntries(o.map((x) => [x.key, x.title])) })))
+      // The answer is kept even when this effect has been cleaned up. It is
+      // merged rather than assigned, so a late one cannot undo a newer answer -
+      // and dropping it left the KEY in `asked` with no name behind it, so the
+      // button showed the server's raw key for the life of the screen. Reversing
+      // an order is two presses on one chip, which is exactly how a request gets
+      // cancelled mid-flight.
+      .then((o) => setSortNames((prev) => ({ ...prev, ...Object.fromEntries(o.map((x) => [x.key, x.title])) })))
       .catch(() => {
         // The button falls back to the raw key, and the ask is forgotten so a
         // later open can try again - a server that was down once is not a
         // server without names.
         asked.current.delete(want);
       });
-    return () => {
-      live = false;
-    };
   }, [backend, libraryId, mode, view.sort, view.desc]);
 
   // Loading a page. `letter` selects between the whole library and one bucket;
@@ -581,7 +588,12 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
               // Filters do not carry across: measured, every list filter returns
               // nothing against collections, so the grid emptied while the
               // button still named the filter that emptied it.
-              setView((v) => ({ ...v, filters: {}, labels: {} }));
+              //
+              // Nor does the ORDER, for the same reason and with the same
+              // symptom: half the orders a film can be put in do not exist for a
+              // collection, and the server answers those with an empty list -
+              // which this screen reports as "this library has no collections".
+              setView((v) => ({ ...v, filters: {}, labels: {}, sort: "titleSort", desc: false }));
               setMode((m) => (m === "items" ? "collections" : "items"));
             }}
             className="rounded-[1vh] bg-white/10 px-[2vw] py-[1vh] text-[2vh]"

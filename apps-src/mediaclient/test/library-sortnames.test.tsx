@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { act, render, waitFor } from "@testing-library/react";
 import { configureI18n } from "@sdk";
 import { Library } from "../Library";
@@ -75,6 +75,13 @@ describe("the word on the sort button", () => {
     });
     await waitFor(() => expect(document.body.textContent).toContain("Date added"));
 
+    // The panel focuses its own first row a macrotask after it opens, so a
+    // setFocus issued before that is simply overwritten - and the press then
+    // lands on "Name", which IS named, and the test passes against the bug.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
     // The SECOND order in the list - the one the stub names - is chosen, and
     // then the screen is left with a sort whose name is missing from the next
     // answer.
@@ -86,6 +93,9 @@ describe("the word on the sort button", () => {
       await new Promise((r) => setTimeout(r, 50));
     });
 
+    // The order that was actually applied, so the test cannot quietly measure
+    // the default one.
+    expect(container.textContent).toContain("Date added");
     const afterApply = sortCalls;
     // Time passes with the screen open. A looping effect shows up here and
     // nowhere else: nothing errors, the grid looks right, and the box asks the
@@ -120,7 +130,7 @@ describe("arranging a collection list", () => {
     render(
       <LibraryFilters
         libraryId="1"
-        view={{ sort: "titleSort", desc: false, filters: {} }}
+        view={{ sort: "titleSort", desc: false, filters: {}, labels: {} }}
         of="collections"
         onApply={() => {}}
         onClose={() => {}}
