@@ -3,6 +3,7 @@ import { act, render, waitFor } from "@testing-library/react";
 import { configureI18n } from "@sdk";
 import { Library } from "../Library";
 import { useApp } from "../state";
+import { clearLibraryViews } from "../libraryView";
 import { setupRemote, setFocus, remote } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
@@ -104,6 +105,8 @@ function offsetOf(container: HTMLElement): number {
 }
 
 beforeEach(async () => {
+  // A library remembers how it was left; these mount the same one.
+  clearLibraryViews();
   useApp.setState({ backend: stubBackend(), screen: { name: "home" }, history: [], failure: null });
   window.innerHeight = WINDOW_H;
   await act(async () => setFocus(""));
