@@ -94,7 +94,7 @@ export function LibraryFilters({
     return () => {
       live = false;
     };
-  }, [backend, libraryId]);
+  }, [backend, libraryId, of]);
 
   useEffect(() => {
     if (!backend || !openFilter || openFilter.kind !== "list") return;

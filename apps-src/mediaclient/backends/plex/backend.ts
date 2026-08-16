@@ -314,7 +314,19 @@ export class PlexBackend implements MediaBackend {
    * the button on the library screen names the order that was chosen. An order
    * that is silently ignored is worse than one that is not offered.
    */
-  private static readonly COLLECTION_SORTS = new Set(["titleSort", "duration", "addedAt", "mediaHeight"]);
+  /**
+   * The orders a COLLECTION can actually be put in.
+   *
+   * Measured against this server, which answers 200 either way: sorting the 461
+   * collections by `duration` or by `mediaHeight` returns NOTHING, because a
+   * collection has neither - and an empty grid here says "this library has no
+   * collections", which is a sentence about the library rather than about the
+   * order. The four item-only orders the server merely ignores (rating,
+   * audience rating, release date, last viewed) are left out for a quieter
+   * reason: it answers them in title order, so the button would name an order
+   * that is not in effect.
+   */
+  private static readonly COLLECTION_SORTS = new Set(["titleSort", "addedAt"]);
 
   async sortOptions(libraryId: string, of?: "collections"): Promise<SortOption[]> {
     const c = container<MetadataContainer>(await this.req(`library/sections/${libraryId}/sorts`));

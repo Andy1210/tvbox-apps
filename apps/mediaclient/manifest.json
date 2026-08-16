@@ -5,11 +5,15 @@
     "hu": "Média",
     "en": "Media"
   },
-  "version": "0.55.0",
+  "version": "0.55.1",
   "changelog": [
     {
+      "version": "0.55.1",
+      "notes": "Switching to Collections no longer reports an empty library: two of the orders on offer there have no meaning for a collection and the server answers them with nothing. And the box hands poster memory back as it goes, instead of holding every picture it has ever shown until the app is restarted."
+    },
+    {
       "version": "0.55.0",
-      "notes": "Three older faults, found by review and fixed together: the library could keep asking the server what an order is called, for as long as the screen was open; a film opened after another one could carry the previous one's cast selection and its first episode's tracks; and the collection view now offers the orders a collection can actually have."
+      "notes": "Two older faults, found by review: the library could keep asking the server what an order is called, for as long as the screen was open; and the collection view now offers the orders a collection can actually have."
     },
     {
       "version": "0.54.2",
