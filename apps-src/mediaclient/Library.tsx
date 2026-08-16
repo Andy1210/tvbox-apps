@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { recallLibraryView, rememberLibraryView, type LibraryState } from "./libraryView";
 import { FocusContext, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, useI18n } from "@sdk";
 import { Tile } from "./Tile";
@@ -88,7 +89,10 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   const playing = usePlayer((s) => s.current !== null);
 
   const [letters, setLetters] = useState<Letter[]>([]);
-  const [view, setView] = useState<LibraryView>({ sort: "titleSort", desc: false, filters: {}, labels: {} });
+  const kept = useRef(recallLibraryView(libraryId));
+  const [view, setView] = useState<LibraryView>(
+    kept.current?.view ?? { sort: "titleSort", desc: false, filters: {}, labels: {} },
+  );
   const [arranging, setArranging] = useState(false);
   /**
    * Browsing the library's collections instead of its films.
@@ -97,13 +101,21 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
    * way, it is the same shape, and this server holds 461 of them - which is a
    * grid, not a row on the home screen.
    */
-  const [mode, setMode] = useState<"items" | "collections">("items");
+  const [mode, setMode] = useState<"items" | "collections">(kept.current?.mode ?? "items");
   /** Sort key to its translated name, for the button. Empty until asked for. */
   const [sortNames, setSortNames] = useState<Record<string, string>>({});
   /** Which (library, mode, sort) the names have been asked for. See below. */
   const asked = useRef(new Set<string>());
   /** How the films were arranged, kept for the way back out of the collections. */
-  const saved = useRef<LibraryView | null>(null);
+  const saved = useRef<LibraryView | null>(kept.current?.saved ?? null);
+  // Opening anything from here unmounts this screen, so what was chosen is
+  // written out as it changes rather than on the way out - there is no way out
+  // to hook.
+  useEffect(() => {
+    const state: LibraryState = { view, mode, saved: saved.current };
+    rememberLibraryView(libraryId, state);
+  }, [libraryId, view, mode]);
+
   /** Which letter search may still act. See jumpToLetter. */
   const jump = useRef(0);
   /** The letter last pressed, until the cursor moves off it. See activeLetter. */

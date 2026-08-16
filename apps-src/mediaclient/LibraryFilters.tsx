@@ -69,8 +69,10 @@ export function LibraryFilters({
   const { ref, focusKey } = useFocusable({ focusKey: "libfilters", saveLastFocusedChild: true, isFocusBoundary: true });
   useInitialFocus("lf-sort-0", sorts.length > 0);
   // The first sort chip, not the close button: a fallback that lands on "leave"
-  // turns a lost cursor into an accidental exit.
-  useFocusFallback("lf-sort-0", (k) => k.startsWith("lf-"), true);
+  // turns a lost cursor into an accidental exit. With nothing to choose from -
+  // which is what an unanswered request looks like - the close button is all
+  // there is, and it beats a cursor on nothing.
+  useFocusFallback(sorts.length > 0 ? "lf-sort-0" : "lf-close", (k) => k.startsWith("lf-"), true);
   useBackspace(() => {
     // The value list is a layer over the panel, so Back closes that first.
     if (openFilter) {
