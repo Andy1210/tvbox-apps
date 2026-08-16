@@ -56,18 +56,32 @@ export function MusicHome({ libraryId, title }: { libraryId: string; title: stri
       try {
         // In parallel: they are independent, and a music home that fills in one
         // row per round trip is a screen that visibly assembles itself.
-        const [recent, played, artists, albums, playlists] = await Promise.all([
-          backend.recentlyAdded(libraryId, "music").catch(() => []),
-          backend
-            .libraryPage(libraryId, { offset: 0, limit: ROW, of: "tracks", sort: "lastViewedAt", desc: true })
-            .catch(() => ({ items: [] as MediaItem[] })),
-          backend.libraryPage(libraryId, { offset: 0, limit: ROW }).catch(() => ({ items: [] as MediaItem[] })),
-          backend
-            .libraryPage(libraryId, { offset: 0, limit: ROW, of: "albums", sort: "addedAt", desc: true })
-            .catch(() => ({ items: [] as MediaItem[] })),
-          backend.playlists("audio").catch(() => []),
+        const settled = await Promise.allSettled([
+          backend.recentlyAdded(libraryId, "music"),
+          backend.libraryPage(libraryId, { offset: 0, limit: ROW, of: "tracks", sort: "lastViewedAt", desc: true }),
+          backend.libraryPage(libraryId, { offset: 0, limit: ROW }),
+          backend.libraryPage(libraryId, { offset: 0, limit: ROW, of: "albums", sort: "addedAt", desc: true }),
+          backend.playlists("audio"),
         ]);
         if (!live) return;
+
+        // A row that failed contributes nothing, which is right - one slow or
+        // missing hub should not hold up the screen. But if they ALL failed the
+        // server is down, and drawing "this library is empty" then tells the
+        // household something about their library that is not true. Every call
+        // used to swallow its own failure, which made the catch below dead code.
+        const failure = settled.find((r) => r.status === "rejected");
+        if (failure && settled.every((r) => r.status === "rejected")) {
+          throw (failure as PromiseRejectedResult).reason;
+        }
+        const value = <T,>(i: number, fallback: T): T =>
+          settled[i].status === "fulfilled" ? ((settled[i] as PromiseFulfilledResult<T>).value ?? fallback) : fallback;
+
+        const recent = value<MediaItem[]>(0, []);
+        const played = value<{ items: MediaItem[] }>(1, { items: [] });
+        const artists = value<{ items: MediaItem[] }>(2, { items: [] });
+        const albums = value<{ items: MediaItem[] }>(3, { items: [] });
+        const playlists = value<MediaItem[]>(4, []);
         // Asked for one item purely for the count the container carries, which is
         // what the "all songs" button says. A page of one is the cheapest way to
         // ask a question the list endpoint answers in its envelope.

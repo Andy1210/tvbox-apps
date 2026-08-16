@@ -397,6 +397,15 @@ export interface PlexStream {
   forced?: boolean;
   selected?: boolean;
   key?: string;
+  /**
+   * What the server decided to do with this stream: "copy", "transcode", "burn".
+   *
+   * Read since long before this branch (the burned-in-subtitle test) but never
+   * declared, so the typecheck failed on the line that reads it - which is why it
+   * is added here rather than left to whoever next runs it. Present only on a
+   * decision response, not on an ordinary listing.
+   */
+  decision?: string;
 }
 
 export interface PlexPart {

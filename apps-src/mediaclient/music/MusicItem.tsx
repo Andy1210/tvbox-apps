@@ -15,7 +15,7 @@ import { useEffect, useState } from "react";
 import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, useI18n } from "@sdk";
 import { Message } from "../Message";
-import { TrackRow } from "./TrackRow";
+import { TrackRow, TRACK_ROW_VH } from "./TrackRow";
 import { artworkScale } from "../posters";
 import { useFocusFallback, useInitialFocus } from "../focus";
 import { classify, useApp } from "../state";
@@ -47,6 +47,7 @@ export function MusicItem({
   const playQueue = useMusic((s) => s.playQueue);
   const enqueue = useMusic((s) => s.enqueue);
   const playingId = useMusic((s) => s.queue[s.index]?.id);
+  const playing = useMusic((s) => s.queue[s.index] !== undefined);
 
   const [header, setHeader] = useState<MediaItem | null>(null);
   const [tracks, setTracks] = useState<MediaItem[] | null>(null);
@@ -131,9 +132,7 @@ export function MusicItem({
       <div className="h-[3.3vh] shrink-0" aria-hidden="true" />
 
       <div className="flex shrink-0 items-end gap-[2vw] pb-[2vh]">
-        {headerArt && (
-          <img src={headerArt} alt="" className="h-[22vh] w-[22vh] shrink-0 rounded-[1vh] object-cover" />
-        )}
+        {headerArt && <img src={headerArt} alt="" className="h-[22vh] w-[22vh] shrink-0 rounded-[1vh] object-cover" />}
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-[4vh] font-bold">{shown.title || title}</h1>
           {subtitle && <p className="truncate text-[2.2vh] text-fg-dim">{subtitle}</p>}
@@ -147,6 +146,15 @@ export function MusicItem({
             onPlay={() => void play(false)}
             onShuffle={() => void play(true)}
             onQueue={() => {
+              // With nothing playing there is no queue to add to: the store would
+              // hold the songs at index -1, where no screen can show them and no
+              // chip can reach the player, and the next Play would throw them
+              // away - while the screen said they had been added. So the first
+              // "add" is a play.
+              if (!playing) {
+                void play(false);
+                return;
+              }
               enqueue(tracks, "end");
               setNote(t("music.queued", { n: String(tracks.length) }));
             }}
@@ -164,8 +172,11 @@ export function MusicItem({
         )}
 
         <ul className="flex flex-col">
+          {/* The pitch is reserved here for the same reason the songs list
+              reserves it: a row that measures taller than its box makes its
+              neighbour unreachable, which cost the queue every other track. */}
           {tracks.map((item, i) => (
-            <li key={item.id}>
+            <li key={item.id} style={{ height: `${TRACK_ROW_VH}vh` }}>
               <TrackRow
                 item={item}
                 focusKey={`mt-${item.id}`}
@@ -230,7 +241,7 @@ function AlbumList({
       <h2 className="px-[1.5vw] pt-[1vh] pb-[0.6vh] text-[2.2vh] text-fg-dim">{t("music.albums")}</h2>
       <ul className="flex flex-col pb-[1.5vh]">
         {albums.map((a) => (
-          <li key={a.id}>
+          <li key={a.id} style={{ height: `${TRACK_ROW_VH}vh` }}>
             <TrackRow item={a} focusKey={`ma-${a.id}`} artUrl={art(a)} onEnter={() => onOpen(a)} />
           </li>
         ))}

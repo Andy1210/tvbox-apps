@@ -41,7 +41,9 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     const libs = await backend().libraries();
     expect(libs.length).toBeGreaterThan(0);
     expect(libs.every((l) => l.id && l.title)).toBe(true);
-    expect(libs.every((l) => l.kind === "movie" || l.kind === "show")).toBe(true);
+    // Music is offered now too. Photos and anything unmodelled are still left
+    // out, because no screen here opens them.
+    expect(libs.every((l) => l.kind === "movie" || l.kind === "show" || l.kind === "music")).toBe(true);
   });
 
   it("reads on deck", async () => {
@@ -228,12 +230,25 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     // libraries[0] and reported "0 wrong" while a series library got five
     // letters wrong - the same sampling error one level up from the one that
     // made the test walk every bucket rather than three.
-    for (const lib of await b.libraries()) await checkStrip(b, lib.id);
+    for (const lib of await b.libraries()) {
+      await checkStrip(b, lib.id);
+      // Each DEPTH of a music library, not only its own items. The strip is per
+      // depth, and asking the server for it with a type filter answers with the
+      // ARTIST alphabet: measured on this library, that offered 16 letters for a
+      // list of 572 songs, left 175 of them with no letter at all, and sent seven
+      // of the sixteen to the wrong place. Walking only the default lens is what
+      // let that ship - the same sampling error this test already has two notes
+      // about, one depth further down.
+      if (lib.kind === "music") {
+        await checkStrip(b, lib.id, "albums");
+        await checkStrip(b, lib.id, "tracks");
+      }
+    }
   });
 
-  async function checkStrip(b: PlexBackend, libraryId: string): Promise<void> {
+  async function checkStrip(b: PlexBackend, libraryId: string, of?: "albums" | "tracks"): Promise<void> {
     const lib = { id: libraryId };
-    const strip = await b.letters(lib.id);
+    const strip = await b.letters(lib.id, undefined, of);
 
     // One entry per plain letter. The server keeps some accented initials as
     // buckets of their own and lists them after Z, but it sorts them INSIDE the
@@ -241,7 +256,9 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     // not have, and both of this server's landed at the end of the library.
     expect(strip.map((l) => l.key)).toEqual([...new Set(strip.map((l) => l.key))]);
     for (const l of strip) expect(l.key).toMatch(/^[A-Z#]$/);
-    expect(strip.reduce((n, l) => n + l.size, 0)).toBe((await b.libraryPage(lib.id, { offset: 0, limit: 1 })).total);
+    expect(strip.reduce((n, l) => n + l.size, 0)).toBe(
+      (await b.libraryPage(lib.id, { offset: 0, limit: 1, of })).total,
+    );
 
     const usable = strip.filter((l) => l.size > 0 && /^[A-Z]$/.test(l.title));
     // A library can be empty - this account has one - and a strip of nothing is
@@ -251,11 +268,11 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     // EVERY bucket, not a sample: the two that were wrong were the two a sample
     // of three never reached.
     for (const l of usable) {
-      const offset = await b.letterOffset(lib.id, l.key, { sort: "titleSort" });
-      const at = await b.libraryPage(lib.id, { offset, limit: 1, sort: "titleSort" });
+      const offset = await b.letterOffset(lib.id, l.key, { sort: "titleSort", of });
+      const at = await b.libraryPage(lib.id, { offset, limit: 1, sort: "titleSort", of });
       const title = at.items[0]?.sortTitle ?? at.items[0]?.title ?? "";
       const initial = title.trim()[0]?.normalize("NFD")[0]?.toUpperCase();
-      expect(initial, `letter ${l.title} in library ${lib.id}`).toBe(l.title.toUpperCase());
+      expect(initial, `letter ${l.title} in library ${lib.id}${of ? ` (${of})` : ""}`).toBe(l.title.toUpperCase());
     }
   }
 

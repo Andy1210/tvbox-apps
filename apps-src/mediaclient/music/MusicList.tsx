@@ -20,7 +20,7 @@ import { FocusContext, setFocus, useFocusable } from "@noriginmedia/norigin-spat
 import { FocusButton, useI18n } from "@sdk";
 import { LetterStrip, type Letter } from "../LetterStrip";
 import { Message } from "../Message";
-import { TrackRow } from "./TrackRow";
+import { TrackRow, TRACK_ROW_VH } from "./TrackRow";
 import { artworkScale } from "../posters";
 import { useFocusFallback, useInitialFocus } from "../focus";
 import { classify, useApp, type MusicLens } from "../state";
@@ -34,8 +34,6 @@ const PAGE = 100;
 const WINDOW = 36;
 /** Rows kept above the cursor inside that window. */
 const LEAD = 12;
-/** Row pitch in vh. Must match what a row really occupies, or Down skips. */
-const ROW_VH = 9;
 /**
  * How many rows a single Play-all queue may hold.
  *
@@ -166,8 +164,15 @@ export function MusicList({
   /** Where the strip should light up: the letter the cursor's row starts with. */
   const activeLetter = useMemo(() => {
     const item = at(cursor);
-    const c = (item?.sortTitle ?? item?.title ?? "").trim().charAt(0).toUpperCase();
-    return letters.find((l) => l.key === c)?.key ?? null;
+    // Folded the way the server buckets, not merely upper-cased. Two things the
+    // naive version got wrong, both seen on the box: a title starting with a
+    // digit belongs to "#", so a list that opens on "01" lit no letter at all;
+    // and an accented initial is folded into its plain letter, so "Ő" has to
+    // find "O" rather than a key nothing offers.
+    const raw = (item?.sortTitle ?? item?.title ?? "").trim().charAt(0);
+    const plain = raw.normalize("NFD").replace(/\p{M}/gu, "").toUpperCase();
+    const key = /^[A-Z]$/.test(plain) ? plain : "#";
+    return letters.find((l) => l.key === key)?.key ?? null;
     // `pages` is what makes the row available; without it the strip stays on the
     // letter the list opened at.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -204,7 +209,12 @@ export function MusicList({
       .libraryPage(libraryId, { offset: from, limit: Math.min(QUEUE_CAP, PAGE * 4), of })
       .catch(() => null);
     const items = page?.items.length ? page.items : [item];
-    await playQueue(backend, items, { startIndex: Math.max(0, items.findIndex((i) => i.id === item.id)) });
+    await playQueue(backend, items, {
+      startIndex: Math.max(
+        0,
+        items.findIndex((i) => i.id === item.id),
+      ),
+    });
     go({ name: "nowPlaying" });
   };
 
@@ -237,7 +247,7 @@ export function MusicList({
           {/* The spacer above and below is what makes a window of 36 rows behave
               like a list of thousands: the scroll height, and therefore the
               position within the library, stays honest. */}
-          <div style={{ height: `${start * ROW_VH}vh` }} aria-hidden="true" />
+          <div style={{ height: `${start * TRACK_ROW_VH}vh` }} aria-hidden="true" />
           <ul className="flex flex-col">
             {rows.map((i) => {
               const item = at(i);
@@ -248,7 +258,7 @@ export function MusicList({
                     if (el) rowEls.current.set(i, el);
                     else rowEls.current.delete(i);
                   }}
-                  style={{ height: `${ROW_VH}vh` }}
+                  style={{ height: `${TRACK_ROW_VH}vh` }}
                 >
                   {item ? (
                     <TrackRow
@@ -263,7 +273,17 @@ export function MusicList({
                           setFocus(topKey);
                           return false;
                         }
-                        if (dir === "down" || dir === "up") setCursor(dir === "down" ? i + 1 : i - 1);
+                        // Clamped to rows that exist. The cursor drives the
+                        // mounted window, the scroll, the strip's highlight AND
+                        // the focus fallback, so letting it run past either end -
+                        // which it did on the last row, and on the first row of
+                        // the album and artist lenses where there is no header to
+                        // catch Up - pointed the fallback at `mrow-<out of range>`,
+                        // a key that can never mount. That is the dead remote.
+                        if (dir === "down" || dir === "up") {
+                          const to = dir === "down" ? i + 1 : i - 1;
+                          setCursor(Math.max(0, Math.min(to, total - 1)));
+                        }
                         return true;
                       }}
                     />
@@ -278,7 +298,7 @@ export function MusicList({
               );
             })}
           </ul>
-          <div style={{ height: `${Math.max(0, total - end) * ROW_VH}vh` }} aria-hidden="true" />
+          <div style={{ height: `${Math.max(0, total - end) * TRACK_ROW_VH}vh` }} aria-hidden="true" />
         </div>
 
         {letters.length > 1 && (

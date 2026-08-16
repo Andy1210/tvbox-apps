@@ -202,12 +202,20 @@ export const useMusic = create<MusicState>((set, get) => ({
 
   toggle() {
     const tv = bridge();
-    if (get().state === "playing") {
+    const { state, index, queue } = get();
+    if (state === "playing") {
       tv?.pause?.();
       set({ state: "paused" });
-    } else if (get().state === "paused") {
+    } else if (state === "paused") {
       tv?.resume?.();
       set({ state: "playing" });
+    } else if (queue[index]) {
+      // Stopped with a queue still in hand - which is what a film taking the
+      // player leaves behind, and what the end of a list leaves behind. There is
+      // nothing to un-pause, so the button has to START it again. Without this
+      // the chip read "Folytatás" and did nothing at all.
+      void get().playAt(index);
+      return;
     }
     void scheduler?.flush("toggle");
   },
@@ -227,7 +235,12 @@ export const useMusic = create<MusicState>((set, get) => ({
     unsubscribe = null;
     await scheduler?.end();
     scheduler = null;
-    set({ state: "stopped", positionMs: 0, durationMs: 0, buffering: false, index: -1, queue: [], source: [] });
+    // The QUEUE survives a stop. Wiping it turned the end of a list into a dead
+    // end: the player screen fell back to "nothing is playing", which draws no
+    // focusable at all, and the only way out was Back. Keeping it means the
+    // screen still shows what was on and Play starts it again - the same
+    // decision already made for a film taking the player away.
+    set({ state: "stopped", positionMs: 0, durationMs: 0, buffering: false });
   },
 
   enqueue(tracks, where) {
@@ -265,7 +278,12 @@ export const useMusic = create<MusicState>((set, get) => ({
       queue: next,
       // Found rather than assumed: switching shuffle off puts the playing track
       // back wherever it sits in the original order, which is not index 0.
-      index: on ? 0 : Math.max(0, next.findIndex((t) => t.id === playing.id)),
+      index: on
+        ? 0
+        : Math.max(
+            0,
+            next.findIndex((t) => t.id === playing.id),
+          ),
     });
   },
 

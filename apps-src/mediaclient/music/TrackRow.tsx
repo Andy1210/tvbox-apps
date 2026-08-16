@@ -11,6 +11,21 @@ import type { MediaItem } from "../backends/types";
 import { clock } from "../time";
 import { useArtwork } from "./useArtwork";
 
+/**
+ * The pitch a list of these must reserve per row, in vh.
+ *
+ * Not decoration: spatial navigation resolves by geometry and drops a candidate
+ * whose box overlaps the focused one, so a row that measures taller than the
+ * space it is given makes its NEIGHBOUR unreachable. Measured on the box - a
+ * queue whose rows had no fixed height moved the cursor 6 -> 8 -> 10 going down
+ * and 7 -> 5 -> 3 coming up, in every run: half of a 572-track queue could never
+ * be selected. The songs list, which did reserve this, moved one row per press.
+ *
+ * 9vh against a row of 6vh artwork plus 1.1vh padding either side leaves room
+ * for the focus ring's 4% scale without the boxes touching.
+ */
+export const TRACK_ROW_VH = 9;
+
 export function TrackRow({
   item,
   focusKey,

@@ -13,7 +13,7 @@ import { useState } from "react";
 import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, Osk, useI18n } from "@sdk";
 import { Message } from "../Message";
-import { TrackRow } from "./TrackRow";
+import { TrackRow, TRACK_ROW_VH } from "./TrackRow";
 import { artworkScale } from "../posters";
 import { useFocusFallback, useInitialFocus } from "../focus";
 import { useApp } from "../state";
@@ -43,9 +43,21 @@ export function NowPlaying(): React.JSX.Element {
   const item = queue[index];
   // Before either early return below: a hook cannot be called conditionally, and
   // both the keyboard and the empty state return ahead of the artwork.
-  const cover = useArtwork(item && backend ? backend.posterUrl(item, 600 * artworkScale(), 600 * artworkScale()) : undefined);
-  useInitialFocus("np-toggle", Boolean(item));
-  useFocusFallback("np-toggle", (key) => key.startsWith("np-") || key.startsWith("nq-") || key.startsWith("msg-"), true);
+  const cover = useArtwork(
+    item && backend ? backend.posterUrl(item, 600 * artworkScale(), 600 * artworkScale()) : undefined,
+  );
+  useInitialFocus("np-toggle", Boolean(item) && !naming);
+  // OFF while the keyboard is up. The keyboard replaces this screen, so np-toggle
+  // is unmounted - and the fallback runs in the capture phase, ahead of spatial
+  // navigation, so every arrow and Enter would be spent putting the cursor back
+  // on a key that cannot exist until the keyboard closes. That is the dead remote
+  // the fallback exists to prevent, caused by the fallback itself. Search does
+  // the same thing for the same reason: the keyboard owns focus while it is open.
+  useFocusFallback(
+    "np-toggle",
+    (key) => key.startsWith("np-") || key.startsWith("nq-") || key.startsWith("msg-"),
+    !naming,
+  );
 
   if (naming) {
     return (
@@ -70,12 +82,15 @@ export function NowPlaying(): React.JSX.Element {
       // The whole queue, in the order it is playing - which is the shuffled
       // order when shuffle is on, and that is the point: this is for keeping a
       // running order somebody liked.
-      await backend.createPlaylist(
-        title,
-        queue.map((x) => x.id),
-        "audio",
-      );
-      setNote(t("music.saved", { title }));
+      //
+      // Deduplicated first, because the server does it silently: measured, eight
+      // ids with one repeat became a seven-track playlist. Adding an album to the
+      // queue twice is easy, so the difference between what was asked for and
+      // what was saved has to be resolved here rather than left as a surprise on
+      // another device.
+      const ids = [...new Set(queue.map((x) => x.id))];
+      await backend.createPlaylist(title, ids, "audio");
+      setNote(t("music.saved", { title, n: String(ids.length) }));
     } catch (e) {
       log.warn("saving the playlist failed", e);
       setNote(t("music.saveFailed"));
@@ -121,6 +136,7 @@ export function NowPlaying(): React.JSX.Element {
           onToggle={() => music.toggle()}
           onNext={() => void music.next()}
           onPrevious={() => void music.previous()}
+          onSeek={(delta) => music.seek(positionMs + delta)}
           onShuffle={() => music.setShuffle(!shuffle)}
           onRepeat={() => music.setRepeat(nextRepeat(repeat))}
           onSave={() => setNaming(true)}
@@ -137,7 +153,7 @@ export function NowPlaying(): React.JSX.Element {
         </h2>
         <ul className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
           {queue.slice(index).map((x, i) => (
-            <li key={`${x.id}-${index + i}`}>
+            <li key={`${x.id}-${index + i}`} style={{ height: `${TRACK_ROW_VH}vh` }}>
               <TrackRow
                 item={x}
                 focusKey={`nq-${index + i}`}
@@ -165,6 +181,7 @@ function Transport({
   onToggle,
   onNext,
   onPrevious,
+  onSeek,
   onShuffle,
   onRepeat,
   onSave,
@@ -176,6 +193,8 @@ function Transport({
   onToggle: () => void;
   onNext: () => void;
   onPrevious: () => void;
+  /** Relative, in milliseconds; the store clamps it to the track. */
+  onSeek: (deltaMs: number) => void;
   onShuffle: () => void;
   onRepeat: () => void;
   onSave: () => void;
@@ -198,6 +217,15 @@ function Transport({
         </FocusButton>
         <FocusButton focusKey="np-next" onEnter={onNext} className={`${chip} ${off}`}>
           {t("music.next")}
+        </FocusButton>
+        {/* There was no way to move inside a song at all: the progress bar is a
+            picture, and Previous/Next change the track. A long mix or a podcast
+            episode needs a step, and two chips are what a D-pad can aim at. */}
+        <FocusButton focusKey="np-back10" onEnter={() => onSeek(-10_000)} className={`${chip} ${off}`}>
+          {t("music.back10")}
+        </FocusButton>
+        <FocusButton focusKey="np-fwd10" onEnter={() => onSeek(10_000)} className={`${chip} ${off}`}>
+          {t("music.forward10")}
         </FocusButton>
         {/* The two modes show their state in the chip rather than in an icon:
             a filled shape means nothing to someone who has not been told, and
