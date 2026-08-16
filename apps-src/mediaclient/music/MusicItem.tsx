@@ -20,6 +20,7 @@ import { artworkScale } from "../posters";
 import { useFocusFallback, useInitialFocus } from "../focus";
 import { classify, useApp } from "../state";
 import { useMusic } from "../playback/music";
+import { useArtwork } from "./useArtwork";
 import type { ItemKind, MediaItem } from "../backends/types";
 import { clock } from "../time";
 import { log } from "../redact";
@@ -103,6 +104,9 @@ export function MusicItem({
 
   const art = (item: MediaItem, px: number): string | undefined =>
     backend?.posterUrl(item, px * artworkScale(), px * artworkScale());
+  // The header's own cover, loaded with the credential in a header. Above the
+  // early returns below, because a hook cannot be called conditionally.
+  const headerArt = useArtwork(header && backend ? art(header, 300) : undefined);
 
   const play = async (shuffle: boolean, startIndex = 0): Promise<void> => {
     if (!backend || !tracks?.length) return;
@@ -127,8 +131,8 @@ export function MusicItem({
       <div className="h-[3.3vh] shrink-0" aria-hidden="true" />
 
       <div className="flex shrink-0 items-end gap-[2vw] pb-[2vh]">
-        {art(shown, 300) && (
-          <img src={art(shown, 300)} alt="" className="h-[22vh] w-[22vh] shrink-0 rounded-[1vh] object-cover" />
+        {headerArt && (
+          <img src={headerArt} alt="" className="h-[22vh] w-[22vh] shrink-0 rounded-[1vh] object-cover" />
         )}
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-[4vh] font-bold">{shown.title || title}</h1>

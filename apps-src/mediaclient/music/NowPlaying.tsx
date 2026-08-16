@@ -18,6 +18,7 @@ import { artworkScale } from "../posters";
 import { useFocusFallback, useInitialFocus } from "../focus";
 import { useApp } from "../state";
 import { useMusic, type RepeatMode } from "../playback/music";
+import { useArtwork } from "./useArtwork";
 import { clock } from "../time";
 import { log } from "../redact";
 
@@ -40,6 +41,9 @@ export function NowPlaying(): React.JSX.Element {
   const [note, setNote] = useState<string | null>(null);
 
   const item = queue[index];
+  // Before either early return below: a hook cannot be called conditionally, and
+  // both the keyboard and the empty state return ahead of the artwork.
+  const cover = useArtwork(item && backend ? backend.posterUrl(item, 600 * artworkScale(), 600 * artworkScale()) : undefined);
   useInitialFocus("np-toggle", Boolean(item));
   useFocusFallback("np-toggle", (key) => key.startsWith("np-") || key.startsWith("nq-") || key.startsWith("msg-"), true);
 
@@ -80,7 +84,6 @@ export function NowPlaying(): React.JSX.Element {
 
   if (!item) return <Message text={t("music.nothingPlaying")} />;
 
-  const cover = backend?.posterUrl(item, 600 * artworkScale(), 600 * artworkScale());
   const artist = item.grandparentTitle ?? item.parentTitle;
   const pct = durationMs > 0 ? Math.min(100, (positionMs / durationMs) * 100) : 0;
 

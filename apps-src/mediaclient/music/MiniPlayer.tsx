@@ -9,6 +9,7 @@
 
 import { useMusic } from "../playback/music";
 import { useApp } from "../state";
+import { useArtwork } from "./useArtwork";
 import { clock } from "../time";
 
 export function MiniPlayer(): React.JSX.Element | null {
@@ -21,11 +22,14 @@ export function MiniPlayer(): React.JSX.Element | null {
   const durationMs = useMusic((s) => s.durationMs);
 
   const item = queue[index];
+  // Above the early return: a hook cannot be called conditionally, and this
+  // component returns null on most screens.
+  const cover = useArtwork(item && backend ? backend.posterUrl(item, 120, 120) : undefined);
+
   // Not over the player itself, which says all of this larger; and not over a
   // film, which owns the screen and the audio both.
   if (!item || state === "stopped" || screen.name === "nowPlaying") return null;
 
-  const cover = backend?.posterUrl(item, 120, 120);
   const artist = item.grandparentTitle ?? item.parentTitle;
   const pct = durationMs > 0 ? Math.min(100, (positionMs / durationMs) * 100) : 0;
 

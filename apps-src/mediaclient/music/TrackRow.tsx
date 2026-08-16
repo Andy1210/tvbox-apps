@@ -9,6 +9,7 @@
 import { FocusButton } from "@sdk";
 import type { MediaItem } from "../backends/types";
 import { clock } from "../time";
+import { useArtwork } from "./useArtwork";
 
 export function TrackRow({
   item,
@@ -29,6 +30,7 @@ export function TrackRow({
   onArrowPress?: (direction: string) => boolean;
 }): React.JSX.Element {
   const artist = item.grandparentTitle ?? item.parentTitle;
+  const art = useArtwork(artUrl);
   return (
     <FocusButton
       focusKey={focusKey}
@@ -40,9 +42,12 @@ export function TrackRow({
         playing ? "bg-white/10" : ""
       }`}
     >
-      {artUrl ? (
+      {/* The ordinal stands in until the cover arrives, and stays if it never
+          does - a torn-image icon says nothing, and a blank column of the same
+          width would make the titles jump sideways when art lands. */}
+      {art ? (
         <img
-          src={artUrl}
+          src={art}
           alt=""
           // Decorative: the title beside it says what this is, and a screen
           // reader announcing the cover twice is noise.
