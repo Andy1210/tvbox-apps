@@ -9,7 +9,7 @@
   "changelog": [
     {
       "version": "0.55.2",
-      "notes": "The Collections view no longer offers the filters that belong to the films: on this library every one of them answered with nothing, so a single press turned 461 collections into \"this library has no collections\". Coming back from the collections also keeps the order you had chosen for the films, and turning on a filter like HDR now names it on the button instead of showing a bare 1."
+      "notes": "The Collections view no longer offers the filters that belong to the films: of the 27 on offer, only the age rating does anything to a collection, and the rest turned 461 collections into \"this library has no collections\" at one press. An empty grid now blames the filter that emptied it rather than the library. Coming back from the collections keeps the order you had chosen for the films, and turning on a filter like HDR names it on the button instead of showing a bare 1."
     },
     {
       "version": "0.55.1",

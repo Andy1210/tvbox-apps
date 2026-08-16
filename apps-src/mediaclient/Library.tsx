@@ -101,9 +101,9 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   /** Sort key to its translated name, for the button. Empty until asked for. */
   const [sortNames, setSortNames] = useState<Record<string, string>>({});
   /** Which (library, mode, sort) the names have been asked for. See below. */
+  const asked = useRef(new Set<string>());
   /** How the films were arranged, kept for the way back out of the collections. */
   const saved = useRef<LibraryView | null>(null);
-  const asked = useRef(new Set<string>());
   /** Which letter search may still act. See jumpToLetter. */
   const jump = useRef(0);
   /** The letter last pressed, until the cursor moves off it. See activeLetter. */
@@ -654,10 +654,15 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
           >
             {total === 0 && (
               <div className="flex h-full items-center justify-center text-[2.2vh] text-fg-dim">
-                {mode === "collections"
-                  ? t("library.noCollections")
-                  : Object.keys(view.filters).length
-                    ? t("library.emptyFiltered")
+                {/* A filter is the likelier reason for an empty grid, and it is
+                    the one somebody can undo - so it is named first. Saying "this
+                    library has no collections" while a filter is on is a claim
+                    about the library, and 8 of the content ratings a collection
+                    list offers do return nothing. */}
+                {Object.keys(view.filters).length
+                  ? t("library.emptyFiltered")
+                  : mode === "collections"
+                    ? t("library.noCollections")
                     : t("library.empty")}
               </div>
             )}

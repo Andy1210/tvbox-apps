@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act, render, waitFor } from "@testing-library/react";
 import { configureI18n } from "@sdk";
 import { Library } from "../Library";
@@ -7,7 +7,8 @@ import { useApp } from "../state";
 import { setupRemote, setFocus, remote } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
-import type { MediaBackend, MediaItem } from "../backends/types";
+import { PlexBackend } from "../backends/plex/backend";
+import type { MediaBackend, MediaItem, Session } from "../backends/types";
 
 // What a collection list may be narrowed by, and what happens on the way back.
 //
@@ -60,6 +61,53 @@ beforeEach(async () => {
   await act(async () => setFocus(""));
 });
 
+const SESSION: Session = {
+  profileId: "p",
+  profileName: "p",
+  token: "t",
+  accountToken: "t",
+  serverId: "s",
+  serverName: "s",
+  baseUrl: "http://192.168.1.10:32400",
+  location: "lan",
+};
+
+// What the server offers a film library, in the shape it offers it.
+const SERVER_FILTERS = [
+  { filter: "genre", title: "Genre", filterType: "string" },
+  { filter: "contentRating", title: "Content Rating", filterType: "string" },
+  { filter: "year", title: "Year", filterType: "string" },
+  { filter: "hdr", title: "HDR", filterType: "boolean" },
+  { filter: "unwatched", title: "Unplayed", filterType: "boolean" },
+];
+
+describe("which filters a collection list is offered", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("is the one that works, not all of them and not none", async () => {
+    // The real backend, because this is the only line in the change that a
+    // server can tell the difference about - and both the stub tests below pass
+    // whether it is there or not.
+    //
+    // Swept against the household's server on 461 collections: 25 of the 27
+    // filters return nothing, "unwatched" returns all 461 (ignored, so the chip
+    // would claim a filter that is not in effect), and contentRating partitions
+    // the list exactly - its values sum to 461.
+    vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ MediaContainer: { Directory: SERVER_FILTERS } })));
+    const backend = new PlexBackend(SESSION, { clientId: "c", deviceName: "d" });
+
+    const films = await backend.filterOptions("1");
+    expect(films.map((f) => f.key)).toEqual(["genre", "contentRating", "year", "hdr", "unwatched"]);
+
+    const collections = await backend.filterOptions("1", "collections");
+    expect(collections.map((f) => f.key), "genre and the rest empty the grid; unwatched is ignored").toEqual([
+      "contentRating",
+    ]);
+    // The kind travels with it, or the chip opens no value list.
+    expect(collections[0].kind).toBe("list");
+  });
+});
+
 describe("the filter half of the panel", () => {
   it("is told which list it is arranging", async () => {
     const asked: (string | undefined)[] = [];
@@ -92,8 +140,19 @@ describe("the filter half of the panel", () => {
       />,
     );
     await waitFor(() => expect(container.textContent).toContain("Name"));
-    const section = container.querySelector("section:last-of-type");
-    expect(section?.className ?? "", "a heading over nothing promises a control that is not there").toContain("hidden");
+
+    const heading = (text: string): HTMLElement | undefined =>
+      Array.from(container.querySelectorAll("h3")).find((h) => h.textContent === text) as HTMLElement | undefined;
+    const shown = (h: HTMLElement | undefined): boolean =>
+      h !== undefined && !(h.closest("section")?.className ?? "").split(/\s+/).includes("hidden");
+
+    // Not rendered at all is just as good as hidden; what must not happen is a
+    // heading with nothing under it.
+    expect(shown(heading("Filter")), "a heading over nothing promises a control that is not there").toBe(false);
+    // And the half that DOES have chips has to survive, or the panel is a Done
+    // button - which an assertion on the container's text cannot see, because
+    // happy-dom loads no CSS and hidden text is still text.
+    expect(shown(heading("Sort")), "the orders are still there to choose from").toBe(true);
   });
 
   it("puts the filter's name on the button, not its value", async () => {
@@ -148,12 +207,17 @@ describe("coming back from the collections", () => {
     });
     await waitFor(() => expect(container.textContent).toContain("Date added"));
 
-    // Into the collections and straight back out.
+    // Into the collections. Nothing may follow the films in: an order a
+    // collection cannot take is answered with an empty list, which this screen
+    // reports as "this library has no collections".
     await setFocus("lib-mode");
     await act(async () => {
       await remote.ok();
     });
     await waitFor(() => expect(container.textContent).toContain("Bond"));
+    expect(container.textContent, "the film order must not be carried into the collections").not.toContain(
+      "Date added",
+    );
     await setFocus("lib-mode");
     await act(async () => {
       await remote.ok();
