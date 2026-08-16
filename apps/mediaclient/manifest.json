@@ -5,8 +5,12 @@
     "hu": "Média",
     "en": "Media"
   },
-  "version": "0.55.1",
+  "version": "0.55.2",
   "changelog": [
+    {
+      "version": "0.55.2",
+      "notes": "The Collections view no longer offers the filters that belong to the films: on this library every one of them answered with nothing, so a single press turned 461 collections into \"this library has no collections\". Coming back from the collections also keeps the order you had chosen for the films, and turning on a filter like HDR now names it on the button instead of showing a bare 1."
+    },
     {
       "version": "0.55.1",
       "notes": "Switching to Collections no longer reports an empty library: two of the orders on offer there have no meaning for a collection and the server answers them with nothing. And the box hands poster memory back as it goes, instead of holding every picture it has ever shown until the app is restarted."

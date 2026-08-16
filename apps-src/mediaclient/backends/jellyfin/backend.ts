@@ -113,6 +113,18 @@ const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
 type Letter = { key: string; title: string; size: number };
 
+/**
+ * Orders that mean nothing for a box set.
+ *
+ * `Random` for the reason the sibling backend gives - a virtualised grid asks
+ * for a page at a time and the server reshuffles between them - and the two
+ * that describe a FILE rather than a collection of them. Not measured against
+ * this server the way the Plex list was; it is a narrowing of what is offered,
+ * so the cost of being wrong is an order somebody cannot choose rather than a
+ * grid that empties.
+ */
+const COLLECTION_UNFIT = new Set(["Random", "Runtime", "DatePlayed"]);
+
 interface PlaybackInfoResponse {
   MediaSources?: JellyfinMediaSource[];
   PlaySessionId?: string;
@@ -275,12 +287,15 @@ export class JellyfinBackend implements MediaBackend {
     };
   }
 
-  async sortOptions(): Promise<SortOption[]> {
+  async sortOptions(_libraryId?: string, of?: "collections"): Promise<SortOption[]> {
     // A fixed list rather than an asked one: Jellyfin has no endpoint that
     // names its sorts, so unlike the Plex side there is nothing to ask. The
     // keys are the server's own; only the labels are ours. Read at call time,
     // so a change of language reaches a screen that is already open.
-    return SORTS.map((s) => ({ key: s.key, title: s.title() }));
+    return SORTS.filter((s) => !(of === "collections" && COLLECTION_UNFIT.has(s.key))).map((s) => ({
+      key: s.key,
+      title: s.title(),
+    }));
   }
 
   /**

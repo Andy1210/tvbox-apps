@@ -382,7 +382,16 @@ export interface MediaBackend {
   playlists(): Promise<MediaItem[]>;
   /** A playlist's items. Not `children` - the metadata path answers nothing. */
   playlistItems(id: string): Promise<MediaItem[]>;
-  filterOptions(libraryId: string): Promise<FilterOption[]>;
+  /**
+   * How this list can be narrowed.
+   *
+   * `of` matters for the same reason it matters to `sortOptions`, and more:
+   * measured against this server, a collection answers a genre, a year, a
+   * decade, a content rating, HDR or "in progress" with NOTHING - so a panel
+   * that offers them turns 461 collections into "this library has no
+   * collections", which is a sentence about the library.
+   */
+  filterOptions(libraryId: string, of?: "collections"): Promise<FilterOption[]>;
   /** The values a `list` filter can take. */
   filterValues(libraryId: string, filter: string, path?: string): Promise<SortOption[]>;
 
