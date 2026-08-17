@@ -41,11 +41,23 @@ function backend(over: Record<string, unknown> = {}): unknown {
   };
 }
 
+const launched: string[] = [];
+let launchRefused = false;
+
 beforeEach(() => {
   started.length = 0;
+  launchRefused = false;
   __lifecycle.reset();
   (globalThis as { window?: unknown }).window = globalThis;
+  launched.length = 0;
   (globalThis as unknown as { tvbox: unknown }).tvbox = {
+    // What the box does when an app asks to be brought forward: the window is
+    // shown, so the page is visible again. `launchRefused` is how a test says
+    // the box did not manage it.
+    launch: (id: string) => {
+      launched.push(id);
+      if (!launchRefused) __lifecycle.resume();
+    },
     play: () => {},
     stop: () => {},
     pause: () => {},
@@ -226,7 +238,11 @@ describe("a cast of music", () => {
     expect(started, "nothing may play as the person who just left").toEqual([]);
   });
 
-  it("refuses a cast that lands after the app went off screen", async () => {
+  it("comes forward when the app went off screen mid-cast, and still plays", async () => {
+    // Being hidden used to end this: the shell refused the player to a window
+    // nobody was looking at, so the cast was refused here rather than reported
+    // as playing over a launcher. The box lets sound outlive the screen now, so
+    // the answer is to ask for the screen instead of giving up.
     useApp.setState({
       backend: backend({
         queueItems: async () => {
@@ -238,8 +254,24 @@ describe("a cast of music", () => {
 
     const res = await cast({});
 
-    expect(res).toEqual({ ok: false, reason: "the media app is not on screen" });
-    expect(started).toEqual([]);
+    expect(res).toEqual({ ok: true });
+    expect(launched, "it asked the box for the screen").toEqual(["mediaclient"]);
+    expect(started.length).toBeGreaterThan(0);
+  });
+
+  it("plays the cast even when the box will not bring it forward", async () => {
+    // Music is sound, not the screen. A box that cannot show the app - a native
+    // game holding the output, say - is no reason to refuse a phone's album:
+    // the whole point of the shell change behind this is that music does not
+    // need to be looked at.
+    launchRefused = true;
+    __lifecycle.release("hidden");
+
+    const res = await cast({});
+
+    expect(res).toEqual({ ok: true });
+    expect(launched).toEqual(["mediaclient"]);
+    expect(started.length).toBeGreaterThan(0);
   });
 
   it("does not hand a song title to the controller as a reason", async () => {
@@ -256,15 +288,16 @@ describe("a cast of music", () => {
     expect(res.ok === false && res.reason).not.toContain("Második");
   });
 
-  it("refuses while the app is not on screen", async () => {
-    // The box has ONE shared player and the shell will not hand it to a window
-    // nobody is looking at - so a cast that reported success here would be the
-    // house saying music is playing over a launcher.
+  it("shows Now Playing for a cast that arrives while the app is hidden", async () => {
+    // The screen is the whole of what the room sees when a cast arrives: nobody
+    // is holding a remote. So the app comes forward and lands on the track,
+    // rather than leaving an album playing behind whatever was there.
     __lifecycle.release("hidden");
 
     const res = await cast({});
 
-    expect(res).toEqual({ ok: false, reason: "the media app is not on screen" });
-    expect(started).toEqual([]);
+    expect(res).toEqual({ ok: true });
+    expect(launched).toEqual(["mediaclient"]);
+    expect(useApp.getState().screen.name).toBe("nowPlaying");
   });
 });

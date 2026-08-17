@@ -41,11 +41,23 @@ function backend(over: Record<string, unknown> = {}): unknown {
   };
 }
 
+const launched: string[] = [];
+let launchRefused = false;
+
 beforeEach(() => {
+  launchRefused = false;
   played.length = 0;
   __lifecycle.reset();
   (globalThis as { window?: unknown }).window = globalThis;
+  launched.length = 0;
   (globalThis as unknown as { tvbox: unknown }).tvbox = {
+    // What the box does when an app asks to be brought forward: the window is
+    // shown, so the page is visible again. `launchRefused` is a box that cannot
+    // - a native game holding the screen, say.
+    launch: (id: string) => {
+      launched.push(id);
+      if (!launchRefused) __lifecycle.resume();
+    },
     play: (url: string, _s: unknown, startSec?: number) => played.push({ url, startSec }),
     stop: () => {},
     pause: () => {},
@@ -123,11 +135,28 @@ describe("a command from a controller", () => {
     ).toMatchObject({ ok: false });
   });
 
-  it("will not start a film while the app is not on screen", async () => {
-    // The shell refuses to start the player for an app that is not in front,
-    // and it refuses SILENTLY - the bridge discards the result. So this played
-    // nothing, reported success, and left the box publishing "playing" over the
-    // launcher.
+  it("asks the box for the screen before starting a film, and then starts it", async () => {
+    // The box HIDES an app rather than closing it, so a cast to a television
+    // somebody pressed Home on arrives at a page that is alive and polling but
+    // not on screen. That used to be a refusal; it is a request now.
+    __lifecycle.release("hidden");
+    const res = await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "1" },
+    });
+
+    expect(res).toMatchObject({ ok: true });
+    expect(launched, "it asked for the screen by app id").toEqual(["mediaclient"]);
+    expect(played.length, "and only then handed the film to the player").toBe(1);
+  });
+
+  it("will not start a film the box cannot bring to the screen", async () => {
+    // The other half, and the reason the request is awaited rather than fired
+    // and forgotten. The shell refuses the player to a window that is not in
+    // front, and it refuses SILENTLY - the bridge discards the result. So a
+    // film started anyway plays nothing, reports success, and leaves the box
+    // publishing "playing" over whatever is actually on screen.
+    launchRefused = true;
     __lifecycle.release("hidden");
     const res = await runCompanionCommand({
       path: "/player/playback/playMedia",
@@ -185,7 +214,14 @@ describe("a command from a controller", () => {
         resolveStream: async (): Promise<StreamDecision> => {
           streams += 1;
           if (streams > 1) throw new Error("no stream for this");
-          return { url: "http://s/f.mkv", audio: "auto", sub: "no", session: "s", transcoded: false, version: 0 } as never;
+          return {
+            url: "http://s/f.mkv",
+            audio: "auto",
+            sub: "no",
+            session: "s",
+            transcoded: false,
+            version: 0,
+          } as never;
         },
       }) as never,
     });

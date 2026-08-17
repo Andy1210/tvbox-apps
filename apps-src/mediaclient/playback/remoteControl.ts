@@ -42,6 +42,44 @@ function queueId(containerKey: string | undefined): string | undefined {
   return m ? m[1] : undefined;
 }
 
+/** The manifest id, which is how this app asks the box to bring it forward. */
+const APP_ID = "mediaclient";
+/** How long to wait for the box to put this window on screen. */
+const FRONT_TIMEOUT_MS = 3_000;
+
+/**
+ * Bring this app to the front, and wait until it is actually there.
+ *
+ * A cast arrives with nobody at the television holding a remote, so whatever it
+ * starts has to be reachable: the app may be behind the launcher, behind another
+ * app, or hidden since somebody pressed Home an hour ago. The box hides an app
+ * rather than closing it, so this page is alive and polling in all three cases -
+ * it just is not on screen, and before this the cast was REFUSED for that.
+ *
+ * The wait is not politeness. A film may only be started by the app the box has
+ * in front, so a play sent in the same tick as the request to come forward races
+ * the box and is rejected about as often as not. Music has no such rule any more
+ * (sound outlives the screen), but it still waits, because the point of showing
+ * Now Playing is that the room can see what arrived.
+ *
+ * Returns whether the window is on screen. A false is not fatal for music and is
+ * for a film; each caller decides.
+ */
+async function bringToFront(): Promise<boolean> {
+  if (isVisible()) return true;
+  try {
+    (typeof window === "undefined" ? undefined : window.tvbox)?.launch?.(APP_ID);
+  } catch (e) {
+    log.warn("could not ask the box to come forward", e);
+  }
+  const until = Date.now() + FRONT_TIMEOUT_MS;
+  while (Date.now() < until) {
+    await new Promise((r) => setTimeout(r, 50));
+    if (isVisible()) return true;
+  }
+  return false;
+}
+
 /**
  * Start a cast of MUSIC, which is a different player with a different queue.
  *
@@ -77,13 +115,16 @@ async function startMusic(
     }
   }
 
-  // Everything here is checked AGAIN, because reading the queue is a round trip
-  // and all three can change inside it. The film path learned each of these the
-  // hard way and this one had none of them: measured, a cast answered ok while
-  // the app was hidden (so the shell silently refused and nothing played), and
-  // while the profile picker was open (so it played as the person who had just
-  // left, past the PIN that boundary exists for).
-  if (!isVisible()) return no("the media app is not on screen");
+  // On screen before the music starts, not as a condition of it: the box lets
+  // sound outlive the screen now, so being hidden is no longer a reason to
+  // refuse - but a cast nobody can see is a cast nobody can stop from the sofa,
+  // and Now Playing is what this turns into.
+  await bringToFront();
+  // Checked AGAIN after the round trips above, because reading the queue and
+  // coming forward both take time and the person can change inside it: the
+  // profile picker replaces the backend when somebody is chosen, and playing
+  // through it would play as the person who just left, past the PIN that
+  // boundary exists for.
   const now = useApp.getState();
   const choosing = now.screen.name === "profiles" || now.screen.name === "login" || now.screen.name === "boot";
   if (now.backend !== who.backend || choosing) return no("the person on this box changed");
@@ -193,12 +234,13 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       const backend = useApp.getState().backend;
       if (!id) return no("no item in the command");
       if (!backend) return no("nobody is signed in on this box");
-      // The shell REFUSES to start the player for an app that is not in front -
-      // and it refuses silently, because the bridge discards the result. So the
-      // old code played nothing, reported success, and left the box publishing
-      // "playing" over a launcher. Said out loud instead: the assistant can put
-      // the app in front and ask again.
-      if (!isVisible()) return no("the media app is not on screen");
+      // Nothing about the screen here any more, and that is the change: this
+      // refusal fired before either path could ask for the screen itself, so a
+      // cast to a box somebody had pressed Home on was answered "not on screen"
+      // while this very page was alive and polling behind the launcher. Each
+      // path asks in its own way below - a film needs the screen and refuses if
+      // it cannot have it, music only wants to be seen.
+      //
       // Who this command belongs to, taken BEFORE any round trip: both paths
       // compare against it afterwards, and a snapshot taken later is a snapshot
       // of the change rather than of the person who was there.
@@ -213,19 +255,19 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       // itself a film: `type=music` with a film's key handed the film's own file
       // to the music player, with no display mode, no transcode and no subtitle.
       const musical = MUSIC_KINDS.has(item.kind) || (arg(cmd, "type") === "music" && !VIDEO_KINDS.has(item.kind));
-      if (musical) {
-        if (!isVisible()) return no("the media app is not on screen");
-        return await startMusic(cmd, backend, item, asked);
-      }
+      if (musical) return await startMusic(cmd, backend, item, asked);
       const offset = Number(arg(cmd, "offset") ?? "0");
       const at = Number.isFinite(offset) && offset > 0 ? offset : 0;
-      // Asked again, because the answer above is minutes old by the standards
-      // of this function: fetching the item is a round trip to the server, and
-      // the app can be sent behind the launcher while it is in flight. Starting
-      // a film then hands the box's one player to a window nobody is looking
-      // at, and the shell's refusal is invisible from here - the bridge throws
-      // its result away.
-      if (!isVisible()) return no("the media app is not on screen");
+      // A film needs the screen, so it is asked for rather than required: the
+      // box hides an app instead of closing it, and refusing here is what made
+      // a cast to a box somebody had pressed Home on answer "not on screen"
+      // with the app alive and polling behind the launcher.
+      //
+      // Still a refusal when it does not work, and the message is the honest
+      // one: starting a film into a window nobody is looking at hands the box's
+      // one player to a hidden page, and the shell's own refusal is invisible
+      // from here - the bridge throws its result away.
+      if (!(await bringToFront())) return no("the media app could not come to the screen");
       // And still the same person. Two separate things say it is not, because
       // only one of them is the backend: signing out replaces it with null, but
       // OPENING the picker changes the screen alone - the backend is replaced
