@@ -22,7 +22,7 @@ import { deviceName } from "./identity";
 import { usePrefs } from "./prefs";
 import { useChosenVersion } from "./chosenVersion";
 import { startCompanion } from "./backends/plex/companion";
-import { runCompanionCommand } from "./playback/remoteControl";
+import { companionTimelines, runCompanionCommand } from "./playback/remoteControl";
 
 export interface MediaClientProps {
   /** Leave the app and return to the launcher. */
@@ -87,6 +87,10 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
       serverId: session.serverId,
       id: { clientId: identity.clientId, deviceName: deviceName(identity.host) },
       onCommand: runCompanionCommand,
+      // What the box is doing, asked for on a tick while something plays and
+      // after every command. Without it a phone that casts stays on
+      // "connecting": it subscribes and then waits to be told.
+      timelines: () => companionTimelines({ machineIdentifier: session.serverId, baseUrl: session.baseUrl }),
       // A rejected credential is what everything else in this app calls
       // "signed out"; swallowing it here left the box polling with a dead
       // token and nothing on screen.

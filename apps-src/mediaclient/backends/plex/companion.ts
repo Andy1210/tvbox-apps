@@ -12,6 +12,7 @@
 // looks exactly like a box that is simply never chosen.
 
 import { PLEX_TV, plexHeaders, type PlexIdentityHeaders } from "./http";
+import { isActive, timelineXml, type Timeline } from "../../playback/timeline";
 import { log, redactString } from "../../redact";
 
 /**
@@ -51,6 +52,15 @@ const MIN_POLL_MS = 250;
 const COMMAND_TIMEOUT_MS = 12_000;
 /** An acknowledgement is a local round trip; it has no business taking longer. */
 const RESPOND_TIMEOUT_MS = 10_000;
+/**
+ * How often the box says where it is while something plays.
+ *
+ * One second, which is the reference client's cadence and also the coarsest a
+ * phone's position bar can move without visibly stepping. It costs one small
+ * POST to a server on the same LAN, and only while playing: a stopped box
+ * publishes on change and then falls silent.
+ */
+const TIMELINE_MS = 1_000;
 /** How long to wait after a failed poll before trying again. */
 const RETRY_MS = 5_000;
 /**
@@ -113,6 +123,14 @@ export function startCompanion(opts: {
   serverId?: string;
   id: PlexIdentityHeaders;
   onCommand: (cmd: CompanionCommand) => Promise<CommandResult> | CommandResult;
+  /**
+   * What this box is doing, asked for whenever a controller needs telling.
+   *
+   * Without it the player answers a subscribe and then says nothing, and a
+   * phone waits for a first report that never comes - which it shows as still
+   * connecting. See `timeline.ts` for the shape and where it came from.
+   */
+  timelines?: () => Timeline[];
   /** The token stopped working. The loop ends; the app decides what to show. */
   onUnauthorized?: () => void;
 }): () => void {
@@ -123,6 +141,11 @@ export function startCompanion(opts: {
   const once = runOnce();
   let commandId = 0;
   let backoff = RETRY_MS;
+  /** The last report sent, so a stopped box does not repeat itself forever. */
+  let lastReport = "";
+  let timelineTimer: ReturnType<typeof setTimeout> | null = null;
+  /** One publish in flight at a time; a second is folded into the next tick. */
+  let publishing = false;
   /** Whether the oversize refusal has already been said. */
   let oversize = false;
 
@@ -171,6 +194,73 @@ export function startCompanion(opts: {
       clearTimeout(timer);
       responders.delete(respondController);
     }
+  };
+
+  /**
+   * Tell the controller what this box is doing.
+   *
+   * Sent to the same proxy the commands arrive through, carrying the last
+   * command answered - that number is how the server pairs a report with the
+   * controller waiting for one.
+   *
+   * Failures are swallowed on purpose. A report is a courtesy repeated every
+   * second; a warning per failure would be a log line per second for as long as
+   * a server is unreachable, and the poll loop already says that once.
+   */
+  const publish = async (): Promise<void> => {
+    if (stopped || !opts.timelines || publishing) return;
+    let lines: Timeline[];
+    try {
+      lines = opts.timelines();
+    } catch (e) {
+      return;
+    }
+    const body = timelineXml(lines);
+    // While something plays the position moves, so every tick is worth sending.
+    // While nothing does, only a change is: otherwise a box sitting on a poster
+    // grid posts the same three stopped lines forever.
+    const moving = isActive(lines);
+    if (!moving && body === lastReport) return;
+    publishing = true;
+    const url = new URL("player/proxy/timeline", base(opts.baseUrl));
+    url.searchParams.set("commandID", String(commandId));
+    try {
+      await fetch(url.toString(), {
+        method: "POST",
+        headers: { ...headers(), "Content-Type": "application/xml" },
+        body,
+      });
+      lastReport = body;
+    } catch (e) {
+      /* see above: a report is not worth a log line a second */
+    } finally {
+      publishing = false;
+    }
+  };
+
+  /**
+   * Keep reporting while anything is playing, then stop.
+   *
+   * A timer rather than a loop so it can be armed from a command handler - a
+   * subscribe has to be answered with a report immediately, or the phone that
+   * sent it waits a whole second before it has anything to draw.
+   */
+  const scheduleTimeline = (): void => {
+    if (stopped || timelineTimer || !opts.timelines) return;
+    timelineTimer = setTimeout(() => {
+      timelineTimer = null;
+      void publish().finally(() => {
+        let active = false;
+        try {
+          active = isActive(opts.timelines?.() ?? []);
+        } catch (e) {
+          active = false;
+        }
+        // Kept ticking while something plays; otherwise the next report is
+        // whatever arms this again (a command, or playback starting).
+        if (active) scheduleTimeline();
+      });
+    }, TIMELINE_MS);
   };
 
   const loop = async (): Promise<void> => {
@@ -243,6 +333,13 @@ export function startCompanion(opts: {
           // Answered either way: the alternative is a controller that hangs,
           // and "it did not work" is a better answer than no answer at all.
           if (id) await respond(id, result).catch((e: unknown) => log.warn("companion response failed", e));
+          // After the answer, never before it: the controller is waiting on the
+          // answer, and a report that goes first delays the press it belongs to.
+          // Every command is followed by one, not only subscribe - a phone that
+          // pressed pause wants the new state, and a playMedia is the first
+          // thing the report has to describe.
+          void publish();
+          scheduleTimeline();
         }
         const took = Date.now() - startedAt;
         if (took < MIN_POLL_MS) await sleep(MIN_POLL_MS - took);
@@ -295,6 +392,8 @@ export function startCompanion(opts: {
 
   return () => {
     stopped = true;
+    if (timelineTimer) clearTimeout(timelineTimer);
+    timelineTimer = null;
     void registerAsPlayer(false);
     controller?.abort();
     for (const r of responders) r.abort();

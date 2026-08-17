@@ -44,7 +44,16 @@ interface TvboxBridgeGlobal {
   home(): void;
   // `startPos` (seconds) reaches mpv as its own --start, i.e. before the first
   // frame - which is what a resumed film needs.
-  play?(url: string, streams?: TvboxStreams, startPos?: number): void;
+  // `opts.kind: "audio"` is what this IS, not how to play it: the box then skips
+  // the output-mode handshake and the first-frame reveal, neither of which a
+  // song has any use for. Without it a track starts as a film - mpv maps a
+  // window over this page and the shell reveals video, which clears the screen
+  // the app is drawing on and marks this window hidden.
+  //
+  // It is the FOURTH argument, past two the music path has no use for. Passing
+  // it as the second put it in `streams`, where the shell never looks: measured
+  // on the box, a cast song still logged "first frame -> reveal video".
+  play?(url: string, streams?: TvboxStreams | null, startPos?: number, opts?: { kind?: "audio" }): void;
   stop?(): void;
   pause?(): void;
   resume?(): void;

@@ -377,4 +377,74 @@ describe("the companion poll", () => {
 
     expect(calls).toEqual([]);
   });
+
+  it("tells the controller what the box is doing, after answering it", async () => {
+    // A phone that casts subscribes and then waits to be told. Measured against
+    // the live server before this existed: the subscribe was answered "ok", the
+    // report never came, and the phone stayed on "connecting" for good. With
+    // it, a controller that subscribed received a report within the second and
+    // then one a second while the music played.
+    let polls = 0;
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      if (String(url).includes("proxy/poll")) {
+        polls += 1;
+        return polls > 1
+          ? held(init)
+          : xml(
+              '<MediaContainer size="1"><Command path="/player/timeline/subscribe" commandID="4" /></MediaContainer>',
+            );
+      }
+      return new Response("", { status: 200 });
+    });
+
+    const stop = startCompanion({
+      baseUrl: "http://s:32400",
+      token: "t",
+      id: ID,
+      onCommand: () => ({ ok: true }),
+      timelines: () => [
+        { type: "video", state: "stopped" },
+        { type: "music", state: "playing", key: "/library/metadata/9", time: 1000, duration: 2000 },
+        { type: "photo", state: "stopped" },
+      ],
+    });
+    await vi.waitFor(() => expect(calls.some((c) => c.url.includes("proxy/timeline"))).toBe(true));
+    stop();
+
+    const report = calls.find((c) => c.url.includes("proxy/timeline"));
+    // Addressed with the command it follows: that number is how the server
+    // pairs a report with the controller waiting for one.
+    expect(report?.url).toContain("commandID=4");
+    expect(report?.init?.method).toBe("POST");
+    const body = String(report?.init?.body ?? "");
+    expect(body).toContain('location="navigation"');
+    // All three kinds, or a controller never hears that the other one stopped.
+    expect(body.match(/<Timeline /g)).toHaveLength(3);
+    expect(body).toContain('state="playing"');
+
+    // And the answer went first: a report before it delays the press it belongs to.
+    const iResp = calls.findIndex((c) => c.url.includes("proxy/response"));
+    const iTime = calls.findIndex((c) => c.url.includes("proxy/timeline"));
+    expect(iResp).toBeGreaterThanOrEqual(0);
+    expect(iResp).toBeLessThan(iTime);
+  });
+
+  it("says nothing when it has nothing to report with", async () => {
+    // An app that never passed `timelines` must not post an empty container:
+    // a controller reads that as a player claiming all three kinds are stopped.
+    let polls = 0;
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      polls += 1;
+      return polls > 1
+        ? held(init)
+        : xml('<MediaContainer size="1"><Command path="/player/timeline/subscribe" commandID="1" /></MediaContainer>');
+    });
+    const stop = startCompanion({ baseUrl: "http://s:32400", token: "t", id: ID, onCommand: () => ({ ok: true }) });
+    await vi.waitFor(() => expect(calls.some((c) => c.url.includes("proxy/response"))).toBe(true));
+    await new Promise((r) => setTimeout(r, 30));
+    stop();
+    expect(calls.some((c) => c.url.includes("proxy/timeline"))).toBe(false);
+  });
 });

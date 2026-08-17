@@ -217,7 +217,13 @@ export const useMusic = create<MusicState>((set, get) => ({
     });
 
     claimPlayer("music");
-    tv?.play?.(url);
+    // `kind: "audio"` is the whole difference between a song and a film here.
+    // Without it the shell takes the video path: mpv maps a window over this
+    // page, "first frame -> reveal video" makes the page transparent, and the
+    // occluded window reports itself HIDDEN - which a cast then reads as the app
+    // having gone off screen. Measured on the box: a cast started, revealed
+    // video, and stopped itself two seconds later.
+    tv?.play?.(url, null, 0, { kind: "audio" });
 
     // Nothing above answers, so this is the only thing that can notice a start
     // that did not happen. Disarmed by the first position or playing event.

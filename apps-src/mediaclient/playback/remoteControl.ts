@@ -16,6 +16,7 @@ import { rememberedVersion } from "../chosenVersion";
 import type { CommandResult, CompanionCommand } from "../backends/plex/companion";
 import type { MediaBackend, MediaItem } from "../backends/types";
 import { log } from "../redact";
+import { rememberCastQueue, stopped, timelineFor, type ServerAddress, type Timeline } from "./timeline";
 
 /**
  * One of a command's arguments, under either name the server may use.
@@ -98,12 +99,28 @@ async function startMusic(
   // answer to a phone, and the assistant would read it out as one.
   if (after.error) return no("that music could not be played");
   if (!after.queue.length) return no("the music did not start");
-  // And still on screen after the start, or what is playing belongs to a window
-  // nobody is looking at.
-  if (!isVisible()) {
-    await useMusic.getState().stop();
-    return no("the media app went off screen");
-  }
+  // Show what is playing. A cast arrives with nobody at the television holding a
+  // remote, so the screen it lands on is the whole of what the room sees - and
+  // it was the home page, with a song coming out of it and no way to tell which
+  // one. Every in-app route to a track does this (MusicItem, MusicList,
+  // MusicHome); the cast path was the one that did not.
+  useApp.getState().go({ name: "nowPlaying" });
+  // Remembered for the report that follows: a phone matches what the box says
+  // it is playing against the queue IT built, and a report with no queue on it
+  // reads as the box playing one loose track.
+  if (qid) rememberCastQueue("music", `/playQueues/${qid}`, arg(cmd, "playQueueItemID"));
+  // No "went off screen" check after the start, unlike the film path, and the
+  // difference is real rather than an oversight: a film owns the SCREEN, so one
+  // playing behind the launcher is a box lying about what it is showing, while
+  // music is sound - it goes on playing while somebody browses, which is what it
+  // does when it is started from inside the app.
+  //
+  // Measured, when this check was here: the shell revealed video for the song
+  // (it had not been told the track is audio), mpv's window occluded this one,
+  // the page reported itself hidden, and the cast stopped itself two seconds
+  // after starting. The cause is fixed at the source - music now starts with
+  // `kind: "audio"` - and this check is gone because it was wrong for music
+  // either way.
   return ok;
 }
 
@@ -337,8 +354,63 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       if (!p.current) return no("nothing is playing");
       p.seekBy(-30_000);
       return ok;
+    // The controller asking to be kept informed about this player. Measured on
+    // the box: a phone that has just found the box sends `subscribe` first, and
+    // refusing it is where "it appears in the list but will not connect" comes
+    // from - the refusal is answered 400 by the server and the phone gives up.
+    //
+    // Answering ok is enough because the player already tells the SERVER what it
+    // is doing (`:/timeline` on every progress report), and the server is what
+    // relays to a subscriber. Nothing has to be pushed from here.
+    case "/player/timeline/subscribe":
+    case "/player/timeline/unsubscribe":
+      return ok;
     default:
       log.info(`companion command not supported: ${cmd.path}`);
       return no("this player does not support that command");
   }
+}
+
+/**
+ * What this box is doing, in the three lines a controller expects.
+ *
+ * Read at call time from the two stores rather than pushed at them: the report
+ * goes out on a one-second tick and on every command, and a snapshot kept
+ * anywhere else would be the state as of the last thing that thought to update
+ * it. Photos are a kind this app has no player for, so that line is always
+ * stopped - and it is still sent, because a controller decides which player it
+ * holds from the line that is NOT stopped.
+ */
+export function companionTimelines(server: ServerAddress): Timeline[] {
+  const film = usePlayer.getState();
+  const music = useMusic.getState();
+  const track = music.queue[music.index];
+  return [
+    timelineFor(
+      "video",
+      {
+        item: film.current?.item ?? null,
+        // Buffering is its own state on the wire: a phone draws a spinner for it
+        // and a scrubber for "playing", and a rebuffer reported as playing makes
+        // the position bar sit still while the phone insists it is moving.
+        state: film.buffering && film.state === "playing" ? "buffering" : film.state,
+        positionMs: film.positionMs,
+        durationMs: film.durationMs,
+      },
+      server,
+    ),
+    timelineFor(
+      "music",
+      {
+        item: track ?? null,
+        state: music.buffering && music.state === "playing" ? "buffering" : music.state,
+        positionMs: music.positionMs,
+        durationMs: music.durationMs,
+        shuffle: music.shuffle,
+        repeat: music.repeat === "one" ? 1 : music.repeat === "all" ? 2 : 0,
+      },
+      server,
+    ),
+    stopped("photo"),
+  ];
 }
