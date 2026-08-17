@@ -5,6 +5,7 @@ import { accentFrom } from "./accent";
 import { loadImage } from "./posters";
 import { TitleArt } from "./TitleArt";
 import { useApp } from "./state";
+import { usePlayer } from "./playback/player";
 import type { ItemDetail, MediaItem } from "./backends/types";
 import { log } from "./redact";
 
@@ -32,6 +33,20 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
   const [art, setArt] = useState<string | null>(null);
   const [accent, setAccent] = useState<string | null>(null);
   const [detail, setDetail] = useState<ItemDetail | null>(null);
+  /**
+   * Whether a film is on, which is what decides if the layers below may be drawn.
+   *
+   * The page is transparent down to the player stage while something plays, and
+   * the browsing screens are hidden - but this screen's backdrop is portalled
+   * OUT of them, into the body, so `hidden` on the page never reaches it. Four
+   * fixed full-screen layers would then sit over the picture with the film
+   * audible behind them.
+   *
+   * The same expression as the one that hides the screens (`MediaClient`), and
+   * it has to stay that way: a backdrop that outlives them is exactly the bug,
+   * and one that goes early leaves the rows on a black page.
+   */
+  const playing = usePlayer((s) => s.current !== null);
 
   // The series, when the cursor is on an episode: its art, its name and its
   // cast are what someone is choosing between, not one episode's.
@@ -118,57 +133,62 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
           captions, while the posters survived because a tile's frame is itself
           positioned. Outside every stacking context, they are simply behind.
           Two earlier attempts read this as clipping and then as flexbox
-          squashing; it was neither. */}
-      {createPortal(
-        <>
-          <div
-            className="pointer-events-none fixed inset-0 transition-[background] duration-500"
-            style={{ background: tint ?? "transparent" }}
-            aria-hidden="true"
-          />
+          squashing; it was neither.
 
-          {/* The tint is the artwork's own colours, so it is dimmed rather than
+          It is also why they have to be dropped while a film plays rather than
+          hidden with the rest of the page: nothing the page does to itself
+          reaches a subtree that is not in it. See `playing` above. */}
+      {!playing &&
+        createPortal(
+          <>
+            <div
+              className="pointer-events-none fixed inset-0 transition-[background] duration-500"
+              style={{ background: tint ?? "transparent" }}
+              aria-hidden="true"
+            />
+
+            {/* The tint is the artwork's own colours, so it is dimmed rather than
           shown: a scrim over it keeps every answer in the band the app's
           background lives in. */}
-          {tint && <div className="pointer-events-none fixed inset-0 bg-bg-0/72" aria-hidden="true" />}
+            {tint && <div className="pointer-events-none fixed inset-0 bg-bg-0/72" aria-hidden="true" />}
 
-          {art && (
-            <div
-              className="pointer-events-none fixed top-0 right-0 h-[72vh] w-[64vw]"
-              aria-hidden="true"
-              style={{
-                // A circle, not an ellipse: an ellipse stretched to the box takes
-                // the shape of the box, which is the thing the mask exists to hide.
-                // Sized in vh so it stays round whatever the panel's aspect is.
-                //
-                // Centred near the screen's top-right corner, so the picture runs
-                // off those two edges at full strength and softens only where it
-                // meets the page - to the left and downwards. A circle that fades
-                // on all four sides has to be small enough to complete inside its
-                // box, and a box that small crops a 16:9 backdrop to near-square:
-                // the middle 56% of its width, which is a 1.8x zoom into the
-                // centre of every frame. Here the fade only has to complete on
-                // two sides.
-                //
-                // The core is opaque past the top-right corner (21.4vh away,
-                // against a 28.6vh core), so that corner is a clean cut rather
-                // than a half-faded line; the right edge stays solid to 21vh and
-                // then curves away, which is the circle and not an edge.
-                //
-                // The box is deliberately wider than the mask needs - it reaches
-                // 36vw where the picture is already gone by 49.7vw. Nothing shows
-                // there, and it is what keeps the box near the picture's own
-                // shape: the crop is 1.13x instead of the 1.29x a box drawn
-                // tightly around the circle would force.
-                maskImage: "radial-gradient(circle 68vh at 81% 3%, #000 42%, transparent 100%)",
-                WebkitMaskImage: "radial-gradient(circle 68vh at 81% 3%, #000 42%, transparent 100%)",
-              }}
-            >
-              <img src={art} alt="" className="h-full w-full object-cover" />
-            </div>
-          )}
+            {art && (
+              <div
+                className="pointer-events-none fixed top-0 right-0 h-[72vh] w-[64vw]"
+                aria-hidden="true"
+                style={{
+                  // A circle, not an ellipse: an ellipse stretched to the box takes
+                  // the shape of the box, which is the thing the mask exists to hide.
+                  // Sized in vh so it stays round whatever the panel's aspect is.
+                  //
+                  // Centred near the screen's top-right corner, so the picture runs
+                  // off those two edges at full strength and softens only where it
+                  // meets the page - to the left and downwards. A circle that fades
+                  // on all four sides has to be small enough to complete inside its
+                  // box, and a box that small crops a 16:9 backdrop to near-square:
+                  // the middle 56% of its width, which is a 1.8x zoom into the
+                  // centre of every frame. Here the fade only has to complete on
+                  // two sides.
+                  //
+                  // The core is opaque past the top-right corner (21.4vh away,
+                  // against a 28.6vh core), so that corner is a clean cut rather
+                  // than a half-faded line; the right edge stays solid to 21vh and
+                  // then curves away, which is the circle and not an edge.
+                  //
+                  // The box is deliberately wider than the mask needs - it reaches
+                  // 36vw where the picture is already gone by 49.7vw. Nothing shows
+                  // there, and it is what keeps the box near the picture's own
+                  // shape: the crop is 1.13x instead of the 1.29x a box drawn
+                  // tightly around the circle would force.
+                  maskImage: "radial-gradient(circle 68vh at 81% 3%, #000 42%, transparent 100%)",
+                  WebkitMaskImage: "radial-gradient(circle 68vh at 81% 3%, #000 42%, transparent 100%)",
+                }}
+              >
+                <img src={art} alt="" className="h-full w-full object-cover" />
+              </div>
+            )}
 
-          {/* The rail's buttons sit on the brightest part of that picture now
+            {/* The rail's buttons sit on the brightest part of that picture now
               that it reaches the top edge - measured, "Search" over a pale
               backdrop was 2.09:1. A gradient to transparent, not a band, so
               there is no edge to see.
@@ -180,15 +200,15 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
               5.37:1 and let the baseline fall to 4.12:1 and the descenders to
               3.58:1 - under 4.5:1, and at 17.8pt this is not large text. At
               20vh/0.95/0.72 the whole glyph band is 7.3:1 or better. */}
-          {art && (
-            <div
-              className="pointer-events-none fixed inset-x-0 top-0 h-[20vh] bg-gradient-to-b from-bg-0/95 via-bg-0/72 to-transparent"
-              aria-hidden="true"
-            />
-          )}
-        </>,
-        document.body,
-      )}
+            {art && (
+              <div
+                className="pointer-events-none fixed inset-x-0 top-0 h-[20vh] bg-gradient-to-b from-bg-0/95 via-bg-0/72 to-transparent"
+                aria-hidden="true"
+              />
+            )}
+          </>,
+          document.body,
+        )}
 
       <section className="relative z-10 flex h-[42vh] w-[46vw] shrink-0 flex-col justify-center gap-[1.2vh] px-[4vw]">
         <TitleArt title={title} logo={detail?.logo} />

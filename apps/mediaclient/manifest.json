@@ -5,8 +5,12 @@
     "hu": "Média",
     "en": "Media"
   },
-  "version": "0.57.1",
+  "version": "0.57.2",
   "changelog": [
+    {
+      "version": "0.57.2",
+      "notes": "A film asked for by voice fills the screen again. If the app was sitting on its home screen when the film started, the home screen's backdrop stayed drawn over the picture and only the sound came through."
+    },
     {
       "version": "0.57.1",
       "notes": "A safety fix behind the music player's remote handling: a key with an unusual name could raise an error instead of being ignored. Nothing looks or behaves differently in normal use."
