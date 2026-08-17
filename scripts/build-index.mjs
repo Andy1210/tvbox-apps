@@ -53,6 +53,18 @@ if (!existsSync(appsDir)) {
 const errors = [];
 const err = (f, msg) => errors.push(`${f}: ${msg}`);
 
+// A user-facing string: one string, or a per-locale map whose LEAVES are strings.
+// Same rule the shell enforces (install.js), and for the same reason: the launcher
+// renders these as React children, and a nested object there takes the whole 10-foot
+// UI down to the root error boundary. Bounded because a row on a television has one
+// line for a label.
+function localeTextOk(v, max) {
+  if (typeof v === "string") return v.length <= max;
+  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+  const vals = Object.values(v);
+  return vals.length > 0 && vals.every((s) => typeof s === "string" && s.length <= max);
+}
+
 // Mirror of the shell's validateManifest + the registry trust rules.
 function validate(m, f, id) {
   if (typeof m.id !== "string" || !/^[a-z0-9_-]+$/.test(m.id)) err(f, "id must match [a-z0-9_-]+");
@@ -129,7 +141,9 @@ function validate(m, f, id) {
           err(f, "bad switches[].key");
         else if (seen.has(key)) err(f, "duplicate switches[].key " + key);
         else seen.add(key);
-        if (!s || !s.label) err(f, "switches[] needs a label");
+        if (!localeTextOk(s && s.label, 80)) err(f, "switches[].label must be a string (or locale map) <= 80 chars");
+        if (s && s.hint !== undefined && !localeTextOk(s.hint, 240))
+          err(f, "switches[].hint must be a string (or locale map) <= 240 chars");
         if (s && s.default !== undefined && typeof s.default !== "boolean")
           err(f, "switches[].default must be a boolean");
       }

@@ -25,7 +25,27 @@ const DIAL_ST = "urn:dial-multiscreen-org:service:dial:1";
 // every launch payload a sender sends, and the reply budget keeps an M-SEARCH flood
 // from turning the box into an amplifier.
 const MAX_BODY = 2048;
-const MAX_REPLIES_PER_SEC = 10;
+// Per SOURCE, not per box: one counter shared by everyone means a single chatty
+// device (or a deliberate flood) makes the box disappear from every phone's cast
+// list - measured, a legitimate searcher got none of its answers back. The global
+// ceiling stays as the amplification bound.
+const MAX_REPLIES_PER_SEC = 4;
+const MAX_REPLIES_PER_SEC_TOTAL = 20;
+// A launch opens an app on the television. A person pressing cast produces one or
+// two; anything beyond this from one source is not a person.
+const MAX_LAUNCHES_PER_MIN = 12;
+// A browser sender is allowed, but only YouTube's own pages: everything else that
+// speaks CORS here is a page that has no business launching anything.
+const ALLOWED_ORIGINS = new Set([
+  "https://www.youtube.com",
+  "https://youtube.com",
+  "https://m.youtube.com",
+  "https://music.youtube.com",
+  "https://tv.youtube.com",
+]);
+// Sockets a sender may hold at once. The fds belong to the shell's own process,
+// which also serves the launcher's API and the phone remote.
+const MAX_CONNECTIONS = 32;
 
 // Is `ip` inside the network of this interface address? Both v4, both from
 // os.networkInterfaces() / a socket, so a prefix compare on the masked words is
@@ -95,9 +115,29 @@ function createDialReceiver(o) {
   const appPath = "/apps/" + app;
   let server = null;
   let ssdp = null;
-  let replies = 0; // budget for this second
+  let repliesTotal = 0; // SSDP answers sent this second, all sources
+  const repliesBy = new Map(); // source -> answers sent this second
+  const launchesBy = new Map(); // source -> launches this minute
+  let launchWindowAt = 0;
   let budgetTimer = null;
   const log = (m) => o.log && o.log(m);
+  // How many distinct sources a budget map will track. Full and asked about an
+  // unknown one, both budgets refuse: under a flood the honest answer is "no",
+  // and clearing the map instead would hand the flooder a way to reset it.
+  const MAX_SOURCES = 64;
+
+  function launchAllowed(from) {
+    const now = Date.now();
+    if (now - launchWindowAt >= 60000) {
+      launchesBy.clear();
+      launchWindowAt = now;
+    }
+    const seen = launchesBy.has(from);
+    if (!seen && launchesBy.size >= MAX_SOURCES) return false;
+    const n = (launchesBy.get(from) || 0) + 1;
+    launchesBy.set(from, n);
+    return n <= MAX_LAUNCHES_PER_MIN;
+  }
 
   const appUrlFor = (host) => "http://" + host + ":" + boundPort() + "/apps/";
   function boundPort() {
@@ -147,37 +187,75 @@ function createDialReceiver(o) {
     );
   }
 
+  // CORS, and it is a gate rather than a courtesy. A launch is a CORS-SIMPLE
+  // request, so no preflight stands between a page and this endpoint: without a
+  // check, any page on the LAN - a guest phone's browser, an IoT device's web UI,
+  // an ad frame inside an app running on the box - can take the television and
+  // pair it to a stranger's session. The reference device in this house (a Fire
+  // TV) answers 403 to a request whose Origin is not YouTube's, so this is the
+  // protocol's own posture, not ours.
+  //
+  // A native sender (the phone's YouTube app) sends NO Origin at all and is
+  // unaffected. A browser sender gets its own origin echoed - never `*`, because
+  // the wildcard also lets any page READ the box's name, its stable id and
+  // whether somebody is watching right now.
+  function originOk(req) {
+    const o2 = req.headers && req.headers.origin;
+    if (!o2) return true; // not a browser - nothing to gate
+    return ALLOWED_ORIGINS.has(String(o2).toLowerCase());
+  }
+  function corsFor(req) {
+    const o2 = req.headers && req.headers.origin;
+    if (!o2 || !ALLOWED_ORIGINS.has(String(o2).toLowerCase())) return {};
+    return {
+      "Access-Control-Allow-Origin": String(o2),
+      // On the ACTUAL response, not only on the preflight: CORS hides a
+      // non-safelisted response header from script otherwise, and these two are
+      // where the protocol travels - the REST base and the launched instance.
+      "Access-Control-Expose-Headers": "Location, Application-URL",
+      Vary: "Origin",
+    };
+  }
+
   function send(res, code, body, type, extra) {
     const buf = Buffer.from(body || "");
-    res.writeHead(code, {
-      "Content-Type": type || "text/plain",
-      "Content-Length": buf.length,
-      // A sender may be a web page (a browser's cast button), and every route here
-      // is either a read or "open YouTube" - the same thing any remote in the room
-      // can do - so the reads stay open rather than guessing an Origin allowlist.
-      "Access-Control-Allow-Origin": "*",
-      ...(extra || {}),
-    });
+    res.writeHead(code, { "Content-Type": type || "text/plain", "Content-Length": buf.length, ...(extra || {}) });
     res.end(buf);
   }
 
   function handle(req, res) {
     const path = String(req.url || "/").split("?")[0];
     const host = plainIp(req.socket && req.socket.localAddress) || localAddressFor(null);
+    const cors = corsFor(req);
+    if (!originOk(req)) {
+      log("refused " + req.method + " " + path + " from origin " + req.headers.origin);
+      return send(res, 403, "not allowed");
+    }
     if (req.method === "OPTIONS") {
       return send(res, 204, "", "text/plain", {
+        ...cors,
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, Origin",
-        "Access-Control-Expose-Headers": "Location",
       });
     }
-    if (req.method === "GET" && path === "/dd.xml") {
-      return send(res, 200, deviceXml(), "text/xml; charset=utf-8", { "Application-URL": appUrlFor(host) });
+    // HEAD is how some senders probe before they read; answering 404 to it reads as
+    // "no such device". Node suppresses the body itself, so the headers are enough.
+    const reading = req.method === "GET" || req.method === "HEAD";
+    if (reading && path === "/dd.xml") {
+      return send(res, 200, deviceXml(), "text/xml; charset=utf-8", { ...cors, "Application-URL": appUrlFor(host) });
     }
-    if (path === appPath && req.method === "GET") {
-      return send(res, 200, serviceXml(), "text/xml; charset=utf-8");
+    if (path === appPath && reading) {
+      return send(res, 200, serviceXml(), "text/xml; charset=utf-8", cors);
     }
     if (path === appPath && req.method === "POST") {
+      const from = plainIp(req.socket && req.socket.remoteAddress);
+      // A launch opens an app and reloads a page, so it is the expensive route on
+      // the box. One sender pressing cast is a couple of these; hundreds a second
+      // is somebody holding the television in a reload loop.
+      if (!launchAllowed(from)) {
+        log("launch from " + from + " refused: too many");
+        return send(res, 429, "too many", "text/plain", cors);
+      }
       let body = "";
       let over = false;
       req.on("data", (c) => {
@@ -186,32 +264,54 @@ function createDialReceiver(o) {
         if (body.length > MAX_BODY) {
           over = true;
           body = "";
+          // Bounding memory is not enough: a sender that keeps writing holds a
+          // socket and a request slot of the shell's own process.
+          send(res, 413, "too large", "text/plain", cors);
+          req.destroy();
         }
       });
       req.on("end", () => {
-        if (over) return send(res, 413, "too large");
-        log("launch from " + plainIp(req.socket && req.socket.remoteAddress) + " (" + body.length + " bytes)");
+        if (over) return undefined;
+        log("launch from " + from + " (" + body.length + " bytes)");
+        let opened = false;
         try {
-          o.onLaunch(body);
+          opened = o.onLaunch(body) !== false;
         } catch (e) {
           log("launch handler: " + e.message);
         }
         // 201 + the instance's own url is what a sender waits for; without it the
-        // cast is reported as failed even though the app came up.
-        return send(res, 201, "", "text/plain", { LOCATION: appUrlFor(host) + app + "/run" });
+        // cast is reported as failed even though the app came up. The opposite
+        // matters too: if nothing opened - the app is not installed, or not ready -
+        // saying 201 leaves the phone connected to a television that is doing
+        // nothing, with no way to tell.
+        if (!opened) return send(res, 503, "the app did not open", "text/plain", cors);
+        return send(res, 201, "", "text/plain", { ...cors, LOCATION: appUrlFor(host) + app + "/run" });
       });
       return undefined;
     }
     // Stopping is advertised as unavailable (`allowStop="false"`), and the spec's
     // answer for that is 501 rather than a silent 404 - a sender that tried can
     // tell the difference between "no" and "no such app".
-    if (path === appPath + "/run" && req.method === "DELETE") return send(res, 501, "stop is not offered");
-    return send(res, 404, "not found");
+    if (path === appPath + "/run" && req.method === "DELETE")
+      return send(res, 501, "stop is not offered", "text/plain", cors);
+    return send(res, 404, "not found", "text/plain", cors);
+  }
+
+  // May we answer THIS asker right now? Charged per source first, so a flood costs
+  // the flooder its own budget and nobody else's, and only then against the global
+  // ceiling that bounds what the box can be made to emit.
+  function replyAllowed(address) {
+    if (repliesTotal >= MAX_REPLIES_PER_SEC_TOTAL) return false;
+    const mine = repliesBy.get(address) || 0;
+    if (mine >= MAX_REPLIES_PER_SEC) return false;
+    if (!repliesBy.has(address) && repliesBy.size >= MAX_SOURCES) return false;
+    repliesBy.set(address, mine + 1);
+    repliesTotal++;
+    return true;
   }
 
   function ssdpReply(remote) {
-    if (replies >= MAX_REPLIES_PER_SEC) return;
-    replies++;
+    if (!replyAllowed(remote.address)) return;
     const host = localAddressFor(remote.address);
     const msg = Buffer.from(
       "HTTP/1.1 200 OK\r\n" +
@@ -242,6 +342,14 @@ function createDialReceiver(o) {
 
   function startHttp(preferred, cb) {
     server = http.createServer(handle);
+    // Idle sockets and half-sent requests are the cheap half of a denial attempt,
+    // and the file descriptors come out of the shell's own process - the one that
+    // also serves the launcher's API and the phone remote. Node refuses a
+    // connection beyond the cap rather than queueing it.
+    server.maxConnections = MAX_CONNECTIONS;
+    server.headersTimeout = 5000;
+    server.requestTimeout = 10000;
+    server.keepAliveTimeout = 5000;
     server.on("error", (e) => {
       if (e.code === "EADDRINUSE" && preferred !== 0) {
         // Somebody else holds the preferred port. The port only has to be reachable,
@@ -307,7 +415,10 @@ function createDialReceiver(o) {
     // its port, so advertising before it is bound would send phones to nothing.
     start(cb) {
       if (server) return void (cb && cb(null));
-      budgetTimer = setInterval(() => (replies = 0), 1000);
+      budgetTimer = setInterval(() => {
+        repliesTotal = 0;
+        repliesBy.clear();
+      }, 1000);
       if (budgetTimer.unref) budgetTimer.unref();
       startHttp(Number(o.port) || 0, (e) => {
         if (e) return cb && cb(e);
@@ -334,13 +445,19 @@ function createDialReceiver(o) {
     },
     running: () => !!server,
     port: boundPort,
-    // for tests: the request handler and the SSDP decision, without sockets
+    // for tests: the decisions, without sockets
     _handle: handle,
     _onSsdp: onSsdp,
+    _replyAllowed: replyAllowed,
+    _launchAllowed: launchAllowed,
   };
 }
 
 module.exports = {
+  ALLOWED_ORIGINS,
+  MAX_LAUNCHES_PER_MIN,
+  MAX_REPLIES_PER_SEC,
+  MAX_REPLIES_PER_SEC_TOTAL,
   createDialReceiver,
   localAddressFor,
   sameSubnet,

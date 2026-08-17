@@ -9,7 +9,16 @@
 // Run: node --test apps/youtube/lib/dial.test.js
 const test = require("node:test");
 const assert = require("node:assert");
-const { createDialReceiver, localAddressFor, sameSubnet, matchesSearch, MAX_BODY } = require("./dial");
+const {
+  createDialReceiver,
+  localAddressFor,
+  sameSubnet,
+  matchesSearch,
+  MAX_BODY,
+  MAX_LAUNCHES_PER_MIN,
+  MAX_REPLIES_PER_SEC,
+  MAX_REPLIES_PER_SEC_TOTAL,
+} = require("./dial");
 
 function receiver(over = {}) {
   const launches = [];
@@ -26,12 +35,20 @@ function receiver(over = {}) {
 }
 
 // A request/response pair as far as the handler can tell.
-function fakeReq(method, url, { body = null, localAddress = "192.168.1.219", remoteAddress = "192.168.1.50" } = {}) {
+function fakeReq(
+  method,
+  url,
+  { body = null, localAddress = "192.168.1.219", remoteAddress = "192.168.1.50", origin = null } = {},
+) {
   const on = {};
   return {
     method,
     url,
+    headers: origin ? { origin } : {},
     socket: { localAddress, remoteAddress },
+    destroy() {
+      this.destroyed = true;
+    },
     on(ev, fn) {
       on[ev] = fn;
       // The body arrives AFTER the handler subscribed, which is the order a real
@@ -117,15 +134,16 @@ test("a launch hands the body over and answers 201 with the instance url", () =>
   assert.match(out.headers.location, /\/apps\/YouTube\/run$/);
 });
 
-test("a launch is answered even when opening the app throws", () => {
-  // A sender with no reply retries, and a cast has to fail on the TV rather than
-  // silently on the phone.
+test("a launch whose handler throws is answered - as the failure it is", () => {
+  // Answered at all, because a sender with no reply retries; and answered honestly,
+  // because a 201 would leave the phone believing the television is now showing
+  // something it never opened.
   const { r } = receiver({
     onLaunch: () => {
       throw new Error("no window");
     },
   });
-  assert.equal(call(r, "POST", "/apps/YouTube", { body: "pairingCode=x" }).code, 201);
+  assert.equal(call(r, "POST", "/apps/YouTube", { body: "pairingCode=x" }).code, 503);
 });
 
 test("a body too big to be a launch is refused, and nothing is opened", () => {
@@ -172,6 +190,97 @@ test("a query string does not change which route was asked for", () => {
   const { r } = receiver();
   assert.equal(call(r, "GET", "/apps/YouTube?v=2").code, 200);
   assert.equal(call(r, "GET", "/dd.xml?x=1").code, 200);
+});
+
+// A launch is a CORS-SIMPLE request: no preflight stands between a page and this
+// endpoint, so without a check any page on the LAN - a guest's browser, an IoT web
+// UI, an ad frame inside an app running on the box - can take the television and
+// pair it to a stranger's session. The reference device in this house answers 403 to
+// exactly this, so it is the protocol's posture and not ours.
+test("a browser page that is not YouTube is refused, on every route", () => {
+  const { r, launches } = receiver();
+  for (const [m, u] of [
+    ["GET", "/dd.xml"],
+    ["GET", "/apps/YouTube"],
+    ["POST", "/apps/YouTube"],
+    ["OPTIONS", "/apps/YouTube"],
+  ]) {
+    const out = call(r, m, u, { origin: "http://evil.example", body: m === "POST" ? "pairingCode=x" : null });
+    assert.equal(out.code, 403, m + " " + u);
+  }
+  assert.deepEqual(launches, [], "and nothing was opened");
+});
+
+test("a native sender sends no Origin and is unaffected", () => {
+  const { r, launches } = receiver();
+  assert.equal(call(r, "GET", "/apps/YouTube").code, 200);
+  assert.equal(call(r, "POST", "/apps/YouTube", { body: "pairingCode=x" }).code, 201);
+  assert.deepEqual(launches, ["pairingCode=x"]);
+});
+
+test("no request gets a wildcard: the box's name, id and whether it is in use are not public", () => {
+  const { r } = receiver();
+  for (const origin of [null, "http://evil.example"]) {
+    const out = call(r, "GET", "/dd.xml", { origin });
+    assert.equal(out.headers["access-control-allow-origin"], undefined, String(origin));
+  }
+});
+
+test("a YouTube page gets its own origin back, and can READ the two headers the protocol travels in", () => {
+  // CORS hides a non-safelisted response header from script unless the ACTUAL
+  // response exposes it - exposing it only on the preflight leaves a web sender
+  // unable to find the REST base or the instance it just launched.
+  const { r } = receiver();
+  const dd = call(r, "GET", "/dd.xml", { origin: "https://www.youtube.com" });
+  assert.equal(dd.headers["access-control-allow-origin"], "https://www.youtube.com");
+  assert.match(dd.headers["access-control-expose-headers"], /Application-URL/);
+  assert.equal(dd.headers.vary, "Origin");
+  const launch = call(r, "POST", "/apps/YouTube", { origin: "https://m.youtube.com", body: "pairingCode=x" });
+  assert.equal(launch.code, 201);
+  assert.match(launch.headers["access-control-expose-headers"], /Location/);
+});
+
+test("a launch that opened nothing is answered as a failure, not as 201", () => {
+  // Otherwise the phone is connected to a television that is doing nothing, with no
+  // way to tell - the app might not be installed, or not ready.
+  const { r } = receiver({ onLaunch: () => false });
+  assert.equal(call(r, "POST", "/apps/YouTube", { body: "pairingCode=x" }).code, 503);
+});
+
+test("HEAD is answered like GET, because a sender probes with it", () => {
+  const { r } = receiver();
+  assert.equal(call(r, "HEAD", "/dd.xml").code, 200);
+  assert.equal(call(r, "HEAD", "/apps/YouTube").code, 200);
+});
+
+test("one flooding source loses its OWN budget, not everybody's", () => {
+  // A single counter for the whole box is a denial of the feature: measured, a
+  // legitimate searcher got none of its answers back while another host flooded.
+  const { r } = receiver();
+  const flood = "192.168.1.99";
+  const phone = "192.168.1.50";
+  for (let i = 0; i < MAX_REPLIES_PER_SEC; i++) assert.equal(r._replyAllowed(flood), true, "reply " + i);
+  assert.equal(r._replyAllowed(flood), false, "the flooder is spent");
+  assert.equal(r._replyAllowed(phone), true, "the phone still gets an answer");
+});
+
+test("and the global ceiling still bounds what the box can be made to emit", () => {
+  const { r } = receiver();
+  let sent = 0;
+  for (let i = 0; i < 40; i++) if (r._replyAllowed("10.0.0." + i)) sent++;
+  assert.equal(sent, MAX_REPLIES_PER_SEC_TOTAL);
+});
+
+test("a source that keeps launching is refused, and told so", () => {
+  const { r, launches } = receiver();
+  for (let i = 0; i < MAX_LAUNCHES_PER_MIN; i++) {
+    assert.equal(call(r, "POST", "/apps/YouTube", { body: "pairingCode=" + i }).code, 201, "launch " + i);
+  }
+  const over = call(r, "POST", "/apps/YouTube", { body: "pairingCode=over" });
+  assert.equal(over.code, 429);
+  assert.equal(launches.length, MAX_LAUNCHES_PER_MIN, "the refused one opened nothing");
+  // Another phone in the house is not punished for it.
+  assert.equal(call(r, "POST", "/apps/YouTube", { body: "pairingCode=x", remoteAddress: "192.168.1.51" }).code, 201);
 });
 
 const search = (st) =>

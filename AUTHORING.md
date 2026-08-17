@@ -321,9 +321,16 @@ if (host.switchOn("cast")) startReceiver(); // the value in force (manifest defa
 host.onConfigChange(() => (host.switchOn("cast") ? startReceiver() : stopReceiver()));
 ```
 
-It appears in Settings → Apps → App settings. The shell stores it and knows nothing
-about what it does; your plugin is what acts on it, so a switch without a `service` is
-refused.
+It appears in Settings → Apps → **Extra app settings**. The shell stores it and knows
+nothing about what it does; your plugin is what acts on it, so a switch without a
+`service` is refused — and the box hides a switch whose plugin is not loaded, rather
+than offering a row that writes config and changes nothing.
+
+`default: true` is a decision, not a default: an app update can land unattended
+overnight, so it turns the thing on for every box with nobody pressing anything. For
+anything that opens a port, holds a radio or takes input from the network, declare it
+off. `apps/youtube` is the worked example — a DIAL cast receiver behind a switch that
+starts life off.
 
 ### Background work: wait for `host.idle()`
 

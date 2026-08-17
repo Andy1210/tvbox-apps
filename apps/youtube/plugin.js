@@ -18,6 +18,14 @@ const { createDialReceiver } = require("./lib/dial");
 const APP_ID = "youtube";
 const DIAL_APP = "YouTube"; // the name senders address; case is part of it
 const SWITCH = "cast";
+// Two sentences that reach the television, so they are in the house's language
+// rather than the log's. The shell has no locale to give a plugin, and Hungarian
+// is what this box speaks; keep them short - it is a corner overlay, not a dialog.
+const CAST_NOTE = { title: "Átküldés telefonról", message: "A YouTube most indul a TV-n." };
+const FAIL_NOTE = {
+  title: "Átküldés telefonról",
+  message: "Nem sikerült elindítani a fogadást, ezért a box most nem látszik a telefonon.",
+};
 // A port worth asking for rather than one worth relying on: it travels inside the
 // LOCATION a sender reads, so a taken port costs nothing (dial.js falls back to any
 // free one). Kept clear of 8008/8009, which are Cast's.
@@ -72,7 +80,20 @@ module.exports = (host) => {
     // it (withLaunchQuery) and can only ever put it on the manifest's own url, so
     // there is nothing to sanitize here that it would not sanitize again.
     host.log("youtube: cast -> opening the app");
-    host.navTo(APP_ID, { query: String(launchData || "") });
+    // A note in the room, because a cast REPLACES what is on screen and the person
+    // holding the remote did not ask for it. Best effort: an older shell has no
+    // notify, and a cast must not fail on the toast.
+    try {
+      host.notify({ title: CAST_NOTE.title, message: CAST_NOTE.message, duration: 4000 });
+    } catch (e) {
+      /* nothing on screen is not a reason to drop the cast */
+    }
+    // Whether the app actually came up decides what the sender is told (a phone
+    // connected to a television that is doing nothing is the worst answer). An
+    // older shell returns undefined here, which reads as "cannot tell" rather than
+    // as a failure.
+    const opened = host.navTo(APP_ID, { query: String(launchData || "") });
+    return opened !== false;
   }
 
   function start() {
@@ -92,6 +113,13 @@ module.exports = (host) => {
       const d = dial;
       dial = null;
       if (d) d.stop();
+      // Otherwise the switch reads ON while no phone can see the box, and the only
+      // trace is a line in a log nobody on a sofa will read.
+      try {
+        host.notify({ ...FAIL_NOTE, duration: 8000 });
+      } catch (x) {
+        /* best effort */
+      }
     });
   }
 
@@ -105,10 +133,18 @@ module.exports = (host) => {
   // shell names the sections that changed, but the state is RE-READ rather than
   // matched against them: what matters is the value now in force, and re-reading it
   // costs one config load.
-  host.onConfigChange(() => {
-    if (castOn()) start();
-    else stop();
-  });
+  // Guarded like the two calls above, and for the same reason: an older shell has
+  // no onConfigChange, and a plugin factory that throws is a plugin the shell drops
+  // entirely - the switch would then be a row that does nothing, with the app's tile
+  // still on HOME.
+  try {
+    host.onConfigChange(() => {
+      if (castOn()) start();
+      else stop();
+    });
+  } catch (e) {
+    host.log("youtube: this shell cannot report config changes; the switch needs a restart");
+  }
 
   return { start, stop };
 };

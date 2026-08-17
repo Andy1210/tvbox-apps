@@ -6,7 +6,7 @@
   "changelog": [
     {
       "version": "1.1.0",
-      "notes": "Cast from a phone: the box shows up in the YouTube app's cast list even while nothing is on screen, and picking it opens YouTube on the TV already connected to your phone. Switchable in Settings > Apps > App settings."
+      "notes": "Send a video from your phone: turn on Settings > Apps > Extra app settings > YouTube - cast from phone, and the box appears in the YouTube app on your phone. Tap the cast icon there and the video starts on the TV, even if YouTube is not open. It stays off until you turn it on, and anyone on the same wifi can then send to the TV."
     },
     {
       "version": "1.0.0",
@@ -20,14 +20,14 @@
     {
       "key": "cast",
       "label": {
-        "hu": "Castolás telefonról",
+        "hu": "Átküldés telefonról",
         "en": "Cast from phone"
       },
       "hint": {
-        "hu": "A box megjelenik a telefonod YouTube-alkalmazásában, és akkor is fogadja a castot, ha épp nem fut az app.",
-        "en": "The box shows up in your phone's YouTube app, and takes a cast even while the app is not running."
+        "hu": "A box megjelenik a telefonod YouTube-alkalmazásában, a box nevén. Koppints ott az átküldés ikonra, és a videó itt indul el – akkor is, ha a YouTube épp nincs nyitva a TV-n. Aki ugyanezen a wifin van, az is átküldhet.",
+        "en": "The box shows up in the YouTube app on your phone, under the box's name. Tap the cast icon there and the video starts here, even if YouTube is not open on the TV. Anyone on the same wifi can send to it too."
       },
-      "default": true
+      "default": false
     }
   ],
   "accent": "#ff0033",
