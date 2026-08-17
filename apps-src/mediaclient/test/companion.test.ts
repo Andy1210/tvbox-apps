@@ -304,4 +304,77 @@ describe("the companion poll", () => {
     expect(body).toContain("before");
     expect(body).toContain("after");
   });
+
+  it("registers as a player the server proxies, and stops being one on the way out", async () => {
+    // Polling is enough to BE commandable and not enough to be OFFERED.
+    // Measured on the live account: with the app polling, PMS lists the box in
+    // /clients, announces it over GDM, and plex.tv shows provides="player" - and
+    // no phone offers it. The old Plex HTPC client, which IS castable, differs
+    // in one field: provides="client,player". Its own code says why, and this is
+    // the call it makes.
+    const calls: { url: string; method: string; provides: string | null }[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.includes("/devices/")) {
+        const headers = new Headers(init?.headers);
+        calls.push({ url, method, provides: headers.get("X-Plex-Provides") });
+        return new Response("", { status: 200 });
+      }
+      // The poll: hang, so the loop does not spin while this test looks.
+      return new Promise<Response>(() => {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const stop = startCompanion({
+      baseUrl: "http://server",
+      token: "tok",
+      serverId: "MACHINE-ID",
+      id: { clientId: "CLIENT-ID", deviceName: "tvbox-test" },
+      onCommand: () => ({ ok: true }),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(calls.length, "it registers on start").toBe(1);
+    expect(calls[0].method).toBe("PUT");
+    expect(calls[0].url).toContain("/devices/CLIENT-ID");
+    // The whole point of the call: a phone may cast to a "player", not to a
+    // bare "client".
+    expect(calls[0].provides).toBe("client,player");
+    // And it names the server that will relay to it.
+    expect(calls[0].url).toContain("proxiedBy=MACHINE-ID");
+
+    stop();
+    await Promise.resolve();
+
+    expect(calls.length, "and it stands down on the way out").toBe(2);
+    expect(calls[1].provides, "no longer a player").toBe("client");
+  });
+
+  it("does not register when there is no server to be proxied by", async () => {
+    // Without a machine identifier the registration would name nobody, and a
+    // player nothing relays to is worse than one that was never offered.
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/devices/")) calls.push(url);
+        return new Promise<Response>(() => {});
+      }),
+    );
+
+    const stop = startCompanion({
+      baseUrl: "http://server",
+      token: "tok",
+      id: { clientId: "CLIENT-ID", deviceName: "tvbox-test" },
+      onCommand: () => ({ ok: true }),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    stop();
+
+    expect(calls).toEqual([]);
+  });
 });

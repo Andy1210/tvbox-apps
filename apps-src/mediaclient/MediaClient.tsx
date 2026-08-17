@@ -84,6 +84,7 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
     return startCompanion({
       baseUrl: session.baseUrl,
       token: session.token,
+      serverId: session.serverId,
       id: { clientId: identity.clientId, deviceName: deviceName(identity.host) },
       onCommand: runCompanionCommand,
       // A rejected credential is what everything else in this app calls

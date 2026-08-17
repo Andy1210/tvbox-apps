@@ -11,7 +11,7 @@
 // server does not like is answered 400, and a client that retries in a loop
 // looks exactly like a box that is simply never chosen.
 
-import { plexHeaders, type PlexIdentityHeaders } from "./http";
+import { PLEX_TV, plexHeaders, type PlexIdentityHeaders } from "./http";
 import { log, redactString } from "../../redact";
 
 /**
@@ -54,28 +54,28 @@ const RESPOND_TIMEOUT_MS = 10_000;
 /** How long to wait after a failed poll before trying again. */
 const RETRY_MS = 5_000;
 /**
- * WHY THIS APP IS NOT IN A PHONE'S CAST LIST, and why nothing here fixes it.
+ * What puts this box in a phone's cast list.
  *
- * The account's device record is written when a client SIGNS IN and never
- * again, and this app calls plex.tv only during sign-in. So a box signed in on
- * a build that predates `X-Plex-Provides` keeps a record with an empty
- * `provides` for the life of the session, and anything that picks a player from
- * plex.tv - the phone's cast list, Plexamp - is offered the DEAD rows from
- * earlier runs instead of the live one.
+ * Polling the server is enough to BE commandable - the house assistant proves
+ * that - but not to be OFFERED. Measured on this account, with the app open and
+ * polling on both boxes: PMS lists them in `/clients`, PMS announces them over
+ * GDM on the LAN with the right identifier, plex.tv lists them with
+ * `provides="player"` - and neither Plexamp nor the Plex app shows either one.
  *
- * A periodic authenticated GET was tried here and removed: nothing shows that
- * plex.tv updates an existing record from request headers. The evidence is the
- * other way. The house assistant has sent identity headers to plex.tv for weeks
- * and has no device row at all; a Plex forum report describes a record staying
- * stale until the device re-registered; and on this account `tvbox-gaming`,
- * signed in on a current build, already carries `provides="player"`. So the
- * header works - at SIGN-IN - and the fix for an older session is to sign out
- * and back in, not to ping.
+ * The answer came from the box itself. The old `apps/plex` client (Plex's own
+ * HTPC bundle) IS castable from a phone, and its device row differs in exactly
+ * one field: `provides="client,player"` against our `provides="player"`. Its
+ * code says why, in as many words:
  *
- * One thing to settle before building anything larger: every Plex-authored
- * player on this account also advertises `pubsub-player` and joins plex.tv's
- * pubsub relay, which this app does not. A corrected `provides` may therefore
- * still not be enough for a phone to offer the box.
+ *     [Plex Companion] Registering PMS <name> as a proxy for Plex Companion
+ *     PUT /devices/<clientIdentifier>
+ *         X-Plex-Provides: client,player
+ *         proxiedBy=<the server's machineIdentifier>
+ *
+ * So a Companion player is not something the account infers from a poll: the
+ * client REGISTERS itself as a player and names the server that will relay to
+ * it. That is what this does, and what the teardown undoes - the same client
+ * drops back to `X-Plex-Provides: client` when it stops being a player.
  */
 /** Ceiling for the backoff, so a server that is down is asked about calmly. */
 const RETRY_MAX_MS = 60_000;
@@ -109,6 +109,8 @@ export interface CompanionCommand {
 export function startCompanion(opts: {
   baseUrl: string;
   token: string;
+  /** The server's machineIdentifier: who relays to this player. */
+  serverId?: string;
   id: PlexIdentityHeaders;
   onCommand: (cmd: CompanionCommand) => Promise<CommandResult> | CommandResult;
   /** The token stopped working. The loop ends; the app decides what to show. */
@@ -255,10 +257,45 @@ export function startCompanion(opts: {
     }
   };
 
+  /**
+   * Register as a player that this server proxies, and stop being one on the way
+   * out. Failure is logged and ignored: it costs the cast pickers, and nothing
+   * else in the app depends on it.
+   *
+   * `keepalive` on the deregister because it fires while the window is going
+   * away, which is the one request here that would otherwise be cancelled by
+   * the navigation that caused it.
+   */
+  const registerAsPlayer = async (asPlayer: boolean): Promise<void> => {
+    if (!opts.serverId) return;
+    const url = new URL(`devices/${encodeURIComponent(opts.id.clientId)}`, `${PLEX_TV}/`);
+    url.searchParams.set("proxiedBy", opts.serverId);
+    try {
+      const res = await fetch(url.toString(), {
+        method: "PUT",
+        keepalive: !asPlayer,
+        headers: {
+          ...plexHeaders(opts.id, { "X-Plex-Token": opts.token }),
+          Accept: "application/xml",
+          // The whole point: "client" alone is a browser, "client,player" is
+          // something a phone may cast to.
+          "X-Plex-Provides": asPlayer ? "client,player" : "client",
+        },
+      });
+      if (!res.ok) log.warn(`plex.tv refused the player registration (${res.status})`);
+    } catch (e) {
+      log.warn("could not register this box as a player", e);
+    }
+  };
+
   void loop();
+  // After the loop: the poll is what makes the box commandable and must not
+  // queue behind an internet round trip that only decides who can find it.
+  void registerAsPlayer(true);
 
   return () => {
     stopped = true;
+    void registerAsPlayer(false);
     controller?.abort();
     for (const r of responders) r.abort();
   };

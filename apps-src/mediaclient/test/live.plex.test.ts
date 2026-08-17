@@ -30,12 +30,6 @@ const session: Session = {
 
 const id = { clientId: "mediaclient-live-test", deviceName: "test" };
 
-async function serverId(): Promise<string> {
-  const res = await fetch(`${BASE}/identity`, { headers: { Accept: "application/json" } });
-  const body = (await res.json()) as { MediaContainer?: { machineIdentifier?: string } };
-  return String(body.MediaContainer?.machineIdentifier ?? "");
-}
-
 describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
   // The global stub in setup.ts exists so no ordinary test reaches the network;
   // this suite is the exception it was written for.
