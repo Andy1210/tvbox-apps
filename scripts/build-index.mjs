@@ -84,7 +84,10 @@ function validate(m, f, id) {
       const declared = m.requires && m.requires.flatpak;
       if (declared !== undefined && !Array.isArray(declared)) err(f, "requires.flatpak must be an array");
       if (ref && !(Array.isArray(declared) && declared.includes(ref)))
-        err(f, "runtime.native.flatpak must also be listed in requires.flatpak (so the tile greys out until installed)");
+        err(
+          f,
+          "runtime.native.flatpak must also be listed in requires.flatpak (so the tile greys out until installed)",
+        );
     }
   } else {
     const serve = m.runtime && m.runtime.serve;
@@ -100,8 +103,7 @@ function validate(m, f, id) {
   if (bridge !== undefined) {
     if (typeof bridge !== "string" || !/^\.\/[a-z0-9_-]+\.js$/.test(bridge))
       err(f, "runtime.bridge must be ./<file>.js shipped by the package");
-    else if (!existsSync(join(appsDir, id, bridge.slice(2))))
-      err(f, `runtime.bridge ${bridge} is not in the package`);
+    else if (!existsSync(join(appsDir, id, bridge.slice(2)))) err(f, `runtime.bridge ${bridge} is not in the package`);
   }
   if (m.pairing !== undefined) {
     // A pairing entry only makes sense with a plugin to register the provider.
@@ -112,6 +114,29 @@ function validate(m, f, id) {
         if (!p || !p.label) err(f, "pairing[] needs a label");
       }
     if (!m.service) err(f, "pairing needs a `service` plugin to register the provider");
+  }
+  if (m.switches !== undefined) {
+    // On/off settings the BOX shows for an app whose own screen cannot hold them (a
+    // native app, or a remote site that is not ours). The key becomes a config key
+    // and an object key on the box, so the charset is pinned and the names that are
+    // not properties when assigned to a plain object are refused.
+    if (!Array.isArray(m.switches) || m.switches.length > 8) err(f, "switches must be an array of at most 8");
+    else {
+      const seen = new Set();
+      for (const s of m.switches) {
+        const key = s && String(s.key || "");
+        if (!key || !/^[a-z0-9_-]{1,32}$/.test(key) || ["__proto__", "constructor", "prototype"].includes(key))
+          err(f, "bad switches[].key");
+        else if (seen.has(key)) err(f, "duplicate switches[].key " + key);
+        else seen.add(key);
+        if (!s || !s.label) err(f, "switches[] needs a label");
+        if (s && s.default !== undefined && typeof s.default !== "boolean")
+          err(f, "switches[].default must be a boolean");
+      }
+    }
+    // The shell acts on none of them - the app's own plugin reads the value - so a
+    // switch without a service is a row that does nothing.
+    if (!m.service) err(f, "switches need a `service` plugin to act on them");
   }
   // Trust model: CURATED repo, every app is merge-reviewed, so it may carry a
   // `service` plugin (host-side code) or a `builtin` view. The only hard line is
