@@ -224,6 +224,27 @@ test("a browser page that is not YouTube is refused, on every route", () => {
   assert.deepEqual(launches, [], "and nothing was opened");
 });
 
+test("the phone's own YouTube app names itself, and is let in", () => {
+  // Measured on a box, by a phone in this house: the Android app sends
+  // `Origin: package:com.google.android.youtube`. Refusing it meant the phone found the
+  // box over SSDP and then could not read the description - casting never started. A
+  // browser cannot produce a `package:` origin (it sends its own), and a native sender
+  // that could would simply omit the header, which was always allowed.
+  const { r, launches } = receiver();
+  for (const o of [
+    "package:com.google.android.youtube",
+    "package:com.google.android.apps.youtube.music",
+    "package:com.google.android.youtube.tv",
+  ]) {
+    assert.equal(call(r, "GET", "/dd.xml", { origin: o }).code, 200, o);
+    assert.equal(call(r, "POST", "/apps/YouTube", { origin: o, body: "pairingCode=x" }).code, 201, o);
+  }
+  assert.equal(launches.length, 3);
+  // ...and it is the SCHEME that is allowed, not the word: a page cannot smuggle one in.
+  assert.equal(call(r, "GET", "/dd.xml", { origin: "http://package:evil" }).code, 403);
+  assert.equal(call(r, "GET", "/dd.xml", { origin: "https://package.evil.example" }).code, 403);
+});
+
 test("a native sender sends no Origin and is unaffected", () => {
   const { r, launches } = receiver();
   assert.equal(call(r, "GET", "/apps/YouTube").code, 200);
