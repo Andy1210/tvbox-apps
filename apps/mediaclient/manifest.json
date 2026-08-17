@@ -5,8 +5,12 @@
     "hu": "Média",
     "en": "Media"
   },
-  "version": "0.58.0",
+  "version": "0.59.0",
   "changelog": [
+    {
+      "version": "0.59.0",
+      "notes": "The box is a Plex player a phone can cast to from the moment it starts, music keeps playing when you leave the app, and a cast opens the track on screen."
+    },
     {
       "version": "0.58.0",
       "notes": "The box now offers itself to your phone: send a song, an album or a playlist from Plexamp or the Plex app and it plays here as music, with the running order and starting on the track you pressed. The phone's play, pause, skip and stop buttons work on it too - before, they said nothing was playing while it played on, and stop claimed to have stopped it. Two things to know: the media app has to be on screen, because the box has one player and will not hand it to a window nobody is looking at; and a very long list plays a slice of about two hundred tracks around the one you pressed."
@@ -97,6 +101,7 @@
     }
   ],
   "type": "webclient",
+  "service": "mediaclient",
   "status": "ready",
   "accent": "#cc7b19",
   "icon": "<svg viewBox='0 0 24 24' fill='none' stroke='#cc7b19' stroke-width='2'><rect x='2.5' y='4' width='19' height='16' rx='2.5'/><path d='M10 9.5v5l4.5-2.5z' stroke-linejoin='round'/></svg>",
