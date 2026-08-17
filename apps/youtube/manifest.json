@@ -2,8 +2,12 @@
   "id": "youtube",
   "manifestVersion": 1,
   "name": "YouTube",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "changelog": [
+    {
+      "version": "1.1.1",
+      "notes": "Az átküldés most már tényleg működik: a telefon YouTube-alkalmazása a saját nevében jelentkezik be a boxnál, és ezt eddig visszautasította - így a telefon megtalálta a TV-t, de nem tudott hozzá kapcsolódni. / Casting really works now: the YouTube app on a phone identifies itself by name when it talks to the box, and that was being refused - so the phone found the TV but could not connect to it."
+    },
     {
       "version": "1.1.0",
       "notes": "Küldj videót a telefonodról a TV-re. Kapcsold be: Beállítások → Alkalmazások → Alkalmazások extra beállításai → „Átküldés telefonról”. Ezután a box megjelenik a telefon YouTube-appjában; koppints ott az átküldés ikonra, és a videó itt indul el, akkor is, ha a YouTube nincs nyitva. Amíg be van kapcsolva, bárki ugyanezen a wifin átküldhet, és az félbeszakítja, amit épp néztek. / Send a video from your phone to the TV. Turn it on under Settings → Apps → Extra app settings → \"Cast from phone\". The box then appears in the YouTube app on your phone; tap the cast icon there and the video starts here, even if YouTube is not open. While it is on, anyone on the same wifi can send to the TV, interrupting what is playing."

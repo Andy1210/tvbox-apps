@@ -53,6 +53,19 @@ const ALLOWED_ORIGINS = new Set([
   "https://music.youtube.com",
   "https://tv.youtube.com",
 ]);
+// ...and a NATIVE sender that names itself. Measured on the box, by a phone in this
+// house: the Android YouTube app sends `Origin: package:com.google.android.youtube`,
+// and refusing it meant the phone found the box over SSDP and then could not read the
+// device description - so casting could never start. The reference device in this house
+// answers that origin too.
+//
+// The scheme is what makes this safe rather than a hole in the gate: a browser sets
+// Origin itself and can only ever send its own `http(s)://…`, so no page can produce a
+// `package:` one. A native app on the LAN could - but a native app has no CORS to
+// satisfy in the first place and would simply send no Origin at all, which has always
+// been allowed. So this costs nothing against the threat the gate exists for (a page in
+// a browser on the wifi) while it is exactly what the real sender needs.
+const ALLOWED_ORIGIN_SCHEMES = ["package:"];
 // Sockets a sender may hold at once. The fds belong to the shell's own process,
 // which also serves the launcher's API and the phone remote.
 const MAX_CONNECTIONS = 64;
@@ -241,7 +254,9 @@ function createDialReceiver(o) {
     // PRESENCE, not truthiness: `Origin:` with an empty value is a browser too, and
     // an empty string is not one of the origins we allow.
     if (!("origin" in h)) return true; // not a browser - nothing to gate
-    return ALLOWED_ORIGINS.has(String(h.origin).toLowerCase());
+    const origin = String(h.origin).toLowerCase();
+    if (ALLOWED_ORIGIN_SCHEMES.some((s) => origin.startsWith(s))) return true;
+    return ALLOWED_ORIGINS.has(origin);
   }
 
   // A refusal is the one log line an attacker controls the rate of - it happens
