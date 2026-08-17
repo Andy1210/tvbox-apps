@@ -30,6 +30,12 @@ const session: Session = {
 
 const id = { clientId: "mediaclient-live-test", deviceName: "test" };
 
+async function serverId(): Promise<string> {
+  const res = await fetch(`${BASE}/identity`, { headers: { Accept: "application/json" } });
+  const body = (await res.json()) as { MediaContainer?: { machineIdentifier?: string } };
+  return String(body.MediaContainer?.machineIdentifier ?? "");
+}
+
 describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
   // The global stub in setup.ts exists so no ordinary test reaches the network;
   // this suite is the exception it was written for.
@@ -580,4 +586,68 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     expect(profiles.every((p) => /^[0-9a-f]{8,}$/i.test(p.id))).toBe(true);
     expect(profiles.every((p) => p.name)).toBe(true);
   }, 60_000);
+
+  it("reads a play queue WHOLE, and finds the track that was chosen in it", async () => {
+    // The one the fixtures cannot pin, and the reason this file exists. Without
+    // `window` the server answers a window of about forty rows around the
+    // selected item, while `playQueueSelectedItemOffset` counts from the start
+    // of the WHOLE queue - so a long queue played the last row of the window and
+    // then fell silent.
+    //
+    // It has to be a LONG queue or the test proves nothing: an album that fits
+    // inside the default window passes either way, which is how the first
+    // version of this case passed against the broken code.
+    const b = backend();
+    const lists = await b.playlists("audio");
+    let biggest: { id: string; tracks: Awaited<ReturnType<PlexBackend["playlistItems"]>> } | null = null;
+    for (const list of lists) {
+      const tracks = await b.playlistItems(list.id);
+      if (!biggest || tracks.length > biggest.tracks.length) biggest = { id: list.id, tracks };
+    }
+    // Below this the default window would hold the whole thing and the case
+    // could not tell the two behaviours apart, so it says so rather than passing.
+    if (!biggest || biggest.tracks.length < 60) {
+      expect(biggest?.tracks.length ?? 0, "no audio playlist long enough to test windowing").toBeLessThan(60);
+      return;
+    }
+
+    // A real queue, built the way a controller builds one: the whole list, and a
+    // chosen track far enough in that a window cannot contain both ends.
+    const at = biggest.tracks.length - 1;
+    const chosen = biggest.tracks[at];
+    // A playlist is addressed by `playlistID`, not by a metadata uri - the uri
+    // form is what the server answers with an HTML error page for.
+    const created = await fetch(
+      `${BASE}/playQueues?type=audio&playlistID=${encodeURIComponent(biggest.id)}` +
+        `&key=${encodeURIComponent(`/library/metadata/${chosen.id}`)}&shuffle=0&repeat=0&X-Plex-Token=${TOKEN}`,
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "X-Plex-Client-Identifier": id.clientId,
+          "X-Plex-Product": "mediaclient-test",
+          "X-Plex-Platform": "Linux",
+        },
+      },
+    );
+    expect(created.ok, `the server made a queue (${created.status})`).toBe(true);
+    const queueId = String(
+      ((await created.json()) as { MediaContainer?: { playQueueID?: number } }).MediaContainer?.playQueueID ?? "",
+    );
+    expect(queueId, "the server made a queue").toBeTruthy();
+
+    const read = await b.queueItems(queueId);
+
+    // What matters, and what was wrong: the chosen track is found IN what came
+    // back, by its own id. An offset could not do this - it counts from the
+    // start of the whole queue, so with a window it pointed past the end and the
+    // clamp played the last row instead.
+    expect(read.items[read.startIndex]?.id, "the track that was chosen").toBe(chosen.id);
+    // And the window is a CAP, not "the whole queue": measured, a 1055-track
+    // playlist comes back as 201 rows even asking for 200. That is the limit to
+    // know - a very long cast plays a slice around what was pressed - and it is
+    // enormously better than one wrong song and silence.
+    expect(read.items.length, "a real slice, not the default handful").toBeGreaterThan(60);
+    expect(read.items.length).toBeLessThanOrEqual(Math.min(biggest.tracks.length, 201));
+  });
 });

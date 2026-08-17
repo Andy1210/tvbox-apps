@@ -191,6 +191,13 @@ function page(offset: number, limit: number): Record<string, number> {
   return { "X-Plex-Container-Start": offset, "X-Plex-Container-Size": limit };
 }
 
+// How much of a cast queue the box takes. This is a CAP, not "all of it":
+// measured, a 1055-track playlist comes back as 201 rows even asking for 200,
+// so a very long cast plays a slice around what was pressed. That is the limit
+// to know, and it is what the app's own "shuffle everything" already accepts for
+// the same reason - a queue is held in memory on a Pi.
+const QUEUE_WINDOW = 200;
+
 export class PlexBackend implements MediaBackend {
   readonly kind = "plex" as const;
 
@@ -643,18 +650,39 @@ export class PlexBackend implements MediaBackend {
   }
 
   async queueItems(queueId: string): Promise<{ items: MediaItem[]; startIndex: number }> {
-    // No inner query string: the `?own=1&window=200` form Plex Web sends is what
-    // this server answers 400 for, which is the same trap `playMedia`'s
-    // containerKey documents on the assistant side.
-    const c = container<MetadataContainer & { playQueueSelectedItemOffset?: number }>(
-      await this.req(`playQueues/${encodeURIComponent(queueId)}`),
-    );
+    // `window` is not optional, and getting it wrong is a wrong song. Without it
+    // the server answers a window of about forty rows around the selected one
+    // while `playQueueSelectedItemOffset` counts from the start of the WHOLE
+    // queue - measured, a 101-track album with track 80 pressed returned 41 rows
+    // and an offset of 79, so the clamp landed on the last row and the box fell
+    // silent after it. Plex Web sends 200 for exactly this reason.
+    //
+    // (The `?own=1&window=200` form that must NOT be used is the `containerKey`
+    // INSIDE a playMedia command - a different string in a different place, and
+    // reading that rule as being about this GET is what caused the above.)
+    const c = container<
+      MetadataContainer & {
+        playQueueSelectedItemOffset?: number;
+        playQueueSelectedMetadataItemID?: number | string;
+        playQueueTotalCount?: number;
+      }
+    >(await this.req(`playQueues/${encodeURIComponent(queueId)}`, { own: "1", window: String(QUEUE_WINDOW) }));
     const items = (c.Metadata ?? []).map(toItem);
-    // Which track the person actually pressed. A queue is built with the whole
-    // album in it and an offset saying where to start, so ignoring the offset
-    // plays the album from the top whatever was tapped.
+
+    // Which track the person actually pressed, found by ITS OWN ID rather than
+    // by an offset. An offset is a position in the full queue and survives no
+    // windowing at all; the id is in the rows we were given or it is not.
+    const chosen = String(c.playQueueSelectedMetadataItemID ?? "");
+    const byId = chosen ? items.findIndex((item) => item.id === chosen) : -1;
+    if (byId >= 0) return { items, startIndex: byId };
+
+    // No id to go on. The offset is only an index when nothing was left out, so
+    // it is used only then - otherwise the queue starts at the top, which is
+    // wrong but says so by being the top rather than an arbitrary row.
+    const total = Number(c.playQueueTotalCount ?? items.length);
     const at = Number(c.playQueueSelectedItemOffset ?? 0);
-    return { items, startIndex: Number.isFinite(at) && at > 0 ? at : 0 };
+    const whole = Number.isFinite(total) && total === items.length;
+    return { items, startIndex: whole && Number.isFinite(at) && at > 0 ? Math.min(at, items.length - 1) : 0 };
   }
 
   /**

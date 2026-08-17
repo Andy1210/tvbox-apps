@@ -53,7 +53,12 @@ function queueId(containerKey: string | undefined): string | undefined {
  * hand the track to the film player, take the screen for it and stop whatever
  * the person was listening to.
  */
-async function startMusic(cmd: CompanionCommand, backend: MediaBackend, item: MediaItem): Promise<CommandResult> {
+async function startMusic(
+  cmd: CompanionCommand,
+  backend: MediaBackend,
+  item: MediaItem,
+  who: ReturnType<typeof useApp.getState>,
+): Promise<CommandResult> {
   let tracks: MediaItem[] = [item];
   let startIndex = 0;
   const qid = queueId(arg(cmd, "containerKey"));
@@ -70,19 +75,54 @@ async function startMusic(cmd: CompanionCommand, backend: MediaBackend, item: Me
       log.warn("could not read the cast play queue", e);
     }
   }
-  await useMusic.getState().playQueue(backend, tracks, { startIndex });
+
+  // Everything here is checked AGAIN, because reading the queue is a round trip
+  // and all three can change inside it. The film path learned each of these the
+  // hard way and this one had none of them: measured, a cast answered ok while
+  // the app was hidden (so the shell silently refused and nothing played), and
+  // while the profile picker was open (so it played as the person who had just
+  // left, past the PIN that boundary exists for).
+  if (!isVisible()) return no("the media app is not on screen");
+  const now = useApp.getState();
+  const choosing = now.screen.name === "profiles" || now.screen.name === "login" || now.screen.name === "boot";
+  if (now.backend !== who.backend || choosing) return no("the person on this box changed");
+
+  // `shuffle: false` explicitly, not the box's leftover flag. A controller sends
+  // a running order it has already decided - Plexamp shuffles at its end - so
+  // inheriting a switch somebody left on plays a different album than the one on
+  // the phone: measured, a three-track cast came back 2, 3, 1.
+  await useMusic.getState().playQueue(backend, tracks, { startIndex, shuffle: false });
   const after = useMusic.getState();
-  if (after.error) return no(after.error);
-  const playing = after.queue[after.index];
-  if (!playing) return no("the music did not start");
+  // `error` in the music store is a LABEL - the title of the track that could
+  // not be played - so it is not sent on as a reason. A song title is not an
+  // answer to a phone, and the assistant would read it out as one.
+  if (after.error) return no("that music could not be played");
+  if (!after.queue.length) return no("the music did not start");
+  // And still on screen after the start, or what is playing belongs to a window
+  // nobody is looking at.
+  if (!isVisible()) {
+    await useMusic.getState().stop();
+    return no("the media app went off screen");
+  }
   return ok;
 }
 
-/** `/library/metadata/12345` -> `12345`. Anything else is not an item. */
+/**
+ * `/library/metadata/12345` -> `12345`. Anything else is not an item.
+ *
+ * `/playlists/<id>` is accepted too: a controller casting a playlist addresses
+ * it that way, and this server answers `/library/metadata/<id>` for the same
+ * number - so refusing the form was refusing the cast.
+ */
 function ratingKey(key: string | undefined): string | undefined {
-  const m = /^\/library\/metadata\/(\d+)\b/.exec(key ?? "");
+  const m = /^\/(?:library\/metadata|playlists)\/(\d+)\b/.exec(key ?? "");
   return m ? m[1] : undefined;
 }
+
+/** Which item kinds belong to the music player rather than the film player. */
+const MUSIC_KINDS = new Set<string>(["track", "album", "artist", "playlist"]);
+/** And which are films, whatever a controller calls them. */
+const VIDEO_KINDS = new Set<string>(["movie", "episode", "season", "show"]);
 
 const ok: CommandResult = { ok: true };
 const no = (reason: string): CommandResult => ({ ok: false, reason });
@@ -114,6 +154,20 @@ function started(id: string | undefined): CommandResult {
  * than ignored: the controller gets an answer either way, and a refusal is the
  * true one.
  */
+/**
+ * Whether the MUSIC player is the one holding playback.
+ *
+ * Every transport case used to test the film player's `current`, which a cast
+ * never sets - so once music was casting, pause, play, next, previous and seek
+ * all answered "nothing is playing" while it played on, and STOP answered ok
+ * (its "already what was asked for" branch) and stopped nothing. That reaches a
+ * phone AND the house assistant, which drives the same six paths.
+ */
+function music(): boolean {
+  const m = useMusic.getState();
+  return usePlayer.getState().current === null && m.queue.length > 0 && m.state !== "stopped";
+}
+
 export async function runCompanionCommand(cmd: CompanionCommand): Promise<CommandResult> {
   const p = usePlayer.getState();
   switch (cmd.path) {
@@ -128,13 +182,23 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       // "playing" over a launcher. Said out loud instead: the assistant can put
       // the app in front and ask again.
       if (!isVisible()) return no("the media app is not on screen");
+      // Who this command belongs to, taken BEFORE any round trip: both paths
+      // compare against it afterwards, and a snapshot taken later is a snapshot
+      // of the change rather than of the person who was there.
+      const asked = useApp.getState();
 
       const item = await backend.item(id);
       // What the thing IS, not what the controller called it: `type` is the
       // controller's word and a cast that omits it would be played as a film.
-      if (item.kind === "track" || arg(cmd, "type") === "music") {
+      // An album, an artist and a playlist are music too - only a TRACK carries
+      // a file, so keying on that alone sent a cast album to the film player.
+      // The controller's word is a fallback, and only for something that is not
+      // itself a film: `type=music` with a film's key handed the film's own file
+      // to the music player, with no display mode, no transcode and no subtitle.
+      const musical = MUSIC_KINDS.has(item.kind) || (arg(cmd, "type") === "music" && !VIDEO_KINDS.has(item.kind));
+      if (musical) {
         if (!isVisible()) return no("the media app is not on screen");
-        return await startMusic(cmd, backend, item);
+        return await startMusic(cmd, backend, item, asked);
       }
       const offset = Number(arg(cmd, "offset") ?? "0");
       const at = Number.isFinite(offset) && offset > 0 ? offset : 0;
@@ -180,20 +244,36 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       return ok;
     }
     case "/player/playback/play":
+      if (music()) {
+        if (useMusic.getState().state === "paused") useMusic.getState().toggle();
+        return ok;
+      }
       if (!p.current) return no("nothing is playing");
       if (p.state === "paused") p.togglePause();
       return ok;
     case "/player/playback/pause":
+      if (music()) {
+        if (useMusic.getState().state === "playing") useMusic.getState().toggle();
+        return ok;
+      }
       if (!p.current) return no("nothing is playing");
       if (p.state === "playing") p.togglePause();
       return ok;
     case "/player/playback/playPause":
       // Guarded on `current`, not on state: the bridge is the box's SHARED mpv,
       // so an unguarded toggle reached it with this app holding nothing.
+      if (music()) {
+        useMusic.getState().toggle();
+        return ok;
+      }
       if (!p.current) return no("nothing is playing");
       p.togglePause();
       return ok;
     case "/player/playback/stop":
+      if (music()) {
+        await useMusic.getState().stop();
+        return ok;
+      }
       if (!p.current) return ok; // already what was asked for
       await p.stop();
       return ok;
@@ -210,6 +290,10 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
     // two: a false failure leaves the person looking at what they asked for, a
     // false success leaves the house saying a film is playing over a launcher.
     case "/player/playback/skipNext": {
+      if (music()) {
+        await useMusic.getState().next();
+        return ok;
+      }
       if (!p.siblings.next) return no("nothing follows this");
       // The item the player says it started, not the one this snapshot held:
       // `siblings` is replaced as the previous film is torn down, so the two
@@ -217,10 +301,20 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       return started((await p.playSibling("next"))?.id);
     }
     case "/player/playback/skipPrevious": {
+      if (music()) {
+        await useMusic.getState().previous();
+        return ok;
+      }
       if (!p.siblings.prev) return no("nothing comes before this");
       return started((await p.playSibling("prev"))?.id);
     }
     case "/player/playback/seekTo": {
+      if (music()) {
+        const to = Number(arg(cmd, "offset"));
+        if (!Number.isFinite(to)) return no("no offset in the command");
+        useMusic.getState().seek(Math.max(0, to));
+        return ok;
+      }
       if (!p.current) return no("nothing is playing");
       const to = Number(arg(cmd, "offset"));
       if (!Number.isFinite(to)) return no("no offset in the command");
@@ -228,10 +322,18 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       return ok;
     }
     case "/player/playback/stepForward":
+      if (music()) {
+        useMusic.getState().seek(useMusic.getState().positionMs + 30_000);
+        return ok;
+      }
       if (!p.current) return no("nothing is playing");
       p.seekBy(30_000);
       return ok;
     case "/player/playback/stepBack":
+      if (music()) {
+        useMusic.getState().seek(Math.max(0, useMusic.getState().positionMs - 30_000));
+        return ok;
+      }
       if (!p.current) return no("nothing is playing");
       p.seekBy(-30_000);
       return ok;

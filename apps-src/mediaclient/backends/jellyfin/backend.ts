@@ -473,8 +473,11 @@ export class JellyfinBackend implements MediaBackend {
 
   /**
    * Jellyfin has no play queues: its own remote control sends the item list.
-   * Answering empty is what makes the cast path refuse honestly rather than
-   * start one track of an album.
+   *
+   * A stub for a path nothing reaches - the companion loop is Plex's and never
+   * starts for a Jellyfin session - so this is here to satisfy the interface
+   * rather than to be used. It answers EMPTY, which the cast path reads as "no
+   * queue" and falls back to the single item; it does not refuse.
    */
   async queueItems(): Promise<{ items: MediaItem[]; startIndex: number }> {
     return { items: [], startIndex: 0 };
