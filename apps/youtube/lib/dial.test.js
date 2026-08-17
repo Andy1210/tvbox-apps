@@ -16,6 +16,7 @@ const {
   matchesSearch,
   MAX_BODY,
   MAX_LAUNCHES_PER_MIN,
+  MAX_LAUNCHES_PER_MIN_TOTAL,
   MAX_REPLIES_PER_SEC,
   MAX_REPLIES_PER_SEC_TOTAL,
 } = require("./dial");
@@ -44,7 +45,7 @@ function fakeReq(
   return {
     method,
     url,
-    headers: origin ? { origin } : {},
+    headers: origin === null ? {} : { origin },
     socket: { localAddress, remoteAddress },
     destroy() {
       this.destroyed = true;
@@ -150,6 +151,18 @@ test("a body too big to be a launch is refused, and nothing is opened", () => {
   const { r, launches } = receiver();
   const out = call(r, "POST", "/apps/YouTube", { body: "x".repeat(MAX_BODY + 1) });
   assert.equal(out.code, 413);
+  assert.deepEqual(launches, []);
+});
+
+test("the body cap counts bytes, not characters", () => {
+  // A JS string measures UTF-16 code units, so a body of multi-byte characters passes a
+  // cap it has already exceeded on the wire - and this cap is the bound on an
+  // unauthenticated input.
+  const { r, launches } = receiver();
+  const wide = "\u00e9".repeat(MAX_BODY / 2 + 1); // half as many characters, over the byte cap
+  assert.ok(Buffer.byteLength(wide) > MAX_BODY, "the fixture must exceed the cap in bytes");
+  assert.ok(wide.length <= MAX_BODY, "...while passing a character count");
+  assert.equal(call(r, "POST", "/apps/YouTube", { body: wide }).code, 413);
   assert.deepEqual(launches, []);
 });
 
@@ -267,8 +280,68 @@ test("one flooding source loses its OWN budget, not everybody's", () => {
 test("and the global ceiling still bounds what the box can be made to emit", () => {
   const { r } = receiver();
   let sent = 0;
-  for (let i = 0; i < 40; i++) if (r._replyAllowed("10.0.0." + i)) sent++;
+  for (let i = 0; i < 100; i++) if (r._replyAllowed("10.0.0." + i)) sent++;
   assert.equal(sent, MAX_REPLIES_PER_SEC_TOTAL);
+});
+
+test("an Origin header that is present but empty is a browser too", () => {
+  // Empty is not one of the origins we allow, and a client that could send it would
+  // simply omit the header instead - so treating "" as "not a browser" is a hole in
+  // the rule with nothing on the other side of it.
+  const { r, launches } = receiver();
+  const out = call(r, "POST", "/apps/YouTube", { origin: "", body: "pairingCode=x" });
+  assert.equal(out.code, 403);
+  assert.deepEqual(launches, []);
+});
+
+test("refusals are summarised, not written per request", () => {
+  // The refusal happens BEFORE any budget is charged, and both the path and the origin
+  // come off the wire: written per request it is a storage-fill against a log file with
+  // no rotation - measured at gigabytes in seconds - which also destroys every other
+  // line in it.
+  const lines = [];
+  const { r } = receiver({ log: (m) => lines.push(m) });
+  for (let i = 0; i < 500; i++) call(r, "GET", "/apps/YouTube/" + "z".repeat(4000), { origin: "http://evil.example" });
+  assert.equal(lines.length, 1, "500 refusals -> one line");
+  assert.match(lines[0], /refused \d+ request/);
+  assert.ok(lines[0].length < 300, "and what it quotes is cut: " + lines[0].length);
+});
+
+test("the launch window slides, so it cannot be straddled", () => {
+  // A fixed window let twice the limit land either side of its boundary, in a fifth of
+  // a second of wall clock.
+  const { r } = receiver();
+  for (let i = 0; i < MAX_LAUNCHES_PER_MIN; i++) assert.equal(r._launchAllowed("192.168.1.50"), true, "launch " + i);
+  assert.equal(r._launchAllowed("192.168.1.50"), false, "the source is spent for the minute");
+});
+
+test("the box has a launch ceiling of its own, so many addresses cannot multiply it", () => {
+  // 64 sources times a per-source limit was 768 app launches - and 768 CEC power-ons -
+  // a minute, which an attacker holding a range of addresses can reach.
+  const { r } = receiver();
+  let allowed = 0;
+  for (let src = 0; src < 60; src++) {
+    for (let i = 0; i < MAX_LAUNCHES_PER_MIN; i++) if (r._launchAllowed("10.0.0." + src)) allowed++;
+  }
+  assert.equal(allowed, MAX_LAUNCHES_PER_MIN_TOTAL, "many addresses cannot multiply the per-source limit");
+});
+
+test("one phone spending its own launch budget does not touch another's", () => {
+  const { r } = receiver();
+  for (let i = 0; i < MAX_LAUNCHES_PER_MIN; i++) r._launchAllowed("192.168.1.50");
+  assert.equal(r._launchAllowed("192.168.1.50"), false, "that phone is spent");
+  assert.equal(r._launchAllowed("192.168.1.51"), true, "the other one is not");
+});
+
+test("an oversized body closes the connection, not just the request", () => {
+  // Bounding memory is not enough: a sender that keeps writing holds a socket and a
+  // request slot of the shell's own process.
+  const { r } = receiver();
+  const res = fakeRes();
+  const req = fakeReq("POST", "/apps/YouTube", { body: "x".repeat(MAX_BODY + 1) });
+  r._handle(req, res);
+  assert.equal(res.out.code, 413);
+  assert.equal(req.destroyed, true);
 });
 
 test("a source that keeps launching is refused, and told so", () => {

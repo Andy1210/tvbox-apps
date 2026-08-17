@@ -27,13 +27,23 @@ const DIAL_ST = "urn:dial-multiscreen-org:service:dial:1";
 const MAX_BODY = 2048;
 // Per SOURCE, not per box: one counter shared by everyone means a single chatty
 // device (or a deliberate flood) makes the box disappear from every phone's cast
-// list - measured, a legitimate searcher got none of its answers back. The global
-// ceiling stays as the amplification bound.
+// list - measured, a legitimate searcher got none of its answers back.
+//
+// The global ceiling is generous on purpose: it exists to bound what the box can be
+// made to EMIT (a reply is ~300 bytes, so 60/s is ~18 KB/s), and a tight one turned
+// into a denial of discovery instead - five spoofed source addresses, or an ordinary
+// household UPnP sweep, spent it and the phone got nothing. SSDP is UDP, so a
+// determined attacker on the LAN can deny discovery whatever we do here; what this
+// keeps is the box behaving under ordinary noise.
 const MAX_REPLIES_PER_SEC = 4;
-const MAX_REPLIES_PER_SEC_TOTAL = 20;
+const MAX_REPLIES_PER_SEC_TOTAL = 60;
 // A launch opens an app on the television. A person pressing cast produces one or
-// two; anything beyond this from one source is not a person.
+// two; anything beyond this from one source is not a person, and the box-wide ceiling
+// is what a hundred addresses run into.
 const MAX_LAUNCHES_PER_MIN = 12;
+const MAX_LAUNCHES_PER_MIN_TOTAL = 30;
+// How often a refusal is summarised into the log, rather than written per request.
+const REFUSAL_LOG_EVERY_MS = 60000;
 // A browser sender is allowed, but only YouTube's own pages: everything else that
 // speaks CORS here is a page that has no business launching anything.
 const ALLOWED_ORIGINS = new Set([
@@ -45,7 +55,11 @@ const ALLOWED_ORIGINS = new Set([
 ]);
 // Sockets a sender may hold at once. The fds belong to the shell's own process,
 // which also serves the launcher's API and the phone remote.
-const MAX_CONNECTIONS = 32;
+const MAX_CONNECTIONS = 64;
+// How often to re-try the multicast join while it is failing. Long enough to be
+// free, short enough that a box which came up before its network is findable by the
+// time somebody reaches for a phone.
+const JOIN_RETRY_MS = 15000;
 
 // Is `ip` inside the network of this interface address? Both v4, both from
 // os.networkInterfaces() / a socket, so a prefix compare on the masked words is
@@ -117,26 +131,49 @@ function createDialReceiver(o) {
   let ssdp = null;
   let repliesTotal = 0; // SSDP answers sent this second, all sources
   const repliesBy = new Map(); // source -> answers sent this second
-  const launchesBy = new Map(); // source -> launches this minute
-  let launchWindowAt = 0;
+  const launchesBy = new Map(); // source -> timestamps of its launches in the last minute
+  let refusedCount = 0; // refusals since the last summary line
+  let refusedLoggedAt = 0;
   let budgetTimer = null;
+  let joinTimer = null; // retrying the multicast join (a box that booted before its wifi)
+  let joined = false;
   const log = (m) => o.log && o.log(m);
-  // How many distinct sources a budget map will track. Full and asked about an
-  // unknown one, both budgets refuse: under a flood the honest answer is "no",
-  // and clearing the map instead would hand the flooder a way to reset it.
+  // How many distinct sources the SSDP budget tracks. Full, an unknown source is
+  // refused: a reply is cheap, spoofing the source of a UDP search is free, and the
+  // global ceiling is what such a flood runs into anyway. The launch budget needs no
+  // equivalent - see launchAllowed.
   const MAX_SOURCES = 64;
 
+  // May this source launch something right now? Three properties, each one a measured
+  // failure of the simpler version:
+  //
+  //   • a SLIDING minute, not a fixed one - a fixed window let 24 launches land in a
+  //     fifth of a second by straddling its boundary;
+  //   • a ceiling for the BOX as well as per source - 64 addresses times a per-source
+  //     limit was 768 page loads and 768 CEC power-ons a minute, and an attacker on
+  //     the LAN can hold that many addresses;
+  //   • no cap on the number of sources tracked, because the box-wide ceiling already
+  //     is one: an entry is only recorded for a launch that was ALLOWED, so the table
+  //     cannot hold more sources than that ceiling, and entries older than the window
+  //     are dropped on the next call. A source cap here would only have given a flood a
+  //     way to evict the household's own phone.
   function launchAllowed(from) {
     const now = Date.now();
-    if (now - launchWindowAt >= 60000) {
-      launchesBy.clear();
-      launchWindowAt = now;
+    const cutoff = now - 60000;
+    let total = 0;
+    for (const [src, stamps] of launchesBy) {
+      const live = stamps.filter((t) => t > cutoff);
+      if (live.length) {
+        launchesBy.set(src, live);
+        total += live.length;
+      } else launchesBy.delete(src);
     }
-    const seen = launchesBy.has(from);
-    if (!seen && launchesBy.size >= MAX_SOURCES) return false;
-    const n = (launchesBy.get(from) || 0) + 1;
-    launchesBy.set(from, n);
-    return n <= MAX_LAUNCHES_PER_MIN;
+    if (total >= MAX_LAUNCHES_PER_MIN_TOTAL) return false;
+    const mine = launchesBy.get(from) || [];
+    if (mine.length >= MAX_LAUNCHES_PER_MIN) return false;
+    mine.push(now);
+    launchesBy.set(from, mine);
+    return true;
   }
 
   const appUrlFor = (host) => "http://" + host + ":" + boundPort() + "/apps/";
@@ -200,9 +237,36 @@ function createDialReceiver(o) {
   // the wildcard also lets any page READ the box's name, its stable id and
   // whether somebody is watching right now.
   function originOk(req) {
-    const o2 = req.headers && req.headers.origin;
-    if (!o2) return true; // not a browser - nothing to gate
-    return ALLOWED_ORIGINS.has(String(o2).toLowerCase());
+    const h = req.headers || {};
+    // PRESENCE, not truthiness: `Origin:` with an empty value is a browser too, and
+    // an empty string is not one of the origins we allow.
+    if (!("origin" in h)) return true; // not a browser - nothing to gate
+    return ALLOWED_ORIGINS.has(String(h.origin).toLowerCase());
+  }
+
+  // A refusal is the one log line an attacker controls the rate of - it happens
+  // BEFORE any budget is charged, and both the path and the origin come off the
+  // wire. Written out per request it is a storage-fill: measured at 3 GiB in six
+  // seconds from one host, into a file with no rotation, which also destroys every
+  // other line in it. So refusals are counted and summarised, and what is quoted is
+  // cut to a length that cannot be used as a payload.
+  function noteRefusal(method, path, origin) {
+    refusedCount++;
+    const now = Date.now();
+    if (now - refusedLoggedAt < REFUSAL_LOG_EVERY_MS) return;
+    refusedLoggedAt = now;
+    const cut = (s) => String(s || "").slice(0, 60);
+    log(
+      "refused " +
+        refusedCount +
+        " request(s) from a browser origin we do not allow; last: " +
+        cut(method) +
+        " " +
+        cut(path) +
+        " origin " +
+        cut(origin),
+    );
+    refusedCount = 0;
   }
   function corsFor(req) {
     const o2 = req.headers && req.headers.origin;
@@ -228,7 +292,7 @@ function createDialReceiver(o) {
     const host = plainIp(req.socket && req.socket.localAddress) || localAddressFor(null);
     const cors = corsFor(req);
     if (!originOk(req)) {
-      log("refused " + req.method + " " + path + " from origin " + req.headers.origin);
+      noteRefusal(req.method, path, req.headers.origin);
       return send(res, 403, "not allowed");
     }
     if (req.method === "OPTIONS") {
@@ -258,10 +322,16 @@ function createDialReceiver(o) {
       }
       let body = "";
       let over = false;
+      // BYTES, counted off the chunks, not the length of the string they decode to: a
+      // JS string measures UTF-16 code units, so a multi-byte body passes a cap it has
+      // already exceeded on the wire - and the cap is the bound on an unauthenticated
+      // input.
+      let bytes = 0;
       req.on("data", (c) => {
         if (over) return;
+        bytes += c.length;
         body += c;
-        if (body.length > MAX_BODY) {
+        if (bytes > MAX_BODY) {
           over = true;
           body = "";
           // Bounding memory is not enough: a sender that keeps writing holds a
@@ -272,7 +342,7 @@ function createDialReceiver(o) {
       });
       req.on("end", () => {
         if (over) return undefined;
-        log("launch from " + from + " (" + body.length + " bytes)");
+        log("launch from " + from + " (" + bytes + " bytes)");
         let opened = false;
         try {
           opened = o.onLaunch(body) !== false;
@@ -301,9 +371,11 @@ function createDialReceiver(o) {
   // the flooder its own budget and nobody else's, and only then against the global
   // ceiling that bounds what the box can be made to emit.
   function replyAllowed(address) {
-    if (repliesTotal >= MAX_REPLIES_PER_SEC_TOTAL) return false;
+    // Per source FIRST: a flooder should spend its own budget before it can spend the
+    // box's, so an honest asker is still inside the ceiling when it arrives.
     const mine = repliesBy.get(address) || 0;
     if (mine >= MAX_REPLIES_PER_SEC) return false;
+    if (repliesTotal >= MAX_REPLIES_PER_SEC_TOTAL) return false;
     if (!repliesBy.has(address) && repliesBy.size >= MAX_SOURCES) return false;
     repliesBy.set(address, mine + 1);
     repliesTotal++;
@@ -350,6 +422,10 @@ function createDialReceiver(o) {
     server.headersTimeout = 5000;
     server.requestTimeout = 10000;
     server.keepAliveTimeout = 5000;
+    // Without this Node only CHECKS those timeouts every 30 s, so a socket held with
+    // one byte a minute lived 21-30 s each time - long enough for a handful of them
+    // to keep the connection table full and the receiver unreachable indefinitely.
+    server.connectionsCheckingInterval = 2000;
     server.on("error", (e) => {
       if (e.code === "EADDRINUSE" && preferred !== 0) {
         // Somebody else holds the preferred port. The port only has to be reachable,
@@ -393,14 +469,13 @@ function createDialReceiver(o) {
     });
     ssdp.on("message", onSsdp);
     ssdp.bind(SSDP_PORT, () => {
-      try {
-        ssdp.addMembership(SSDP_ADDR);
-      } catch (e) {
-        // A box with no route to the multicast group yet (booting, wifi still
-        // associating) must not lose the receiver for good - the REST half is up,
-        // and a restart of the switch re-tries the join.
-        log("ssdp membership: " + e.message);
-      }
+      // Joining the group is what makes the box FINDABLE - the REST half being up
+      // means nothing to a phone that never learns the address. A box that boots
+      // before its wifi associates fails this join, so it is retried rather than
+      // logged and forgotten: without the retry the receiver reports success and
+      // stays invisible until somebody toggles the switch, which is the least
+      // diagnosable failure this feature can have.
+      joinGroup();
       log("ssdp listening on :" + SSDP_PORT);
       if (cb) {
         const done = cb;
@@ -408,6 +483,22 @@ function createDialReceiver(o) {
         done(null);
       }
     });
+  }
+
+  function joinGroup() {
+    if (!ssdp) return;
+    try {
+      ssdp.addMembership(SSDP_ADDR);
+      joined = true;
+      if (joinTimer) clearInterval(joinTimer);
+      joinTimer = null;
+      return;
+    } catch (e) {
+      log("ssdp membership: " + e.message + (joinTimer ? "" : "; retrying every " + JOIN_RETRY_MS / 1000 + "s"));
+    }
+    if (joinTimer) return;
+    joinTimer = setInterval(joinGroup, JOIN_RETRY_MS);
+    if (joinTimer.unref) joinTimer.unref();
   }
 
   return {
@@ -428,6 +519,9 @@ function createDialReceiver(o) {
     stop(cb) {
       if (budgetTimer) clearInterval(budgetTimer);
       budgetTimer = null;
+      if (joinTimer) clearInterval(joinTimer);
+      joinTimer = null;
+      joined = false;
       const s = server;
       const u = ssdp;
       server = null;
@@ -444,6 +538,9 @@ function createDialReceiver(o) {
       s.close(() => cb && cb());
     },
     running: () => !!server,
+    // Findable, not merely running: the REST half being up means nothing to a phone
+    // that never learns the address. A caller can tell the two apart.
+    findable: () => !!server && joined,
     port: boundPort,
     // for tests: the decisions, without sockets
     _handle: handle,
@@ -456,6 +553,7 @@ function createDialReceiver(o) {
 module.exports = {
   ALLOWED_ORIGINS,
   MAX_LAUNCHES_PER_MIN,
+  MAX_LAUNCHES_PER_MIN_TOTAL,
   MAX_REPLIES_PER_SEC,
   MAX_REPLIES_PER_SEC_TOTAL,
   createDialReceiver,

@@ -18,13 +18,22 @@ const { createDialReceiver } = require("./lib/dial");
 const APP_ID = "youtube";
 const DIAL_APP = "YouTube"; // the name senders address; case is part of it
 const SWITCH = "cast";
-// Two sentences that reach the television, so they are in the house's language
-// rather than the log's. The shell has no locale to give a plugin, and Hungarian
-// is what this box speaks; keep them short - it is a corner overlay, not a dialog.
-const CAST_NOTE = { title: "Átküldés telefonról", message: "A YouTube most indul a TV-n." };
-const FAIL_NOTE = {
-  title: "Átküldés telefonról",
-  message: "Nem sikerült elindítani a fogadást, ezért a box most nem látszik a telefonon.",
+// What reaches the television, in the language the box is set to (`host.config`
+// carries it - every other plugin in the registry does the same). Short: it is a
+// corner overlay, not a dialog. The cast note says who did it, because the person in
+// the room did not; the failure note says what to do about it, because "it did not
+// start" is not actionable on its own.
+const STR = {
+  hu: {
+    castTitle: "Átküldés telefonról",
+    cast: "Valaki a telefonjáról indított egy videót – a YouTube átveszi a képernyőt.",
+    fail: "Nem indult el, így a box most nem látszik a telefonokon. Kapcsold ki, majd be a beállítást.",
+  },
+  en: {
+    castTitle: "Cast from phone",
+    cast: "Someone started a video from their phone - YouTube is taking the screen.",
+    fail: "It did not start, so the box will not show up on phones. Turn the setting off and on again.",
+  },
 };
 // A port worth asking for rather than one worth relying on: it travels inside the
 // LOCATION a sender reads, so a taken port costs nothing (dial.js falls back to any
@@ -75,24 +84,48 @@ module.exports = (host) => {
     }
   };
 
+  // The box's language, for the two sentences below. Falls back to English like the
+  // other plugins in the registry; an older shell without uiLocale gets English too.
+  function str() {
+    let locale = "";
+    try {
+      locale = String((host.config && host.config.uiLocale && host.config.uiLocale()) || "");
+    } catch (e) {
+      locale = "";
+    }
+    return locale.startsWith("hu") ? STR.hu : STR.en;
+  }
+
   function open(launchData) {
     // The launch body IS the query: `pairingCode=<uuid>&theme=cl`. The shell bounds
     // it (withLaunchQuery) and can only ever put it on the manifest's own url, so
     // there is nothing to sanitize here that it would not sanitize again.
     host.log("youtube: cast -> opening the app");
-    // A note in the room, because a cast REPLACES what is on screen and the person
-    // holding the remote did not ask for it. Best effort: an older shell has no
-    // notify, and a cast must not fail on the toast.
+    // Was anybody watching anything? Asked BEFORE the launch, because the launch is
+    // what changes the answer.
+    let interrupting = false;
     try {
-      host.notify({ title: CAST_NOTE.title, message: CAST_NOTE.message, duration: 4000 });
+      interrupting = host.idle ? !host.idle() : false;
     } catch (e) {
-      /* nothing on screen is not a reason to drop the cast */
+      interrupting = false;
     }
     // Whether the app actually came up decides what the sender is told (a phone
     // connected to a television that is doing nothing is the worst answer). An
     // older shell returns undefined here, which reads as "cannot tell" rather than
     // as a failure.
     const opened = host.navTo(APP_ID, { query: String(launchData || "") });
+    // A note in the room only when the cast took the screen from something. AFTER
+    // the launch, because that is what wakes a panel that was off - a note shown to
+    // a dark television has faded by the time it can be read, and nobody's viewing
+    // was interrupted in that case anyway.
+    if (opened !== false && interrupting) {
+      const s = str();
+      try {
+        host.notify({ title: s.castTitle, message: s.cast, duration: 5000 });
+      } catch (e) {
+        /* an older shell has no notify; a cast must not fail on a toast */
+      }
+    }
     return opened !== false;
   }
 
@@ -115,8 +148,9 @@ module.exports = (host) => {
       if (d) d.stop();
       // Otherwise the switch reads ON while no phone can see the box, and the only
       // trace is a line in a log nobody on a sofa will read.
+      const s = str();
       try {
-        host.notify({ ...FAIL_NOTE, duration: 8000 });
+        host.notify({ title: s.castTitle, message: s.fail, duration: 10000 });
       } catch (x) {
         /* best effort */
       }

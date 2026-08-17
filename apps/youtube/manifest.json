@@ -6,7 +6,7 @@
   "changelog": [
     {
       "version": "1.1.0",
-      "notes": "Send a video from your phone: turn on Settings > Apps > Extra app settings > YouTube - cast from phone, and the box appears in the YouTube app on your phone. Tap the cast icon there and the video starts on the TV, even if YouTube is not open. It stays off until you turn it on, and anyone on the same wifi can then send to the TV."
+      "notes": "Küldj videót a telefonodról a TV-re. Kapcsold be: Beállítások → Alkalmazások → Alkalmazások extra beállításai → „Átküldés telefonról”. Ezután a box megjelenik a telefon YouTube-appjában; koppints ott az átküldés ikonra, és a videó itt indul el, akkor is, ha a YouTube nincs nyitva. Amíg be van kapcsolva, bárki ugyanezen a wifin átküldhet, és az félbeszakítja, amit épp néztek. / Send a video from your phone to the TV. Turn it on under Settings → Apps → Extra app settings → \"Cast from phone\". The box then appears in the YouTube app on your phone; tap the cast icon there and the video starts here, even if YouTube is not open. While it is on, anyone on the same wifi can send to the TV, interrupting what is playing."
     },
     {
       "version": "1.0.0",
@@ -24,8 +24,8 @@
         "en": "Cast from phone"
       },
       "hint": {
-        "hu": "A box megjelenik a telefonod YouTube-alkalmazásában, a box nevén. Koppints ott az átküldés ikonra, és a videó itt indul el – akkor is, ha a YouTube épp nincs nyitva a TV-n. Aki ugyanezen a wifin van, az is átküldhet.",
-        "en": "The box shows up in the YouTube app on your phone, under the box's name. Tap the cast icon there and the video starts here, even if YouTube is not open on the TV. Anyone on the same wifi can send to it too."
+        "hu": "A telefon YouTube-appjában a box nevén jelenik meg. Bárki a wifin átküldhet ide, és az félbeszakítja, amit épp néztek.",
+        "en": "It appears in your phone's YouTube app under the box's name. Anyone on the wifi can send to it, interrupting what is playing."
       },
       "default": false
     }

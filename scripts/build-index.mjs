@@ -59,10 +59,10 @@ const err = (f, msg) => errors.push(`${f}: ${msg}`);
 // UI down to the root error boundary. Bounded because a row on a television has one
 // line for a label.
 function localeTextOk(v, max) {
-  if (typeof v === "string") return v.length <= max;
+  if (typeof v === "string") return v.length > 0 && v.length <= max;
   if (!v || typeof v !== "object" || Array.isArray(v)) return false;
   const vals = Object.values(v);
-  return vals.length > 0 && vals.every((s) => typeof s === "string" && s.length <= max);
+  return vals.length > 0 && vals.every((s) => typeof s === "string" && s.length > 0 && s.length <= max);
 }
 
 // Mirror of the shell's validateManifest + the registry trust rules.
@@ -71,7 +71,16 @@ function validate(m, f, id) {
   if (m.id !== id) err(f, "manifest id must equal the file/dir name");
   if ((m.manifestVersion ?? 1) !== 1) err(f, "manifestVersion must be 1");
   if (m.status !== "ready" && m.status !== "coming_soon") err(f, "status must be ready|coming_soon");
-  if (!m.name) err(f, "missing name");
+  // Every user-facing string, on the same rule the box enforces: a nested object here
+  // renders as a React child and takes the whole 10-foot UI down to the root error
+  // boundary - and a name does it on the HOME grid, i.e. the box's first screen. The
+  // lengths matter for a different reason: over them the BOX refuses the manifest, and
+  // a refused manifest takes the app off every box that installed it.
+  if (!localeTextOk(m.name, 80)) err(f, "name must be a string (or locale map) 1..80 chars");
+  if (m.tagline !== undefined && !localeTextOk(m.tagline, 240))
+    err(f, "tagline must be a string (or locale map) 1..240 chars");
+  if (m.description !== undefined && !localeTextOk(m.description, 1200))
+    err(f, "description must be a string (or locale map) 1..1200 chars");
   if (m.accent && !/^#[0-9a-fA-F]{3,8}$/.test(m.accent)) err(f, "accent must be a hex color");
   if (m.type !== "webclient" && m.type !== "native") err(f, "type must be webclient|native");
   if (m.type === "native") {
@@ -123,7 +132,7 @@ function validate(m, f, id) {
     else
       for (const p of m.pairing) {
         if (!p || !/^[a-z0-9_-]{1,32}$/.test(String(p.kind || ""))) err(f, "bad pairing[].kind");
-        if (!p || !p.label) err(f, "pairing[] needs a label");
+        if (!localeTextOk(p && p.label, 80)) err(f, "pairing[].label must be a string (or locale map) 1..80 chars");
       }
     if (!m.service) err(f, "pairing needs a `service` plugin to register the provider");
   }

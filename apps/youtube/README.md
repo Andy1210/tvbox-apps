@@ -31,15 +31,15 @@ without a restart, and switching off releases both sockets.
 A receiver has to be reachable by an unauthenticated phone, so the bounds are the
 design:
 
-|                 |                                                                                                                                     |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Sockets         | `udp/1900` (SSDP) + one TCP port (17954 if free, else any) on `0.0.0.0`                                                             |
-| Browser senders | only YouTube's own origins; any other `Origin` gets 403, and no response carries `Access-Control-Allow-Origin: *`                   |
-| Native senders  | send no `Origin` and are unaffected                                                                                                 |
-| Launches        | 12 per source per minute, 2 KB body, oversized bodies close the socket                                                              |
-| SSDP replies    | 4 per source per second, 20 overall - per source first, so one flooding device cannot make the box vanish from everyone's cast list |
-| Sockets held    | 32, with header and request timeouts                                                                                                |
-| Stop            | advertised as unavailable (`allowStop="false"`, `DELETE` → 501): a sender cannot take the television back to HOME                   |
+|                 |                                                                                                                                          |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Sockets         | `udp/1900` (SSDP) + one TCP port (17954 if free, else any) on `0.0.0.0`                                                                  |
+| Browser senders | only YouTube's own origins; any other `Origin` gets 403, and no response carries `Access-Control-Allow-Origin: *`                        |
+| Native senders  | send no `Origin` and are unaffected                                                                                                      |
+| Launches        | 12 per source per minute on a sliding window, 30 per minute for the box, 2 KB body (counted in bytes), oversized bodies close the socket |
+| SSDP replies    | 4 per source per second, 60 overall - per source first, so ordinary noise cannot make the box vanish from everyone's cast list           |
+| Sockets held    | 64, with header and request timeouts CHECKED every 2 s (Node's default 30 s let a held socket live half a minute)                        |
+| Stop            | advertised as unavailable (`allowStop="false"`, `DELETE` → 501): a sender cannot take the television back to HOME                        |
 
 **Be honest about the rest**, because a switch is a decision the owner makes:
 
@@ -49,8 +49,22 @@ design:
 - **A paired sender gets the box's YouTube session.** It chooses what plays, and what
   it plays lands in the history and recommendations of whatever account is signed in
   on the TV.
+- **A cast can turn the television on** (the box wakes the panel over CEC, because it
+  may have slept it itself). It cannot change the TV's input, so a cast to a set showing
+  a console opens YouTube where nobody is looking. The one exception: it will not wake a
+  television somebody put on standby in the last 30 seconds.
 - **The first ordinary launch after a cast reloads the page clean** (the shell does
   this), so somebody opening YouTube from HOME does not land in the caster's session.
+  What that ends is the live session, not the LINK: the page keeps YouTube's own screen
+  id in its storage, exactly as a television does, so a phone that has been paired to
+  this box before can offer it again.
+- **A determined attacker on the LAN can deny discovery.** SSDP is UDP, so its source
+  address is free to forge; the budgets keep the box behaving under ordinary noise, not
+  under a flood. Somebody who can do that can also flood the group the phone searches
+  on, so there is nothing to win here.
+- **A local app's own page can turn this switch on.** Local packages are served from the
+  shell's own origin, so they pass its same-origin gate; the registry review is what
+  stands between an app and that. The switch is a control, not a boundary.
 - **On an untrusted network** (hotel wifi, a guest VLAN with no client isolation) this
   is an unauthenticated screen-takeover endpoint exposed to that network. Leave the
   switch off there.
