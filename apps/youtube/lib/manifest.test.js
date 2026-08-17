@@ -48,12 +48,22 @@ test("the label is the word the phone uses, in both languages", () => {
   assert.match(cast.label.en, /Cast/i);
 });
 
-test("the release note tells a Hungarian box's owner where the switch is", () => {
-  // The store shows this text, and the menu path in it is the only instruction anybody
-  // gets. An English-only path on a Hungarian box names rows that do not exist.
-  const notes = (m.changelog || []).find((c) => c.version === m.version);
-  assert.ok(notes, "no release note for the current version");
-  assert.match(notes.notes, /Beállítások/, "no Hungarian path");
-  assert.match(notes.notes, /Settings/, "no English path");
-  assert.match(notes.notes, /wifi/i, "does not say who else can send to the TV");
+test("every release note is bilingual, and the one that introduced casting tells the owner where the switch is", () => {
+  // The store shows this text, and for the release that brought the feature the menu
+  // path in it is the only instruction anybody gets - an English-only path on a
+  // Hungarian box names rows that do not exist. Later notes are fixes and need no path,
+  // but they still have to be readable on this box.
+  const notes = m.changelog || [];
+  assert.ok(
+    notes.find((c) => c.version === m.version),
+    "no release note for the current version",
+  );
+  for (const c of notes.filter((c) => c.version.startsWith("1.1"))) {
+    assert.match(c.notes, / \/ /, c.version + " is not bilingual");
+    assert.match(c.notes, /[áéíóöőúüű]/i, c.version + " has no Hungarian half");
+  }
+  const intro = notes.find((c) => c.version === "1.1.0");
+  assert.match(intro.notes, /Beállítások/, "no Hungarian path");
+  assert.match(intro.notes, /Settings/, "no English path");
+  assert.match(intro.notes, /wifi/i, "does not say who else can send to the TV");
 });
