@@ -1,0 +1,6 @@
+{
+  "name": "tvbox-app-youtube",
+  "private": true,
+  "type": "commonjs",
+  "description": "Host-side plugin for the tvbox YouTube app: the DIAL cast receiver that puts the box in a phone's YouTube cast list. CommonJS, because the shell loads plugin.js with require()."
+}
