@@ -429,6 +429,15 @@ export interface MediaBackend {
   /** A playlist's items. Not `children` - the metadata path answers nothing. */
   playlistItems(id: string): Promise<MediaItem[]>;
   /**
+   * The items of a PLAY QUEUE, and which of them was chosen.
+   *
+   * A controller that casts - Plexamp, the phone app - does not send a list. It
+   * builds a play queue on the server and sends its key, so the running order
+   * exists only there: without reading it back, a cast of an album plays one
+   * track and stops.
+   */
+  queueItems(queueId: string): Promise<{ items: MediaItem[]; startIndex: number }>;
+  /**
    * Make a playlist holding these items, and answer with it.
    *
    * Separate from `addToPlaylist` because the server's create and append are

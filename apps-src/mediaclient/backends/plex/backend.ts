@@ -642,6 +642,21 @@ export class PlexBackend implements MediaBackend {
     return (c.Metadata ?? []).map(toItem);
   }
 
+  async queueItems(queueId: string): Promise<{ items: MediaItem[]; startIndex: number }> {
+    // No inner query string: the `?own=1&window=200` form Plex Web sends is what
+    // this server answers 400 for, which is the same trap `playMedia`'s
+    // containerKey documents on the assistant side.
+    const c = container<MetadataContainer & { playQueueSelectedItemOffset?: number }>(
+      await this.req(`playQueues/${encodeURIComponent(queueId)}`),
+    );
+    const items = (c.Metadata ?? []).map(toItem);
+    // Which track the person actually pressed. A queue is built with the whole
+    // album in it and an offset saying where to start, so ignoring the offset
+    // plays the album from the top whatever was tapped.
+    const at = Number(c.playQueueSelectedItemOffset ?? 0);
+    return { items, startIndex: Number.isFinite(at) && at > 0 ? at : 0 };
+  }
+
   /**
    * The server's own name for a set of its items, which is what both playlist
    * writes are addressed with.

@@ -11,7 +11,7 @@
 // server does not like is answered 400, and a client that retries in a loop
 // looks exactly like a box that is simply never chosen.
 
-import { plexHeaders, type PlexIdentityHeaders } from "./http";
+import { PLEX_TV, plexHeaders, type PlexIdentityHeaders } from "./http";
 import { log, redactString } from "../../redact";
 
 /**
@@ -53,6 +53,22 @@ const COMMAND_TIMEOUT_MS = 12_000;
 const RESPOND_TIMEOUT_MS = 10_000;
 /** How long to wait after a failed poll before trying again. */
 const RETRY_MS = 5_000;
+/**
+ * How often to tell plex.tv that this box is a player.
+ *
+ * The account's device record is written when a client SIGNS IN and never
+ * again, and this app talks to plex.tv only during sign-in - so a box that was
+ * signed in on a build without `X-Plex-Provides` keeps a record with an empty
+ * `provides` for as long as the session lasts. Measured on this account: the
+ * client that is polling right now has `provides=""` while two dead rows from
+ * earlier runs have `provides="client,player"`.
+ *
+ * That matters to anything that picks a player from plex.tv rather than from
+ * the server - the Plex mobile app's cast list, Plexamp - which is every
+ * controller except the house assistant, and it means the ones on offer there
+ * are the dead rows.
+ */
+const ANNOUNCE_MS = 6 * 60 * 60 * 1000;
 /** Ceiling for the backoff, so a server that is down is asked about calmly. */
 const RETRY_MAX_MS = 60_000;
 
@@ -231,9 +247,34 @@ export function startCompanion(opts: {
     }
   };
 
+  /**
+   * Make plex.tv notice the identity headers this app already sends.
+   *
+   * Any authenticated request carries them, and the account updates the device
+   * record from what it sees - so this is a `GET` whose ANSWER is not wanted.
+   * Failure is ignored on purpose: not being listed on plex.tv costs the cast
+   * pickers, and nothing else in the app depends on it.
+   */
+  const announce = async (): Promise<void> => {
+    try {
+      const res = await fetch(new URL("api/v2/user", `${PLEX_TV}/`).toString(), {
+        headers: { ...plexHeaders(opts.id, { "X-Plex-Token": opts.token }), "X-Plex-Provides": "player" },
+      });
+      if (!res.ok) log.warn(`plex.tv did not take the announcement (${res.status})`);
+    } catch (e) {
+      log.warn("could not announce this box to plex.tv", e);
+    }
+  };
+
   void loop();
+  // AFTER the loop, deliberately: the poll is what makes this box commandable
+  // and it must not queue behind an internet round trip that only affects who
+  // can find it later.
+  void announce();
+  const announcing = setInterval(() => void announce(), ANNOUNCE_MS);
 
   return () => {
+    clearInterval(announcing);
     stopped = true;
     controller?.abort();
     for (const r of responders) r.abort();
@@ -379,7 +420,9 @@ async function withTimeout<T>(work: Promise<T> | T, ms: number): Promise<T> {
  */
 function escapeAttr(v: string): string {
   // eslint-disable-next-line no-control-regex
-  return v.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ").replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  return v
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ")
+    .replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }
 
 function sleep(ms: number): Promise<void> {

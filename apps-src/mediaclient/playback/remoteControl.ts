@@ -9,10 +9,12 @@
 // a film is playing while the television shows the launcher.
 
 import { usePlayer } from "./player";
+import { useMusic } from "./music";
 import { useApp } from "../state";
 import { isVisible } from "../lifecycle";
 import { rememberedVersion } from "../chosenVersion";
 import type { CommandResult, CompanionCommand } from "../backends/plex/companion";
+import type { MediaBackend, MediaItem } from "../backends/types";
 import { log } from "../redact";
 
 /**
@@ -31,6 +33,49 @@ import { log } from "../redact";
 function arg(cmd: CompanionCommand, name: string): string | undefined {
   const prefixed = `query${name[0].toUpperCase()}${name.slice(1)}`;
   return cmd.params[prefixed] ?? cmd.params[name];
+}
+
+/** `/playQueues/20406` -> `20406`. The `?own=1&window=200` form is stripped. */
+function queueId(containerKey: string | undefined): string | undefined {
+  const m = /^\/playQueues\/(\d+)\b/.exec(containerKey ?? "");
+  return m ? m[1] : undefined;
+}
+
+/**
+ * Start a cast of MUSIC, which is a different player with a different queue.
+ *
+ * Plexamp and the phone app do not send a list: they build a play queue on the
+ * server and send its key, so the running order exists only there. Reading it
+ * back is what makes a cast album an album - without it the first track plays
+ * and the box falls silent.
+ *
+ * The whole video path is wrong for this, and not only cosmetically: it would
+ * hand the track to the film player, take the screen for it and stop whatever
+ * the person was listening to.
+ */
+async function startMusic(cmd: CompanionCommand, backend: MediaBackend, item: MediaItem): Promise<CommandResult> {
+  let tracks: MediaItem[] = [item];
+  let startIndex = 0;
+  const qid = queueId(arg(cmd, "containerKey"));
+  if (qid) {
+    try {
+      const queue = await backend.queueItems(qid);
+      if (queue.items.length) {
+        tracks = queue.items;
+        startIndex = Math.min(queue.startIndex, queue.items.length - 1);
+      }
+    } catch (e) {
+      // One track is a worse answer than the album, but it is an honest one and
+      // it is what was asked for; the queue is the running order after it.
+      log.warn("could not read the cast play queue", e);
+    }
+  }
+  await useMusic.getState().playQueue(backend, tracks, { startIndex });
+  const after = useMusic.getState();
+  if (after.error) return no(after.error);
+  const playing = after.queue[after.index];
+  if (!playing) return no("the music did not start");
+  return ok;
 }
 
 /** `/library/metadata/12345` -> `12345`. Anything else is not an item. */
@@ -85,6 +130,12 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       if (!isVisible()) return no("the media app is not on screen");
 
       const item = await backend.item(id);
+      // What the thing IS, not what the controller called it: `type` is the
+      // controller's word and a cast that omits it would be played as a film.
+      if (item.kind === "track" || arg(cmd, "type") === "music") {
+        if (!isVisible()) return no("the media app is not on screen");
+        return await startMusic(cmd, backend, item);
+      }
       const offset = Number(arg(cmd, "offset") ?? "0");
       const at = Number.isFinite(offset) && offset > 0 ? offset : 0;
       // Asked again, because the answer above is minutes old by the standards

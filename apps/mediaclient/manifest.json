@@ -5,8 +5,12 @@
     "hu": "Média",
     "en": "Media"
   },
-  "version": "0.57.2",
+  "version": "0.58.0",
   "changelog": [
+    {
+      "version": "0.58.0",
+      "notes": "Music cast to the box at last: send a song, an album or a playlist from Plexamp or the Plex app on your phone and it plays here, with the whole running order and starting on the track you pressed - not the first one. The box also tells your Plex account that it is a player, so it shows up in those cast lists instead of only answering the house assistant. The media app has to be on screen: the box has one player and it will not hand it to a window nobody is looking at."
+    },
     {
       "version": "0.57.2",
       "notes": "A film asked for by voice fills the screen again. If the app was sitting on its home screen when the film started, the home screen's backdrop stayed drawn over the picture and only the sound came through."
