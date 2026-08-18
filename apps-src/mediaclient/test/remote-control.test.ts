@@ -42,10 +42,20 @@ function backend(over: Record<string, unknown> = {}): unknown {
 }
 
 const launched: string[] = [];
+const notified: unknown[] = [];
 let launchRefused = false;
 
 beforeEach(() => {
   launchRefused = false;
+  notified.length = 0;
+  const realFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes("/tvbox/api/notify")) {
+      notified.push(init?.body);
+      return new Response("{}", { status: 200 });
+    }
+    return realFetch(input as RequestInfo, init);
+  });
   played.length = 0;
   __lifecycle.reset();
   (globalThis as { window?: unknown }).window = globalThis;
@@ -327,5 +337,43 @@ describe("a command from a controller", () => {
 
     expect(res).toMatchObject({ ok: false });
     expect(played.length, "nothing may play as the person who is being replaced").toBe(0);
+  });
+
+  it("does not take the screen for a film it is going to refuse", async () => {
+    // The check that makes this pass runs BEFORE the request to come forward.
+    // Asserting only "refused, nothing played" would pass with that check
+    // removed, because the one after the request still refuses - by which time a
+    // native app has been killed and another app's film stopped.
+    __lifecycle.release("hidden");
+    useApp.setState({ screen: { name: "profiles" } });
+
+    const res = await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "1" },
+    });
+
+    expect(res).toMatchObject({ ok: false });
+    expect(launched, "nothing was asked to come forward").toEqual([]);
+    expect(played.length).toBe(0);
+  });
+
+  it("says a phone took the screen only once it really has", async () => {
+    // The note names a takeover. Announcing it before the request could succeed
+    // meant telling the room the app had the screen and then refusing.
+    launchRefused = true;
+    __lifecycle.release("hidden");
+    await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "1" },
+    });
+    expect(notified, "no note for a takeover that did not happen").toEqual([]);
+
+    launchRefused = false;
+    __lifecycle.release("hidden");
+    await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "1" },
+    });
+    expect(notified.length, "and one when it did").toBe(1);
   });
 });

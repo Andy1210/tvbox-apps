@@ -89,7 +89,9 @@ module.exports = (host) => {
     }
 
     try {
-      host.startHidden();
+      // The argument is ignored by the scoped binding, and needed by the
+      // shell that shipped the unscoped one. Cheap insurance across two repos.
+      host.startHidden(APP_ID);
     } catch (e) {
       host.log("mediaclient: could not start hidden: " + (e && e.message));
     }

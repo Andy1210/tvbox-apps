@@ -126,11 +126,6 @@ const FRONT_TIMEOUT_MS = 3_000;
  */
 async function bringToFront(): Promise<boolean> {
   if (isVisible()) return true;
-  // Somebody in the room did not ask for this. Coming forward ends whatever was
-  // on screen - a game, another app's film - so the room is told who did, the
-  // way the box's other cast receiver does it. Best effort and never awaited: a
-  // cast must not fail on a toast.
-  castNote();
   try {
     (typeof window === "undefined" ? undefined : window.tvbox)?.launch?.(APP_ID);
   } catch (e) {
@@ -139,7 +134,15 @@ async function bringToFront(): Promise<boolean> {
   const until = Date.now() + FRONT_TIMEOUT_MS;
   while (Date.now() < until) {
     await new Promise((r) => setTimeout(r, 50));
-    if (isVisible()) return true;
+    if (isVisible()) {
+      // Only once it really happened. Somebody in the room did not ask for this
+      // and what they were doing has just ended, so they are told who did - the
+      // way the box's other cast receiver does it. Saying so BEFORE the request
+      // meant announcing a takeover that could still be refused a moment later.
+      // Best effort and never awaited: a cast must not fail on a toast.
+      castNote();
+      return true;
+    }
   }
   return false;
 }
