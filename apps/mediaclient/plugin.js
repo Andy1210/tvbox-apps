@@ -29,6 +29,15 @@ const RETRY_MS = 60_000;
 // Given up on after this long. Something is playing for an hour, so the box is
 // in use and the app can start when whoever is using it opens it.
 const GIVE_UP_MS = 60 * 60_000;
+// And then a slow look every so often, for the rest of the box's life. The
+// window can go without anybody deciding it should: the memory guard drops the
+// least recently shown hidden app, and a hidden one that nobody has opened is
+// exactly that. Somebody pressing the X in HOME's Running row also lands here -
+// they meant "close the app", and the box quietly stopping being castable is
+// not something they asked for or would be told about. Half an hour, because
+// the cost of being wrong either way is small and this must not look like a
+// window that refuses to stay closed.
+const WATCH_MS = 30 * 60_000;
 
 module.exports = (host) => {
   let timer = null;
@@ -45,7 +54,7 @@ module.exports = (host) => {
     // did before, i.e. castable once somebody opens the app.
     if (typeof host.startHidden !== "function") {
       host.log("mediaclient: this shell cannot start an app hidden; the box is castable once the app is opened");
-      return;
+      return; // and no watch: an older shell will not grow the call
     }
     let alive = false;
     try {
@@ -53,8 +62,13 @@ module.exports = (host) => {
     } catch (e) {
       alive = false;
     }
-    // Somebody opened it first, which is the outcome this was for.
-    if (alive) return;
+    // Somebody opened it first, which is the outcome this was for - but keep
+    // looking, because the window can go later without anybody deciding it
+    // should.
+    if (alive) {
+      timer = setTimeout(tryStart, WATCH_MS);
+      return;
+    }
 
     let free = true;
     try {
@@ -65,7 +79,9 @@ module.exports = (host) => {
     if (!free) {
       waitedMs += RETRY_MS;
       if (waitedMs >= GIVE_UP_MS) {
-        host.log("mediaclient: the box has been busy for an hour; not starting the player in the background");
+        host.log("mediaclient: the box has been busy for an hour; looking again later");
+        waitedMs = 0;
+        timer = setTimeout(tryStart, WATCH_MS);
         return;
       }
       timer = setTimeout(tryStart, RETRY_MS);
@@ -73,10 +89,11 @@ module.exports = (host) => {
     }
 
     try {
-      host.startHidden(APP_ID);
+      host.startHidden();
     } catch (e) {
       host.log("mediaclient: could not start hidden: " + (e && e.message));
     }
+    timer = setTimeout(tryStart, WATCH_MS);
   };
 
   return {
