@@ -6,6 +6,7 @@ import { useApp } from "./state";
 import { PlaybackSettings } from "./PlaybackSettings";
 import { HomeRows } from "./HomeRows";
 import { usePrefs } from "./prefs";
+import { deviceName } from "./identity";
 
 /**
  * Which server, which account, and how to leave.
@@ -21,6 +22,9 @@ export function Settings(): React.JSX.Element {
   const signOut = useApp((s) => s.signOut);
   const autologin = useApp((s) => s.autologin);
   const cast = usePrefs((s) => s.cast);
+  // What the phone lists this box under: its hostname, which is also what
+  // its Plex client and its Spotify device are named after.
+  const boxName = deviceName(useApp((s) => s.identity?.host) || "");
   const setPref = usePrefs((s) => s.set);
   const setAutologin = useApp((s) => s.setAutologin);
   const go = useApp((s) => s.go);
@@ -42,7 +46,7 @@ export function Settings(): React.JSX.Element {
           remote. */}
       {panel === "playback" && <PlaybackSettings onClose={() => setPanel(null)} />}
       {panel === "rows" && <HomeRows onClose={() => setPanel(null)} />}
-      <div ref={ref} className="flex h-full flex-col gap-[3vh] px-[6vw] py-[5vh]">
+      <div ref={ref} className="flex h-full flex-col overflow-y-auto gap-[3vh] px-[6vw] py-[5vh]">
         <h1 className="text-[3vh] font-semibold tracking-tight">{t("settings.title")}</h1>
 
         <dl className="flex flex-col gap-[1.4vh] text-[2vh]">
@@ -74,19 +78,25 @@ export function Settings(): React.JSX.Element {
         </div>
 
         {/* Not in the box's own "Extra app settings" - that is where an app with
-            no screen of its own has to put a switch, and this app has one. */}
-        <div className="flex flex-col gap-[1vh]">
-          <FocusButton
-            focusKey="settings-cast"
-            onEnter={() => void setPref("cast", !cast)}
-            className="self-start rounded-[1vh] bg-white/12 px-[2.4vw] py-[1.3vh] text-[2.1vh]"
-          >
-            {`${t("settings.cast")} · ${t(cast ? "settings.on" : "settings.off")}`}
-          </FocusButton>
-          <p className="max-w-[60vw] text-[1.7vh] text-fg-dim">
-            {t(cast ? "settings.castOnHint" : "settings.castOffHint")}
-          </p>
-        </div>
+            no screen of its own has to put a switch, and this app has one.
+            Plex only: both halves of the receiver refuse a Jellyfin session, so
+            the row would promise a household something that can never happen. */}
+        {session?.kind !== "jellyfin" && (
+          <div className="flex flex-col gap-[1vh]">
+            <FocusButton
+              focusKey="settings-cast"
+              onEnter={() => void setPref("cast", !cast)}
+              className="self-start rounded-[1vh] bg-white/12 px-[2.4vw] py-[1.3vh] text-[2.1vh]"
+            >
+              {`${t("settings.cast")} · ${t(cast ? "settings.on" : "settings.off")}`}
+            </FocusButton>
+            {/* Names the box, because a household with two of them has to know
+              which one this is, and the phone lists it under this name. */}
+            <p className="max-w-[60vw] text-[1.7vh] text-fg-dim">
+              {cast ? t("settings.castOnHint", { name: boxName }) : t("settings.castOffHint")}
+            </p>
+          </div>
+        )}
 
         {/* Named for what it opens and marked as leading somewhere. On its own
             the word "Playback" reads as a status line rather than a way in. */}

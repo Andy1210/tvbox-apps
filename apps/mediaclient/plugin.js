@@ -21,6 +21,20 @@ const os = require("os");
 const { startCompanion, readSession, leaveCast } = require("./lib/companion");
 
 const APP_ID = "mediaclient";
+// What the room is told when a phone takes the screen, in the box's language.
+// Short: it is a corner overlay, not a dialog. It says who did it, because the
+// person sitting there did not - and this path is the one with no warning at
+// all, since the app was closed a moment ago.
+const STR = {
+  hu: {
+    title: "Átküldés telefonról",
+    took: "Valaki a telefonjáról küldött ide valamit – a médiaapp átveszi a képernyőt.",
+  },
+  en: {
+    title: "Cast from phone",
+    took: "Someone sent this from their phone - the media app is taking the screen.",
+  },
+};
 const STORE = path.join(os.homedir(), ".tvbox", "appdata", APP_ID + ".json");
 /** How often to look at whether this should be listening at all. */
 const WATCH_MS = 15_000;
@@ -42,6 +56,16 @@ module.exports = (host) => {
       return false;
     }
   };
+
+  function str() {
+    let locale = "";
+    try {
+      locale = String((host.config && host.config.uiLocale && host.config.uiLocale()) || "");
+    } catch (e) {
+      locale = "";
+    }
+    return locale.startsWith("hu") ? STR.hu : STR.en;
+  }
 
   const stopListening = () => {
     const s = stopCompanion;
@@ -69,11 +93,29 @@ module.exports = (host) => {
     }
     handedOver = true;
     host.log("mediaclient: a cast arrived with the app closed - opening it");
+    // Asked BEFORE the launch, because the launch is what changes the answer.
+    let interrupting = false;
+    try {
+      interrupting = host.idle ? !host.idle() : false;
+    } catch (e) {
+      interrupting = false;
+    }
     const opened = host.navTo(APP_ID);
     if (opened === false) {
       handedOver = false;
       host.log("mediaclient: the box would not open the app for a cast");
       return false;
+    }
+    // Only when it took the screen from something. Opening the app ends a
+    // native app - a game, with whatever was unsaved in it - and stops another
+    // app's film, and nobody in the room asked for that.
+    if (interrupting) {
+      const s = str();
+      try {
+        host.notify({ title: s.title, message: s.took, duration: 5000 });
+      } catch (e) {
+        /* an older shell has no notify; a cast must not fail on a toast */
+      }
     }
     return true;
   };
@@ -98,6 +140,14 @@ module.exports = (host) => {
       ...found,
       onCommand,
       log: (m) => host.log("mediaclient: " + m),
+      // A refused credential ends the loop, and without this the handle stayed
+      // set - so the next tick saw "already listening" and the box quietly
+      // stopped being a player until the shell restarted, with the setting
+      // still reading on. Cleared instead, so the next tick re-reads the store
+      // and tries again with whatever is in it.
+      onUnauthorized: () => {
+        stopCompanion = null;
+      },
     });
     host.log("mediaclient: listening for a cast");
   };

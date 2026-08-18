@@ -72,8 +72,15 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   // PREVIOUS person's token - and a command would play as them, history and
   // all, without passing the picker or its PIN.
   const picking = screen.name === "profiles" || screen.name === "login" || screen.name === "boot";
+  // The same setting the box reads. Without it the switch turned off only the
+  // half of the receiver that runs OUT here: the box hides an app rather than
+  // closing it, so once anybody had opened this app its own page went on
+  // answering Plex, and Settings said the television was not offered while it
+  // was - measured against the shell plugin, which stands down whenever this
+  // window exists.
+  const castEnabled = usePrefs((s) => s.cast);
   useEffect(() => {
-    if (!session || !identity || picking) return;
+    if (!session || !identity || picking || !castEnabled) return;
     // Plex's protocol, not a general one: `player/proxy/poll` is a Plex route,
     // and this loop reads a 401 as "signed out". Pointed at a Jellyfin server it
     // would poll a path that does not exist, forever - and the day that server
@@ -96,7 +103,7 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
       // token and nothing on screen.
       onUnauthorized: () => useApp.getState().fail({ kind: "signed-out" }),
     });
-  }, [session, identity, picking]);
+  }, [session, identity, picking, castEnabled]);
 
   useEffect(() => installNavSounds(), []);
   // Through the store rather than a one-shot fetch, so turning the setting off

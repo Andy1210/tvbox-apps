@@ -353,7 +353,11 @@ async function navigate(what: string): Promise<CommandResult> {
   // Refused BEFORE the screen, like every other refusal here: coming forward
   // ends a native app and stops another app's film, and a command that is going
   // to be refused must not do that on its way to the refusal.
-  if (what === "music" && useMusic.getState().queue.length === 0) return no("nothing is playing");
+  if (what === "music" && useMusic.getState().queue.length === 0) {
+    // Said as what it is. "Nothing is playing" is false while a film is on
+    // screen, and the assistant reads these out.
+    return no("there is no music on this box to show");
+  }
   if (!NAV_KEYS[what] && what !== "back" && what !== "home" && what !== "music") {
     return no("this player does not support that command");
   }
@@ -643,7 +647,18 @@ export function companionTimelines(server: ServerAddress): Timeline[] {
  * app for their own reasons.
  */
 const PENDING_CAST_KEY = "pending-cast";
-const PENDING_CAST_MAX_AGE_MS = 60_000;
+/**
+ * How old a waiting cast may be.
+ *
+ * Ten minutes rather than one, because of the case that takes the longest and
+ * is the reason this exists: with autologin off, a cast opens the app onto the
+ * profile picker and nothing can run until somebody walks over and answers it.
+ * A minute is not enough to cross a room and type a PIN, and dropping the cast
+ * there means the phone said it was playing and nothing ever did. Long enough
+ * to survive that, short enough that a cast from this morning does not start
+ * playing at whoever opens the app tonight.
+ */
+const PENDING_CAST_MAX_AGE_MS = 10 * 60_000;
 
 let pendingCastRun: Promise<void> | null = null;
 

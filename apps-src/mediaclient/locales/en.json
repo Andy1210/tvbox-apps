@@ -151,9 +151,9 @@
     "rowVisible": "Row",
     "themeMusic": "Series theme music",
     "themeMusicHint": "A series plays its own theme while you look at it. Twice, then silence.",
-    "cast": "Cast from phone",
-    "castOnHint": "Your phone can send music or a film to this television, and it works whether or not this app is open.",
-    "castOffHint": "This television is not offered to phones. Anything you want to watch has to be started here."
+    "cast": "Cast from Plex",
+    "castOnHint": "Your phone can send music or a film here from the Plex app, and it works whether or not this app is open. The box appears as {name}.",
+    "castOffHint": "This box is not offered in the Plex app. Anything from there has to be started here. Other ways of sending to this television are unaffected."
   },
   "tracks": {
     "version": "Version",

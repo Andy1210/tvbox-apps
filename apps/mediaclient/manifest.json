@@ -9,15 +9,15 @@
   "changelog": [
     {
       "version": "0.60.0",
-      "notes": "Your phone can send music or a film here without the app being open, and its own play, pause and skip buttons work on it. Turn it off in Settings - Apps - Extra app settings."
+      "notes": "Send music or a film here from the Plex app on your phone - it works whether or not this app is open, and the phone gets a full remote, arrows and all. Turn it off in this app's own Settings, under \"Cast from Plex\"."
     },
     {
       "version": "0.59.0",
-      "notes": "You can cast to the box the moment it is on, without opening the app first, and what you send opens on screen. Music now keeps playing when you leave the app - the home screen shows what is playing and takes you back to it - and stops when you close the app from there."
+      "notes": "Music keeps playing when you leave the app - the home screen shows what is playing and takes you back to it - and stops when you close the app from there."
     },
     {
       "version": "0.58.0",
-      "notes": "The box now offers itself to your phone: send a song, an album or a playlist from Plexamp or the Plex app and it plays here as music, with the running order and starting on the track you pressed. The phone's play, pause, skip and stop buttons work on it too - before, they said nothing was playing while it played on, and stop claimed to have stopped it. One thing to know: a very long list plays a slice of about two hundred tracks around the one you pressed."
+      "notes": "A song, an album or a playlist sent from your phone plays here as music, with the running order and starting on the track you pressed. One thing to know: a very long list plays a slice of about two hundred tracks around the one you pressed."
     },
     {
       "version": "0.57.2",

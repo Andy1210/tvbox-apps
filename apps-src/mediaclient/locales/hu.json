@@ -151,9 +151,9 @@
     "rowVisible": "Mutasd",
     "themeMusic": "Sorozatok főcímzenéje",
     "themeMusicHint": "A sorozat saját zenéje szól, amíg nézegeted. Kétszer megy le, aztán elhallgat.",
-    "cast": "Átküldés telefonról",
-    "castOnHint": "A telefonod küldhet ide zenét vagy filmet, és akkor is működik, ha ez az alkalmazás nincs megnyitva.",
-    "castOffHint": "Ez a TV nem jelenik meg a telefonokon. Amit nézni szeretnél, azt itt kell elindítani."
+    "cast": "Átküldés a Plexből",
+    "castOnHint": "A telefonod a Plex appból küldhet ide zenét vagy filmet, és akkor is működik, ha ez az alkalmazás nincs nyitva. A box {name} néven jelenik meg.",
+    "castOffHint": "Ez a box nem jelenik meg a Plex appban. Onnan semmit nem lehet ideküldeni, itt kell elindítani. A többi átküldési módot ez nem érinti."
   },
   "tracks": {
     "version": "Verzió",

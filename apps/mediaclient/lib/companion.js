@@ -181,6 +181,7 @@ function startCompanion(opts) {
         );
         if (res.status === 401 || res.status === 403) {
           opts.log("the server refused this box's credential; standing down");
+          if (opts.onUnauthorized) opts.onUnauthorized();
           return;
         }
         if (res.status >= 400) throw new Error("poll answered " + res.status);
