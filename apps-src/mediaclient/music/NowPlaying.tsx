@@ -424,8 +424,7 @@ function Transport({
   const on = t("music.on");
   const off = t("music.off");
   const playLabel = state === "playing" ? t("music.pause") : state === "paused" ? t("music.resume") : t("music.play");
-  const repeatLabel =
-    repeat === "one" ? t("music.repeatOne") : `${t("music.repeat")} · ${repeat === "all" ? on : off}`;
+  const repeatLabel = repeat === "one" ? t("music.repeatOne") : `${t("music.repeat")} · ${repeat === "all" ? on : off}`;
 
   return (
     <FocusContext.Provider value={focusKey}>

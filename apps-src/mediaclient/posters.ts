@@ -179,8 +179,7 @@ export async function loadImage(url: string, headers: Record<string, string>): P
       // One retry, because the failure this guards against is a burst losing a
       // connection rather than a poster that does not exist - and a 404 comes
       // back as !ok, which is not retried.
-      const once = (): Promise<Response | null> =>
-        fetch(url, { headers, signal: imageDeadline() }).catch(() => null);
+      const once = (): Promise<Response | null> => fetch(url, { headers, signal: imageDeadline() }).catch(() => null);
       let res = await once();
       if (!res) res = await once();
       if (!res || !res.ok) return null;

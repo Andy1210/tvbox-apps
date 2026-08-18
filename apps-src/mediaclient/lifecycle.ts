@@ -44,9 +44,23 @@ let releasedFor: ReleaseReason | null = null;
  * player for an app that is not in front - silently, because the bridge
  * discards the refusal. So anything that starts playback from outside the
  * remote's own presses has to ask first, or it reports success over a launcher.
+ *
+ * Two questions, because neither answers alone. The release flag is EVENT-based,
+ * and an event only fires on a CHANGE: a window the box started already hidden
+ * - which is how the box makes itself castable before anybody opens the app -
+ * has never changed, so the flag says visible for a page that has never been on
+ * screen. Measured: a cast to a box nobody had touched since boot asked for the
+ * screen, was told it already had it, and the shell then refused the player
+ * without a word. So the document is asked as well, and it is the one that knows
+ * at startup.
+ *
+ * The flag is still needed the other way round: it is what the tests drive, and
+ * `pagehide` releases without the document reporting hidden.
  */
 export function isVisible(): boolean {
-  return releasedFor === null;
+  if (releasedFor !== null) return false;
+  if (typeof document === "undefined") return true;
+  return document.visibilityState !== "hidden";
 }
 
 export function onRelease(fn: ReleaseFn): () => void {

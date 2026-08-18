@@ -281,8 +281,7 @@ export function LibraryFilters({
                           // a filter has no name - so turning one on read
                           // "Sort and filter · 1".
                           setFilter(f.key, chosen ? null : "1", f.title);
-                        }
-                        else setOpenFilter(f);
+                        } else setOpenFilter(f);
                       }}
                     />
                   );

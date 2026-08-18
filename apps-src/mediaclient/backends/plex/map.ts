@@ -21,6 +21,8 @@ import type {
 } from "../types";
 
 export interface PlexMetadata {
+  /** Only on a row that came from a play queue: that entry's own id. */
+  playQueueItemID?: number | string;
   grandparentArt?: string;
   parentArt?: string;
   theme?: string;

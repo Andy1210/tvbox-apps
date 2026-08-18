@@ -131,12 +131,7 @@ export function buildUrl(base: string, path: string, query?: RequestOpts["query"
  * put in the DOM. The exceptions are artwork and stream URLs, which are handed
  * to another process and are built deliberately in the backend.
  */
-export async function request<T>(
-  base: string,
-  path: string,
-  id: JellyfinIdentity,
-  opts: RequestOpts = {},
-): Promise<T> {
+export async function request<T>(base: string, path: string, id: JellyfinIdentity, opts: RequestOpts = {}): Promise<T> {
   const url = buildUrl(base, path, opts.query);
   const headers = jellyfinHeaders(id, opts.token, {
     ...(opts.body !== undefined ? { "Content-Type": "application/json" } : {}),

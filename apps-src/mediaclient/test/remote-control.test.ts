@@ -41,11 +41,33 @@ function backend(over: Record<string, unknown> = {}): unknown {
   };
 }
 
+const launched: string[] = [];
+const notified: unknown[] = [];
+let launchRefused = false;
+
 beforeEach(() => {
+  launchRefused = false;
+  notified.length = 0;
+  const realFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes("/tvbox/api/notify")) {
+      notified.push(init?.body);
+      return new Response("{}", { status: 200 });
+    }
+    return realFetch(input as RequestInfo, init);
+  });
   played.length = 0;
   __lifecycle.reset();
   (globalThis as { window?: unknown }).window = globalThis;
+  launched.length = 0;
   (globalThis as unknown as { tvbox: unknown }).tvbox = {
+    // What the box does when an app asks to be brought forward: the window is
+    // shown, so the page is visible again. `launchRefused` is a box that cannot
+    // - a native game holding the screen, say.
+    launch: (id: string) => {
+      launched.push(id);
+      if (!launchRefused) __lifecycle.resume();
+    },
     play: (url: string, _s: unknown, startSec?: number) => played.push({ url, startSec }),
     stop: () => {},
     pause: () => {},
@@ -123,11 +145,28 @@ describe("a command from a controller", () => {
     ).toMatchObject({ ok: false });
   });
 
-  it("will not start a film while the app is not on screen", async () => {
-    // The shell refuses to start the player for an app that is not in front,
-    // and it refuses SILENTLY - the bridge discards the result. So this played
-    // nothing, reported success, and left the box publishing "playing" over the
-    // launcher.
+  it("asks the box for the screen before starting a film, and then starts it", async () => {
+    // The box HIDES an app rather than closing it, so a cast to a television
+    // somebody pressed Home on arrives at a page that is alive and polling but
+    // not on screen. That used to be a refusal; it is a request now.
+    __lifecycle.release("hidden");
+    const res = await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "1" },
+    });
+
+    expect(res).toMatchObject({ ok: true });
+    expect(launched, "it asked for the screen by app id").toEqual(["mediaclient"]);
+    expect(played.length, "and only then handed the film to the player").toBe(1);
+  });
+
+  it("will not start a film the box cannot bring to the screen", async () => {
+    // The other half, and the reason the request is awaited rather than fired
+    // and forgotten. The shell refuses the player to a window that is not in
+    // front, and it refuses SILENTLY - the bridge discards the result. So a
+    // film started anyway plays nothing, reports success, and leaves the box
+    // publishing "playing" over whatever is actually on screen.
+    launchRefused = true;
     __lifecycle.release("hidden");
     const res = await runCompanionCommand({
       path: "/player/playback/playMedia",
@@ -185,7 +224,14 @@ describe("a command from a controller", () => {
         resolveStream: async (): Promise<StreamDecision> => {
           streams += 1;
           if (streams > 1) throw new Error("no stream for this");
-          return { url: "http://s/f.mkv", audio: "auto", sub: "no", session: "s", transcoded: false, version: 0 } as never;
+          return {
+            url: "http://s/f.mkv",
+            audio: "auto",
+            sub: "no",
+            session: "s",
+            transcoded: false,
+            version: 0,
+          } as never;
         },
       }) as never,
     });
@@ -291,5 +337,112 @@ describe("a command from a controller", () => {
 
     expect(res).toMatchObject({ ok: false });
     expect(played.length, "nothing may play as the person who is being replaced").toBe(0);
+  });
+
+  it("does not take the screen for a film it is going to refuse", async () => {
+    // The check that makes this pass runs BEFORE the request to come forward.
+    // Asserting only "refused, nothing played" would pass with that check
+    // removed, because the one after the request still refuses - by which time a
+    // native app has been killed and another app's film stopped.
+    __lifecycle.release("hidden");
+    useApp.setState({ screen: { name: "profiles" } });
+
+    const res = await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "1" },
+    });
+
+    expect(res).toMatchObject({ ok: false });
+    expect(launched, "nothing was asked to come forward").toEqual([]);
+    expect(played.length).toBe(0);
+  });
+
+  it("says a phone took the screen only once it really has", async () => {
+    // The note names a takeover. Announcing it before the request could succeed
+    // meant telling the room the app had the screen and then refusing.
+    launchRefused = true;
+    __lifecycle.release("hidden");
+    await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "1" },
+    });
+    expect(notified, "no note for a takeover that did not happen").toEqual([]);
+
+    launchRefused = false;
+    __lifecycle.release("hidden");
+    await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "1" },
+    });
+    expect(notified.length, "and one when it did").toBe(1);
+  });
+
+  it("turns a phone's D-pad into the keys every screen already listens to", async () => {
+    // The player claims `navigation` now, so a phone draws a D-pad - and a claim
+    // that answers with a refusal is worse than no claim. Keys rather than calls
+    // into each screen, so a phone and the remote in the room do the same thing.
+    const keys: string[] = [];
+    const onKey = (e: KeyboardEvent) => keys.push(e.key);
+    window.addEventListener("keydown", onKey);
+
+    for (const [path, key] of [
+      ["moveUp", "ArrowUp"],
+      ["moveDown", "ArrowDown"],
+      ["moveLeft", "ArrowLeft"],
+      ["moveRight", "ArrowRight"],
+      ["select", "Enter"],
+    ] as const) {
+      const res = await runCompanionCommand({ path: `/player/navigation/${path}`, params: {} });
+      expect(res, path).toEqual({ ok: true });
+      expect(keys.at(-1), path).toBe(key);
+    }
+    window.removeEventListener("keydown", onKey);
+  });
+
+  it("sends Back and Home through the app rather than as keys", async () => {
+    // The box's Back never reaches a page (the compositor takes it), and Home
+    // here means this app's home screen - not the launcher, which is not a
+    // phone controlling the media app's business.
+    useApp.setState({ screen: { name: "search" }, history: [{ name: "home" }] });
+    expect(await runCompanionCommand({ path: "/player/navigation/back", params: {} })).toEqual({ ok: true });
+    expect(useApp.getState().screen.name).toBe("home");
+
+    useApp.setState({ screen: { name: "search" }, history: [] });
+    expect(await runCompanionCommand({ path: "/player/navigation/home", params: {} })).toEqual({ ok: true });
+    expect(useApp.getState().screen.name).toBe("home");
+  });
+
+  it("refuses the music screen when there is no music", async () => {
+    useApp.setState({ screen: { name: "home" }, history: [] });
+    const res = await runCompanionCommand({ path: "/player/navigation/music", params: {} });
+    expect(res).toMatchObject({ ok: false });
+    expect(useApp.getState().screen.name).toBe("home");
+  });
+
+  it("will not drive a phone's D-pad into the profile picker", async () => {
+    // `select` on that screen chooses a person, and a PIN pad is a screen you
+    // can send digits at - so a controller with a D-pad could otherwise cross
+    // the boundary the playback paths refuse at.
+    const keys: string[] = [];
+    const onKey = (e: KeyboardEvent) => keys.push(e.key);
+    window.addEventListener("keydown", onKey);
+    useApp.setState({ screen: { name: "profiles" }, history: [] });
+
+    for (const what of ["moveDown", "select", "back", "home", "music"]) {
+      const res = await runCompanionCommand({ path: `/player/navigation/${what}`, params: {} });
+      expect(res, what).toMatchObject({ ok: false });
+    }
+    expect(keys, "no press may reach the picker").toEqual([]);
+    expect(launched, "and it must not take the screen on the way to refusing").toEqual([]);
+    expect(useApp.getState().screen.name, "nor navigate away from it").toBe("profiles");
+    window.removeEventListener("keydown", onKey);
+  });
+
+  it("refuses the music screen before taking the screen, not after", async () => {
+    __lifecycle.release("hidden");
+    useApp.setState({ screen: { name: "home" }, history: [] });
+    const res = await runCompanionCommand({ path: "/player/navigation/music", params: {} });
+    expect(res).toMatchObject({ ok: false });
+    expect(launched, "nothing was asked to come forward").toEqual([]);
   });
 });

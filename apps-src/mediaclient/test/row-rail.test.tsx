@@ -117,9 +117,7 @@ describe("a rail whose list is replaced", () => {
     expect(offsetOf(container)).toBeGreaterThan(0);
 
     const refined = [list("a", 1)[0], ...list("z", 11)];
-    rerender(
-      <Row id="search-films" title="Films" items={refined} posterUrl={() => undefined} onSelect={() => {}} />,
-    );
+    rerender(<Row id="search-films" title="Films" items={refined} posterUrl={() => undefined} onSelect={() => {}} />);
     size(container, 12);
     await settle();
 

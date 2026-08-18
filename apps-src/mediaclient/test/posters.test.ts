@@ -126,4 +126,3 @@ describe("a poster that falls out of the cache", () => {
     vi.useRealTimers();
   });
 });
-

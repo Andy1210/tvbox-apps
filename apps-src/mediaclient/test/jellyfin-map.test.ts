@@ -124,15 +124,30 @@ describe("tracks", () => {
     { Index: 1, Type: "Audio", Language: "hun", DisplayTitle: "Magyar" },
     { Index: 2, Type: "Audio", Language: "eng", DisplayTitle: "English" },
     { Index: 3, Type: "Subtitle", Language: "hun", DisplayTitle: "Magyar felirat" },
-    { Index: 4, Type: "Subtitle", Language: "eng", IsExternal: true, DeliveryUrl: "/Videos/1/2/Subtitles/4/0/Stream.srt" },
-    { Index: 5, Type: "Subtitle", Language: "ger", IsExternal: true, DeliveryUrl: "/Videos/1/2/Subtitles/5/0/Stream.srt" },
+    {
+      Index: 4,
+      Type: "Subtitle",
+      Language: "eng",
+      IsExternal: true,
+      DeliveryUrl: "/Videos/1/2/Subtitles/4/0/Stream.srt",
+    },
+    {
+      Index: 5,
+      Type: "Subtitle",
+      Language: "ger",
+      IsExternal: true,
+      DeliveryUrl: "/Videos/1/2/Subtitles/5/0/Stream.srt",
+    },
   ];
 
   it("numbers what is inside the file from zero, ignoring the video", () => {
     // The ordinal is what the box's player counts, and it counts per type.
     const audio = toTracks(streams, "Audio");
     expect(audio.map((t) => t.ordinal)).toEqual([0, 1]);
-    expect(audio.map((t) => t.id), "the server's own index, for asking it things").toEqual(["1", "2"]);
+    expect(
+      audio.map((t) => t.id),
+      "the server's own index, for asking it things",
+    ).toEqual(["1", "2"]);
   });
 
   it("gives every sidecar its own negative ordinal", () => {
