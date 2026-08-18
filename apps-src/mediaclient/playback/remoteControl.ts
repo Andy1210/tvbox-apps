@@ -342,9 +342,27 @@ function pressKey(key: string): void {
 }
 
 async function navigate(what: string): Promise<CommandResult> {
-  // On screen first: a D-pad press means "move what I am looking at", and a
-  // hidden window would answer ok while nothing moved.
+  // Not into the profile picker. A D-pad from a phone is presses, and `select`
+  // on that screen chooses a person - so without this a controller could pick a
+  // profile, and a PIN pad is a screen you can send digits at. The playback
+  // paths refuse for the same reason; this is the same boundary reached by a
+  // different door.
+  const who = useApp.getState();
+  const picking = who.screen.name === "profiles" || who.screen.name === "login" || who.screen.name === "boot";
+  if (picking) return no("this box is asking who is watching; choose a profile on it first");
+  // Refused BEFORE the screen, like every other refusal here: coming forward
+  // ends a native app and stops another app's film, and a command that is going
+  // to be refused must not do that on its way to the refusal.
+  if (what === "music" && useMusic.getState().queue.length === 0) return no("nothing is playing");
+  if (!NAV_KEYS[what] && what !== "back" && what !== "home" && what !== "music") {
+    return no("this player does not support that command");
+  }
+  // On screen: a D-pad press means "move what I am looking at", and a hidden
+  // window would answer ok while nothing moved.
   if (!(await bringToFront())) return no("the media app could not come to the screen");
+  // And still not the picker - coming forward is a round trip, and boot can put
+  // it up inside one.
+  if (personChanged(who)) return no("this box is asking who is watching; choose a profile on it first");
   const key = NAV_KEYS[what];
   if (key) {
     pressKey(key);
@@ -359,14 +377,10 @@ async function navigate(what: string): Promise<CommandResult> {
     app.go({ name: "home" });
     return ok;
   }
-  if (what === "music") {
-    // Where the music IS, which is what this command means on a player: the
-    // track, not the library. Nothing playing has nothing to show.
-    if (useMusic.getState().queue.length === 0) return no("nothing is playing");
-    app.go({ name: "nowPlaying" });
-    return ok;
-  }
-  return no("this player does not support that command");
+  // Where the music IS, which is what this command means on a player: the
+  // track, not the library.
+  app.go({ name: "nowPlaying" });
+  return ok;
 }
 
 export async function runCompanionCommand(cmd: CompanionCommand): Promise<CommandResult> {
@@ -631,7 +645,21 @@ export function companionTimelines(server: ServerAddress): Timeline[] {
 const PENDING_CAST_KEY = "pending-cast";
 const PENDING_CAST_MAX_AGE_MS = 60_000;
 
+let pendingCastRun: Promise<void> | null = null;
+
 export async function runPendingCast(): Promise<void> {
+  // One at a time. The key is removed only after the read returns, so two
+  // overlapping calls both see the same command and both play it - and the
+  // effect that calls this can run twice (a remount in development, `picking`
+  // flipping back inside the read).
+  if (pendingCastRun) return pendingCastRun;
+  pendingCastRun = takePendingCast().finally(() => {
+    pendingCastRun = null;
+  });
+  return pendingCastRun;
+}
+
+async function takePendingCast(): Promise<void> {
   const raw = await readRaw(PENDING_CAST_KEY);
   if (raw === null) return;
   await removeRaw(PENDING_CAST_KEY);

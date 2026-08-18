@@ -418,4 +418,31 @@ describe("a command from a controller", () => {
     expect(res).toMatchObject({ ok: false });
     expect(useApp.getState().screen.name).toBe("home");
   });
+
+  it("will not drive a phone's D-pad into the profile picker", async () => {
+    // `select` on that screen chooses a person, and a PIN pad is a screen you
+    // can send digits at - so a controller with a D-pad could otherwise cross
+    // the boundary the playback paths refuse at.
+    const keys: string[] = [];
+    const onKey = (e: KeyboardEvent) => keys.push(e.key);
+    window.addEventListener("keydown", onKey);
+    useApp.setState({ screen: { name: "profiles" }, history: [] });
+
+    for (const what of ["moveDown", "select", "back", "home", "music"]) {
+      const res = await runCompanionCommand({ path: `/player/navigation/${what}`, params: {} });
+      expect(res, what).toMatchObject({ ok: false });
+    }
+    expect(keys, "no press may reach the picker").toEqual([]);
+    expect(launched, "and it must not take the screen on the way to refusing").toEqual([]);
+    expect(useApp.getState().screen.name, "nor navigate away from it").toBe("profiles");
+    window.removeEventListener("keydown", onKey);
+  });
+
+  it("refuses the music screen before taking the screen, not after", async () => {
+    __lifecycle.release("hidden");
+    useApp.setState({ screen: { name: "home" }, history: [] });
+    const res = await runCompanionCommand({ path: "/player/navigation/music", params: {} });
+    expect(res).toMatchObject({ ok: false });
+    expect(launched, "nothing was asked to come forward").toEqual([]);
+  });
 });

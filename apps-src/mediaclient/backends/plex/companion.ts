@@ -256,6 +256,10 @@ export function startCompanion(opts: {
         reportRefused = true;
         log.warn(`the server refused this player's status report (${res.status})`);
       }
+      // Cleared on the way back up, like the oversize flag below: said once per
+      // spell of trouble, not once per process. One transient refusal would
+      // otherwise silence a permanent one that starts an hour later.
+      if (res.ok) reportRefused = false;
       lastReport = body;
     } catch (e) {
       if (!reportRefused) {
