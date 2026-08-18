@@ -279,8 +279,8 @@ module.exports = (host) => {
   host.pairing.register("myapp", { page: (ctx) => "<html>…", routes: { "POST /save": … } });
   host.onConfigChange((sections) => { if (sections.includes("myapp")) reload(); });
   // host also gives: config, BrowserWindow, spawnService/stopService/restartService,
-  // childEnv, audioSink, showLauncher, navTo, appState, startHidden, switchOn,
-  // widget, idle, base, log
+  // childEnv, audioSink, showLauncher, navTo, appState, switchOn, widget, idle,
+  // base, log
   return {}; // optional { start, stop }
 };
 ```
@@ -299,61 +299,7 @@ host.widget.set({ title: "Now playing", subtitle: "Artist / Track" }); // upsert
 host.widget.clear(); // remove it
 host.navTo("myapp"); // foreground an app by id ("home" = the launcher)
 host.appState("myapp"); // { running, foreground } - is it alive, is it on screen
-host.startHidden("myapp"); // start it WITHOUT showing it (local apps only)
 ```
-
-### An app that is useful before anybody opens it
-
-Call `host.startHidden(id)` when your app's PAGE is the feature - a cast receiver
-that has to be registered and polling, say - because until somebody walks to the
-television and opens it, the box does not have that feature at all. It starts
-your app's window without putting it on screen. A plugin may only start its own
-app, so the id is a formality; pass it anyway, so the call also works on a shell
-that shipped the unscoped form.
-
-It is an ordinary background window afterwards: it costs memory, the box may evict
-it under pressure, Home brings it forward, and quitting it from HOME's Running row
-really quits it. It goes through the same window path as a normal launch, so the
-app gets nothing it would not have had. Local apps only - a remote site is somebody
-else's page and starting one unseen is a request nobody made.
-
-Do it a little after boot rather than at boot, and only while `host.idle()`: boot is
-the busiest the box ever is, and a second window in the middle of it costs the
-launcher's own first paint - which is the one thing somebody is watching then.
-`apps/mediaclient/plugin.js` is the worked example (20 s, retried each minute for an
-hour while the box is busy).
-
-A **remote** app can be foregrounded with launch data of its own, which is how a
-cast gets its session onto the page: the query is merged into the manifest's url by
-the shell (never the origin, the path or the fragment), and an app that is already
-open is re-pointed at it rather than merely re-shown.
-
-```js
-host.navTo("youtube", { query: "pairingCode=" + code + "&theme=cl" });
-```
-
-### Settings the box shows for your app (`switches`)
-
-For an app that cannot put a setting on its own screen — a `native` app has none of
-ours, and a remote site is not ours to add to. Declare it in the manifest
-(`switches`, see the tvbox repo's app-manifest doc) and read the value scoped to your
-own app:
-
-```js
-if (host.switchOn("cast")) startReceiver(); // the value in force (manifest default until flipped)
-host.onConfigChange(() => (host.switchOn("cast") ? startReceiver() : stopReceiver()));
-```
-
-It appears in Settings → Apps → **Extra app settings**. The shell stores it and knows
-nothing about what it does; your plugin is what acts on it, so a switch without a
-`service` is refused — and the box hides a switch whose plugin is not loaded, rather
-than offering a row that writes config and changes nothing.
-
-`default: true` is a decision, not a default: an app update can land unattended
-overnight, so it turns the thing on for every box with nobody pressing anything. For
-anything that opens a port, holds a radio or takes input from the network, declare it
-off. `apps/youtube` is the worked example — a DIAL cast receiver behind a switch that
-starts life off.
 
 ### Background work: wait for `host.idle()`
 

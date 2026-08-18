@@ -67,10 +67,12 @@ module.exports = (host) => {
     return locale.startsWith("hu") ? STR.hu : STR.en;
   }
 
-  const stopListening = () => {
+  /** `leaving` = for good, so the account is told this box is no longer a
+   *  player. A handover is not leaving: the app registers again at once. */
+  const stopListening = (leaving) => {
     const s = stopCompanion;
     stopCompanion = null;
-    if (s) s();
+    if (s) s(!!leaving);
   };
 
   /**
@@ -85,9 +87,30 @@ module.exports = (host) => {
    * happening, and answering by turning the app on would be a box that wakes up
    * to do nothing.
    */
+  // Who the receiver is currently signed in as, for the stash.
+  let session = null;
+
   const onCommand = (cmd) => {
-    if (String(cmd.path || "") !== "/player/playback/playMedia") return false;
-    if (!leaveCast(STORE, cmd)) {
+    const path = String(cmd.path || "");
+    // A phone that has just found the box subscribes BEFORE it casts, and the
+    // app's own receiver records what refusing that costs: the server answers
+    // the refusal 400 and the phone gives up - "it appears in the list but will
+    // not connect". Nothing has to be pushed for it either, because the player
+    // that answers from here is not playing anything; the app publishes its own
+    // state the moment it takes over.
+    if (path === "/player/timeline/subscribe" || path === "/player/timeline/unsubscribe") return "ok";
+    if (path !== "/player/playback/playMedia") return false;
+    // Asked again here rather than trusted from the last tick: the window can
+    // open in the fifteen seconds between two of them, and stashing a command
+    // for an app that is ALREADY running leaves it in the store unread - the
+    // app picks one up when it opens, not when it resumes. Refused instead, so
+    // the controller sees a failure it can retry rather than a success that
+    // played nothing.
+    if (appRunning()) {
+      host.log("mediaclient: the app opened while a cast was arriving; letting the controller retry");
+      return false;
+    }
+    if (!leaveCast(STORE, cmd, session.profileId)) {
       host.log("mediaclient: could not leave the cast for the app to pick up");
       return false;
     }
@@ -125,7 +148,7 @@ module.exports = (host) => {
     // The app is up: it is the player, and this must not be.
     if (appRunning()) {
       handedOver = false;
-      return stopListening();
+      return stopListening(false);
     }
     // Handed a cast a moment ago; the window is still coming up.
     if (handedOver || stopCompanion) return;
@@ -136,6 +159,7 @@ module.exports = (host) => {
     // in" and "the household said no".
     const found = readSession(STORE);
     if (!found) return;
+    session = found;
     stopCompanion = startCompanion({
       ...found,
       onCommand,
@@ -145,7 +169,9 @@ module.exports = (host) => {
       // stopped being a player until the shell restarted, with the setting
       // still reading on. Cleared instead, so the next tick re-reads the store
       // and tries again with whatever is in it.
-      onUnauthorized: () => {
+      // Whichever way the loop ends, the handle has to go with it or the next
+      // tick reads it as "already listening" for the life of the box.
+      onEnded: () => {
         stopCompanion = null;
       },
     });
@@ -161,7 +187,7 @@ module.exports = (host) => {
     stop() {
       if (timer) clearTimeout(timer);
       timer = null;
-      stopListening();
+      stopListening(true);
     },
   };
 };

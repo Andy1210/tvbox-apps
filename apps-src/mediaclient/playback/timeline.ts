@@ -65,9 +65,17 @@ export interface Timeline {
  * Sent as a list rather than inferred: a phone greys out what is missing, so
  * claiming a control this app does not implement is worse than omitting it -
  * the button is drawn, pressed, and nothing happens.
+ *
+ * Which is what four of them were doing. `shuffle` and `repeat` arrive as
+ * `setParameters`, and the two stream pickers as `setStreams`; neither path is
+ * handled, so both fell through to the refusal at the end of the switch. They
+ * are off this list until they are, and `volume` was never on it - the box's own
+ * mixer is the wrong thing to move (it would stay where a phone left it, with
+ * only Settings to put it back), and the right one is the television's, over the
+ * IR blaster, which is a different feature.
  */
-const MUSIC_CONTROLS = "playPause,stop,skipPrevious,skipNext,seekTo,stepBack,stepForward,shuffle,repeat";
-const VIDEO_CONTROLS = "playPause,stop,seekTo,stepBack,stepForward,subtitleStream,audioStream";
+const MUSIC_CONTROLS = "playPause,stop,skipPrevious,skipNext,seekTo,stepBack,stepForward";
+const VIDEO_CONTROLS = "playPause,stop,seekTo,stepBack,stepForward";
 
 /**
  * The play queue a cast arrived with.
@@ -83,8 +91,18 @@ const VIDEO_CONTROLS = "playPause,stop,seekTo,stepBack,stepForward,subtitleStrea
  */
 interface CastQueue {
   containerKey: string;
-  /** The queue's own id for each row, in the order the rows were handed over. */
-  entryIds?: string[];
+  /**
+   * The queue's own id for each row, keyed by the ITEM's id rather than by
+   * position.
+   *
+   * Position looked obvious and was wrong: the music store's index walks the
+   * SHUFFLED order while the server handed these over in its own, so turning
+   * shuffle on after a cast made the box name a row the phone was not
+   * highlighting. Keyed this way, a track that appears twice in a queue reports
+   * the first of its entries - which is wrong in a way nobody can see, rather
+   * than wrong by however far the shuffle moved it.
+   */
+  entryIds?: Record<string, string>;
   version?: string;
 }
 
@@ -117,8 +135,6 @@ export function stopped(type: TimelineKind): Timeline {
 
 export interface PlayingSnapshot {
   item: MediaItem | null;
-  /** Which row of the queue this is, so the report can name the entry. */
-  index?: number;
   state: TimelineState;
   positionMs: number;
   durationMs: number;
@@ -154,7 +170,7 @@ export function timelineFor(type: TimelineKind, snap: PlayingSnapshot, server: S
     line.containerKey = queue.containerKey;
     line.playQueueID = queueIdOf(queue.containerKey);
     if (queue.version) line.playQueueVersion = queue.version;
-    const entry = queue.entryIds?.[snap.index ?? -1];
+    const entry = queue.entryIds?.[snap.item.id];
     if (entry) line.playQueueItemID = entry;
   }
   if (snap.shuffle !== undefined) line.shuffle = snap.shuffle ? 1 : 0;
@@ -178,7 +194,18 @@ export function timelineFor(type: TimelineKind, snap: PlayingSnapshot, server: S
 /** The document a controller reads. Attributes only, like the reference. */
 export function timelineXml(lines: Timeline[], location = "navigation"): string {
   const attr = (v: string): string =>
-    v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    v
+      // A control character makes the whole document unparseable and the server
+      // drops it, which silently ends this box's status reporting - the reason
+      // the command-response path strips them too. These strings come from the
+      // SERVER now (the queue's own ids), and this app signs into servers it
+      // does not own.
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
   const one = (t: Timeline): string => {
     const parts: string[] = [];
     for (const [k, v] of Object.entries(t)) {

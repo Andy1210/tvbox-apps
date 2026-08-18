@@ -35,6 +35,8 @@ function backend(over: Record<string, unknown> = {}): unknown {
       items: TRACKS,
       startIndex: 1,
       // The queue's own ids, which is what a controller matches against.
+      // In the SERVER's order; the report keys them by item, because the store's
+      // index walks the shuffled one.
       entryIds: ["q1", "q2", "q3"],
       version: "3",
     }),
@@ -343,7 +345,7 @@ describe("a cast of music", () => {
 
     const line = timelineFor(
       "music",
-      { item: TRACKS[1] as unknown as MediaItem, index: 1, state: "playing", positionMs: 0, durationMs: 1 },
+      { item: TRACKS[1] as unknown as MediaItem, state: "playing", positionMs: 0, durationMs: 1 },
       { machineIdentifier: "M", baseUrl: "http://s:32400" },
     );
     expect(line.playQueueItemID, "the queue's own id for that row").toBe("q2");

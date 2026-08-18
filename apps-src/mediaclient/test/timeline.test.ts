@@ -43,12 +43,8 @@ describe("companion timeline", () => {
   });
 
   it("carries the queue a cast arrived with", () => {
-    rememberCastQueue("music", "/playQueues/20426", { entryIds: ["a", "9911"], version: "7" });
-    const line = timelineFor(
-      "music",
-      { item: track("65823"), index: 1, state: "playing", positionMs: 0, durationMs: 1 },
-      server,
-    );
+    rememberCastQueue("music", "/playQueues/20426", { entryIds: { "65823": "9911" }, version: "7" });
+    const line = timelineFor("music", { item: track("65823"), state: "playing", positionMs: 0, durationMs: 1 }, server);
     expect(line.containerKey).toBe("/playQueues/20426");
     expect(line.playQueueID).toBe("20426");
     // WHICH row is playing, by the queue's own id for it - a controller has no
@@ -110,10 +106,16 @@ describe("companion timeline", () => {
     // draws a button that answers a press with silence.
     const music = timelineFor("music", { item: track("1"), state: "playing", positionMs: 0, durationMs: 1 }, server);
     expect(music.controllable).toContain("skipNext");
-    expect(music.controllable).toContain("shuffle");
     const video = timelineFor("video", { item: track("1"), state: "playing", positionMs: 0, durationMs: 1 }, server);
-    expect(video.controllable).not.toContain("shuffle");
-    expect(video.controllable).toContain("subtitleStream");
+    expect(video.controllable).not.toContain("skipNext");
+    // Nothing without a handler. `shuffle`/`repeat` arrive as `setParameters`
+    // and the stream pickers as `setStreams`, and neither is implemented - this
+    // assertion pinned the claim rather than the behaviour before.
+    for (const claimed of [music.controllable, video.controllable]) {
+      for (const absent of ["shuffle", "repeat", "subtitleStream", "audioStream", "volume"]) {
+        expect(claimed, absent).not.toContain(absent);
+      }
+    }
   });
 
   it("rounds the clock, because the protocol counts whole milliseconds", () => {

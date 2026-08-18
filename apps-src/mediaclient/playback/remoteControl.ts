@@ -222,7 +222,16 @@ async function startMusic(
   // command: the command names ONE entry, and the report has to name whichever
   // one is playing as the album moves on. (Where the read failed there is
   // nothing to name, and the report leaves the field out.)
-  if (qid) rememberCastQueue("music", `/playQueues/${qid}`, { entryIds, version });
+  if (qid) {
+    // Keyed by the item, not by position: the store's index walks the shuffled
+    // order and these came back in the server's.
+    const byItem: Record<string, string> = {};
+    tracks.forEach((t, i) => {
+      const id = entryIds?.[i];
+      if (id && byItem[t.id] === undefined) byItem[t.id] = id;
+    });
+    rememberCastQueue("music", `/playQueues/${qid}`, { entryIds: byItem, version });
+  }
   // No "went off screen" check after the start, unlike the film path, and the
   // difference is real rather than an oversight: a film owns the SCREEN, so one
   // playing behind the launcher is a box lying about what it is showing, while
@@ -616,7 +625,6 @@ export function companionTimelines(server: ServerAddress): Timeline[] {
       "music",
       {
         item: track ?? null,
-        index: music.index,
         state: music.buffering && music.state === "playing" ? "buffering" : music.state,
         positionMs: music.positionMs,
         durationMs: music.durationMs,
@@ -678,13 +686,23 @@ async function takePendingCast(): Promise<void> {
   const raw = await readRaw(PENDING_CAST_KEY);
   if (raw === null) return;
   await removeRaw(PENDING_CAST_KEY);
-  let pending: { at?: number; path?: string; params?: Record<string, string> };
+  let pending: { at?: number; profileId?: string; path?: string; params?: Record<string, string> };
   try {
     pending = JSON.parse(raw);
   } catch (e) {
     return;
   }
   if (!pending.path || !pending.params) return;
+  // Whose it was. The box answered Plex as the last person signed in, and this
+  // runs when somebody has been chosen - which need not be the same person. A
+  // cast addressed to one profile must not play under another's token, history
+  // and all, past a picker it never saw. An older stash has no profile on it
+  // and is refused rather than guessed at.
+  const who = useApp.getState().session?.profileId ?? "";
+  if ((pending.profileId ?? "") !== who) {
+    log.info("a cast was waiting here for somebody else; ignored");
+    return;
+  }
   const age = Date.now() - Number(pending.at || 0);
   if (!Number.isFinite(age) || age < 0 || age > PENDING_CAST_MAX_AGE_MS) {
     log.info("a cast was waiting here but it is stale; ignored");
