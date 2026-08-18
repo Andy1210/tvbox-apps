@@ -1,0 +1,65 @@
+{
+  "id": "youtube",
+  "manifestVersion": 1,
+  "name": "YouTube",
+  "version": "1.1.1",
+  "changelog": [
+    {
+      "version": "1.1.1",
+      "notes": "Az átküldés most már tényleg működik: a telefon YouTube-alkalmazása a saját nevében jelentkezik be a boxnál, és ezt eddig visszautasította - így a telefon megtalálta a TV-t, de nem tudott hozzá kapcsolódni. / Casting really works now: the YouTube app on a phone identifies itself by name when it talks to the box, and that was being refused - so the phone found the TV but could not connect to it."
+    },
+    {
+      "version": "1.1.0",
+      "notes": "Küldj videót a telefonodról a TV-re. Kapcsold be: Beállítások → Alkalmazások → Alkalmazások extra beállításai → „Átküldés telefonról”. Ezután a box megjelenik a telefon YouTube-appjában; koppints ott az átküldés ikonra, és a videó itt indul el, akkor is, ha a YouTube nincs nyitva. Amíg be van kapcsolva, bárki ugyanezen a wifin átküldhet, és az félbeszakítja, amit épp néztek. / Send a video from your phone to the TV. Turn it on under Settings → Apps → Extra app settings → \"Cast from phone\". The box then appears in the YouTube app on your phone; tap the cast icon there and the video starts here, even if YouTube is not open. While it is on, anyone on the same wifi can send to the TV, interrupting what is playing."
+    },
+    {
+      "version": "1.0.0",
+      "notes": "YouTube's own TV interface on the box, driven by the remote."
+    }
+  ],
+  "type": "webclient",
+  "status": "ready",
+  "service": "youtube",
+  "switches": [
+    {
+      "key": "cast",
+      "label": {
+        "hu": "Átküldés telefonról",
+        "en": "Cast from phone"
+      },
+      "hint": {
+        "hu": "A telefon YouTube-appjában a box nevén jelenik meg. Bárki a wifin átküldhet ide, és az félbeszakítja, amit épp néztek.",
+        "en": "It appears in your phone's YouTube app under the box's name. Anyone on the wifi can send to it, interrupting what is playing."
+      },
+      "default": false
+    }
+  ],
+  "accent": "#ff0033",
+  "icon": "<svg viewBox='0 0 28.57 20'><path d='M27.9727 3.12324C27.6435 1.89323 26.6768 0.926623 25.4468 0.597366C23.2197 2.24288e-07 14.285 0 14.285 0C14.285 0 5.35042 2.24288e-07 3.12323 0.597366C1.89323 0.926623 0.926623 1.89323 0.597366 3.12324C2.24288e-07 5.35042 0 10 0 10C0 10 2.24288e-07 14.6496 0.597366 16.8768C0.926623 18.1068 1.89323 19.0734 3.12323 19.4026C5.35042 20 14.285 20 14.285 20C14.285 20 23.2197 20 25.4468 19.4026C26.6768 19.0734 27.6435 18.1068 27.9727 16.8768C28.5701 14.6496 28.5701 10 28.5701 10C28.5701 10 28.5677 5.35042 27.9727 3.12324Z' fill='#FF0000'/><path d='M11.4253 14.2854L18.8477 10.0004L11.4253 5.71533V14.2854Z' fill='#fff'/></svg>",
+  "tagline": {
+    "hu": "Videók",
+    "en": "Videos"
+  },
+  "description": {
+    "en": "The full YouTube living-room experience: browse, search and play, all driven by the TV remote. Sign in to see your subscriptions and history.",
+    "hu": "A teljes YouTube nappali-élmény: böngészés, keresés és lejátszás, mind a TV-távirányítóval. Jelentkezz be a feliratkozásaidhoz és az előzményeidhez."
+  },
+  "runtime": {
+    "serve": "remote",
+    "url": "https://www.youtube.com/tv",
+    "userAgent": "Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.5) AppleWebKit/537.36 (KHTML, like Gecko) 94.0.4606.31/6.5 TV Safari/537.36",
+    "origins": [
+      "youtube.com",
+      "google.com",
+      "gstatic.com",
+      "googleapis.com",
+      "ggpht.com",
+      "googlevideo.com",
+      "ytimg.com",
+      "googleusercontent.com",
+      "youtube-nocookie.com"
+    ],
+    "textInput": "off",
+    "capabilities": ["nav"]
+  }
+}

@@ -53,13 +53,34 @@ if (!existsSync(appsDir)) {
 const errors = [];
 const err = (f, msg) => errors.push(`${f}: ${msg}`);
 
+// A user-facing string: one string, or a per-locale map whose LEAVES are strings.
+// Same rule the shell enforces (install.js), and for the same reason: the launcher
+// renders these as React children, and a nested object there takes the whole 10-foot
+// UI down to the root error boundary. Bounded because a row on a television has one
+// line for a label.
+function localeTextOk(v, max) {
+  if (typeof v === "string") return v.length > 0 && v.length <= max;
+  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+  const vals = Object.values(v);
+  return vals.length > 0 && vals.every((s) => typeof s === "string" && s.length > 0 && s.length <= max);
+}
+
 // Mirror of the shell's validateManifest + the registry trust rules.
 function validate(m, f, id) {
   if (typeof m.id !== "string" || !/^[a-z0-9_-]+$/.test(m.id)) err(f, "id must match [a-z0-9_-]+");
   if (m.id !== id) err(f, "manifest id must equal the file/dir name");
   if ((m.manifestVersion ?? 1) !== 1) err(f, "manifestVersion must be 1");
   if (m.status !== "ready" && m.status !== "coming_soon") err(f, "status must be ready|coming_soon");
-  if (!m.name) err(f, "missing name");
+  // Every user-facing string, on the same rule the box enforces: a nested object here
+  // renders as a React child and takes the whole 10-foot UI down to the root error
+  // boundary - and a name does it on the HOME grid, i.e. the box's first screen. The
+  // lengths matter for a different reason: over them the BOX refuses the manifest, and
+  // a refused manifest takes the app off every box that installed it.
+  if (!localeTextOk(m.name, 80)) err(f, "name must be a string (or locale map) 1..80 chars");
+  if (m.tagline !== undefined && !localeTextOk(m.tagline, 240))
+    err(f, "tagline must be a string (or locale map) 1..240 chars");
+  if (m.description !== undefined && !localeTextOk(m.description, 1200))
+    err(f, "description must be a string (or locale map) 1..1200 chars");
   if (m.accent && !/^#[0-9a-fA-F]{3,8}$/.test(m.accent)) err(f, "accent must be a hex color");
   if (m.type !== "webclient" && m.type !== "native") err(f, "type must be webclient|native");
   if (m.type === "native") {
@@ -84,7 +105,10 @@ function validate(m, f, id) {
       const declared = m.requires && m.requires.flatpak;
       if (declared !== undefined && !Array.isArray(declared)) err(f, "requires.flatpak must be an array");
       if (ref && !(Array.isArray(declared) && declared.includes(ref)))
-        err(f, "runtime.native.flatpak must also be listed in requires.flatpak (so the tile greys out until installed)");
+        err(
+          f,
+          "runtime.native.flatpak must also be listed in requires.flatpak (so the tile greys out until installed)",
+        );
     }
   } else {
     const serve = m.runtime && m.runtime.serve;
@@ -100,8 +124,7 @@ function validate(m, f, id) {
   if (bridge !== undefined) {
     if (typeof bridge !== "string" || !/^\.\/[a-z0-9_-]+\.js$/.test(bridge))
       err(f, "runtime.bridge must be ./<file>.js shipped by the package");
-    else if (!existsSync(join(appsDir, id, bridge.slice(2))))
-      err(f, `runtime.bridge ${bridge} is not in the package`);
+    else if (!existsSync(join(appsDir, id, bridge.slice(2)))) err(f, `runtime.bridge ${bridge} is not in the package`);
   }
   if (m.pairing !== undefined) {
     // A pairing entry only makes sense with a plugin to register the provider.
@@ -109,9 +132,34 @@ function validate(m, f, id) {
     else
       for (const p of m.pairing) {
         if (!p || !/^[a-z0-9_-]{1,32}$/.test(String(p.kind || ""))) err(f, "bad pairing[].kind");
-        if (!p || !p.label) err(f, "pairing[] needs a label");
+        if (!localeTextOk(p && p.label, 80)) err(f, "pairing[].label must be a string (or locale map) 1..80 chars");
       }
     if (!m.service) err(f, "pairing needs a `service` plugin to register the provider");
+  }
+  if (m.switches !== undefined) {
+    // On/off settings the BOX shows for an app whose own screen cannot hold them (a
+    // native app, or a remote site that is not ours). The key becomes a config key
+    // and an object key on the box, so the charset is pinned and the names that are
+    // not properties when assigned to a plain object are refused.
+    if (!Array.isArray(m.switches) || m.switches.length > 8) err(f, "switches must be an array of at most 8");
+    else {
+      const seen = new Set();
+      for (const s of m.switches) {
+        const key = s && String(s.key || "");
+        if (!key || !/^[a-z0-9_-]{1,32}$/.test(key) || ["__proto__", "constructor", "prototype"].includes(key))
+          err(f, "bad switches[].key");
+        else if (seen.has(key)) err(f, "duplicate switches[].key " + key);
+        else seen.add(key);
+        if (!localeTextOk(s && s.label, 80)) err(f, "switches[].label must be a string (or locale map) <= 80 chars");
+        if (s && s.hint !== undefined && !localeTextOk(s.hint, 240))
+          err(f, "switches[].hint must be a string (or locale map) <= 240 chars");
+        if (s && s.default !== undefined && typeof s.default !== "boolean")
+          err(f, "switches[].default must be a boolean");
+      }
+    }
+    // The shell acts on none of them - the app's own plugin reads the value - so a
+    // switch without a service is a row that does nothing.
+    if (!m.service) err(f, "switches need a `service` plugin to act on them");
   }
   // Trust model: CURATED repo, every app is merge-reviewed, so it may carry a
   // `service` plugin (host-side code) or a `builtin` view. The only hard line is
