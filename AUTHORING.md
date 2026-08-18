@@ -304,10 +304,12 @@ host.startHidden("myapp"); // start it WITHOUT showing it (local apps only)
 
 ### An app that is useful before anybody opens it
 
-`host.startHidden(id)` starts an app's window without putting it on screen. For an
-app whose page IS the feature - a cast receiver that has to be registered and
-polling, say - because until somebody walks to the television and opens it, the
-box does not have that feature at all.
+Call `host.startHidden(id)` when your app's PAGE is the feature - a cast receiver
+that has to be registered and polling, say - because until somebody walks to the
+television and opens it, the box does not have that feature at all. It starts
+your app's window without putting it on screen. A plugin may only start its own
+app, so the id is a formality; pass it anyway, so the call also works on a shell
+that shipped the unscoped form.
 
 It is an ordinary background window afterwards: it costs memory, the box may evict
 it under pressure, Home brings it forward, and quitting it from HOME's Running row

@@ -299,6 +299,19 @@ function music(): boolean {
   return usePlayer.getState().current === null && m.queue.length > 0 && m.state !== "stopped";
 }
 
+/**
+ * Whether PLAY belongs to the music player, which is a wider question.
+ *
+ * `stop()` keeps the queue and sets the state to "stopped", so after a phone
+ * presses Stop the box still holds an album with a cursor in it - and the same
+ * phone's Play was answered "nothing is playing" while its own screen showed the
+ * album. Pressing play on a stopped queue means start it again from where the
+ * cursor is, which is what pressing play on the television does.
+ */
+function musicToResume(): boolean {
+  return usePlayer.getState().current === null && useMusic.getState().queue.length > 0;
+}
+
 export async function runCompanionCommand(cmd: CompanionCommand): Promise<CommandResult> {
   const p = usePlayer.getState();
   switch (cmd.path) {
@@ -373,8 +386,12 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       return ok;
     }
     case "/player/playback/play":
-      if (music()) {
-        if (useMusic.getState().state === "paused") useMusic.getState().toggle();
+      if (musicToResume()) {
+        const m = useMusic.getState();
+        if (m.state === "paused") m.toggle();
+        // Stopped, with the queue still there: start it again where the cursor
+        // is. `playAt` is what the television's own play does from this state.
+        else if (m.state === "stopped") await m.playAt(m.index);
         return ok;
       }
       if (!p.current) return no("nothing is playing");

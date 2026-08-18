@@ -77,13 +77,15 @@ module.exports = (host) => {
       free = true;
     }
     if (!free) {
-      waitedMs += RETRY_MS;
+      // Checked BEFORE the increment, or the last check happens a minute short
+      // of the hour and the one AT the hour never runs.
       if (waitedMs >= GIVE_UP_MS) {
         host.log("mediaclient: the box has been busy for an hour; looking again later");
         waitedMs = 0;
         timer = setTimeout(tryStart, WATCH_MS);
         return;
       }
+      waitedMs += RETRY_MS;
       timer = setTimeout(tryStart, RETRY_MS);
       return;
     }

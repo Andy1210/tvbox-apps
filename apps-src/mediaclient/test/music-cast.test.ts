@@ -351,4 +351,21 @@ describe("a cast of music", () => {
     );
     expect(ok.playQueueItemID).toBe("9911");
   });
+
+  it("plays again after a phone stopped it, because the queue is still there", async () => {
+    // `stop()` keeps the queue and sets the state to stopped, so the box still
+    // holds the album with a cursor in it - and the phone showing that album was
+    // answered "nothing is playing" when it pressed play.
+    await cast({});
+    expect(started.length).toBeGreaterThan(0);
+    await runCompanionCommand({ path: "/player/playback/stop", params: {} });
+    expect(useMusic.getState().state).toBe("stopped");
+    expect(useMusic.getState().queue.length, "the album is still held").toBeGreaterThan(0);
+
+    const before = started.length;
+    const res = await runCompanionCommand({ path: "/player/playback/play", params: {} });
+
+    expect(res).toEqual({ ok: true });
+    expect(started.length, "it starts again where the cursor is").toBeGreaterThan(before);
+  });
 });
