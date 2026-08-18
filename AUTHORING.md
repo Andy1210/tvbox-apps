@@ -279,7 +279,8 @@ module.exports = (host) => {
   host.pairing.register("myapp", { page: (ctx) => "<html>…", routes: { "POST /save": … } });
   host.onConfigChange((sections) => { if (sections.includes("myapp")) reload(); });
   // host also gives: config, BrowserWindow, spawnService/stopService/restartService,
-  // childEnv, audioSink, showLauncher, navTo, appState, switchOn, widget, idle, base, log
+  // childEnv, audioSink, showLauncher, navTo, appState, startHidden, switchOn,
+  // widget, idle, base, log
   return {}; // optional { start, stop }
 };
 ```
@@ -298,7 +299,27 @@ host.widget.set({ title: "Now playing", subtitle: "Artist / Track" }); // upsert
 host.widget.clear(); // remove it
 host.navTo("myapp"); // foreground an app by id ("home" = the launcher)
 host.appState("myapp"); // { running, foreground } - is it alive, is it on screen
+host.startHidden("myapp"); // start it WITHOUT showing it (local apps only)
 ```
+
+### An app that is useful before anybody opens it
+
+`host.startHidden(id)` starts an app's window without putting it on screen. For an
+app whose page IS the feature - a cast receiver that has to be registered and
+polling, say - because until somebody walks to the television and opens it, the
+box does not have that feature at all.
+
+It is an ordinary background window afterwards: it costs memory, the box may evict
+it under pressure, Home brings it forward, and quitting it from HOME's Running row
+really quits it. It goes through the same window path as a normal launch, so the
+app gets nothing it would not have had. Local apps only - a remote site is somebody
+else's page and starting one unseen is a request nobody made.
+
+Do it a little after boot rather than at boot, and only while `host.idle()`: boot is
+the busiest the box ever is, and a second window in the middle of it costs the
+launcher's own first paint - which is the one thing somebody is watching then.
+`apps/mediaclient/plugin.js` is the worked example (20 s, retried each minute for an
+hour while the box is busy).
 
 A **remote** app can be foregrounded with launch data of its own, which is how a
 cast gets its session onto the page: the query is merged into the manifest's url by
