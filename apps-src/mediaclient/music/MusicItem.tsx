@@ -162,7 +162,14 @@ export function MusicItem({
         </div>
       </div>
 
-      <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto pb-[4vh]">
+      {/* px, for the same reason the queue has py: the focus ring scales a row
+          by 4%, and a scroll container clips BOTH axes - `overflow-y: auto`
+          with x left visible computes to auto, so the growth on either side of
+          a focused row was cropped off. 2vw against rows about 92vw wide,
+          which is the ~1.8vw each side that 4% comes to. The songs list has
+          carried the same padding all along, which is why only this screen and
+          the queue showed it. */}
+      <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-[2vw] pb-[4vh]">
         {kind === "artist" && albums.length > 0 && (
           <AlbumList
             albums={albums}

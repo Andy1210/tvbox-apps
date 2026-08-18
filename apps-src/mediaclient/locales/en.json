@@ -230,8 +230,7 @@
     "songsN": "{n} songs",
     "stop": "Stop",
     "trackFailed": "This track could not be played: {title}",
-    "tracksN": "{n} tracks",
-    "upNext": "Up next"
+    "tracksN": "{n} tracks"
   },
   "cast": {
     "title": "Cast from phone",

@@ -5,8 +5,12 @@
     "hu": "Média",
     "en": "Media"
   },
-  "version": "0.60.0",
+  "version": "0.60.1",
   "changelog": [
+    {
+      "version": "0.60.1",
+      "notes": "The song you are on no longer has its edges cut off in an album or an artist, and the playing queue keeps what has already played - so you can go back to a song that has just gone past."
+    },
     {
       "version": "0.60.0",
       "notes": "Send music or a film here from the Plex app on your phone - it works whether or not this app is open, and the phone gets a full remote, arrows and all. Turn it off in this app's own Settings, under \"Cast from Plex\"."
