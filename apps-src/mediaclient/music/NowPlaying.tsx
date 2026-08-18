@@ -36,6 +36,14 @@ import {
 
 /** How much of the queue is drawn. See the note where it is used. */
 const QUEUE_ROWS = 60;
+/**
+ * How many played rows the window keeps behind the cursor.
+ *
+ * Enough to see where you came from without spending the window on it: the
+ * point of showing them at all is that the song that just went past is one
+ * press away, not that the whole history is on screen.
+ */
+const QUEUE_LEAD = 6;
 
 /**
  * How far one press moves the scrub cursor.
@@ -53,6 +61,15 @@ export function NowPlaying(): React.JSX.Element {
   const back = useApp((s) => s.back);
   const queue = useMusic((s) => s.queue);
   const index = useMusic((s) => s.index);
+  /**
+   * Where the LIST is looking, which is not where the music is.
+   *
+   * Follows the playing track until somebody moves focus, and follows the focus
+   * after that - the same anchor the songs list uses, and for the same reason: a
+   * window that follows playback alone scrolls out from under the person
+   * reading it.
+   */
+  const [queueCursor, setQueueCursor] = useState<number | null>(null);
   const state = useMusic((s) => s.state);
   const positionMs = useMusic((s) => s.positionMs);
   const durationMs = useMusic((s) => s.durationMs);
@@ -70,6 +87,8 @@ export function NowPlaying(): React.JSX.Element {
   const [hint, setHint] = useState<string | null>(null);
 
   const item = queue[index];
+  const at = queueCursor ?? index;
+  const qStart = Math.max(0, Math.min(at - QUEUE_LEAD, Math.max(0, queue.length - QUEUE_ROWS)));
   // Before either early return below: a hook cannot be called conditionally, and
   // both the keyboard and the empty state return ahead of the artwork.
   const cover = useArtwork(
@@ -195,24 +214,30 @@ export function NowPlaying(): React.JSX.Element {
 
       <div className="flex w-[34vw] min-w-0 flex-col">
         <h2 className="shrink-0 px-[1.5vw] pb-[1vh] text-[2.4vh] text-fg-dim">
-          {t("music.upNext")} · {Math.max(0, queue.length - index - 1)}
+          {t("music.queue")} · {index + 1}/{queue.length}
         </h2>
-        {/* py, because the focus ring scales a row by 4% and the container's own
-            edge clipped the top one in half. */}
-        <ul className="no-scrollbar min-h-0 flex-1 overflow-y-auto py-[0.6vh]">
-          {/* Bounded. A shuffle of this library is 572 rows, and every one of
-              them would otherwise be a mounted focusable that spatial navigation
-              measures on each press - the songs list windows for the same
-              reason. What is past here is still in the queue and still plays; it
-              is only not drawn. */}
-          {queue.slice(index, index + QUEUE_ROWS).map((x, i) => (
-            <li key={`${x.id}-${index + i}`} style={{ height: `${TRACK_ROW_VH}vh` }}>
+        {/* py and px, because the focus ring scales a row by 4% and a scroll
+            container clips both axes: without them the top row was cut in half
+            and the focused one lost a slice off each side. */}
+        <ul className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-[1vw] py-[0.6vh]">
+          {/* Bounded, and windowed around the CURSOR rather than around what is
+              playing. A shuffle of this library is 572 rows, and every one of
+              them would otherwise be a mounted focusable that spatial
+              navigation measures on each press - the songs list windows for the
+              same reason, and learns where it is the same way, from `onFocused`
+              rather than by counting presses.
+              Anchored on the playing track it drew only what was ahead, so a
+              song that had just gone past could not be reached at all: the way
+              back to it was off the list. */}
+          {queue.slice(qStart, qStart + QUEUE_ROWS).map((x, i) => (
+            <li key={`${x.id}-${qStart + i}`} style={{ height: `${TRACK_ROW_VH}vh` }}>
               <TrackRow
                 item={x}
-                focusKey={`nq-${index + i}`}
-                ordinal={index + i + 1}
-                playing={i === 0}
-                onEnter={() => void music.playAt(index + i)}
+                focusKey={`nq-${qStart + i}`}
+                ordinal={qStart + i + 1}
+                playing={qStart + i === index}
+                onFocused={() => setQueueCursor(qStart + i)}
+                onEnter={() => void music.playAt(qStart + i)}
               />
             </li>
           ))}
