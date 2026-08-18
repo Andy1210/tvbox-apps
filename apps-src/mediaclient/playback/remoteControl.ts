@@ -312,6 +312,63 @@ function musicToResume(): boolean {
   return usePlayer.getState().current === null && useMusic.getState().queue.length > 0;
 }
 
+/**
+ * The D-pad a phone draws once this player claims `navigation`.
+ *
+ * The presses arrive as commands and leave as key events on this window, which
+ * is what every screen here already listens to - the spatial navigation, the
+ * player's own overlay, the on-screen keyboard. Sending keys rather than calling
+ * into each screen is what keeps a phone and the remote in the room doing
+ * exactly the same thing, including on a screen written after this.
+ *
+ * `back` and `home` are the two that are not keys: Back is the app's own history
+ * (the box's Back key is caught by the compositor before a page sees it), and
+ * Home means this app's home screen - not the box's launcher, which is a place a
+ * phone controlling the media app has no business sending it.
+ */
+const NAV_KEYS: Record<string, string> = {
+  moveUp: "ArrowUp",
+  moveDown: "ArrowDown",
+  moveLeft: "ArrowLeft",
+  moveRight: "ArrowRight",
+  select: "Enter",
+};
+
+function pressKey(key: string): void {
+  if (typeof window === "undefined") return;
+  for (const type of ["keydown", "keyup"] as const) {
+    window.dispatchEvent(new KeyboardEvent(type, { key, code: key, bubbles: true, cancelable: true }));
+  }
+}
+
+async function navigate(what: string): Promise<CommandResult> {
+  // On screen first: a D-pad press means "move what I am looking at", and a
+  // hidden window would answer ok while nothing moved.
+  if (!(await bringToFront())) return no("the media app could not come to the screen");
+  const key = NAV_KEYS[what];
+  if (key) {
+    pressKey(key);
+    return ok;
+  }
+  const app = useApp.getState();
+  if (what === "back") {
+    app.back();
+    return ok;
+  }
+  if (what === "home") {
+    app.go({ name: "home" });
+    return ok;
+  }
+  if (what === "music") {
+    // Where the music IS, which is what this command means on a player: the
+    // track, not the library. Nothing playing has nothing to show.
+    if (useMusic.getState().queue.length === 0) return no("nothing is playing");
+    app.go({ name: "nowPlaying" });
+    return ok;
+  }
+  return no("this player does not support that command");
+}
+
 export async function runCompanionCommand(cmd: CompanionCommand): Promise<CommandResult> {
   const p = usePlayer.getState();
   switch (cmd.path) {
@@ -494,6 +551,15 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
     case "/player/timeline/subscribe":
     case "/player/timeline/unsubscribe":
       return ok;
+    case "/player/navigation/moveUp":
+    case "/player/navigation/moveDown":
+    case "/player/navigation/moveLeft":
+    case "/player/navigation/moveRight":
+    case "/player/navigation/select":
+    case "/player/navigation/back":
+    case "/player/navigation/home":
+    case "/player/navigation/music":
+      return await navigate(cmd.path.slice("/player/navigation/".length));
     default:
       log.info(`companion command not supported: ${cmd.path}`);
       return no("this player does not support that command");

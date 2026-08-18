@@ -25,10 +25,26 @@ import { log, redactString } from "../../redact";
  *   - argument `protocolCapabilities`
  * Nothing in the 400 body says which, so this list is the whole of it.
  */
+/**
+ * What this player says it is, and what it can be asked to do.
+ *
+ * Read off the working client rather than chosen: Plex's own HTPC app on one of
+ * the boxes registers `protocolVersion: 2` with
+ * `timeline,playback,navigation,playqueues,provider-playback`, and a phone
+ * controlling it draws a full remote. This app said `protocolVersion: 1` with
+ * `playback,playqueues,timeline` - measured side by side on the same server -
+ * and a phone that cast to it connected, played the music, and drew no controls
+ * at all.
+ *
+ * `provider-playback` is deliberately NOT claimed: it means the player can be
+ * handed something from Plex's own providers rather than from the server's
+ * library, which this app cannot do. Claiming a capability that answers a
+ * command with a refusal is worse than not claiming it.
+ */
 const POLL_ARGS = {
   deviceClass: "stb",
-  protocolCapabilities: "playback,playqueues,timeline",
-  protocolVersion: "1",
+  protocolCapabilities: "timeline,playback,navigation,playqueues",
+  protocolVersion: "2",
 };
 
 /**

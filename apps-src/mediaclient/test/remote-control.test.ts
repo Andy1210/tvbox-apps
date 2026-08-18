@@ -376,4 +376,46 @@ describe("a command from a controller", () => {
     });
     expect(notified.length, "and one when it did").toBe(1);
   });
+
+  it("turns a phone's D-pad into the keys every screen already listens to", async () => {
+    // The player claims `navigation` now, so a phone draws a D-pad - and a claim
+    // that answers with a refusal is worse than no claim. Keys rather than calls
+    // into each screen, so a phone and the remote in the room do the same thing.
+    const keys: string[] = [];
+    const onKey = (e: KeyboardEvent) => keys.push(e.key);
+    window.addEventListener("keydown", onKey);
+
+    for (const [path, key] of [
+      ["moveUp", "ArrowUp"],
+      ["moveDown", "ArrowDown"],
+      ["moveLeft", "ArrowLeft"],
+      ["moveRight", "ArrowRight"],
+      ["select", "Enter"],
+    ] as const) {
+      const res = await runCompanionCommand({ path: `/player/navigation/${path}`, params: {} });
+      expect(res, path).toEqual({ ok: true });
+      expect(keys.at(-1), path).toBe(key);
+    }
+    window.removeEventListener("keydown", onKey);
+  });
+
+  it("sends Back and Home through the app rather than as keys", async () => {
+    // The box's Back never reaches a page (the compositor takes it), and Home
+    // here means this app's home screen - not the launcher, which is not a
+    // phone controlling the media app's business.
+    useApp.setState({ screen: { name: "search" }, history: [{ name: "home" }] });
+    expect(await runCompanionCommand({ path: "/player/navigation/back", params: {} })).toEqual({ ok: true });
+    expect(useApp.getState().screen.name).toBe("home");
+
+    useApp.setState({ screen: { name: "search" }, history: [] });
+    expect(await runCompanionCommand({ path: "/player/navigation/home", params: {} })).toEqual({ ok: true });
+    expect(useApp.getState().screen.name).toBe("home");
+  });
+
+  it("refuses the music screen when there is no music", async () => {
+    useApp.setState({ screen: { name: "home" }, history: [] });
+    const res = await runCompanionCommand({ path: "/player/navigation/music", params: {} });
+    expect(res).toMatchObject({ ok: false });
+    expect(useApp.getState().screen.name).toBe("home");
+  });
 });
