@@ -229,5 +229,9 @@
     "trackFailed": "This track could not be played: {title}",
     "tracksN": "{n} tracks",
     "upNext": "Up next"
+  },
+  "cast": {
+    "title": "Cast from phone",
+    "took": "Someone sent this from their phone - the media app is taking the screen."
   }
 }

@@ -16,6 +16,7 @@ import { rememberedVersion } from "../chosenVersion";
 import type { CommandResult, CompanionCommand } from "../backends/plex/companion";
 import type { MediaBackend, MediaItem } from "../backends/types";
 import { log } from "../redact";
+import { translate, useLocaleStore } from "@sdk";
 import { rememberCastQueue, stopped, timelineFor, type ServerAddress, type Timeline } from "./timeline";
 
 /**
@@ -36,10 +37,68 @@ function arg(cmd: CompanionCommand, name: string): string | undefined {
   return cmd.params[prefixed] ?? cmd.params[name];
 }
 
+/** A server-side id as the protocol writes them, or nothing. */
+function digits(v: string | undefined): string | undefined {
+  return v && /^\d{1,20}$/.test(v) ? v : undefined;
+}
+
 /** `/playQueues/20406` -> `20406`. The `?own=1&window=200` form is stripped. */
 function queueId(containerKey: string | undefined): string | undefined {
   const m = /^\/playQueues\/(\d+)\b/.exec(containerKey ?? "");
   return m ? m[1] : undefined;
+}
+
+/**
+ * Whether the person this command was meant for is still the person here.
+ *
+ * Two separate things say no, because only one of them is the backend: signing
+ * out replaces it with null, but OPENING the picker changes the screen alone -
+ * the backend is replaced when somebody is CHOSEN, which is after a film would
+ * have started. Measured before this existed: a film played and reported
+ * progress under the previous profile's token with the picker on screen.
+ */
+function personChanged(who: { backend: unknown }): CommandResult | null {
+  const now = useApp.getState();
+  if (now.backend !== who.backend) return no("the person on this box changed");
+  const choosing = now.screen.name === "profiles" || now.screen.name === "login" || now.screen.name === "boot";
+  // A different sentence, because it is a different thing and the assistant
+  // reads it out: with nobody chosen yet the backend has not CHANGED - the box
+  // is sitting on its own picker, which is what somebody in the room has to
+  // answer before anything can be sent here.
+  if (choosing) return no("this box is asking who is watching; choose a profile on it first");
+  return null;
+}
+
+/**
+ * A note on the television saying a phone took the screen.
+ *
+ * The person holding the remote did not press anything, and what they were
+ * doing has just ended. `apps/youtube` shows the same note for the same reason;
+ * this is the box's own toast, posted through the local door every app on this
+ * origin has.
+ */
+function say(key: string): string {
+  // The store rather than the hook: this is not a component, and the note has to
+  // be in the language the box is set to at the moment the phone sends it.
+  // `locale` is null until the store has resolved one, which is the state a
+  // cast can easily arrive in - the app may have started hidden seconds ago.
+  return translate(useLocaleStore.getState().locale || "en", key);
+}
+
+function castNote(): void {
+  try {
+    void fetch("/tvbox/api/notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: say("cast.title"),
+        message: say("cast.took"),
+        duration: 5000,
+      }),
+    }).catch(() => {});
+  } catch (e) {
+    /* no shell (dev, tests) */
+  }
 }
 
 /** The manifest id, which is how this app asks the box to bring it forward. */
@@ -67,6 +126,11 @@ const FRONT_TIMEOUT_MS = 3_000;
  */
 async function bringToFront(): Promise<boolean> {
   if (isVisible()) return true;
+  // Somebody in the room did not ask for this. Coming forward ends whatever was
+  // on screen - a game, another app's film - so the room is told who did, the
+  // way the box's other cast receiver does it. Best effort and never awaited: a
+  // cast must not fail on a toast.
+  castNote();
   try {
     (typeof window === "undefined" ? undefined : window.tvbox)?.launch?.(APP_ID);
   } catch (e) {
@@ -119,15 +183,17 @@ async function startMusic(
   // sound outlive the screen now, so being hidden is no longer a reason to
   // refuse - but a cast nobody can see is a cast nobody can stop from the sofa,
   // and Now Playing is what this turns into.
+  // BEFORE coming forward, not only after. Bringing this app to the front is
+  // destructive - it ends a native app (a game, with its unsaved state) and
+  // stops another app's film - so a command that is going to be refused must
+  // never have taken the screen on its way to the refusal.
+  const before = personChanged(who);
+  if (before) return before;
   await bringToFront();
-  // Checked AGAIN after the round trips above, because reading the queue and
-  // coming forward both take time and the person can change inside it: the
-  // profile picker replaces the backend when somebody is chosen, and playing
-  // through it would play as the person who just left, past the PIN that
-  // boundary exists for.
-  const now = useApp.getState();
-  const choosing = now.screen.name === "profiles" || now.screen.name === "login" || now.screen.name === "boot";
-  if (now.backend !== who.backend || choosing) return no("the person on this box changed");
+  // And again, because reading the queue and coming forward both take time and
+  // the person can change inside it.
+  const changed = personChanged(who);
+  if (changed) return changed;
 
   // `shuffle: false` explicitly, not the box's leftover flag. A controller sends
   // a running order it has already decided - Plexamp shuffles at its end - so
@@ -149,7 +215,11 @@ async function startMusic(
   // Remembered for the report that follows: a phone matches what the box says
   // it is playing against the queue IT built, and a report with no queue on it
   // reads as the box playing one loose track.
-  if (qid) rememberCastQueue("music", `/playQueues/${qid}`, arg(cmd, "playQueueItemID"));
+  // Digits only. The id comes from the controller and ends up in the XML this
+  // box publishes; the escaper handles markup, but a control character makes the
+  // whole document unparseable and the server drops it - which would silently
+  // end this box's status reporting on a string somebody else chose.
+  if (qid) rememberCastQueue("music", `/playQueues/${qid}`, digits(arg(cmd, "playQueueItemID")));
   // No "went off screen" check after the start, unlike the film path, and the
   // difference is real rather than an oversight: a film owns the SCREEN, so one
   // playing behind the launcher is a box lying about what it is showing, while
@@ -267,17 +337,14 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       // one: starting a film into a window nobody is looking at hands the box's
       // one player to a hidden page, and the shell's own refusal is invisible
       // from here - the bridge throws its result away.
+      // Asked BEFORE coming forward as well: taking the screen ends a native app
+      // and stops another app's film, and a command that is going to be refused
+      // must not do that on its way to the refusal.
+      const beforeFront = personChanged(asked);
+      if (beforeFront) return beforeFront;
       if (!(await bringToFront())) return no("the media app could not come to the screen");
-      // And still the same person. Two separate things say it is not, because
-      // only one of them is the backend: signing out replaces it with null, but
-      // OPENING the picker changes the screen alone - the backend is replaced
-      // when somebody is chosen, which is after the film would have started.
-      // Measured before this: the film played and reported progress under the
-      // previous profile's token with the picker on screen, and the loop's own
-      // teardown made it silent rather than visible.
-      const app = useApp.getState();
-      const choosing = app.screen.name === "profiles" || app.screen.name === "login" || app.screen.name === "boot";
-      if (app.backend !== backend || choosing) return no("the person on this box changed");
+      const afterFront = personChanged(asked);
+      if (afterFront) return afterFront;
       await p.play(backend, item, {
         version: rememberedVersion(item.id, item.versions.length),
         // The controller's offset is the whole instruction, so the server's own

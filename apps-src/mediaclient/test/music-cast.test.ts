@@ -4,6 +4,8 @@ import { usePlayer, resetPlayer } from "../playback/player";
 import { useMusic, resetMusic } from "../playback/music";
 import { useApp } from "../state";
 import { __lifecycle } from "../lifecycle";
+import { forgetCastQueue, timelineFor } from "../playback/timeline";
+import type { MediaItem } from "../backends/types";
 
 /**
  * A cast from Plexamp or the phone app, which is MUSIC.
@@ -234,7 +236,12 @@ describe("a cast of music", () => {
 
     const res = await cast({});
 
-    expect(res).toEqual({ ok: false, reason: "the person on this box changed" });
+    // The picker being UP is its own sentence: nobody has changed, the box is
+    // asking. Either way nothing plays.
+    expect(res).toEqual({
+      ok: false,
+      reason: "this box is asking who is watching; choose a profile on it first",
+    });
     expect(started, "nothing may play as the person who just left").toEqual([]);
   });
 
@@ -299,5 +306,49 @@ describe("a cast of music", () => {
     expect(res).toEqual({ ok: true });
     expect(launched).toEqual(["mediaclient"]);
     expect(useApp.getState().screen.name).toBe("nowPlaying");
+  });
+
+  it("does not take the screen for a cast it is going to refuse", async () => {
+    // Coming forward is DESTRUCTIVE on this box: it ends a native app - a game,
+    // with whatever was unsaved in it - and stops another app's film. So a
+    // command that will be refused must not have taken the screen on its way to
+    // the refusal. The person check therefore runs BEFORE the request as well as
+    // after it.
+    __lifecycle.release("hidden");
+    useApp.setState({ screen: { name: "profiles" } });
+
+    const res = await cast({});
+
+    expect(res).toEqual({
+      ok: false,
+      reason: "this box is asking who is watching; choose a profile on it first",
+    });
+    expect(launched, "nothing was asked to come forward").toEqual([]);
+    expect(started).toEqual([]);
+  });
+
+  it("keeps a controller's queue item id out of the report unless it is an id", async () => {
+    // It reaches the XML this box publishes. The escaper handles markup; a
+    // control character makes the document unparseable and the server drops it,
+    // which would end this box's status reporting on a string somebody else
+    // chose.
+    forgetCastQueue("music");
+    await cast({ queryPlayQueueItemID: "12\u0007<x" });
+    const line = timelineFor(
+      "music",
+      { item: TRACKS[0] as unknown as MediaItem, state: "playing", positionMs: 0, durationMs: 1 },
+      { machineIdentifier: "M", baseUrl: "http://s:32400" },
+    );
+    expect(line.playQueueItemID).toBeUndefined();
+    expect(line.containerKey, "the queue itself still travels").toBe("/playQueues/20406");
+
+    forgetCastQueue("music");
+    await cast({ queryPlayQueueItemID: "9911" });
+    const ok = timelineFor(
+      "music",
+      { item: TRACKS[0] as unknown as MediaItem, state: "playing", positionMs: 0, durationMs: 1 },
+      { machineIdentifier: "M", baseUrl: "http://s:32400" },
+    );
+    expect(ok.playQueueItemID).toBe("9911");
   });
 });
