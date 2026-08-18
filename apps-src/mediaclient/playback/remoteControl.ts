@@ -16,6 +16,7 @@ import { rememberedVersion } from "../chosenVersion";
 import type { CommandResult, CompanionCommand } from "../backends/plex/companion";
 import type { MediaBackend, MediaItem } from "../backends/types";
 import { log } from "../redact";
+import { readRaw, removeRaw } from "../storage";
 import { translate, useLocaleStore } from "@sdk";
 import { rememberCastQueue, stopped, timelineFor, type ServerAddress, type Timeline } from "./timeline";
 
@@ -608,4 +609,45 @@ export function companionTimelines(server: ServerAddress): Timeline[] {
     ),
     stopped("photo"),
   ];
+}
+
+/**
+ * The cast that arrived while this app was closed.
+ *
+ * The box answers Plex while the app is not running (`apps/mediaclient/plugin.js`
+ * - a player has to be findable before somebody walks to the television), and a
+ * command it cannot execute itself is left here and the app is opened. This is
+ * the app picking it up.
+ *
+ * Left in the app's own store rather than on the url: a playMedia carries the
+ * key, the queue, the server and its address, which is well past what the
+ * shell's launch-query allows a sender to put on a page - and rightly, since
+ * that path exists for untrusted senders.
+ *
+ * Taken exactly once, and only if it is fresh: a command left by a cast an hour
+ * ago is not something to start playing at the person who has just opened the
+ * app for their own reasons.
+ */
+const PENDING_CAST_KEY = "pending-cast";
+const PENDING_CAST_MAX_AGE_MS = 60_000;
+
+export async function runPendingCast(): Promise<void> {
+  const raw = await readRaw(PENDING_CAST_KEY);
+  if (raw === null) return;
+  await removeRaw(PENDING_CAST_KEY);
+  let pending: { at?: number; path?: string; params?: Record<string, string> };
+  try {
+    pending = JSON.parse(raw);
+  } catch (e) {
+    return;
+  }
+  if (!pending.path || !pending.params) return;
+  const age = Date.now() - Number(pending.at || 0);
+  if (!Number.isFinite(age) || age < 0 || age > PENDING_CAST_MAX_AGE_MS) {
+    log.info("a cast was waiting here but it is stale; ignored");
+    return;
+  }
+  log.info("running the cast that opened this app");
+  const res = await runCompanionCommand({ path: pending.path, params: pending.params });
+  if (!res.ok) log.warn(`the cast that opened this app did not run: ${res.reason}`);
 }

@@ -30,6 +30,19 @@ export interface Prefs {
   /** Play a series' theme while looking at it. */
   themeMusic: boolean;
   /**
+   * Offer this box to phones as a Plex player.
+   *
+   * Read by the box itself (`apps/mediaclient/plugin.js`), which is what answers
+   * Plex while this app is closed - so turning it off here really does take the
+   * box off the list, rather than only stopping the page from answering.
+   *
+   * On by default: it is what makes a television a thing you can send a song to,
+   * and reaching it needs a token for this server rather than merely being on
+   * the wifi. Off is for a household that would rather nobody in another room
+   * could put something on this screen.
+   */
+  cast: boolean;
+  /**
    * Row order, top to bottom.
    *
    * Playlists last by default: an account often has none, and where it has one
@@ -49,6 +62,7 @@ export const DEFAULTS: Prefs = {
   subColor: "#ffffff",
   autoSkip: false,
   themeMusic: true,
+  cast: true,
   homeRows: [...ROW_IDS],
   hiddenRows: [],
 };
@@ -65,6 +79,9 @@ export function sane(v: Partial<Prefs>): Prefs {
     // on a value nothing here ever wrote.
     autoSkip: v.autoSkip === true,
     themeMusic: v.themeMusic !== false,
+    // On unless it was turned off - an absent value is a box that has never
+    // been asked, and a television nobody can send anything to is the surprise.
+    cast: v.cast !== false,
     // Rebuilt rather than trusted: a stored order from an older build is
     // missing any row added since, and one from a newer build may name a row
     // this code has never heard of. Known ids in their stored order first, then
@@ -101,8 +118,17 @@ export const usePrefs = create<PrefsState>((set, get) => ({
 
   async set(key, value) {
     set({ [key]: value } as Pick<Prefs, typeof key>);
-    const { subScale, subPos, subColor, autoSkip, themeMusic, homeRows, hiddenRows } = get();
-    const w = await writeJson(KEY, { subScale, subPos, subColor, autoSkip, themeMusic, homeRows, hiddenRows });
+    const { subScale, subPos, subColor, autoSkip, themeMusic, cast, homeRows, hiddenRows } = get();
+    const w = await writeJson(KEY, {
+      subScale,
+      subPos,
+      subColor,
+      autoSkip,
+      themeMusic,
+      cast,
+      homeRows,
+      hiddenRows,
+    });
     if (!w.ok) log.warn("playback preference not saved");
     applySubtitleStyle();
   },

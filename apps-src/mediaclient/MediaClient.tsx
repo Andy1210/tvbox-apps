@@ -22,7 +22,7 @@ import { deviceName } from "./identity";
 import { usePrefs } from "./prefs";
 import { useChosenVersion } from "./chosenVersion";
 import { startCompanion } from "./backends/plex/companion";
-import { companionTimelines, runCompanionCommand } from "./playback/remoteControl";
+import { companionTimelines, runCompanionCommand, runPendingCast } from "./playback/remoteControl";
 
 export interface MediaClientProps {
   /** Leave the app and return to the launcher. */
@@ -121,6 +121,15 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   useEffect(() => {
     void boot();
   }, [boot]);
+
+  // A cast may be what opened this app: the box answers Plex while the app is
+  // closed and leaves the command here. After boot, because it needs the
+  // session that boot restores.
+  const signedIn = Boolean(session);
+  useEffect(() => {
+    if (!signedIn || picking) return;
+    void runPendingCast();
+  }, [signedIn, picking]);
 
   /**
    * The box's screensaver, over this app.

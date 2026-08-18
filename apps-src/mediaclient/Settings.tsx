@@ -5,6 +5,7 @@ import { useFocusFallback, useInitialFocus } from "./focus";
 import { useApp } from "./state";
 import { PlaybackSettings } from "./PlaybackSettings";
 import { HomeRows } from "./HomeRows";
+import { usePrefs } from "./prefs";
 
 /**
  * Which server, which account, and how to leave.
@@ -19,6 +20,8 @@ export function Settings(): React.JSX.Element {
   const session = useApp((s) => s.session);
   const signOut = useApp((s) => s.signOut);
   const autologin = useApp((s) => s.autologin);
+  const cast = usePrefs((s) => s.cast);
+  const setPref = usePrefs((s) => s.set);
   const setAutologin = useApp((s) => s.setAutologin);
   const go = useApp((s) => s.go);
 
@@ -67,6 +70,21 @@ export function Settings(): React.JSX.Element {
             {autologin
               ? t("settings.autologinOnHint", { who: session?.profileName || t("settings.owner") })
               : t("settings.autologinOffHint")}
+          </p>
+        </div>
+
+        {/* Not in the box's own "Extra app settings" - that is where an app with
+            no screen of its own has to put a switch, and this app has one. */}
+        <div className="flex flex-col gap-[1vh]">
+          <FocusButton
+            focusKey="settings-cast"
+            onEnter={() => void setPref("cast", !cast)}
+            className="self-start rounded-[1vh] bg-white/12 px-[2.4vw] py-[1.3vh] text-[2.1vh]"
+          >
+            {`${t("settings.cast")} · ${t(cast ? "settings.on" : "settings.off")}`}
+          </FocusButton>
+          <p className="max-w-[60vw] text-[1.7vh] text-fg-dim">
+            {t(cast ? "settings.castOnHint" : "settings.castOffHint")}
           </p>
         </div>
 

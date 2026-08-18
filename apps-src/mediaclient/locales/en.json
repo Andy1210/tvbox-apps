@@ -150,7 +150,10 @@
     "rowHidden": "Hidden",
     "rowVisible": "Row",
     "themeMusic": "Series theme music",
-    "themeMusicHint": "A series plays its own theme while you look at it. Twice, then silence."
+    "themeMusicHint": "A series plays its own theme while you look at it. Twice, then silence.",
+    "cast": "Cast from phone",
+    "castOnHint": "Your phone can send music or a film to this television, and it works whether or not this app is open.",
+    "castOffHint": "This television is not offered to phones. Anything you want to watch has to be started here."
   },
   "tracks": {
     "version": "Version",

@@ -150,7 +150,10 @@
     "rowHidden": "Rejtve",
     "rowVisible": "Mutasd",
     "themeMusic": "Sorozatok főcímzenéje",
-    "themeMusicHint": "A sorozat saját zenéje szól, amíg nézegeted. Kétszer megy le, aztán elhallgat."
+    "themeMusicHint": "A sorozat saját zenéje szól, amíg nézegeted. Kétszer megy le, aztán elhallgat.",
+    "cast": "Átküldés telefonról",
+    "castOnHint": "A telefonod küldhet ide zenét vagy filmet, és akkor is működik, ha ez az alkalmazás nincs megnyitva.",
+    "castOffHint": "Ez a TV nem jelenik meg a telefonokon. Amit nézni szeretnél, azt itt kell elindítani."
   },
   "tracks": {
     "version": "Verzió",
