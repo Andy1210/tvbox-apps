@@ -18,6 +18,7 @@ import type {
   SortOption,
   FilterOption,
   ListLens,
+  QueueRead,
 } from "../types";
 import { buildUrl, container, request, type PlexIdentityHeaders } from "./http";
 import { beginDeviceLogin, listHomeUsers, switchHomeUser } from "./auth";
@@ -190,6 +191,13 @@ function encodeLetterKey(key: string): string {
 function page(offset: number, limit: number): Record<string, number> {
   return { "X-Plex-Container-Start": offset, "X-Plex-Container-Size": limit };
 }
+
+// How much of a cast queue the box takes. This is a CAP, not "all of it":
+// measured, a 1055-track playlist comes back as 201 rows even asking for 200,
+// so a very long cast plays a slice around what was pressed. That is the limit
+// to know, and it is what the app's own "shuffle everything" already accepts for
+// the same reason - a queue is held in memory on a Pi.
+const QUEUE_WINDOW = 200;
 
 export class PlexBackend implements MediaBackend {
   readonly kind = "plex" as const;
@@ -640,6 +648,55 @@ export class PlexBackend implements MediaBackend {
   async playlistItems(id: string): Promise<MediaItem[]> {
     const c = container<MetadataContainer>(await this.req(`playlists/${encodeURIComponent(id)}/items`));
     return (c.Metadata ?? []).map(toItem);
+  }
+
+  async queueItems(queueId: string): Promise<QueueRead> {
+    // `window` is not optional, and getting it wrong is a wrong song. Without it
+    // the server answers a window of about forty rows around the selected one
+    // while `playQueueSelectedItemOffset` counts from the start of the WHOLE
+    // queue - measured, a 101-track album with track 80 pressed returned 41 rows
+    // and an offset of 79, so the clamp landed on the last row and the box fell
+    // silent after it. Plex Web sends 200 for exactly this reason.
+    //
+    // (The `?own=1&window=200` form that must NOT be used is the `containerKey`
+    // INSIDE a playMedia command - a different string in a different place, and
+    // reading that rule as being about this GET is what caused the above.)
+    const c = container<
+      MetadataContainer & {
+        playQueueSelectedItemOffset?: number;
+        playQueueSelectedMetadataItemID?: number | string;
+        playQueueTotalCount?: number;
+        playQueueVersion?: number | string;
+      }
+    >(await this.req(`playQueues/${encodeURIComponent(queueId)}`, { own: "1", window: String(QUEUE_WINDOW) }));
+    const items = (c.Metadata ?? []).map(toItem);
+    // The queue's own per-entry ids, in the order the rows came back. A
+    // controller identifies what is playing by these, not by the metadata id -
+    // the same track can sit in a queue twice - and its remote stays blank
+    // without one. `playQueueVersion` is how it knows its view of the queue is
+    // still current.
+    const entryIds = (c.Metadata ?? []).map((m) => (m.playQueueItemID === undefined ? "" : String(m.playQueueItemID)));
+    const version = c.playQueueVersion === undefined ? undefined : String(c.playQueueVersion);
+
+    // Which track the person actually pressed, found by ITS OWN ID rather than
+    // by an offset. An offset is a position in the full queue and survives no
+    // windowing at all; the id is in the rows we were given or it is not.
+    const chosen = String(c.playQueueSelectedMetadataItemID ?? "");
+    const byId = chosen ? items.findIndex((item) => item.id === chosen) : -1;
+    if (byId >= 0) return { items, startIndex: byId, entryIds, version };
+
+    // No id to go on. The offset is only an index when nothing was left out, so
+    // it is used only then - otherwise the queue starts at the top, which is
+    // wrong but says so by being the top rather than an arbitrary row.
+    const total = Number(c.playQueueTotalCount ?? items.length);
+    const at = Number(c.playQueueSelectedItemOffset ?? 0);
+    const whole = Number.isFinite(total) && total === items.length;
+    return {
+      items,
+      startIndex: whole && Number.isFinite(at) && at > 0 ? Math.min(at, items.length - 1) : 0,
+      entryIds,
+      version,
+    };
   }
 
   /**

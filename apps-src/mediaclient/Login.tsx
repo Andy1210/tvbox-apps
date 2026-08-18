@@ -199,7 +199,15 @@ export function Login(): React.JSX.Element {
   // again. The screen after the keyboard had no focus ring at all, which is the
   // same fault the chooser had, one screen along.
   const wants =
-    phase.name === "address" ? undefined : choosing ? "login-plex" : done ? "login-retry" : server ? "login-other" : undefined;
+    phase.name === "address"
+      ? undefined
+      : choosing
+        ? "login-plex"
+        : done
+          ? "login-retry"
+          : server
+            ? "login-other"
+            : undefined;
   useEffect(() => {
     if (!wants) return;
     // The timeout is not a guess: `useFocusable` registers during its own
@@ -290,7 +298,9 @@ export function Login(): React.JSX.Element {
           </div>
           <p className="text-[1.8vh] text-fg-dim">{t("login.waiting")}</p>
           {serverName && (
-            <p className="text-[1.8vh] text-fg-dim">{t("login.found", { name: serverName.name, version: serverName.version })}</p>
+            <p className="text-[1.8vh] text-fg-dim">
+              {t("login.found", { name: serverName.name, version: serverName.version })}
+            </p>
           )}
         </>
       )}

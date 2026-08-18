@@ -1,0 +1,6 @@
+{
+  "name": "tvbox-app-mediaclient",
+  "private": true,
+  "type": "commonjs",
+  "description": "Host-side plugin for the tvbox media client: the Plex Companion receiver that keeps the box castable while the app is closed. CommonJS, because the shell loads plugin.js with require()."
+}

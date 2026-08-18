@@ -11,7 +11,8 @@
 // server does not like is answered 400, and a client that retries in a loop
 // looks exactly like a box that is simply never chosen.
 
-import { plexHeaders, type PlexIdentityHeaders } from "./http";
+import { PLEX_TV, plexHeaders, type PlexIdentityHeaders } from "./http";
+import { isActive, timelineXml, type Timeline } from "../../playback/timeline";
 import { log, redactString } from "../../redact";
 
 /**
@@ -24,10 +25,26 @@ import { log, redactString } from "../../redact";
  *   - argument `protocolCapabilities`
  * Nothing in the 400 body says which, so this list is the whole of it.
  */
+/**
+ * What this player says it is, and what it can be asked to do.
+ *
+ * Read off the working client rather than chosen: Plex's own HTPC app on one of
+ * the boxes registers `protocolVersion: 2` with
+ * `timeline,playback,navigation,playqueues,provider-playback`, and a phone
+ * controlling it draws a full remote. This app said `protocolVersion: 1` with
+ * `playback,playqueues,timeline` - measured side by side on the same server -
+ * and a phone that cast to it connected, played the music, and drew no controls
+ * at all.
+ *
+ * `provider-playback` is deliberately NOT claimed: it means the player can be
+ * handed something from Plex's own providers rather than from the server's
+ * library, which this app cannot do. Claiming a capability that answers a
+ * command with a refusal is worse than not claiming it.
+ */
 const POLL_ARGS = {
   deviceClass: "stb",
-  protocolCapabilities: "playback,playqueues,timeline",
-  protocolVersion: "1",
+  protocolCapabilities: "timeline,playback,navigation,playqueues",
+  protocolVersion: "2",
 };
 
 /**
@@ -51,8 +68,41 @@ const MIN_POLL_MS = 250;
 const COMMAND_TIMEOUT_MS = 12_000;
 /** An acknowledgement is a local round trip; it has no business taking longer. */
 const RESPOND_TIMEOUT_MS = 10_000;
+/**
+ * How often the box says where it is while something plays.
+ *
+ * One second, which is the reference client's cadence and also the coarsest a
+ * phone's position bar can move without visibly stepping. It costs one small
+ * POST to a server on the same LAN, and only while playing: a stopped box
+ * publishes on change and then falls silent.
+ */
+const TIMELINE_MS = 1_000;
 /** How long to wait after a failed poll before trying again. */
 const RETRY_MS = 5_000;
+/**
+ * What puts this box in a phone's cast list.
+ *
+ * Polling the server is enough to BE commandable - the house assistant proves
+ * that - but not to be OFFERED. Measured on this account, with the app open and
+ * polling on both boxes: PMS lists them in `/clients`, PMS announces them over
+ * GDM on the LAN with the right identifier, plex.tv lists them with
+ * `provides="player"` - and neither Plexamp nor the Plex app shows either one.
+ *
+ * The answer came from the box itself. The old `apps/plex` client (Plex's own
+ * HTPC bundle) IS castable from a phone, and its device row differs in exactly
+ * one field: `provides="client,player"` against our `provides="player"`. Its
+ * code says why, in as many words:
+ *
+ *     [Plex Companion] Registering PMS <name> as a proxy for Plex Companion
+ *     PUT /devices/<clientIdentifier>
+ *         X-Plex-Provides: client,player
+ *         proxiedBy=<the server's machineIdentifier>
+ *
+ * So a Companion player is not something the account infers from a poll: the
+ * client REGISTERS itself as a player and names the server that will relay to
+ * it. That is what this does, and what the teardown undoes - the same client
+ * drops back to `X-Plex-Provides: client` when it stops being a player.
+ */
 /** Ceiling for the backoff, so a server that is down is asked about calmly. */
 const RETRY_MAX_MS = 60_000;
 
@@ -85,8 +135,18 @@ export interface CompanionCommand {
 export function startCompanion(opts: {
   baseUrl: string;
   token: string;
+  /** The server's machineIdentifier: who relays to this player. */
+  serverId?: string;
   id: PlexIdentityHeaders;
   onCommand: (cmd: CompanionCommand) => Promise<CommandResult> | CommandResult;
+  /**
+   * What this box is doing, asked for whenever a controller needs telling.
+   *
+   * Without it the player answers a subscribe and then says nothing, and a
+   * phone waits for a first report that never comes - which it shows as still
+   * connecting. See `timeline.ts` for the shape and where it came from.
+   */
+  timelines?: () => Timeline[];
   /** The token stopped working. The loop ends; the app decides what to show. */
   onUnauthorized?: () => void;
 }): () => void {
@@ -97,6 +157,13 @@ export function startCompanion(opts: {
   const once = runOnce();
   let commandId = 0;
   let backoff = RETRY_MS;
+  /** The last report sent, so a stopped box does not repeat itself forever. */
+  let lastReport = "";
+  let timelineTimer: ReturnType<typeof setTimeout> | null = null;
+  /** One publish in flight at a time; a second is folded into the next tick. */
+  let publishing = false;
+  /** Whether a refused status report has already been said. */
+  let reportRefused = false;
   /** Whether the oversize refusal has already been said. */
   let oversize = false;
 
@@ -145,6 +212,88 @@ export function startCompanion(opts: {
       clearTimeout(timer);
       responders.delete(respondController);
     }
+  };
+
+  /**
+   * Tell the controller what this box is doing.
+   *
+   * Sent to the same proxy the commands arrive through, carrying the last
+   * command answered - that number is how the server pairs a report with the
+   * controller waiting for one.
+   *
+   * Failures are swallowed on purpose. A report is a courtesy repeated every
+   * second; a warning per failure would be a log line per second for as long as
+   * a server is unreachable, and the poll loop already says that once.
+   */
+  const publish = async (): Promise<void> => {
+    if (stopped || !opts.timelines || publishing) return;
+    let lines: Timeline[];
+    try {
+      lines = opts.timelines();
+    } catch (e) {
+      return;
+    }
+    const body = timelineXml(lines);
+    // While something plays the position moves, so every tick is worth sending.
+    // While nothing does, only a change is: otherwise a box sitting on a poster
+    // grid posts the same three stopped lines forever.
+    const moving = isActive(lines);
+    if (!moving && body === lastReport) return;
+    publishing = true;
+    const url = new URL("player/proxy/timeline", base(opts.baseUrl));
+    url.searchParams.set("commandID", String(commandId));
+    try {
+      const res = await fetch(url.toString(), {
+        method: "POST",
+        headers: { ...headers(), "Content-Type": "application/xml" },
+        body,
+      });
+      // Said ONCE, not once a second - but said. A refused report is invisible
+      // from every other angle: the box goes on playing, the controller goes on
+      // waiting, and a phone showing no controls looks like a phone that never
+      // asked. Silence here is what would hide that.
+      if (!res.ok && !reportRefused) {
+        reportRefused = true;
+        log.warn(`the server refused this player's status report (${res.status})`);
+      }
+      // Cleared on the way back up, like the oversize flag below: said once per
+      // spell of trouble, not once per process. One transient refusal would
+      // otherwise silence a permanent one that starts an hour later.
+      if (res.ok) reportRefused = false;
+      lastReport = body;
+    } catch (e) {
+      if (!reportRefused) {
+        reportRefused = true;
+        log.warn("this player's status report did not reach the server", e);
+      }
+    } finally {
+      publishing = false;
+    }
+  };
+
+  /**
+   * Keep reporting while anything is playing, then stop.
+   *
+   * A timer rather than a loop so it can be armed from a command handler - a
+   * subscribe has to be answered with a report immediately, or the phone that
+   * sent it waits a whole second before it has anything to draw.
+   */
+  const scheduleTimeline = (): void => {
+    if (stopped || timelineTimer || !opts.timelines) return;
+    timelineTimer = setTimeout(() => {
+      timelineTimer = null;
+      void publish().finally(() => {
+        let active = false;
+        try {
+          active = isActive(opts.timelines?.() ?? []);
+        } catch (e) {
+          active = false;
+        }
+        // Kept ticking while something plays; otherwise the next report is
+        // whatever arms this again (a command, or playback starting).
+        if (active) scheduleTimeline();
+      });
+    }, TIMELINE_MS);
   };
 
   const loop = async (): Promise<void> => {
@@ -203,6 +352,11 @@ export function startCompanion(opts: {
           // picker both land here, and running the command anyway would play as
           // the person who just left.
           if (stopped) return;
+          // Every command that arrives, by path. A controller that draws no
+          // buttons is either sending something this player refuses or sending
+          // nothing at all, and those two look identical from the sofa - this
+          // line is what tells them apart. One line per press.
+          log.info(`companion command ${cmd.path}`);
           let result: CommandResult;
           try {
             // Bounded, because the loop does not poll while a command runs: a
@@ -217,6 +371,13 @@ export function startCompanion(opts: {
           // Answered either way: the alternative is a controller that hangs,
           // and "it did not work" is a better answer than no answer at all.
           if (id) await respond(id, result).catch((e: unknown) => log.warn("companion response failed", e));
+          // After the answer, never before it: the controller is waiting on the
+          // answer, and a report that goes first delays the press it belongs to.
+          // Every command is followed by one, not only subscribe - a phone that
+          // pressed pause wants the new state, and a playMedia is the first
+          // thing the report has to describe.
+          void publish();
+          scheduleTimeline();
         }
         const took = Date.now() - startedAt;
         if (took < MIN_POLL_MS) await sleep(MIN_POLL_MS - took);
@@ -231,10 +392,47 @@ export function startCompanion(opts: {
     }
   };
 
+  /**
+   * Register as a player that this server proxies, and stop being one on the way
+   * out. Failure is logged and ignored: it costs the cast pickers, and nothing
+   * else in the app depends on it.
+   *
+   * `keepalive` on the deregister because it fires while the window is going
+   * away, which is the one request here that would otherwise be cancelled by
+   * the navigation that caused it.
+   */
+  const registerAsPlayer = async (asPlayer: boolean): Promise<void> => {
+    if (!opts.serverId) return;
+    const url = new URL(`devices/${encodeURIComponent(opts.id.clientId)}`, `${PLEX_TV}/`);
+    url.searchParams.set("proxiedBy", opts.serverId);
+    try {
+      const res = await fetch(url.toString(), {
+        method: "PUT",
+        keepalive: !asPlayer,
+        headers: {
+          ...plexHeaders(opts.id, { "X-Plex-Token": opts.token }),
+          Accept: "application/xml",
+          // The whole point: "client" alone is a browser, "client,player" is
+          // something a phone may cast to.
+          "X-Plex-Provides": asPlayer ? "client,player" : "client",
+        },
+      });
+      if (!res.ok) log.warn(`plex.tv refused the player registration (${res.status})`);
+    } catch (e) {
+      log.warn("could not register this box as a player", e);
+    }
+  };
+
   void loop();
+  // After the loop: the poll is what makes the box commandable and must not
+  // queue behind an internet round trip that only decides who can find it.
+  void registerAsPlayer(true);
 
   return () => {
     stopped = true;
+    if (timelineTimer) clearTimeout(timelineTimer);
+    timelineTimer = null;
+    void registerAsPlayer(false);
     controller?.abort();
     for (const r of responders) r.abort();
   };
@@ -379,7 +577,9 @@ async function withTimeout<T>(work: Promise<T> | T, ms: number): Promise<T> {
  */
 function escapeAttr(v: string): string {
   // eslint-disable-next-line no-control-regex
-  return v.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ").replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  return v
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ")
+    .replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }
 
 function sleep(ms: number): Promise<void> {

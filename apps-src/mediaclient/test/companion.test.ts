@@ -304,4 +304,147 @@ describe("the companion poll", () => {
     expect(body).toContain("before");
     expect(body).toContain("after");
   });
+
+  it("registers as a player the server proxies, and stops being one on the way out", async () => {
+    // Polling is enough to BE commandable and not enough to be OFFERED.
+    // Measured on the live account: with the app polling, PMS lists the box in
+    // /clients, announces it over GDM, and plex.tv shows provides="player" - and
+    // no phone offers it. The old Plex HTPC client, which IS castable, differs
+    // in one field: provides="client,player". Its own code says why, and this is
+    // the call it makes.
+    const calls: { url: string; method: string; provides: string | null }[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.includes("/devices/")) {
+        const headers = new Headers(init?.headers);
+        calls.push({ url, method, provides: headers.get("X-Plex-Provides") });
+        return new Response("", { status: 200 });
+      }
+      // The poll: hang, so the loop does not spin while this test looks.
+      return new Promise<Response>(() => {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const stop = startCompanion({
+      baseUrl: "http://server",
+      token: "tok",
+      serverId: "MACHINE-ID",
+      id: { clientId: "CLIENT-ID", deviceName: "tvbox-test" },
+      onCommand: () => ({ ok: true }),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(calls.length, "it registers on start").toBe(1);
+    expect(calls[0].method).toBe("PUT");
+    expect(calls[0].url).toContain("/devices/CLIENT-ID");
+    // The whole point of the call: a phone may cast to a "player", not to a
+    // bare "client".
+    expect(calls[0].provides).toBe("client,player");
+    // And it names the server that will relay to it.
+    expect(calls[0].url).toContain("proxiedBy=MACHINE-ID");
+
+    stop();
+    await Promise.resolve();
+
+    expect(calls.length, "and it stands down on the way out").toBe(2);
+    expect(calls[1].provides, "no longer a player").toBe("client");
+  });
+
+  it("does not register when there is no server to be proxied by", async () => {
+    // Without a machine identifier the registration would name nobody, and a
+    // player nothing relays to is worse than one that was never offered.
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/devices/")) calls.push(url);
+        return new Promise<Response>(() => {});
+      }),
+    );
+
+    const stop = startCompanion({
+      baseUrl: "http://server",
+      token: "tok",
+      id: { clientId: "CLIENT-ID", deviceName: "tvbox-test" },
+      onCommand: () => ({ ok: true }),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    stop();
+
+    expect(calls).toEqual([]);
+  });
+
+  it("tells the controller what the box is doing, after answering it", async () => {
+    // A phone that casts subscribes and then waits to be told. Measured against
+    // the live server before this existed: the subscribe was answered "ok", the
+    // report never came, and the phone stayed on "connecting" for good. With
+    // it, a controller that subscribed received a report within the second and
+    // then one a second while the music played.
+    let polls = 0;
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      if (String(url).includes("proxy/poll")) {
+        polls += 1;
+        return polls > 1
+          ? held(init)
+          : xml(
+              '<MediaContainer size="1"><Command path="/player/timeline/subscribe" commandID="4" /></MediaContainer>',
+            );
+      }
+      return new Response("", { status: 200 });
+    });
+
+    const stop = startCompanion({
+      baseUrl: "http://s:32400",
+      token: "t",
+      id: ID,
+      onCommand: () => ({ ok: true }),
+      timelines: () => [
+        { type: "video", state: "stopped" },
+        { type: "music", state: "playing", key: "/library/metadata/9", time: 1000, duration: 2000 },
+        { type: "photo", state: "stopped" },
+      ],
+    });
+    await vi.waitFor(() => expect(calls.some((c) => c.url.includes("proxy/timeline"))).toBe(true));
+    stop();
+
+    const report = calls.find((c) => c.url.includes("proxy/timeline"));
+    // Addressed with the command it follows: that number is how the server
+    // pairs a report with the controller waiting for one.
+    expect(report?.url).toContain("commandID=4");
+    expect(report?.init?.method).toBe("POST");
+    const body = String(report?.init?.body ?? "");
+    expect(body).toContain('location="navigation"');
+    // All three kinds, or a controller never hears that the other one stopped.
+    expect(body.match(/<Timeline /g)).toHaveLength(3);
+    expect(body).toContain('state="playing"');
+
+    // And the answer went first: a report before it delays the press it belongs to.
+    const iResp = calls.findIndex((c) => c.url.includes("proxy/response"));
+    const iTime = calls.findIndex((c) => c.url.includes("proxy/timeline"));
+    expect(iResp).toBeGreaterThanOrEqual(0);
+    expect(iResp).toBeLessThan(iTime);
+  });
+
+  it("says nothing when it has nothing to report with", async () => {
+    // An app that never passed `timelines` must not post an empty container:
+    // a controller reads that as a player claiming all three kinds are stopped.
+    let polls = 0;
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      polls += 1;
+      return polls > 1
+        ? held(init)
+        : xml('<MediaContainer size="1"><Command path="/player/timeline/subscribe" commandID="1" /></MediaContainer>');
+    });
+    const stop = startCompanion({ baseUrl: "http://s:32400", token: "t", id: ID, onCommand: () => ({ ok: true }) });
+    await vi.waitFor(() => expect(calls.some((c) => c.url.includes("proxy/response"))).toBe(true));
+    await new Promise((r) => setTimeout(r, 30));
+    stop();
+    expect(calls.some((c) => c.url.includes("proxy/timeline"))).toBe(false);
+  });
 });

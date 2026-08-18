@@ -5,8 +5,20 @@
     "hu": "Média",
     "en": "Media"
   },
-  "version": "0.57.2",
+  "version": "0.60.0",
   "changelog": [
+    {
+      "version": "0.60.0",
+      "notes": "Send music or a film here from the Plex app on your phone - it works whether or not this app is open, and the phone gets a full remote, arrows and all. Turn it off in this app's own Settings, under \"Cast from Plex\"."
+    },
+    {
+      "version": "0.59.0",
+      "notes": "Music keeps playing when you leave the app - the home screen shows what is playing and takes you back to it - and stops when you close the app from there."
+    },
+    {
+      "version": "0.58.0",
+      "notes": "A song, an album or a playlist sent from your phone plays here as music, with the running order and starting on the track you pressed. One thing to know: a very long list plays a slice of about two hundred tracks around the one you pressed."
+    },
     {
       "version": "0.57.2",
       "notes": "A film asked for by voice fills the screen again. If the app was sitting on its home screen when the film started, the home screen's backdrop stayed drawn over the picture and only the sound came through."
@@ -93,6 +105,7 @@
     }
   ],
   "type": "webclient",
+  "service": "mediaclient",
   "status": "ready",
   "accent": "#cc7b19",
   "icon": "<svg viewBox='0 0 24 24' fill='none' stroke='#cc7b19' stroke-width='2'><rect x='2.5' y='4' width='19' height='16' rx='2.5'/><path d='M10 9.5v5l4.5-2.5z' stroke-linejoin='round'/></svg>",

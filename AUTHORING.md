@@ -279,7 +279,8 @@ module.exports = (host) => {
   host.pairing.register("myapp", { page: (ctx) => "<html>…", routes: { "POST /save": … } });
   host.onConfigChange((sections) => { if (sections.includes("myapp")) reload(); });
   // host also gives: config, BrowserWindow, spawnService/stopService/restartService,
-  // childEnv, audioSink, showLauncher, navTo, appState, switchOn, widget, idle, base, log
+  // childEnv, audioSink, showLauncher, navTo, appState, switchOn, widget, idle,
+  // base, log
   return {}; // optional { start, stop }
 };
 ```
@@ -299,38 +300,6 @@ host.widget.clear(); // remove it
 host.navTo("myapp"); // foreground an app by id ("home" = the launcher)
 host.appState("myapp"); // { running, foreground } - is it alive, is it on screen
 ```
-
-A **remote** app can be foregrounded with launch data of its own, which is how a
-cast gets its session onto the page: the query is merged into the manifest's url by
-the shell (never the origin, the path or the fragment), and an app that is already
-open is re-pointed at it rather than merely re-shown.
-
-```js
-host.navTo("youtube", { query: "pairingCode=" + code + "&theme=cl" });
-```
-
-### Settings the box shows for your app (`switches`)
-
-For an app that cannot put a setting on its own screen — a `native` app has none of
-ours, and a remote site is not ours to add to. Declare it in the manifest
-(`switches`, see the tvbox repo's app-manifest doc) and read the value scoped to your
-own app:
-
-```js
-if (host.switchOn("cast")) startReceiver(); // the value in force (manifest default until flipped)
-host.onConfigChange(() => (host.switchOn("cast") ? startReceiver() : stopReceiver()));
-```
-
-It appears in Settings → Apps → **Extra app settings**. The shell stores it and knows
-nothing about what it does; your plugin is what acts on it, so a switch without a
-`service` is refused — and the box hides a switch whose plugin is not loaded, rather
-than offering a row that writes config and changes nothing.
-
-`default: true` is a decision, not a default: an app update can land unattended
-overnight, so it turns the thing on for every box with nobody pressing anything. For
-anything that opens a port, holds a radio or takes input from the network, declare it
-off. `apps/youtube` is the worked example — a DIAL cast receiver behind a switch that
-starts life off.
 
 ### Background work: wait for `host.idle()`
 

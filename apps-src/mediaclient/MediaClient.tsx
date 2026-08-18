@@ -22,7 +22,7 @@ import { deviceName } from "./identity";
 import { usePrefs } from "./prefs";
 import { useChosenVersion } from "./chosenVersion";
 import { startCompanion } from "./backends/plex/companion";
-import { runCompanionCommand } from "./playback/remoteControl";
+import { companionTimelines, runCompanionCommand, runPendingCast } from "./playback/remoteControl";
 
 export interface MediaClientProps {
   /** Leave the app and return to the launcher. */
@@ -37,6 +37,23 @@ export interface MediaClientProps {
  * the manifest names, so that node has to exist whether or not anything is
  * playing.
  */
+/**
+ * Which of the two Plex receivers on this box is the live one.
+ *
+ * Best effort and never awaited: a box without the plugin (an app newer than
+ * the shell it landed on) simply answers 404, and this app polls as it always
+ * did. What it must not do is delay the poll it is announcing.
+ */
+function tellBox(what: "poll-taken" | "poll-released"): void {
+  try {
+    void fetch(`/tvbox/api/mediaclient/${what}`, { method: "POST", keepalive: what === "poll-released" }).catch(
+      () => {},
+    );
+  } catch (e) {
+    /* no shell (dev, tests) */
+  }
+}
+
 export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   const screen = useApp((s) => s.screen);
   const boot = useApp((s) => s.boot);
@@ -72,8 +89,15 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   // PREVIOUS person's token - and a command would play as them, history and
   // all, without passing the picker or its PIN.
   const picking = screen.name === "profiles" || screen.name === "login" || screen.name === "boot";
+  // The same setting the box reads. Without it the switch turned off only the
+  // half of the receiver that runs OUT here: the box hides an app rather than
+  // closing it, so once anybody had opened this app its own page went on
+  // answering Plex, and Settings said the television was not offered while it
+  // was - measured against the shell plugin, which stands down whenever this
+  // window exists.
+  const castEnabled = usePrefs((s) => s.cast);
   useEffect(() => {
-    if (!session || !identity || picking) return;
+    if (!session || !identity || picking || !castEnabled) return;
     // Plex's protocol, not a general one: `player/proxy/poll` is a Plex route,
     // and this loop reads a 401 as "signed out". Pointed at a Jellyfin server it
     // would poll a path that does not exist, forever - and the day that server
@@ -81,17 +105,34 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
     // session with no `kind` is a Plex one written before there was a second
     // backend, so it keeps the loop.
     if (session.kind === "jellyfin") return;
-    return startCompanion({
+    // Tell the box BEFORE polling, and again when this stops. The box answers
+    // Plex while this app is closed, and the two must never both poll (they
+    // share one client identifier, so they would take each other's commands)
+    // nor both fall silent - measured, standing the box down the moment it
+    // handed a cast over left a gap the length of this app's boot, and a phone
+    // sends `subscribe` straight after casting: it spun, gave up, and only
+    // stuck on a second try, sometimes playing the song on the phone instead.
+    void tellBox("poll-taken");
+    const stop = startCompanion({
       baseUrl: session.baseUrl,
       token: session.token,
+      serverId: session.serverId,
       id: { clientId: identity.clientId, deviceName: deviceName(identity.host) },
       onCommand: runCompanionCommand,
+      // What the box is doing, asked for on a tick while something plays and
+      // after every command. Without it a phone that casts stays on
+      // "connecting": it subscribes and then waits to be told.
+      timelines: () => companionTimelines({ machineIdentifier: session.serverId, baseUrl: session.baseUrl }),
       // A rejected credential is what everything else in this app calls
       // "signed out"; swallowing it here left the box polling with a dead
       // token and nothing on screen.
       onUnauthorized: () => useApp.getState().fail({ kind: "signed-out" }),
     });
-  }, [session, identity, picking]);
+    return () => {
+      stop();
+      void tellBox("poll-released");
+    };
+  }, [session, identity, picking, castEnabled]);
 
   useEffect(() => installNavSounds(), []);
   // Through the store rather than a one-shot fetch, so turning the setting off
@@ -116,6 +157,15 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   useEffect(() => {
     void boot();
   }, [boot]);
+
+  // A cast may be what opened this app: the box answers Plex while the app is
+  // closed and leaves the command here. After boot, because it needs the
+  // session that boot restores.
+  const signedIn = Boolean(session);
+  useEffect(() => {
+    if (!signedIn || picking) return;
+    void runPendingCast();
+  }, [signedIn, picking]);
 
   /**
    * The box's screensaver, over this app.

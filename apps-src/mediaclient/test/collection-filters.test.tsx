@@ -105,9 +105,10 @@ describe("which filters a collection list is offered", () => {
     expect(films.map((f) => f.key)).toEqual(["genre", "contentRating", "year", "hdr", "unwatched"]);
 
     const collections = await backend.filterOptions("1", "collections");
-    expect(collections.map((f) => f.key), "genre and the rest empty the grid; unwatched is ignored").toEqual([
-      "contentRating",
-    ]);
+    expect(
+      collections.map((f) => f.key),
+      "genre and the rest empty the grid; unwatched is ignored",
+    ).toEqual(["contentRating"]);
     // The kind travels with it, or the chip opens no value list.
     expect(collections[0].kind).toBe("list");
   });

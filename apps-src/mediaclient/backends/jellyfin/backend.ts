@@ -38,6 +38,7 @@ import type {
   Marker,
   MediaBackend,
   MediaItem,
+  QueueRead,
   Page,
   PageQuery,
   PersonRef,
@@ -143,9 +144,7 @@ function deviceProfileBody(maxBitrateKbps?: number): Record<string, unknown> {
     DeviceProfile: {
       MaxStreamingBitrate: maxBitrateKbps ? maxBitrateKbps * 1000 : 200_000_000,
       DirectPlayProfiles: [{ Type: "Video" }, { Type: "Audio" }],
-      TranscodingProfiles: [
-        { Type: "Video", Container: "ts", VideoCodec: "h264", AudioCodec: "aac", Protocol: "hls" },
-      ],
+      TranscodingProfiles: [{ Type: "Video", Container: "ts", VideoCodec: "h264", AudioCodec: "aac", Protocol: "hls" }],
       SubtitleProfiles: [
         { Format: "srt", Method: "External" },
         { Format: "subrip", Method: "External" },
@@ -419,11 +418,7 @@ export class JellyfinBackend implements MediaBackend {
    * an accented initial goes, and only the server can say. `nameLessThan` asks
    * exactly that question - how many titles sort before this letter.
    */
-  async letterOffset(
-    libraryId: string,
-    letterKey: string,
-    q: Omit<PageQuery, "offset" | "limit">,
-  ): Promise<number> {
+  async letterOffset(libraryId: string, letterKey: string, q: Omit<PageQuery, "offset" | "limit">): Promise<number> {
     return this.count(libraryId, q.of, q.filters, { nameLessThan: letterKey });
   }
 
@@ -475,6 +470,18 @@ export class JellyfinBackend implements MediaBackend {
       query: { userId: this.userId, parentId: id, sortBy: "SortName", fields: LIST_FIELDS },
     });
     return (res.Items || []).map(toItem);
+  }
+
+  /**
+   * Jellyfin has no play queues: its own remote control sends the item list.
+   *
+   * A stub for a path nothing reaches - the companion loop is Plex's and never
+   * starts for a Jellyfin session - so this is here to satisfy the interface
+   * rather than to be used. It answers EMPTY, which the cast path reads as "no
+   * queue" and falls back to the single item; it does not refuse.
+   */
+  async queueItems(_queueId: string): Promise<QueueRead> {
+    return { items: [], startIndex: 0 };
   }
 
   /** Jellyfin holds no soundtrack listing; the screen draws nothing for empty. */
@@ -697,9 +704,12 @@ export class JellyfinBackend implements MediaBackend {
     const chosen = source;
     const audioTracks = toTracks(chosen.MediaStreams, "Audio");
     const subTracksFirst = toTracks(chosen.MediaStreams, "Subtitle");
-    const audioIndex = typeof opts.audio === "number" ? audioTracks.find((t) => t.ordinal === opts.audio)?.id : undefined;
+    const audioIndex =
+      typeof opts.audio === "number" ? audioTracks.find((t) => t.ordinal === opts.audio)?.id : undefined;
     const subInside =
-      typeof opts.subtitle === "number" ? subTracksFirst.find((t) => t.ordinal === opts.subtitle && !t.external) : undefined;
+      typeof opts.subtitle === "number"
+        ? subTracksFirst.find((t) => t.ordinal === opts.subtitle && !t.external)
+        : undefined;
     if (chosen.TranscodingUrl && (audioIndex !== undefined || subInside)) {
       const again = await ask({
         MediaSourceId: chosen.Id,
@@ -740,8 +750,7 @@ export class JellyfinBackend implements MediaBackend {
     // subtitle the person had just turned on never appeared. This library holds
     // sidecars beside 487 films, and for a film whose only subtitle is one of
     // them the row was simply a lie.
-    const chosenSub =
-      typeof opts.subtitle === "number" ? subs.find((t) => t.ordinal === opts.subtitle) : undefined;
+    const chosenSub = typeof opts.subtitle === "number" ? subs.find((t) => t.ordinal === opts.subtitle) : undefined;
     if (info.PlaySessionId) this.stoppedItems.set(info.PlaySessionId, id);
     this.playing = { session: info.PlaySessionId, itemId: id, started: false, stopped: false };
     return {
@@ -756,7 +765,12 @@ export class JellyfinBackend implements MediaBackend {
       // second time the source is a NEW object from that answer, so looking it
       // up in the first answer's array returned -1 and the version reported as
       // 0 - a file chosen deliberately, reported as the default one.
-      version: opts.partId ? Math.max(0, sources.findIndex((s3) => s3.Id === chosen.Id)) : (opts.version ?? 0),
+      version: opts.partId
+        ? Math.max(
+            0,
+            sources.findIndex((s3) => s3.Id === chosen.Id),
+          )
+        : (opts.version ?? 0),
       session: info.PlaySessionId,
       location: this.session.location,
       transcoded,
@@ -886,7 +900,8 @@ export class JellyfinBackend implements MediaBackend {
    */
   async reapOwnSessions(): Promise<number> {
     try {
-      const sessions = await this.req<{ Id: string; DeviceId?: string; NowPlayingItem?: { Id?: string } }[]>("Sessions");
+      const sessions =
+        await this.req<{ Id: string; DeviceId?: string; NowPlayingItem?: { Id?: string } }[]>("Sessions");
       const mine = (sessions || []).filter((s) => s.DeviceId === this.id.deviceId && s.NowPlayingItem);
       let stopped = 0;
       for (const s of mine) {

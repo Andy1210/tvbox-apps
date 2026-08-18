@@ -89,20 +89,22 @@ describe("artwork built from a server's own path", () => {
 
 describe("the stream URL the server decides", () => {
   function stubPlaybackInfo(transcodingUrl?: string): void {
-    vi.stubGlobal("fetch", async () =>
-      new Response(
-        JSON.stringify({
-          PlaySessionId: "ps1",
-          MediaSources: [
-            {
-              Id: "ms1",
-              TranscodingUrl: transcodingUrl,
-              MediaStreams: [{ Index: 0, Type: "Video", Codec: "h264" }],
-            },
-          ],
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        new Response(
+          JSON.stringify({
+            PlaySessionId: "ps1",
+            MediaSources: [
+              {
+                Id: "ms1",
+                TranscodingUrl: transcodingUrl,
+                MediaStreams: [{ Index: 0, Type: "Video", Codec: "h264" }],
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
     );
   }
 

@@ -150,7 +150,10 @@
     "rowHidden": "Rejtve",
     "rowVisible": "Mutasd",
     "themeMusic": "Sorozatok főcímzenéje",
-    "themeMusicHint": "A sorozat saját zenéje szól, amíg nézegeted. Kétszer megy le, aztán elhallgat."
+    "themeMusicHint": "A sorozat saját zenéje szól, amíg nézegeted. Kétszer megy le, aztán elhallgat.",
+    "cast": "Átküldés a Plexből",
+    "castOnHint": "A telefonod a Plex appból küldhet ide zenét vagy filmet, és akkor is működik, ha ez az alkalmazás nincs nyitva. A box {name} néven jelenik meg.",
+    "castOffHint": "Ez a box nem jelenik meg a Plex appban. Onnan semmit nem lehet ideküldeni, itt kell elindítani. A többi átküldési módot ez nem érinti."
   },
   "tracks": {
     "version": "Verzió",
@@ -229,5 +232,9 @@
     "trackFailed": "Ez a szám nem játszható le: {title}",
     "tracksN": "{n} szám",
     "upNext": "Következik"
+  },
+  "cast": {
+    "title": "Átküldés telefonról",
+    "took": "Valaki a telefonjáról küldte ide - a médiaapp átveszi a képernyőt."
   }
 }

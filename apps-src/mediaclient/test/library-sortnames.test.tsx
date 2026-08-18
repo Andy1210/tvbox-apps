@@ -144,4 +144,3 @@ describe("arranging a collection list", () => {
     expect(asked[0]).toBe("collections");
   });
 });
-
