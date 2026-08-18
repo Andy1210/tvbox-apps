@@ -45,17 +45,18 @@ module.exports = (host) => {
   let timer = null;
   let stopCompanion = null;
   let handedOver = false;
-
-  const appRunning = () => {
-    try {
-      return !!(host.appState && host.appState(APP_ID).running);
-    } catch (e) {
-      // An older shell cannot say, and guessing "running" would keep this
-      // silent for ever. Guess the other way: two pollers cost a retry, a
-      // missing one costs the feature.
-      return false;
-    }
-  };
+  /**
+   * Whether the app's own poll is live.
+   *
+   * The app says so itself, over the routes below, and that word is what this
+   * receiver stands down on. Guessing was the bug: it stood down the instant it
+   * handed a cast over, while the app's page took a few seconds to boot - and a
+   * phone sends `subscribe` immediately after casting, into a gap where nobody
+   * was polling. The server held that command until it timed out, so the phone
+   * spun, gave up, and only stuck on a second try; sometimes it fell back to
+   * playing the song on the phone itself.
+   */
+  let appPolling = false;
 
   function str() {
     let locale = "";
@@ -91,29 +92,30 @@ module.exports = (host) => {
   let session = null;
 
   const onCommand = (cmd) => {
-    const path = String(cmd.path || "");
+    const p = String(cmd.path || "");
     // A phone that has just found the box subscribes BEFORE it casts, and the
     // app's own receiver records what refusing that costs: the server answers
     // the refusal 400 and the phone gives up - "it appears in the list but will
     // not connect". Nothing has to be pushed for it either, because the player
     // that answers from here is not playing anything; the app publishes its own
     // state the moment it takes over.
-    if (path === "/player/timeline/subscribe" || path === "/player/timeline/unsubscribe") return "ok";
-    if (path !== "/player/playback/playMedia") return false;
-    // Asked again here rather than trusted from the last tick: the window can
-    // open in the fifteen seconds between two of them, and stashing a command
-    // for an app that is ALREADY running leaves it in the store unread - the
-    // app picks one up when it opens, not when it resumes. Refused instead, so
-    // the controller sees a failure it can retry rather than a success that
-    // played nothing.
-    if (appRunning()) {
-      host.log("mediaclient: the app opened while a cast was arriving; letting the controller retry");
+    if (p === "/player/timeline/subscribe" || p === "/player/timeline/unsubscribe") return "ok";
+    if (p !== "/player/playback/playMedia") return false;
+    // Stashing a command for an app whose poll is already live leaves it in the
+    // store unread - the app picks one up when it OPENS, not when it resumes -
+    // and that app can answer for itself anyway. Refused, so the controller sees
+    // a failure it can retry rather than a success that played nothing.
+    if (appPolling) {
+      host.log("mediaclient: the app took the poll while a cast was arriving; letting the controller retry");
       return false;
     }
     if (!leaveCast(STORE, cmd, session.profileId)) {
       host.log("mediaclient: could not leave the cast for the app to pick up");
       return false;
     }
+    // NOT a stand-down. The receiver keeps answering until the app says its own
+    // poll is live, because everything a phone sends in between - the subscribe
+    // it sends right after a cast, above all - would otherwise reach nobody.
     handedOver = true;
     host.log("mediaclient: a cast arrived with the app closed - opening it");
     // Asked BEFORE the launch, because the launch is what changes the answer.
@@ -145,13 +147,14 @@ module.exports = (host) => {
 
   const tick = () => {
     timer = setTimeout(tick, WATCH_MS);
-    // The app is up: it is the player, and this must not be.
-    if (appRunning()) {
+    // The app's own poll is live: it is the player, and this must not be.
+    if (appPolling) {
       handedOver = false;
       return stopListening(false);
     }
-    // Handed a cast a moment ago; the window is still coming up.
-    if (handedOver || stopCompanion) return;
+    // A window with no live poll is not a player - it may be booting, or
+    // sitting on the profile picker, or signed out. Keep answering for it.
+    if (stopCompanion) return;
     // Re-read every tick rather than once. This is also where the app's own
     // "Cast from phone" setting lives, so turning it off in Settings takes the
     // box off the list within a tick and turning it back on brings it back,
@@ -177,6 +180,25 @@ module.exports = (host) => {
     });
     host.log("mediaclient: listening for a cast");
   };
+
+  // The app's word on who is polling. One local round trip, and it is what
+  // closes the handover gap: the app says "mine" BEFORE it starts its loop and
+  // "yours" when it tears one down, so the two never both poll and never both
+  // stay silent.
+  host.registerRoutes("/tvbox/api/mediaclient", {
+    "POST /poll-taken": (req, res) => {
+      appPolling = true;
+      stopListening(false);
+      host.json(res, { ok: true });
+    },
+    "POST /poll-released": (req, res) => {
+      appPolling = false;
+      // Straight away rather than at the next tick: the app has just stopped
+      // answering, and until this receiver does the box is not a player.
+      tick();
+      host.json(res, { ok: true });
+    },
+  });
 
   return {
     start() {

@@ -37,6 +37,23 @@ export interface MediaClientProps {
  * the manifest names, so that node has to exist whether or not anything is
  * playing.
  */
+/**
+ * Which of the two Plex receivers on this box is the live one.
+ *
+ * Best effort and never awaited: a box without the plugin (an app newer than
+ * the shell it landed on) simply answers 404, and this app polls as it always
+ * did. What it must not do is delay the poll it is announcing.
+ */
+function tellBox(what: "poll-taken" | "poll-released"): void {
+  try {
+    void fetch(`/tvbox/api/mediaclient/${what}`, { method: "POST", keepalive: what === "poll-released" }).catch(
+      () => {},
+    );
+  } catch (e) {
+    /* no shell (dev, tests) */
+  }
+}
+
 export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   const screen = useApp((s) => s.screen);
   const boot = useApp((s) => s.boot);
@@ -88,7 +105,15 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
     // session with no `kind` is a Plex one written before there was a second
     // backend, so it keeps the loop.
     if (session.kind === "jellyfin") return;
-    return startCompanion({
+    // Tell the box BEFORE polling, and again when this stops. The box answers
+    // Plex while this app is closed, and the two must never both poll (they
+    // share one client identifier, so they would take each other's commands)
+    // nor both fall silent - measured, standing the box down the moment it
+    // handed a cast over left a gap the length of this app's boot, and a phone
+    // sends `subscribe` straight after casting: it spun, gave up, and only
+    // stuck on a second try, sometimes playing the song on the phone instead.
+    void tellBox("poll-taken");
+    const stop = startCompanion({
       baseUrl: session.baseUrl,
       token: session.token,
       serverId: session.serverId,
@@ -103,6 +128,10 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
       // token and nothing on screen.
       onUnauthorized: () => useApp.getState().fail({ kind: "signed-out" }),
     });
+    return () => {
+      stop();
+      void tellBox("poll-released");
+    };
   }, [session, identity, picking, castEnabled]);
 
   useEffect(() => installNavSounds(), []);

@@ -18,7 +18,9 @@ test("a raw > inside an attribute does not truncate the command", () => {
   // `>` is legal unescaped in an XML attribute value. Stopping at the first one
   // lost both the key and the commandID, so the box acted on a paramless
   // command and, having no id, answered nobody - the controller hung.
-  const [cmd] = parseCommands('<MediaContainer><Command path="/player/playback/playMedia" key="/a?x>y" commandID="7" /></MediaContainer>');
+  const [cmd] = parseCommands(
+    '<MediaContainer><Command path="/player/playback/playMedia" key="/a?x>y" commandID="7" /></MediaContainer>',
+  );
   assert.equal(cmd.path, "/player/playback/playMedia");
   assert.equal(cmd.params.key, "/a?x>y");
   assert.equal(cmd.params.commandID, "7");
