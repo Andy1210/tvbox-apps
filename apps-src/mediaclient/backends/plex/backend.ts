@@ -18,6 +18,7 @@ import type {
   SortOption,
   FilterOption,
   ListLens,
+  QueueRead,
 } from "../types";
 import { buildUrl, container, request, type PlexIdentityHeaders } from "./http";
 import { beginDeviceLogin, listHomeUsers, switchHomeUser } from "./auth";
@@ -649,7 +650,7 @@ export class PlexBackend implements MediaBackend {
     return (c.Metadata ?? []).map(toItem);
   }
 
-  async queueItems(queueId: string): Promise<{ items: MediaItem[]; startIndex: number }> {
+  async queueItems(queueId: string): Promise<QueueRead> {
     // `window` is not optional, and getting it wrong is a wrong song. Without it
     // the server answers a window of about forty rows around the selected one
     // while `playQueueSelectedItemOffset` counts from the start of the WHOLE
@@ -665,16 +666,24 @@ export class PlexBackend implements MediaBackend {
         playQueueSelectedItemOffset?: number;
         playQueueSelectedMetadataItemID?: number | string;
         playQueueTotalCount?: number;
+        playQueueVersion?: number | string;
       }
     >(await this.req(`playQueues/${encodeURIComponent(queueId)}`, { own: "1", window: String(QUEUE_WINDOW) }));
     const items = (c.Metadata ?? []).map(toItem);
+    // The queue's own per-entry ids, in the order the rows came back. A
+    // controller identifies what is playing by these, not by the metadata id -
+    // the same track can sit in a queue twice - and its remote stays blank
+    // without one. `playQueueVersion` is how it knows its view of the queue is
+    // still current.
+    const entryIds = (c.Metadata ?? []).map((m) => (m.playQueueItemID === undefined ? "" : String(m.playQueueItemID)));
+    const version = c.playQueueVersion === undefined ? undefined : String(c.playQueueVersion);
 
     // Which track the person actually pressed, found by ITS OWN ID rather than
     // by an offset. An offset is a position in the full queue and survives no
     // windowing at all; the id is in the rows we were given or it is not.
     const chosen = String(c.playQueueSelectedMetadataItemID ?? "");
     const byId = chosen ? items.findIndex((item) => item.id === chosen) : -1;
-    if (byId >= 0) return { items, startIndex: byId };
+    if (byId >= 0) return { items, startIndex: byId, entryIds, version };
 
     // No id to go on. The offset is only an index when nothing was left out, so
     // it is used only then - otherwise the queue starts at the top, which is
@@ -682,7 +691,12 @@ export class PlexBackend implements MediaBackend {
     const total = Number(c.playQueueTotalCount ?? items.length);
     const at = Number(c.playQueueSelectedItemOffset ?? 0);
     const whole = Number.isFinite(total) && total === items.length;
-    return { items, startIndex: whole && Number.isFinite(at) && at > 0 ? Math.min(at, items.length - 1) : 0 };
+    return {
+      items,
+      startIndex: whole && Number.isFinite(at) && at > 0 ? Math.min(at, items.length - 1) : 0,
+      entryIds,
+      version,
+    };
   }
 
   /**

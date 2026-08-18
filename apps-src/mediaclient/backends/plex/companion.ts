@@ -162,6 +162,8 @@ export function startCompanion(opts: {
   let timelineTimer: ReturnType<typeof setTimeout> | null = null;
   /** One publish in flight at a time; a second is folded into the next tick. */
   let publishing = false;
+  /** Whether a refused status report has already been said. */
+  let reportRefused = false;
   /** Whether the oversize refusal has already been said. */
   let oversize = false;
 
@@ -241,14 +243,25 @@ export function startCompanion(opts: {
     const url = new URL("player/proxy/timeline", base(opts.baseUrl));
     url.searchParams.set("commandID", String(commandId));
     try {
-      await fetch(url.toString(), {
+      const res = await fetch(url.toString(), {
         method: "POST",
         headers: { ...headers(), "Content-Type": "application/xml" },
         body,
       });
+      // Said ONCE, not once a second - but said. A refused report is invisible
+      // from every other angle: the box goes on playing, the controller goes on
+      // waiting, and a phone showing no controls looks like a phone that never
+      // asked. Silence here is what would hide that.
+      if (!res.ok && !reportRefused) {
+        reportRefused = true;
+        log.warn(`the server refused this player's status report (${res.status})`);
+      }
       lastReport = body;
     } catch (e) {
-      /* see above: a report is not worth a log line a second */
+      if (!reportRefused) {
+        reportRefused = true;
+        log.warn("this player's status report did not reach the server", e);
+      }
     } finally {
       publishing = false;
     }
@@ -335,6 +348,11 @@ export function startCompanion(opts: {
           // picker both land here, and running the command anyway would play as
           // the person who just left.
           if (stopped) return;
+          // Every command that arrives, by path. A controller that draws no
+          // buttons is either sending something this player refuses or sending
+          // nothing at all, and those two look identical from the sofa - this
+          // line is what tells them apart. One line per press.
+          log.info(`companion command ${cmd.path}`);
           let result: CommandResult;
           try {
             // Bounded, because the loop does not poll while a command runs: a

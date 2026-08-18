@@ -160,7 +160,6 @@ live("a real Jellyfin server", () => {
     expect(Array.isArray(markers)).toBe(true);
   });
 
-
   it("builds an A-Z strip whose letters land where they say", async () => {
     // The strip is an accelerator, and an accelerator that arrives at the wrong
     // letter is worse than none - the sibling backend records 14 of 29 buckets
@@ -170,7 +169,10 @@ live("a real Jellyfin server", () => {
     const movies = libs.find((l) => l.kind === "movie") ?? libs[0];
     const letters = await backend.letters(movies.id);
     expect(letters.length).toBeGreaterThan(5);
-    expect(letters.every((l) => l.size > 0), "a letter nobody can press must not be shown").toBe(true);
+    expect(
+      letters.every((l) => l.size > 0),
+      "a letter nobody can press must not be shown",
+    ).toBe(true);
 
     const target = letters.find((l) => l.key === "S") ?? letters[letters.length - 1];
     const offset = await backend.letterOffset(movies.id, target.key, {});

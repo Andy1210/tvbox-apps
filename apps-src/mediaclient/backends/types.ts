@@ -16,6 +16,23 @@ export interface Library {
 export type ItemKind =
   "movie" | "show" | "season" | "episode" | "collection" | "playlist" | "artist" | "album" | "track";
 
+/**
+ * A play queue as the server hands it over.
+ *
+ * `entryIds` are the queue's OWN per-entry ids, in the order of `items` - a
+ * controller identifies what is playing by one of these rather than by the
+ * metadata id, because the same track can sit in a queue twice, and its remote
+ * stays blank without one. `version` is how it knows its view of the queue is
+ * still the current one. Both are absent from a backend that has no play
+ * queues, and the report simply leaves them out.
+ */
+export interface QueueRead {
+  items: MediaItem[];
+  startIndex: number;
+  entryIds?: string[];
+  version?: string;
+}
+
 export interface MediaItem {
   id: string;
   kind: ItemKind;
@@ -436,7 +453,7 @@ export interface MediaBackend {
    * exists only there: without reading it back, a cast of an album plays one
    * track and stops.
    */
-  queueItems(queueId: string): Promise<{ items: MediaItem[]; startIndex: number }>;
+  queueItems(queueId: string): Promise<QueueRead>;
   /**
    * Make a playlist holding these items, and answer with it.
    *

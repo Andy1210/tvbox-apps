@@ -43,11 +43,18 @@ describe("companion timeline", () => {
   });
 
   it("carries the queue a cast arrived with", () => {
-    rememberCastQueue("music", "/playQueues/20426", "9911");
-    const line = timelineFor("music", { item: track("65823"), state: "playing", positionMs: 0, durationMs: 1 }, server);
+    rememberCastQueue("music", "/playQueues/20426", { entryIds: ["a", "9911"], version: "7" });
+    const line = timelineFor(
+      "music",
+      { item: track("65823"), index: 1, state: "playing", positionMs: 0, durationMs: 1 },
+      server,
+    );
     expect(line.containerKey).toBe("/playQueues/20426");
     expect(line.playQueueID).toBe("20426");
+    // WHICH row is playing, by the queue's own id for it - a controller has no
+    // remote to draw without one.
     expect(line.playQueueItemID).toBe("9911");
+    expect(line.playQueueVersion).toBe("7");
     expect(line.key).toBe("/library/metadata/65823");
     expect(line.ratingKey).toBe("65823");
   });

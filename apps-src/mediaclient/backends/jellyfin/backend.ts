@@ -38,6 +38,7 @@ import type {
   Marker,
   MediaBackend,
   MediaItem,
+  QueueRead,
   Page,
   PageQuery,
   PersonRef,
@@ -479,7 +480,7 @@ export class JellyfinBackend implements MediaBackend {
    * rather than to be used. It answers EMPTY, which the cast path reads as "no
    * queue" and falls back to the single item; it does not refuse.
    */
-  async queueItems(_queueId: string): Promise<{ items: MediaItem[]; startIndex: number }> {
+  async queueItems(_queueId: string): Promise<QueueRead> {
     return { items: [], startIndex: 0 };
   }
 

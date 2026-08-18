@@ -44,7 +44,16 @@ function scrub(s: string): string {
   // to a third party rather than merely logged. `token` alone is deliberately
   // not in this second pass: unanchored it would redact the word wherever it
   // appears in prose.
-  for (const p of ["x-plex-token", "plextoken", "auth_token", "authtoken", "access_token", "accesstoken", "api_key", "apikey"]) {
+  for (const p of [
+    "x-plex-token",
+    "plextoken",
+    "auth_token",
+    "authtoken",
+    "access_token",
+    "accesstoken",
+    "api_key",
+    "apikey",
+  ]) {
     out = out.replace(new RegExp(`\\b(${p}[=:]\\s*)[^&;\\s"']+`, "gi"), "$1<redacted>");
   }
   // `Authorization: Bearer <token>` is a header, not a parameter, and reaches a

@@ -35,7 +35,16 @@ export interface Timeline {
   /** The play queue this came from, so the phone can show the running order. */
   containerKey?: string;
   playQueueID?: string;
+  /**
+   * WHICH entry of the queue is playing, by the queue's own id for it.
+   *
+   * A controller matches this against the queue it built. Without it, one that
+   * has subscribed knows a queue is playing and not which row - measured
+   * against Plex's own client, which sends it and whose remote a phone draws in
+   * full; this app sent neither and a phone offered no controls at all.
+   */
   playQueueItemID?: string;
+  /** Whether the controller's view of that queue is still the current one. */
   playQueueVersion?: string;
   /** Milliseconds, both of them. */
   time?: number;
@@ -72,10 +81,17 @@ const VIDEO_CONTROLS = "playPause,stop,seekTo,stepBack,stepForward,subtitleStrea
  * music it described and get reported against the next thing started from the
  * television.
  */
-const queues: Partial<Record<TimelineKind, { containerKey: string; itemId?: string }>> = {};
+interface CastQueue {
+  containerKey: string;
+  /** The queue's own id for each row, in the order the rows were handed over. */
+  entryIds?: string[];
+  version?: string;
+}
 
-export function rememberCastQueue(kind: TimelineKind, containerKey: string, itemId?: string): void {
-  queues[kind] = { containerKey, itemId };
+const queues: Partial<Record<TimelineKind, CastQueue>> = {};
+
+export function rememberCastQueue(kind: TimelineKind, containerKey: string, q?: Omit<CastQueue, "containerKey">): void {
+  queues[kind] = { containerKey, ...(q || {}) };
 }
 
 export function forgetCastQueue(kind: TimelineKind): void {
@@ -101,6 +117,8 @@ export function stopped(type: TimelineKind): Timeline {
 
 export interface PlayingSnapshot {
   item: MediaItem | null;
+  /** Which row of the queue this is, so the report can name the entry. */
+  index?: number;
   state: TimelineState;
   positionMs: number;
   durationMs: number;
@@ -135,7 +153,9 @@ export function timelineFor(type: TimelineKind, snap: PlayingSnapshot, server: S
   if (queue) {
     line.containerKey = queue.containerKey;
     line.playQueueID = queueIdOf(queue.containerKey);
-    if (queue.itemId) line.playQueueItemID = queue.itemId;
+    if (queue.version) line.playQueueVersion = queue.version;
+    const entry = queue.entryIds?.[snap.index ?? -1];
+    if (entry) line.playQueueItemID = entry;
   }
   if (snap.shuffle !== undefined) line.shuffle = snap.shuffle ? 1 : 0;
   if (snap.repeat !== undefined) line.repeat = snap.repeat;

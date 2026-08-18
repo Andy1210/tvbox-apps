@@ -203,13 +203,7 @@ describe("the transport buttons on the remote", () => {
     // the page what arrived - see the table in mediakeys.ts. A test over made-up
     // names would pass while every button on the remote stayed dead.
     await start([track("a"), track("b")]);
-    for (const key of [
-      "MediaPlayPause",
-      "MediaTrackNext",
-      "MediaTrackPrevious",
-      "MediaFastForward",
-      "MediaRewind",
-    ]) {
+    for (const key of ["MediaPlayPause", "MediaTrackNext", "MediaTrackPrevious", "MediaFastForward", "MediaRewind"]) {
       expect([key, handleMusicKey(key)]).toEqual([key, true]);
       await settle();
     }

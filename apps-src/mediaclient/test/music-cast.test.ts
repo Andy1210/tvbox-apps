@@ -31,7 +31,13 @@ function backend(over: Record<string, unknown> = {}): unknown {
   return {
     kind: "plex",
     item: async (id: string) => ({ id, kind: "track", title: `Track ${id}`, versions: [], roles: [], extras: [] }),
-    queueItems: async () => ({ items: TRACKS, startIndex: 1 }),
+    queueItems: async () => ({
+      items: TRACKS,
+      startIndex: 1,
+      // The queue's own ids, which is what a controller matches against.
+      entryIds: ["q1", "q2", "q3"],
+      version: "3",
+    }),
     trackUrl: (item: { id: string }) => {
       started.push(item.id);
       return `http://s/${item.id}.flac`;
@@ -327,29 +333,22 @@ describe("a cast of music", () => {
     expect(started).toEqual([]);
   });
 
-  it("keeps a controller's queue item id out of the report unless it is an id", async () => {
-    // It reaches the XML this box publishes. The escaper handles markup; a
-    // control character makes the document unparseable and the server drops it,
-    // which would end this box's status reporting on a string somebody else
-    // chose.
+  it("names the playing row from the QUEUE, not from the command", async () => {
+    // A controller matches the report against the queue it built, and the
+    // command names one entry while the album moves through many - so the id
+    // comes from the queue read. It also means nothing a controller wrote ever
+    // reaches the XML this box publishes.
     forgetCastQueue("music");
     await cast({ queryPlayQueueItemID: "12\u0007<x" });
+
     const line = timelineFor(
       "music",
-      { item: TRACKS[0] as unknown as MediaItem, state: "playing", positionMs: 0, durationMs: 1 },
+      { item: TRACKS[1] as unknown as MediaItem, index: 1, state: "playing", positionMs: 0, durationMs: 1 },
       { machineIdentifier: "M", baseUrl: "http://s:32400" },
     );
-    expect(line.playQueueItemID).toBeUndefined();
-    expect(line.containerKey, "the queue itself still travels").toBe("/playQueues/20406");
-
-    forgetCastQueue("music");
-    await cast({ queryPlayQueueItemID: "9911" });
-    const ok = timelineFor(
-      "music",
-      { item: TRACKS[0] as unknown as MediaItem, state: "playing", positionMs: 0, durationMs: 1 },
-      { machineIdentifier: "M", baseUrl: "http://s:32400" },
-    );
-    expect(ok.playQueueItemID).toBe("9911");
+    expect(line.playQueueItemID, "the queue's own id for that row").toBe("q2");
+    expect(line.playQueueVersion).toBe("3");
+    expect(line.containerKey).toBe("/playQueues/20406");
   });
 
   it("plays again after a phone stopped it, because the queue is still there", async () => {

@@ -37,11 +37,6 @@ function arg(cmd: CompanionCommand, name: string): string | undefined {
   return cmd.params[prefixed] ?? cmd.params[name];
 }
 
-/** A server-side id as the protocol writes them, or nothing. */
-function digits(v: string | undefined): string | undefined {
-  return v && /^\d{1,20}$/.test(v) ? v : undefined;
-}
-
 /** `/playQueues/20406` -> `20406`. The `?own=1&window=200` form is stripped. */
 function queueId(containerKey: string | undefined): string | undefined {
   const m = /^\/playQueues\/(\d+)\b/.exec(containerKey ?? "");
@@ -167,6 +162,8 @@ async function startMusic(
 ): Promise<CommandResult> {
   let tracks: MediaItem[] = [item];
   let startIndex = 0;
+  let entryIds: string[] | undefined;
+  let version: string | undefined;
   const qid = queueId(arg(cmd, "containerKey"));
   if (qid) {
     try {
@@ -174,6 +171,8 @@ async function startMusic(
       if (queue.items.length) {
         tracks = queue.items;
         startIndex = Math.min(queue.startIndex, queue.items.length - 1);
+        entryIds = queue.entryIds;
+        version = queue.version;
       }
     } catch (e) {
       // One track is a worse answer than the album, but it is an honest one and
@@ -218,11 +217,11 @@ async function startMusic(
   // Remembered for the report that follows: a phone matches what the box says
   // it is playing against the queue IT built, and a report with no queue on it
   // reads as the box playing one loose track.
-  // Digits only. The id comes from the controller and ends up in the XML this
-  // box publishes; the escaper handles markup, but a control character makes the
-  // whole document unparseable and the server drops it - which would silently
-  // end this box's status reporting on a string somebody else chose.
-  if (qid) rememberCastQueue("music", `/playQueues/${qid}`, digits(arg(cmd, "playQueueItemID")));
+  // The queue's own ids, from the queue itself rather than from the controller's
+  // command: the command names ONE entry, and the report has to name whichever
+  // one is playing as the album moves on. (Where the read failed there is
+  // nothing to name, and the report leaves the field out.)
+  if (qid) rememberCastQueue("music", `/playQueues/${qid}`, { entryIds, version });
   // No "went off screen" check after the start, unlike the film path, and the
   // difference is real rather than an oversight: a film owns the SCREEN, so one
   // playing behind the launcher is a box lying about what it is showing, while
@@ -598,6 +597,7 @@ export function companionTimelines(server: ServerAddress): Timeline[] {
       "music",
       {
         item: track ?? null,
+        index: music.index,
         state: music.buffering && music.state === "playing" ? "buffering" : music.state,
         positionMs: music.positionMs,
         durationMs: music.durationMs,

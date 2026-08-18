@@ -217,7 +217,7 @@ export function toTracks(streams: JellyfinStream[] | undefined, type: "Audio" | 
   return (streams || [])
     .filter((s) => s.Type === type)
     .map((s) => ({
-      ordinal: s.IsExternal ? -(++outside) : inside++,
+      ordinal: s.IsExternal ? -++outside : inside++,
       id: String(s.Index),
       kind,
       language: s.Language,
@@ -303,7 +303,9 @@ export function toChapters(list: JellyfinChapter[] | undefined, itemId: string, 
       title: c.Name,
       startMs,
       endMs: next ?? durationMs ?? startMs,
-      thumb: c.ImageTag ? `Items/${encodeURIComponent(itemId)}/Images/Chapter/${i}?tag=${encodeURIComponent(c.ImageTag)}` : undefined,
+      thumb: c.ImageTag
+        ? `Items/${encodeURIComponent(itemId)}/Images/Chapter/${i}?tag=${encodeURIComponent(c.ImageTag)}`
+        : undefined,
     };
   });
 }
