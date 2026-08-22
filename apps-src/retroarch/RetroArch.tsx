@@ -266,7 +266,13 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
   // cover, or (after Close Content) nothing at all.
   useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState !== "visible") return;
+      if (document.visibilityState !== "visible") {
+        // Leaving by the remote's HOME button hides this window rather than
+        // destroying it, so the mode would still be set on the way back in -
+        // Back clears it, and this is the other way out.
+        setMarking(false);
+        return;
+      }
       setStarting("");
       loadSystems();
     };
