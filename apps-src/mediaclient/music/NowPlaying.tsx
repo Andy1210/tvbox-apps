@@ -123,6 +123,10 @@ export function NowPlaying(): React.JSX.Element {
     setPanel((shown) =>
       want === "toggle" ? (shown === "lyrics" ? "queue" : "lyrics") : want === "off" ? "queue" : "lyrics",
     );
+    // Consumed, not latched: this screen unmounts every time somebody walks back
+    // into the library, and a request left in the store re-opened the panel on
+    // the next visit - minutes after it was asked for.
+    useMusic.getState().askLyrics("");
   }, [lyricsAsk]);
 
   const item = queue[index];

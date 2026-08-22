@@ -2,8 +2,12 @@
   "id": "spotify",
   "manifestVersion": 1,
   "name": "Spotify",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "changelog": [
+    {
+      "version": "1.5.1",
+      "notes": "A voice command now reaches whichever app is actually making the sound, so a spoken pause or skip no longer acts on this one while something else is playing."
+    },
     {
       "version": "1.5.0",
       "notes": "Lucy can now shuffle, repeat and show the lyrics by voice, and a spoken pause reaches the music even when Spotify is not the screen you are looking at."

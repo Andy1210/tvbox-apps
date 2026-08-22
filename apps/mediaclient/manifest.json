@@ -5,8 +5,12 @@
     "hu": "M\u00e9dia",
     "en": "Media"
   },
-  "version": "0.62.0",
+  "version": "0.62.1",
   "changelog": [
+    {
+      "version": "0.62.1",
+      "notes": "Shuffle and repeat by voice work on a queue that is merely paused or stopped, and a spoken command meant for another app no longer reaches this one's queue."
+    },
     {
       "version": "0.62.0",
       "notes": "Lucy can now control the music by voice: skip, shuffle, repeat one song or the whole list, and bring the lyrics up - whichever screen the box is on."

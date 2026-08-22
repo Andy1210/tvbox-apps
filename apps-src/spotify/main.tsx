@@ -91,7 +91,13 @@ if (bridge.onCommand) {
   const run = (action: string, state?: boolean | string) =>
     void control(action, state).then((err) => err && console.warn("[spotify] remote " + action + " refused: " + err));
   bridge.onCommand((cmd: unknown) => {
-    const c = (cmd || {}) as { action?: string; state?: string };
+    const c = (cmd || {}) as { action?: string; state?: string; sounding?: string };
+    // The shell says which app it believes is making the sound, and the command
+    // reaches the foreground app as well as that one - so this app stands down
+    // when the sound is somebody else's. Empty means the shell does not know (or
+    // predates the field), and then this app answers as it always did.
+    const sounding = String(c.sounding || "");
+    if (sounding && sounding !== "spotify") return;
     const action = String(c.action || "").toLowerCase();
     const state = String(c.state || "").toLowerCase();
     const a = map[action];

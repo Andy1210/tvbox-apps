@@ -159,23 +159,29 @@ export function useMusicMediaKeys(): void {
  * repeat), which is the queue's own vocabulary too - no translation, unlike the
  * Spotify app, whose API has its own words for repeat.
  */
-export function handleMusicCommand(cmd: { action?: string; state?: string } | null): boolean {
+export function handleMusicCommand(cmd: { action?: string; state?: string; sounding?: string } | null): boolean {
   // A film owns the player: its own pause is the shell's business and the queue
   // underneath must not step. Same question the key handler asks, for the same
   // reason.
   if (usePlayer.getState().current) return false;
   const m = useMusic.getState();
   if (!m.queue.length) return false;
-  // ...and this app has to be the one PLAYING. A key press comes from somebody
-  // looking at this screen; a forwarded command is aimed at whatever is making
-  // the sound in the room, and the shell delivers it to the foreground app as
-  // well. Without the claim, two measured wrongs: a spoken "next song" over a
-  // queue that was STOPPED started music nobody asked for (the queue deliberately
-  // survives a stop), and with Spotify playing in the background a lyrics request
-  // brought up the words of this app's last song instead.
-  if (!ownsPlayer("music")) return false;
+  // Who the SHELL believes is making the sound. A forwarded command goes to the
+  // foreground app as well as to the sounding one, and only the shell can tell
+  // them apart: with a queue paused here and Spotify playing, a spoken "next
+  // song" skipped Spotify and started house music over it. Empty means the shell
+  // does not know (or predates the field), and then the ownership test below is
+  // all there is.
+  const sounding = String(cmd?.sounding || "");
+  if (sounding && sounding !== "mediaclient") return false;
   const action = String(cmd?.action || "").toLowerCase();
   const state = String(cmd?.state || "").toLowerCase();
+  // Ownership is asked for the actions that TOUCH the player, not for the two
+  // that are a store write. Asking it for all of them dropped a spoken "kapcsold
+  // ki a keverést" on a queue that was merely stopped - and shuffle and repeat
+  // are outside the silence policy, so the room heard that it had been done.
+  const needsPlayer = action === "next" || action === "previous" || action === "lyrics";
+  if (needsPlayer && !ownsPlayer("music")) return false;
   switch (action) {
     // Already done to mpv by the shell. Only the label is ours - `state` drives
     // what the player screen and the mini player show, and leaving it on

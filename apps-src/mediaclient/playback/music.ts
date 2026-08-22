@@ -499,7 +499,9 @@ export const useMusic = create<MusicState>((set, get) => ({
   },
 
   askLyrics(state) {
-    set({ lyricsAsk: { state, at: Date.now() } });
+    // An empty state CLEARS it: the screen that draws the words consumes the
+    // request, so it cannot re-open the panel the next time that screen mounts.
+    set({ lyricsAsk: state ? { state, at: Date.now() } : null });
   },
 }));
 

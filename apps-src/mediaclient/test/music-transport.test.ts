@@ -401,16 +401,38 @@ describe("a command forwarded from the shell", () => {
     expect(useMusic.getState().state).toBe("stopped");
   });
 
-  it("stands down when something else is making the sound", async () => {
+  it("stands down when the SHELL says somebody else is making the sound", async () => {
     await start([track("a"), track("b")]);
-    // Spotify plays through its own service, so this app holds nothing - and the
-    // shell forwards the command to the FOREGROUND app as well as to the player.
-    // Acting here showed this app's own song's lyrics over somebody else's music.
-    resetPlayerOwner();
-    expect(handleMusicCommand({ action: "lyrics" })).toBe(false);
+    // The shell forwards to the foreground app as well as to the sounding one, and
+    // only it can tell them apart: a queue paused here with Spotify playing used
+    // to take a spoken "next song" and start house music over it. Note the queue
+    // here is PLAYING and this app owns the player - ownership cannot answer this
+    // question, which is why the shell has to say.
+    expect(handleMusicCommand({ action: "next", sounding: "spotify" })).toBe(false);
+    expect(handleMusicCommand({ action: "lyrics", sounding: "spotify" })).toBe(false);
+    expect(handleMusicCommand({ action: "shuffle", state: "on", sounding: "spotify" })).toBe(false);
+    expect(useMusic.getState().index).toBe(0);
     expect(useMusic.getState().lyricsAsk).toBeNull();
-    expect(handleMusicCommand({ action: "shuffle", state: "on" })).toBe(false);
     expect(useMusic.getState().shuffle).toBe(false);
+    // ...and it acts when the sound is its own, or when the shell does not say.
+    expect(handleMusicCommand({ action: "shuffle", state: "on", sounding: "mediaclient" })).toBe(true);
+    expect(useMusic.getState().shuffle).toBe(true);
+  });
+
+  it("still sets shuffle and repeat on a queue that is not playing", async () => {
+    await start([track("a"), track("b")]);
+    await useMusic.getState().stop();
+    await settle();
+    // These two are store writes and touch no player, so requiring ownership for
+    // them dropped a spoken "kapcsold ki a keverést" on a stopped queue - and
+    // they are outside the silence policy, so the room heard it had been done.
+    expect(handleMusicCommand({ action: "shuffle", state: "on" })).toBe(true);
+    expect(useMusic.getState().shuffle).toBe(true);
+    expect(handleMusicCommand({ action: "repeat", state: "all" })).toBe(true);
+    expect(useMusic.getState().repeat).toBe("all");
+    // ...while the ones that touch it still stand down.
+    expect(handleMusicCommand({ action: "next" })).toBe(false);
+    expect(handleMusicCommand({ action: "lyrics" })).toBe(false);
   });
 
   it("stands down while a film owns the player", async () => {
