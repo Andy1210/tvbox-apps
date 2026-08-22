@@ -142,3 +142,70 @@ export function useMusicMediaKeys(): void {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 }
+
+/**
+ * One command forwarded from the shell (MQTT: voice, Home Assistant, a phone),
+ * and whether it was ours.
+ *
+ * A sibling of `handleMusicKey` rather than part of it, because the two are NOT
+ * the same set of decisions. The shell owns the player this queue plays through,
+ * and for a transport command it acts on it ITSELF before forwarding - so
+ * pausing here as well would toggle the pause straight back off. What the app
+ * still has to do for those is stop lying about them on screen; the ones the
+ * shell has no analogue of are the ones it actually performs.
+ *
+ * `state` arrives in the house's vocabulary (on/off/toggle, and off/one/all for
+ * repeat), which is the queue's own vocabulary too - no translation, unlike the
+ * Spotify app, whose API has its own words for repeat.
+ */
+export function handleMusicCommand(cmd: { action?: string; state?: string } | null): boolean {
+  // A film owns the player: its own pause is the shell's business and the queue
+  // underneath must not step. Same question the key handler asks, for the same
+  // reason.
+  if (usePlayer.getState().current) return false;
+  const m = useMusic.getState();
+  if (!m.queue.length) return false;
+  const action = String(cmd?.action || "").toLowerCase();
+  const state = String(cmd?.state || "").toLowerCase();
+  switch (action) {
+    // Already done to mpv by the shell. Only the label is ours - `state` drives
+    // what the player screen and the mini player show, and leaving it on
+    // "playing" through a spoken pause is a screen that contradicts the room.
+    case "pause":
+      if (m.state === "playing") useMusic.setState({ state: "paused" });
+      return true;
+    case "play":
+    case "resume":
+      if (m.state === "paused") useMusic.setState({ state: "playing" });
+      return true;
+    // Also the shell's: its stop reaches the queue as a `finished` carrying a
+    // reason, which is what keeps it from advancing to the next song.
+    case "stop":
+      return true;
+    case "next":
+      void m.next();
+      return true;
+    case "previous":
+      void m.previous();
+      return true;
+    case "shuffle":
+      if (state === "toggle") m.setShuffle(!m.shuffle);
+      else if (state === "on" || state === "off") m.setShuffle(state === "on");
+      else return false;
+      return true;
+    case "repeat":
+      if (state === "off" || state === "one" || state === "all") m.setRepeat(state);
+      // Through the three in the order the on-screen button cycles them, so a
+      // spoken toggle and a pressed one mean the same thing.
+      else if (state === "toggle") m.setRepeat(m.repeat === "off" ? "all" : m.repeat === "all" ? "one" : "off");
+      else return false;
+      return true;
+    // Only recorded here: it needs a screen, and which screen is up is not this
+    // module's to decide (MediaClient.tsx navigates, then the panel reads this).
+    case "lyrics":
+      m.askLyrics(state || "on");
+      return true;
+    default:
+      return false;
+  }
+}

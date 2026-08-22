@@ -111,6 +111,20 @@ export function NowPlaying(): React.JSX.Element {
   // with nothing naming it is a row of guesses - see the note on the row itself.
   const [hint, setHint] = useState<string | null>(null);
 
+  // A spoken request for the words. The store carries it because this screen is
+  // usually not mounted when it arrives (see the note on `lyricsAsk`); the
+  // functional setter is what makes "toggle" mean the panel on screen rather than
+  // the one this effect closed over, and the request is the only dependency so a
+  // track change cannot put the panel back after somebody pressed it away.
+  const lyricsAsk = useMusic((s) => s.lyricsAsk);
+  useEffect(() => {
+    if (!lyricsAsk) return;
+    const want = String(lyricsAsk.state || "on");
+    setPanel((shown) =>
+      want === "toggle" ? (shown === "lyrics" ? "queue" : "lyrics") : want === "off" ? "queue" : "lyrics",
+    );
+  }, [lyricsAsk]);
+
   const item = queue[index];
   const at = queueCursor ?? index;
   const qStart = Math.max(0, Math.min(at - QUEUE_LEAD, Math.max(0, queue.length - QUEUE_ROWS)));

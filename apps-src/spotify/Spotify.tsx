@@ -104,6 +104,14 @@ export function Spotify({ onExit }: { onExit: () => void }) {
   /** What a spoken request did, when it did not simply start playing. */
   const [asked, setAsked] = useState("");
   /**
+   * A spoken request for the lyrics: what was asked for, and when.
+   *
+   * The timestamp is what makes the same request twice fire twice - somebody
+   * asking again because the screen was on something else. The view that SHOWS
+   * the lyrics owns the toggle, so this only carries the request down to it.
+   */
+  const [lyrics, setLyrics] = useState<{ state: string; at: number } | null>(null);
+  /**
    * A spoken request waiting for the app to know whether it has an account.
    *
    * The command is what OPENS this app, so it arrives while the first
@@ -144,8 +152,17 @@ export function Spotify({ onExit }: { onExit: () => void }) {
   const connected = !!auth?.connected;
   useEffect(() => {
     const off = tvbox().onCommand?.((c) => {
-      const cmd = c as PlayMedia;
-      if (!cmd || String(cmd.action || "") !== "play_media") return;
+      const cmd = c as PlayMedia & { state?: string };
+      if (!cmd) return;
+      const action = String(cmd.action || "");
+      if (action === "lyrics") {
+        // The player screen is the only one that has them, whichever screen the
+        // request arrived on - the box may have been sitting in the library.
+        setView("now");
+        setLyrics({ state: String(cmd.state || "on"), at: Date.now() });
+        return;
+      }
+      if (action !== "play_media") return;
       const query = String(cmd.query ?? "").trim();
       if (!query) return;
       setView("now"); // whatever it finds, this is the screen that shows it
@@ -240,6 +257,7 @@ export function Spotify({ onExit }: { onExit: () => void }) {
     <NowPlaying
       connected={connected}
       note={asked}
+      lyrics={lyrics}
       onNoteDone={() => setAsked("")}
       onSettings={() => setView("settings")}
       onBrowse={() => {
