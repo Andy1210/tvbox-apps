@@ -34,14 +34,16 @@ export function Lyrics({
   /**
    * Whether anything here is MOVING - i.e. the words are time-tagged and follow
    * the song. The player holds its settle off for that and only that: a panel
-   * showing one static line ("no lyrics for this song", or the switch being off)
-   * is exactly the still picture settling exists for.
+   * showing one static line ("no lyrics for this song") is exactly the still
+   * picture settling exists for.
    */
   onLive?: (live: boolean) => void;
 }): React.JSX.Element {
   const { t } = useI18n();
-  // The one thing this app sends outside the house, so it is asked for rather
-  // than assumed - and the panel says so instead of showing nothing.
+  // The lookup is the one thing this app sends outside the house - the track's
+  // title, artist, album and length go to LRCLIB - and pressing Lyrics is what
+  // asks for it. This component mounts only when the panel is switched to it,
+  // so there is nothing to gate behind a setting: no press, no request.
   const [data, setData] = useState<LyricsData | null>(null);
   const [loading, setLoading] = useState(true);
   const activeRef = useRef<HTMLParagraphElement | null>(null);
