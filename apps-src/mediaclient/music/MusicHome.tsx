@@ -43,6 +43,10 @@ export function MusicHome({ libraryId, title }: { libraryId: string; title: stri
   const failure = useApp((s) => s.failure);
   const playQueue = useMusic((s) => s.playQueue);
   const nowPlaying = useMusic((s) => s.queue[s.index] !== undefined);
+  const adding = useMusic((s) => s.adding);
+  const setAdding = useMusic((s) => s.setAdding);
+  const enqueue = useMusic((s) => s.enqueue);
+  const [note, setNote] = useState<string | null>(null);
   const [data, setData] = useState<Loaded | null>(null);
   const [reload, setReload] = useState(0);
   const scroller = useRef<HTMLDivElement | null>(null);
@@ -122,6 +126,13 @@ export function MusicHome({ libraryId, title }: { libraryId: string; title: stri
   /** Play a rail's worth of songs, starting where the cursor is. */
   const playFrom = (items: MediaItem[], item: MediaItem): void => {
     if (!backend) return;
+    // This screen has one rail of songs, and while the add mode is on it obeys
+    // the same rule as every other song: OK adds it.
+    if (adding) {
+      enqueue(backend, [item], "end");
+      setNote(t("music.addedOne", { title: item.title }));
+      return;
+    }
     void playQueue(backend, items, { startIndex: Math.max(0, items.indexOf(item)), shuffle: false });
     go({ name: "nowPlaying" });
   };
@@ -155,6 +166,12 @@ export function MusicHome({ libraryId, title }: { libraryId: string; title: stri
         title={title}
         totalTracks={data.totalTracks}
         onReachTop={toTop}
+        note={note}
+        // Only while the mode is on. Off, this screen's row is already five
+        // chips wide, and the way IN to the mode is the songs list and the album
+        // screens where it is used - what it needs here is a way OUT, because
+        // walking back up to the library is how somebody arrives here with it on.
+        onStopAdding={adding ? () => setAdding(false) : undefined}
         // Only when there is something to go back to. A chip that opens an empty
         // player is a press that teaches people the button does nothing.
         onNowPlaying={nowPlaying ? () => go({ name: "nowPlaying" }) : undefined}
@@ -226,6 +243,8 @@ function Actions({
   title,
   totalTracks,
   onReachTop,
+  note,
+  onStopAdding,
   onShuffle,
   onSongs,
   onAlbums,
@@ -235,6 +254,10 @@ function Actions({
   title: string;
   totalTracks?: number;
   onReachTop: () => void;
+  /** What the last press added, when it added something. */
+  note: string | null;
+  /** Absent unless the add mode is on, and then no chip is drawn. */
+  onStopAdding?: () => void;
   onShuffle: () => void;
   onSongs: () => void;
   onAlbums: () => void;
@@ -269,6 +292,19 @@ function Actions({
             {t("music.nowPlaying")}
           </FocusButton>
         )}
+        {onStopAdding && (
+          <FocusButton
+            focusKey="mh-stopadding"
+            onFocused={onReachTop}
+            onEnter={onStopAdding}
+            className={chip + " !bg-[var(--color-accent)] !text-[#0d1014]"}
+          >
+            {t("music.addModeOff")}
+          </FocusButton>
+        )}
+        {/* Truncating rather than wrapping: the row is one line tall, and a
+            second line here pushes every rail down by its height. */}
+        <span className="min-w-0 flex-1 truncate text-[1.9vh] text-fg-dim">{note}</span>
       </div>
     </FocusContext.Provider>
   );

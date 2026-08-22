@@ -132,6 +132,12 @@
     "savesWouldReplace": "{n} here are newer and would be replaced",
     "savesSame": "the same on both",
     "savesArriving": "{n} would arrive",
-    "savesBringAll": "Bring all"
+    "savesBringAll": "Bring all",
+    "favourites": "Favourites",
+    "recentlyPlayed": "Recently played",
+    "favourite": "Favourite",
+    "markingTitle": "Adding to favourites",
+    "markingHint": "OK marks the cover instead of starting the game. Press “Favourite” again to stop.",
+    "markingDone": "Done"
   }
 }

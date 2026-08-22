@@ -5,7 +5,21 @@ import { NowPlaying } from "./NowPlaying";
 import { SpotifySettings } from "./SpotifySettings";
 import { Browser } from "./Browser";
 import { useSpotifyStore } from "./stores/spotify";
-import { authStatus, setSpotifyEnabled, type AuthStatus } from "./api";
+import { authStatus, play, search, setSpotifyEnabled, URIS_MAX, type AuthStatus } from "./api";
+
+/**
+ * A song asked for out loud.
+ *
+ * The assistant publishes it to the box over MQTT and the shell hands it to this
+ * window (`play_media`), because nothing outside the box can reach the Spotify
+ * account: the credentials live in this app's own host plugin, behind an HTTP
+ * server bound to loopback. So the search and the play happen HERE, with the
+ * code the library screen already uses.
+ *
+ * The query travels as text rather than as a uri: whoever asked said a name, and
+ * resolving a name to a Spotify uri needs the account that this box holds.
+ */
+type PlayMedia = { action: string; query?: unknown };
 
 // Opt-in screen shown until Spotify Connect is enabled on this box. The
 // librespot daemon (which advertises the box on the LAN) runs only once enabled
@@ -74,8 +88,30 @@ function SpotifyEnable({
 // library Browser. Casting auto-opens this screen (shell navigates here on the
 // cast rising edge).
 export function Spotify({ onExit }: { onExit: () => void }) {
+  const { t } = useI18n();
   const [view, setView] = useState<"now" | "settings" | "browse">("now");
+  /**
+   * Whether the player screen was reached by starting something from the library.
+   *
+   * Starting a track leaves the library for the player, which is what somebody
+   * who just pressed a song wants to see - but Back then left the app entirely,
+   * so "that was the wrong song" meant opening the library again and typing the
+   * search a second time. With this, Back goes back to where the press came
+   * from, and the library is still showing what it was (stores/browse.ts).
+   */
+  const [fromBrowse, setFromBrowse] = useState(false);
   const [auth, setAuth] = useState<AuthStatus | null>(null);
+  /** What a spoken request did, when it did not simply start playing. */
+  const [asked, setAsked] = useState("");
+  /**
+   * A spoken request waiting for the app to know whether it has an account.
+   *
+   * The command is what OPENS this app, so it arrives while the first
+   * `authStatus()` is still in the air - acting on it there answered every
+   * voice request with "connect an account", on a box that has one. Held until
+   * the answer is in, then run once.
+   */
+  const [wanted, setWanted] = useState<string | null>(null);
   const enabled = useConfigStore((s) => s.config?.spotify.enabled ?? false);
   const loadConfig = useConfigStore((s) => s.load);
   // The SSE stream is owned by App (kept connected launcher-wide so now-playing
@@ -98,6 +134,49 @@ export function Spotify({ onExit }: { onExit: () => void }) {
     const id = setInterval(() => void authStatus().then(setAuth), 10000);
     return () => clearInterval(id);
   }, [view]);
+
+  // A spoken request. The listener is here rather than on the player screen
+  // because that screen is not the one on display when the request arrives - the
+  // box may have been sitting in the library, or the app may have just been
+  // opened by the command itself. Subscribed ONCE: re-subscribing when something
+  // else on this screen changes would drop a request the shell had already
+  // handed over, which is exactly the moment this arrives in.
+  const connected = !!auth?.connected;
+  useEffect(() => {
+    const off = tvbox().onCommand?.((c) => {
+      const cmd = c as PlayMedia;
+      if (!cmd || String(cmd.action || "") !== "play_media") return;
+      const query = String(cmd.query ?? "").trim();
+      if (!query) return;
+      setView("now"); // whatever it finds, this is the screen that shows it
+      setWanted(query);
+    });
+    return off;
+  }, []);
+
+  useEffect(() => {
+    // Not until the account is known - see `wanted`.
+    if (wanted === null || auth === null) return;
+    const query = wanted;
+    setWanted(null);
+    if (!connected) {
+      // Search and play are Web API calls; without an account this app is a
+      // speaker somebody else casts to, and there is nothing here to search.
+      setAsked(t("spotify.voiceNoAccount"));
+      return;
+    }
+    setAsked(t("spotify.voiceSearching", { query }));
+    void search(query).then(async (r) => {
+      if (!r.tracks.length) {
+        setAsked(t("spotify.voiceNoMatch", { query }));
+        return;
+      }
+      // The result list is the running order, so what was asked for is followed
+      // by more of the same rather than by silence.
+      const out = await play({ uris: r.tracks.slice(0, URIS_MAX).map((x) => x.uri) });
+      setAsked(out.ok ? "" : t("spotify.playError", { error: out.error || "?" }));
+    });
+  }, [wanted, auth, connected, t]);
 
   // The box's screensaver, over this app. While an app is in front the launcher's
   // window is hidden and its idle timer is suppressed there on purpose - so
@@ -144,13 +223,39 @@ export function Spotify({ onExit }: { onExit: () => void }) {
 
   if (view === "settings") return <SpotifySettings onBack={() => setView("now")} />;
   if (view === "browse")
-    return <Browser onBack={() => setView("now")} onPlayed={() => setView("now")} account={auth?.user || ""} />;
+    return (
+      <Browser
+        onBack={() => {
+          setFromBrowse(false);
+          setView("now");
+        }}
+        onPlayed={() => {
+          setFromBrowse(true);
+          setView("now");
+        }}
+        account={auth?.user || ""}
+      />
+    );
   return (
     <NowPlaying
-      connected={!!auth?.connected}
+      connected={connected}
+      note={asked}
+      onNoteDone={() => setAsked("")}
       onSettings={() => setView("settings")}
-      onBrowse={() => setView("browse")}
-      onExit={onExit}
+      onBrowse={() => {
+        setFromBrowse(false);
+        setView("browse");
+      }}
+      onExit={() => {
+        // One press back to the list that started this, and only once: a second
+        // Back from the library leaves the app, as it always did.
+        if (fromBrowse) {
+          setFromBrowse(false);
+          setView("browse");
+          return;
+        }
+        onExit();
+      }}
     />
   );
 }

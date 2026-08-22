@@ -1,9 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
+import { FocusContext, getCurrentFocusKey, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n, useFocusableItem, Osk } from "@sdk";
-import { coverUrl, shortSystem, type GameRow, type SystemRow } from "./api";
+import { coverUrl, shortSystem, type Entry, type SystemRow } from "./api";
 import { Alphabet, bucketOf } from "./Alphabet";
-import { ALPHA, EMPTY_ACTION, RAIL, SEARCH, TABS, TILES, jump } from "./focus";
+import { useLibrary, sameGame, type GameRef } from "./library";
+import { ALPHA, EMPTY_ACTION, FAVOURITE, RAIL, SEARCH, TABS, TILES, jump } from "./focus";
+
+/** A console in the rail, or one of the two categories that are not consoles. */
+export type RailRow = SystemRow & { title?: string };
+
+/** The focus key of one cover. Unique across consoles, because favourites and
+ *  recently played draw games from several at once and an index alone repeats. */
+const tileKey = (e: Entry): string => `g-${e.system}-${e.i}`;
 
 // How many covers a row holds, and how much of the list is MOUNTED around the
 // focused row. A library here is 1044 GBA plus 787 NES games; putting three
@@ -32,7 +40,7 @@ function Console({
   onPick,
   onEnter,
 }: {
-  row: SystemRow;
+  row: RailRow;
   first: boolean;
   active: boolean;
   onPick: (system: string) => void;
@@ -69,35 +77,41 @@ function Console({
         focused ? "!bg-white !text-[#06090d]" : active ? "bg-white/10 text-fg" : "text-fg-dim",
       ].join(" ")}
     >
-      <span className="text-[1.8vh] font-semibold truncate">{shortSystem(row.system)}</span>
+      <span className="text-[1.8vh] font-semibold truncate">{row.title ?? shortSystem(row.system)}</span>
       <span className="text-[1.3vh] opacity-70 tabular-nums">{row.games}</span>
     </div>
   );
 }
 
 function Tile({
-  system,
   game,
   pos,
+  starred,
+  marking,
   onPlay,
+  onMark,
   onFocusPos,
 }: {
-  system: string;
-  game: GameRow;
+  game: Entry;
   pos: number;
-  onPlay: (game: GameRow) => void;
+  /** In the favourites, and marked so from across a room. */
+  starred: boolean;
+  /** The favourites mode is on, so OK marks this cover instead of starting it. */
+  marking: boolean;
+  onPlay: (game: Entry) => void;
+  onMark: (game: Entry, pos: number) => void;
   onFocusPos: (pos: number) => void;
 }) {
   // onFocus is norigin's callback, not the DOM event: nothing here ever takes real
   // DOM focus, so a focusin listener would never fire.
   const { ref, focused } = useFocusableItem(
     {
-      focusKey: "g-" + game.i,
-      onEnterPress: () => onPlay(game),
+      focusKey: tileKey(game),
+      onEnterPress: () => (marking ? onMark(game, pos) : onPlay(game)),
       onFocus: () => onFocusPos(pos),
       onArrowPress: (dir) => {
         if (dir === "up" && pos < COLS) {
-          jump(SEARCH, TABS);
+          jump(FAVOURITE, SEARCH, TABS);
           return false;
         }
         // Left out of the first column goes to the console rail, at the console it
@@ -120,14 +134,26 @@ function Tile({
   return (
     <div
       ref={ref}
-      onClick={() => onPlay(game)}
+      onClick={() => (marking ? onMark(game, pos) : onPlay(game))}
       className={[
         "rounded-[1vh] overflow-hidden bg-white/5 flex flex-col",
         "transition-[transform,outline-color] duration-150 outline outline-[3px] outline-transparent outline-offset-2",
         focused ? "scale-[1.06] outline-[var(--color-focus)] z-10" : "",
       ].join(" ")}
     >
-      <div className="h-[24vh] flex items-center justify-center p-[0.4vh] shrink-0">
+      <div className="h-[24vh] flex items-center justify-center p-[0.4vh] shrink-0 relative">
+        {/* A drawn star, never a glyph: this Chromium has no colour-emoji font
+            and would put a hollow box on the corner of the cover. */}
+        {starred && (
+          <svg
+            viewBox="0 0 24 24"
+            className="absolute top-[0.4vh] right-[0.4vw] w-[2.4vh] h-[2.4vh] drop-shadow-[0_0_0.4vh_rgba(0,0,0,0.9)]"
+            fill="#f5c518"
+            aria-hidden="true"
+          >
+            <path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z" />
+          </svg>
+        )}
         {game.cover ? (
           // Async decode, but NOT `loading="lazy"`. The window above is already the
           // virtualization - at most WINDOW_ROWS * COLS tiles exist at once, and a
@@ -139,7 +165,7 @@ function Tile({
           // filled in on the next press. Decoding is what could block the focus
           // move, and `decoding="async"` is what answers that.
           <img
-            src={coverUrl(system, game.i)}
+            src={coverUrl(game.system, game.i)}
             alt=""
             decoding="async"
             className="max-h-full max-w-full object-contain"
@@ -219,6 +245,60 @@ function SearchButton({ onPress, onClear }: { onPress: () => void; onClear?: () 
   );
 }
 
+/**
+ * The star, next to Search: a MODE rather than an action on the focused cover.
+ *
+ * An action here could only act on whatever the cursor was on when it reached
+ * this button - and reaching it means walking UP through every row above,
+ * changing the focused cover at each step. Measured against the code: from any
+ * row but the first, pressing the star marked a game in row 0 instead of the one
+ * being looked at, so everything below the first six covers was unmarkable.
+ *
+ * As a mode, OK on a cover marks THAT cover and the cursor never has to leave
+ * the grid. The same shape the media client's "add songs" uses, and for the same
+ * reason - which also means it needs the same thing: a line on screen saying
+ * what OK does now.
+ */
+function FavouriteButton({ on, onPress }: { on: boolean; onPress: () => void }) {
+  const { t } = useI18n();
+  const { ref, focused } = useFocusableItem({
+    focusKey: FAVOURITE,
+    onEnterPress: onPress,
+    onArrowPress: (dir) => {
+      if (dir === "up") {
+        jump(TABS);
+        return false;
+      }
+      if (dir === "down") {
+        jump(TILES, EMPTY_ACTION, RAIL);
+        return false;
+      }
+      return true;
+    },
+  });
+  return (
+    <div
+      ref={ref}
+      onClick={onPress}
+      className={[
+        "px-[1.2vw] py-[0.8vh] rounded-[1vh] text-[1.6vh] font-semibold flex items-center gap-[0.5vw]",
+        focused ? "bg-white text-[#06090d]" : "bg-white/5",
+      ].join(" ")}
+    >
+      <svg
+        viewBox="0 0 24 24"
+        className="w-[1.8vh] h-[1.8vh]"
+        fill={on ? "#f5c518" : "none"}
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z" strokeLinejoin="round" />
+      </svg>
+      {on ? t("retroarch.markingDone") : t("retroarch.favourite")}
+    </div>
+  );
+}
+
 function EmptyAction({ onPress }: { onPress: () => void }) {
   const { t } = useI18n();
   const { ref, focused } = useFocusableItem({ focusKey: EMPTY_ACTION, onEnterPress: onPress });
@@ -244,7 +324,7 @@ function ConsoleRail({
   onPick,
   onEnter,
 }: {
-  systems: SystemRow[];
+  systems: RailRow[];
   active: string;
   onPick: (system: string) => void;
   onEnter: () => void;
@@ -270,22 +350,26 @@ function ConsoleRail({
 
 // The covers, for the same reason: an empty grid must not leave a focus key behind.
 function Tiles({
-  system,
   mounted,
   start,
   rows,
   end,
   scroller,
+  favourites,
+  marking,
   onPlay,
+  onMark,
   onFocusPos,
 }: {
-  system: string;
-  mounted: GameRow[];
+  mounted: Entry[];
   start: number;
   rows: number;
   end: number;
   scroller: MutableRefObject<HTMLDivElement | null>;
-  onPlay: (game: GameRow) => void;
+  favourites: GameRef[];
+  marking: boolean;
+  onPlay: (game: Entry) => void;
+  onMark: (game: Entry, pos: number) => void;
   onFocusPos: (pos: number) => void;
 }) {
   const { ref, focusKey } = useFocusable({ focusKey: TILES });
@@ -305,7 +389,16 @@ function Tiles({
         <div style={{ height: start * ROW_VH + "vh" }} />
         <div className="grid grid-cols-6 gap-x-[1vw] gap-y-[1vh]">
           {mounted.map((g, k) => (
-            <Tile key={g.i} system={system} game={g} pos={start * COLS + k} onPlay={onPlay} onFocusPos={onFocusPos} />
+            <Tile
+              key={tileKey(g)}
+              game={g}
+              pos={start * COLS + k}
+              starred={favourites.some((f) => sameGame(f, g))}
+              marking={marking}
+              onPlay={onPlay}
+              onMark={onMark}
+              onFocusPos={onFocusPos}
+            />
           ))}
         </div>
         <div style={{ height: Math.max(0, rows - end) * ROW_VH + "vh" }} />
@@ -317,23 +410,35 @@ function Tiles({
 export function GameGrid({
   systems,
   system,
+  title,
   games,
   loading,
   error,
   onSystem,
   onPlay,
   onEmptyAction,
+  marking,
+  onMarking,
 }: {
-  systems: SystemRow[];
+  systems: RailRow[];
   system: string;
-  games: GameRow[];
+  /** What this list is called, when it is not a console. */
+  title?: string;
+  games: Entry[];
   loading: boolean;
   error: string;
   onSystem: (system: string) => void;
-  onPlay: (game: GameRow) => void;
+  onPlay: (game: Entry) => void;
   onEmptyAction: () => void;
+  /** Marking favourites rather than starting games. Owned by the app, because
+   *  Back has to be able to end it and it must not survive leaving the app. */
+  marking: boolean;
+  onMarking: (on: boolean) => void;
 }) {
   const { t } = useI18n();
+  const favourites = useLibrary((s) => s.favourites);
+  const toggleFavourite = useLibrary((s) => s.toggleFavourite);
+
   const { ref, focusKey } = useFocusable({ focusKey: "grid-page" });
   const [query, setQuery] = useState("");
   const [osk, setOsk] = useState(false);
@@ -349,6 +454,10 @@ export function GameGrid({
     const q = query.trim().toLowerCase();
     return q ? games.filter((g) => g.label.toLowerCase().includes(q)) : games;
   }, [games, query]);
+  // What the grid holds right now, read from inside a timeout that runs after the
+  // store change has re-rendered - `shown` there would be the closure's old one.
+  const gridRef = useRef<Entry[]>(shown);
+  gridRef.current = shown;
 
   // A new list starts at the top.
   useEffect(() => {
@@ -367,7 +476,7 @@ export function GameGrid({
     if (!toTiles && !first.current) return;
     first.current = false;
     setToTiles(false);
-    setFocus("g-" + shown[0].i);
+    setFocus(tileKey(shown[0]));
   }, [toTiles, shown]);
 
   const rows = Math.ceil(shown.length / COLS);
@@ -398,8 +507,42 @@ export function GameGrid({
     const row = Math.floor(pendingPos / COLS);
     if (row < start || row >= end) return; // the window is still moving; re-runs on it
     setPendingPos(null);
-    setFocus("g-" + g.i);
+    setFocus(tileKey(g));
   }, [pendingPos, start, end, shown]);
+
+  /**
+   * Mark or unmark the cover the cursor is on.
+   *
+   * Focus is put back deliberately rather than left to spatial navigation: in a
+   * CATEGORY the list is the favourites, so unmarking removes the tile the
+   * cursor is standing on. Aiming at the same position lands on whatever moved
+   * up into it - the neighbour, or the last cover when the end of the list went.
+   */
+  const mark = (game: Entry, pos: number) => {
+    toggleFavourite({ system: game.system, label: game.label });
+    // Twice, and the second one is the point. Marking a game changes the RAIL -
+    // the category appears or empties - which re-reads the consoles and rebuilds
+    // this grid, so a single re-focus lands before the tiles it names are back
+    // and the cursor ends up wherever the recovery net puts it. Measured on the
+    // box: it went to the letter strip.
+    const back = (again: boolean) => {
+      const list = gridRef.current;
+      const next = list[pos] ?? list[list.length - 1];
+      // The second pass only repairs; it must not MOVE the cursor. Marking is
+      // OK-Right-OK-Right along a row, and a press inside the 250 ms was being
+      // dragged back to the cover just marked (measured: at 120 ms it was, at
+      // 300 ms it was not). So the retry runs only if the cursor is still where
+      // the first pass put it, or nowhere at all.
+      if (again) {
+        const now = getCurrentFocusKey() ?? "";
+        if (now && now !== (next ? tileKey(next) : "")) return;
+      }
+      if (next) setFocus(tileKey(next));
+      else jump(FAVOURITE, SEARCH, RAIL, TABS);
+    };
+    setTimeout(() => back(false), 0);
+    setTimeout(() => back(true), 250);
+  };
 
   // Move the mounted window when focus approaches either edge of it. The position
   // is the one in the FILTERED list, not the playlist index the focus key carries.
@@ -434,12 +577,35 @@ export function GameGrid({
         )}
         <div className="flex-1 min-w-0 flex flex-col">
           <div className="flex items-baseline justify-between gap-[1vw] pb-[1vh]">
-            <div className="text-[2.2vh] font-semibold truncate">{system || t("retroarch.noConsoles")}</div>
+            <div className="text-[2.2vh] font-semibold truncate">{title || system || t("retroarch.noConsoles")}</div>
             <div className="flex items-center gap-[1vw] text-[1.6vh] text-fg-dim">
               {query && <span className="truncate max-w-[14vw]">{"“" + query + "”"}</span>}
+              {/* Acts on the cover the cursor is on, and hands focus straight
+                  back to it: a favourite is added while browsing, so leaving the
+                  cursor on a button in the corner would cost a press per game. */}
+              {shown.length > 0 && <FavouriteButton on={marking} onPress={() => onMarking(!marking)} />}
               <SearchButton onPress={() => setOsk(true)} onClear={query ? () => setQuery("") : undefined} />
             </div>
           </div>
+          {/* A mode where OK does something else has to say so: there is no pointer
+              and no menu bar, and the only thing that can carry it is a line on
+              the screen. Not focusable - it sits between the header and the
+              covers, where Up from the first row would land on it. */}
+          {/* Only where there are covers to mark. The button is gated the same
+              way, so on the no-match, empty-library, loading and error screens
+              the banner would be saying what OK does on a screen where OK does
+              something else entirely - the rescan button, on the empty one. And
+              the amber is a literal: `--color-accent` is the media client's
+              token and does not exist in this app, so the tint was transparent. */}
+          {marking && shown.length > 0 && (
+            <div
+              aria-hidden="true"
+              className="mb-[1vh] shrink-0 rounded-[1vh] bg-[#f5c518]/20 px-[1.5vw] py-[0.7vh] text-[1.7vh]"
+            >
+              <span className="font-semibold">{t("retroarch.markingTitle")}</span>{" "}
+              <span className="text-fg-dim">{t("retroarch.markingHint")}</span>
+            </div>
+          )}
           {error ? (
             <div className="flex-1 flex items-center justify-center text-[2vh] text-fg-dim">{error}</div>
           ) : loading ? (
@@ -458,13 +624,15 @@ export function GameGrid({
             </div>
           ) : (
             <Tiles
-              system={system}
               mounted={mounted}
               start={start}
               rows={rows}
               end={end}
               scroller={scroller}
+              favourites={favourites}
+              marking={marking}
               onPlay={onPlay}
+              onMark={mark}
               onFocusPos={onFocusPos}
             />
           )}

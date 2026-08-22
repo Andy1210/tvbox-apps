@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
+import { FocusContext, getCurrentFocusKey, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n, useBackspace, useFocusableItem, FocusButton, Osk } from "@sdk";
 import {
   fetchLiked,
@@ -15,6 +15,7 @@ import {
   type ListResult,
 } from "./api";
 import { TrackList } from "./TrackList";
+import { useBrowse, type BrowseTab } from "./stores/browse";
 import { ROWS, TABS, TOOLS, focusLost, jump } from "./focus";
 
 function Row({
@@ -52,8 +53,6 @@ function Row({
     </FocusButton>
   );
 }
-
-type Tab = "liked" | "playlists" | "search";
 
 // Account browser (shown only when connected). Liked Songs and own-playlist
 // tracks are fully browsable; any playlist can be played whole; search finds
@@ -142,18 +141,27 @@ function Action({
 export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onPlayed: () => void; account?: string }) {
   const { t } = useI18n();
   const { ref, focusKey } = useFocusable({ focusKey: "sp-browser" });
-  const [tab, setTab] = useState<Tab>("liked");
-  const [liked, setLiked] = useState<ListResult<Track> | null>(null);
-  const [playlists, setPlaylists] = useState<ListResult<Playlist> | null>(null);
-  const [openPl, setOpenPl] = useState<Playlist | null>(null);
-  const [plTracks, setPlTracks] = useState<ListResult<Track> | null>(null);
-  const [results, setResults] = useState<{ tracks: Track[]; playlists: Playlist[] } | null>(null);
+  // Held outside this component, so starting a track and coming back does not
+  // rebuild the screen from nothing - see stores/browse.ts.
+  const tab = useBrowse((s) => s.tab);
+  const liked = useBrowse((s) => s.liked);
+  const playlists = useBrowse((s) => s.playlists);
+  const openPl = useBrowse((s) => s.openPl);
+  const plTracks = useBrowse((s) => s.plTracks);
+  const results = useBrowse((s) => s.results);
+  const query = useBrowse((s) => s.query);
+  const remember = useBrowse((s) => s.set);
+  const setTab = (v: BrowseTab): void => remember({ tab: v });
+  const setLiked = (v: ListResult<Track> | null): void => remember({ liked: v });
+  const setPlaylists = (v: ListResult<Playlist> | null): void => remember({ playlists: v });
+  const setOpenPl = (v: Playlist | null): void => remember({ openPl: v });
+  const setPlTracks = (v: ListResult<Track> | null): void => remember({ plTracks: v });
+  const setResults = (v: { tracks: Track[]; playlists: Playlist[] } | null): void => remember({ results: v });
+  const setQuery = (v: string): void => remember({ query: v });
   const [osk, setOsk] = useState(false);
-  const [query, setQuery] = useState("");
   const [err, setErr] = useState("");
   const [starting, setStarting] = useState(false); // play may take ~20s when the box is being adopted
   const wanted = useRef(""); // the playlist whose read is still worth showing (see openPlaylist)
-  const cameFrom = useRef(""); // the playlist row that was pressed, so Back can return to it
 
   // Back: out of a playlist -> playlist list; otherwise leave the browser.
   useBackspace(() => {
@@ -173,16 +181,12 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
   // somebody else's library now. Dropped rather than relabelled: the header would
   // otherwise name one account over another's tracks, and pressing one of them
   // sends that account's context to the new owner's player, which refuses it.
-  const shownFor = useRef(account);
   useEffect(() => {
-    if (shownFor.current === account) return;
-    shownFor.current = account;
+    const store = useBrowse.getState();
+    if (store.shownFor === account) return;
     wanted.current = "";
-    setLiked(null);
-    setPlaylists(null);
-    setPlTracks(null);
-    setOpenPl(null);
-    setResults(null);
+    store.forgetLists();
+    store.set({ shownFor: account });
   }, [account]);
   useEffect(() => {
     if (tab === "liked" && liked === null) fetchLiked().then(setLiked);
@@ -201,11 +205,15 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
   useEffect(() => {
     const id = setTimeout(() => {
       if (openPl) {
-        jump("br-pt-all", "br-tab-playlists");
+        // The row first, when there is one to come back to - coming back from
+        // the player into an open playlist should land where the press was.
+        // `jump` walks on if the key is not mounted, so a stale one costs
+        // nothing and the old behaviour is the fallback.
+        jump(useBrowse.getState().cameFrom, "br-pt-all", "br-tab-playlists");
         return; // the row to come back to is still needed
       }
-      jump(cameFrom.current, "br-tab-" + tab);
-      cameFrom.current = "";
+      jump(useBrowse.getState().cameFrom, "br-tab-" + tab);
+      remember({ cameFrom: "" });
     }, 0);
     return () => clearTimeout(id);
   }, [tab, openPl]);
@@ -229,6 +237,12 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
     const r = await play(body);
     setStarting(false);
     if (r.ok) {
+      // The row that was pressed, so Back from the player lands on it rather
+      // than on the tab: "that was the wrong song, try the next one" is the
+      // press this whole return path exists for, and it cost several more.
+      // Read here rather than passed down: every list on this screen has its own
+      // key scheme, and the focused one is the one that was just pressed.
+      remember({ cameFrom: getCurrentFocusKey() || "" });
       onPlayed();
       return;
     }
@@ -284,7 +298,7 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
   // track with nothing to say so.
   const openPlaylist = async (p: Playlist, rowKey: string) => {
     wanted.current = p.id;
-    cameFrom.current = rowKey;
+    remember({ cameFrom: rowKey });
     setOpenPl(p);
     setPlTracks(null);
     const r = await fetchPlaylistItems(p.id);
@@ -307,7 +321,7 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
     return <Osk title={t("spotify.searchPrompt")} initial={query} onDone={runSearch} onCancel={() => setOsk(false)} />;
   }
 
-  const tabBtn = (id: Tab, label: string) => (
+  const tabBtn = (id: BrowseTab, label: string) => (
     <TabButton
       key={id}
       id={id}

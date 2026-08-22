@@ -269,6 +269,32 @@ export async function play(body: {
   }
 }
 
+/** One row of what is coming next. */
+export interface QueueItem {
+  uri: string;
+  name: string;
+  artists: string;
+  duration_ms: number;
+  image_url: string;
+}
+
+/**
+ * What is queued behind the current track.
+ *
+ * `ok` false is not "the queue is empty": the box may be held by an account this
+ * box has not linked, or unreachable - and a panel that draws nothing for all
+ * three says the wrong thing about two of them.
+ */
+export async function fetchQueue(limit = 12): Promise<{ ok: boolean; items: QueueItem[]; error: string }> {
+  try {
+    const r = await fetch("/tvbox/api/spotify/queue?limit=" + limit, { cache: "no-store" });
+    const j = await r.json();
+    return { ok: j.ok === true, items: Array.isArray(j.items) ? j.items : [], error: String(j.error || "") };
+  } catch {
+    return { ok: false, items: [], error: "network" };
+  }
+}
+
 // Lyrics from the shell's LRCLIB proxy — matched by the track metadata, so it
 // works cast-only (no Spotify account). `synced` is time-tagged for a karaoke view.
 export async function fetchLyrics(s: SpState): Promise<Lyrics> {

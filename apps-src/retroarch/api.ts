@@ -26,6 +26,17 @@ export interface GameRow {
   cover: boolean;
 }
 
+/**
+ * A game with the console it belongs to.
+ *
+ * `i` is a position in ONE console's playlist, so a list that spans consoles -
+ * favourites, recently played - has to carry the console beside it or the cover
+ * comes from the wrong shelf and the wrong game starts.
+ */
+export interface Entry extends GameRow {
+  system: string;
+}
+
 export interface CoreRow {
   core: string;
   label: string; // "Sony - PlayStation (PCSX ReARMed)" - the core's own display_name

@@ -62,6 +62,14 @@ export function MusicList({
   // after Stop - three surfaces telling two stories, with the mini bar correctly
   // gone.
   const playingId = useMusic((s) => (s.state === "stopped" ? undefined : s.queue[s.index]?.id));
+  // A queue that exists, playing or not. Adding songs to a stopped queue is what
+  // the add mode does, and the only way to that queue is the player screen - so
+  // the chip has to appear for it, which the marker above must not.
+  const hasQueue = useMusic((s) => s.queue[s.index] !== undefined);
+  const adding = useMusic((s) => s.adding);
+  const setAdding = useMusic((s) => s.setAdding);
+  const enqueue = useMusic((s) => s.enqueue);
+  const [note, setNote] = useState<string | null>(null);
 
   const [total, setTotal] = useState<number | null>(null);
   const [pages, setPages] = useState<Map<number, MediaItem[]>>(new Map());
@@ -196,6 +204,14 @@ export function MusicList({
   const openOrPlay = async (index: number): Promise<void> => {
     const item = at(index);
     if (!item || !backend) return;
+    // Adding a SONG is what the mode changes. An album or an artist still opens,
+    // so the way to add three tracks off one album is to walk into it - and each
+    // of those screens carries a chip that adds the whole thing.
+    if (adding && lens === "tracks") {
+      enqueue(backend, [item], "end");
+      setNote(t("music.addedOne", { title: item.title }));
+      return;
+    }
     if (lens !== "tracks") {
       go({ name: "musicItem", itemId: item.id, kind: item.kind, title: item.title, libraryId });
       return;
@@ -231,7 +247,13 @@ export function MusicList({
         title={title}
         lens={lens}
         total={total}
-        onNowPlaying={playingId ? () => go({ name: "nowPlaying" }) : undefined}
+        note={note}
+        adding={adding}
+        onAdding={() => {
+          setNote(null);
+          setAdding(!adding);
+        }}
+        onNowPlaying={hasQueue ? () => go({ name: "nowPlaying" }) : undefined}
         onPlayAll={async (shuffle) => {
           if (!backend || lens !== "tracks") return;
           const p = await backend.libraryPage(libraryId, { offset: 0, limit: QUEUE_CAP, of }).catch(() => null);
@@ -320,14 +342,21 @@ function Header({
   title,
   lens,
   total,
+  note,
+  adding,
+  onAdding,
   onPlayAll,
   onNowPlaying,
 }: {
   title: string;
   lens: MusicLens;
   total: number;
+  /** What the last press did, when it added something. */
+  note: string | null;
+  adding: boolean;
+  onAdding: () => void;
   onPlayAll: (shuffle: boolean) => Promise<void>;
-  /** Absent when nothing is playing, and then no chip is drawn. */
+  /** Absent when there is no queue at all, and then no chip is drawn. */
   onNowPlaying?: () => void;
 }): React.JSX.Element {
   const { t } = useI18n();
@@ -341,7 +370,10 @@ function Header({
         <span className="mr-[1vw] shrink-0 text-[2.6vh] font-bold">
           {title} · {heading}
         </span>
-        <span className="mr-auto shrink-0 text-[2vh] text-fg-dim tabular-nums">{total}</span>
+        <span className="shrink-0 text-[2vh] text-fg-dim tabular-nums">{total}</span>
+        {/* The last thing added, next to the button that added it. It replaces
+            nothing and pushes nothing: the row is one line tall either way. */}
+        <span className="mr-auto min-w-0 flex-1 truncate px-[1vw] text-[1.9vh] text-fg-dim">{note}</span>
         {lens === "tracks" && (
           <>
             <FocusButton focusKey="ml-playall" onEnter={() => void onPlayAll(false)} className={chip}>
@@ -349,6 +381,13 @@ function Header({
             </FocusButton>
             <FocusButton focusKey="ml-shuffle" onEnter={() => void onPlayAll(true)} className={chip}>
               {t("music.shuffle")}
+            </FocusButton>
+            <FocusButton
+              focusKey="ml-add"
+              onEnter={onAdding}
+              className={adding ? chip + " !bg-[var(--color-accent)] !text-[#0d1014]" : chip}
+            >
+              {t("music.addMode")}
             </FocusButton>
           </>
         )}

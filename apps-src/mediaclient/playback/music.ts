@@ -46,6 +46,18 @@ const NEAR_END_MS = 4_000;
  */
 const START_TIMEOUT_MS = 12_000;
 
+/**
+ * How far into a track counts as a place worth going back to.
+ *
+ * The film player allows ten seconds, and a song is a fortieth of a film - but
+ * the direction that costs something is the other one: resuming a three-minute
+ * song fifteen seconds in is a verse missed, while restarting an hour-long set
+ * is the whole thing again. So this is generous where the film's is cautious,
+ * and the near-end test below is what keeps the last few seconds of a track from
+ * becoming a resume point that plays nothing.
+ */
+const RESUME_MIN_MS = 15_000;
+
 function bridge(): NonNullable<Window["tvbox"]> | undefined {
   return typeof window === "undefined" ? undefined : window.tvbox;
 }
@@ -97,6 +109,33 @@ interface MusicState {
   /** Set when a track could not be started; cleared by the next one that can. */
   error: string | null;
   /**
+   * Where the track at `index` was left, when it was left part-way through.
+   *
+   * The server's own offset covers a queue built after the app was restarted;
+   * this covers the same evening, where it is both fresher and the only thing
+   * there is - a stop reports the position to the server, but the queue survives
+   * a stop and reading it back would cost a round trip on a press that is meant
+   * to be instant. Cleared by the start that consumes it.
+   */
+  resume: { index: number; ms: number } | null;
+  /**
+   * Browsing to ADD rather than to play.
+   *
+   * A mode rather than a second action on every row: what somebody is doing when
+   * they build a queue is adding one song after another, and a per-row menu makes
+   * that two presses each. It lives in the store because the point of it is to
+   * survive walking from one album to the next, which unmounts every screen it
+   * was turned on from.
+   *
+   * Nothing about it may be invisible - a mode where OK does something other than
+   * what it usually does is the classic remote trap - so the banner it draws is
+   * part of the feature rather than decoration.
+   */
+  adding: boolean;
+  /** Songs added since the mode was turned on, which is what the banner counts. */
+  added: number;
+
+  /**
    * Where the scrub cursor points, while it is out.
    *
    * Null means there is no cursor and the bar simply shows the song. Held here
@@ -111,7 +150,9 @@ interface MusicState {
     tracks: MediaItem[],
     opts?: { startIndex?: number; shuffle?: boolean },
   ): Promise<void>;
-  playAt(index: number): Promise<void>;
+  /** `fromStart` is the advance's own decision: reaching the next track, or
+   *  pressing Previous over one already playing, means its beginning. */
+  playAt(index: number, opts?: { fromStart?: boolean }): Promise<void>;
   /** `auto` marks the advance the box asked for, which is the only one that
    *  honours repeat-one - pressing Next over a repeating song means the next. */
   next(auto?: boolean): Promise<void>;
@@ -124,7 +165,17 @@ interface MusicState {
   commitScrub(): void;
   cancelScrub(): void;
   stop(): Promise<void>;
-  enqueue(tracks: MediaItem[], where: "next" | "end"): void;
+  /**
+   * Add songs without starting anything.
+   *
+   * Takes the backend for the same reason `playQueue` does: the module keeps ONE
+   * of them, and it is what turns a track into a URL. A queue built only by
+   * adding used to leave it unset, so Play on that queue reached `playAt`, found
+   * no backend and returned - no sound, no error, nothing on screen. Measured on
+   * the box, and invisible in any session where something had been played first.
+   */
+  enqueue(be: MediaBackend, tracks: MediaItem[], where: "next" | "end"): void;
+  setAdding(on: boolean): void;
   removeAt(index: number): void;
   setShuffle(on: boolean): void;
   setRepeat(mode: RepeatMode): void;
@@ -155,6 +206,9 @@ export const useMusic = create<MusicState>((set, get) => ({
   shuffle: false,
   repeat: "off",
   error: null,
+  resume: null,
+  adding: false,
+  added: 0,
   scrubMs: null,
 
   async playQueue(be, tracks, opts) {
@@ -173,8 +227,8 @@ export const useMusic = create<MusicState>((set, get) => ({
     await get().playAt(shuffle ? 0 : start);
   },
 
-  async playAt(index) {
-    const { queue } = get();
+  async playAt(index, opts) {
+    const { queue, resume } = get();
     const item = queue[index];
     const be = backend;
     if (!item || !be) return;
@@ -201,16 +255,28 @@ export const useMusic = create<MusicState>((set, get) => ({
     wireLifecycle();
     const mine = ++token;
 
+    // Where this track is picked up. What this store remembers wins over what the
+    // server does: both are the same track, and ours is this evening's.
+    const from = opts?.fromStart ? 0 : resume && resume.index === index ? resume.ms : (item.viewOffsetMs ?? 0);
+    // Not the last few seconds. A track left there is one that finished, and
+    // starting it at its own end plays nothing and advances the queue - the one
+    // resume that looks like a broken file.
+    const length = item.durationMs ?? 0;
+    const startMs = from > RESUME_MIN_MS && (length <= 0 || from < length - NEAR_END_MS) ? from : 0;
+
     set({
       index,
       state: "playing",
-      positionMs: 0,
+      positionMs: startMs,
       // Seeded from the library rather than waited for: the box reports a
       // duration a moment later, and until then the end-of-track test would have
       // nothing to compare against.
       durationMs: item.durationMs ?? 0,
       buffering: true,
       error: null,
+      // Consumed. Leaving it set would make every later press on this index
+      // resume to the same second, whatever has happened in between.
+      resume: null,
       // A cursor belongs to the song it was opened on. Carried into the next
       // track it would point at a second somewhere in the previous one's length.
       scrubMs: null,
@@ -223,7 +289,7 @@ export const useMusic = create<MusicState>((set, get) => ({
     // occluded window reports itself HIDDEN - which a cast then reads as the app
     // having gone off screen. Measured on the box: a cast started, revealed
     // video, and stopped itself two seconds later.
-    tv?.play?.(url, null, 0, { kind: "audio" });
+    tv?.play?.(url, null, Math.floor(startMs / 1000), { kind: "audio" });
 
     // Nothing above answers, so this is the only thing that can notice a start
     // that did not happen. Disarmed by the first position or playing event.
@@ -232,7 +298,7 @@ export const useMusic = create<MusicState>((set, get) => ({
       startWatchdog = null;
       if (mine !== token) return;
       const s = get();
-      if (s.state !== "playing" || s.positionMs > 0) return;
+      if (s.state !== "playing" || s.positionMs !== startMs) return;
       log.warn("the box never started this track", item.title);
       set({ error: item.title });
       void get().stop();
@@ -251,10 +317,12 @@ export const useMusic = create<MusicState>((set, get) => ({
 
   async next(auto) {
     const { index, queue, repeat } = get();
-    if (auto && repeat === "one") return get().playAt(index);
+    // Reaching a track is not the same as choosing it: an album played from the
+    // top must not drop into the middle of a song somebody once left there.
+    if (auto && repeat === "one") return get().playAt(index, { fromStart: true });
     const at = index + 1;
-    if (at < queue.length) return get().playAt(at);
-    if (repeat === "all" && queue.length) return get().playAt(0);
+    if (at < queue.length) return get().playAt(at, { fromStart: true });
+    if (repeat === "all" && queue.length) return get().playAt(0, { fromStart: true });
     await get().stop();
   },
 
@@ -263,8 +331,8 @@ export const useMusic = create<MusicState>((set, get) => ({
     // Past the first few seconds, Previous restarts the song - which is what the
     // button means everywhere else, and what stops a mis-press losing your place
     // in a queue you cannot see the top of.
-    if (positionMs > 3_000 || index <= 0) return get().playAt(Math.max(0, index));
-    await get().playAt(index - 1);
+    if (positionMs > 3_000 || index <= 0) return get().playAt(Math.max(0, index), { fromStart: true });
+    await get().playAt(index - 1, { fromStart: true });
   },
 
   toggle() {
@@ -322,6 +390,13 @@ export const useMusic = create<MusicState>((set, get) => ({
   async stop() {
     if (get().index < 0 && get().state === "stopped") return;
     disarmWatchdog();
+    // Before the position is cleared below. This is what Play means on a queue
+    // that is still in hand: carry on, not start again.
+    const { index: stoppedAt, positionMs: stoppedMs, durationMs: stoppedOf } = get();
+    // A track that ran out leaves its position at the end, and the end is not a
+    // place to come back to - the last thing a queue does before stopping is
+    // finish its last song.
+    const partWay = stoppedMs > RESUME_MIN_MS && (stoppedOf <= 0 || stoppedMs < stoppedOf - NEAR_END_MS);
     // Only OUR player. The queue survives a stop now, so the old guard - index
     // below zero and already stopped - no longer fires, and a second stop while
     // a film holds the box would otherwise reach the shared mpv and stop the
@@ -340,19 +415,38 @@ export const useMusic = create<MusicState>((set, get) => ({
     // The LENGTH is kept with the queue. Zeroing it left the player screen
     // showing the track it still names at 0:00 / 0:00, which reads as a broken
     // item rather than a stopped one.
-    set({ state: "stopped", positionMs: 0, buffering: false, scrubMs: null });
+    set({
+      state: "stopped",
+      positionMs: 0,
+      buffering: false,
+      scrubMs: null,
+      resume: stoppedAt >= 0 && partWay ? { index: stoppedAt, ms: stoppedMs } : null,
+    });
   },
 
-  enqueue(tracks, where) {
+  enqueue(be, tracks, where) {
     if (!tracks.length) return;
-    const { queue, index, source } = get();
+    backend = be;
+    const { queue, index, source, added } = get();
     const at = where === "next" ? Math.max(0, index) + 1 : queue.length;
     set({
       queue: [...queue.slice(0, at), ...tracks, ...queue.slice(at)],
       // The unshuffled order gains them too, or switching shuffle off would
       // silently drop everything that had been queued while it was on.
       source: [...source, ...tracks],
+      // A queue built from nothing has to point AT something, or the player
+      // screen reads "nothing is playing" over a list it is holding, the bar
+      // along the bottom stays away, and Play has no index to start. Nothing is
+      // started here: the whole point of adding is that it does not play.
+      index: index < 0 ? 0 : index,
+      added: added + tracks.length,
     });
+  },
+
+  setAdding(on) {
+    // The count belongs to one run of the mode, so it starts again each time
+    // rather than counting the evening.
+    set({ adding: on, added: 0 });
   },
 
   removeAt(at) {
@@ -489,22 +583,43 @@ whenPlayerLost("music", () => {
   scheduler = null;
   unsubscribe?.();
   unsubscribe = null;
-  useMusic.setState({ state: "stopped", buffering: false, positionMs: 0, scrubMs: null });
+  // The queue is kept, so where the song had got to is kept with it - this is
+  // the case somebody comes back to most: a film over the music, and Play on the
+  // player screen afterwards.
+  const { index, positionMs, durationMs } = useMusic.getState();
+  const partWay = positionMs > RESUME_MIN_MS && (durationMs <= 0 || positionMs < durationMs - NEAR_END_MS);
+  useMusic.setState({
+    state: "stopped",
+    buffering: false,
+    positionMs: 0,
+    scrubMs: null,
+    resume: index >= 0 && partWay ? { index, ms: positionMs } : null,
+  });
 });
 
 /** Forget everything. Called when the identity behind the queue changes. */
 export function resetMusic(): void {
-  void useMusic.getState().stop();
+  const clear = (): void => {
+    useMusic.setState({
+      queue: [],
+      source: [],
+      index: -1,
+      shuffle: false,
+      repeat: "off",
+      error: null,
+      resume: null,
+      adding: false,
+      added: 0,
+      scrubMs: null,
+    });
+  };
   backend = null;
-  useMusic.setState({
-    queue: [],
-    source: [],
-    index: -1,
-    shuffle: false,
-    repeat: "off",
-    error: null,
-    scrubMs: null,
-  });
+  // Twice, and the second one is the point: `stop` awaits the server before it
+  // writes its own state, so a single clear here lands FIRST and the stop then
+  // puts a resume point back - the previous account's place in a track it can no
+  // longer see. Clearing now as well keeps this synchronous for its callers.
+  clear();
+  void useMusic.getState().stop().then(clear);
 }
 
 /** Wire the bridge's events without starting playback. Tests only. */

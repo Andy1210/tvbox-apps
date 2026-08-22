@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FocusContext, doesFocusableExist, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, useBackspace, useI18n } from "@sdk";
 import { Row } from "./Row";
@@ -168,6 +168,77 @@ export function Detail({
     };
   }, [backend, itemId, fail, reload]);
 
+  /**
+   * What this screen last started, so coming back from playback lands on it.
+   *
+   * The browse tree is HIDDEN while a film plays rather than unmounted, so the
+   * focus fallback below still aims at the key this screen was built with - the
+   * episode somebody arrived pointing at. Three episodes later that is not where
+   * the cursor belongs, and it is where it went.
+   *
+   * Held against the children rather than trusted: the player also carries a
+   * film's own id, and a fallback aimed at a key nothing mounted leaves the
+   * remote dead.
+   */
+  const playingId = usePlayer((s) => s.current?.item.id);
+  const [lastPlayedId, setLastPlayedId] = useState<string | undefined>();
+  useEffect(() => {
+    if (playingId) setLastPlayedId(playingId);
+  }, [playingId]);
+  const lastPlayedChild = lastPlayedId && children.some((c) => c.id === lastPlayedId) ? lastPlayedId : undefined;
+
+  /**
+   * What the server knows AFTER playback, rather than what it knew before it.
+   *
+   * Same cause as the focus above: this screen keeps the children it was built
+   * with for as long as it is up, so an episode that has just been watched still
+   * carries the view count it had - no tick, on any of them, until the screen is
+   * left and opened again. Refetched in place rather than through `reload`,
+   * which clears the screen to a spinner and takes the focus fallback with it.
+   *
+   * `children` is not cached by either backend, so this really does ask the
+   * server; the item itself is, briefly, which is the same answer re-entering
+   * the screen would get.
+   */
+  const wasPlaying = useRef(false);
+  useEffect(() => {
+    if (playing) {
+      wasPlaying.current = true;
+      return;
+    }
+    if (!wasPlaying.current) return;
+    wasPlaying.current = false;
+    if (!backend || !detail) return;
+    const kind = detail.kind;
+    let live = true;
+    void (async () => {
+      try {
+        const [d, kids] = await Promise.all([
+          backend.item(itemId),
+          kind === "playlist"
+            ? backend.playlistItems(itemId)
+            : kind === "show" || kind === "season" || kind === "collection"
+              ? backend.children(itemId)
+              : Promise.resolve(null),
+        ]);
+        if (!live) return;
+        setDetail(d);
+        if (kids) setChildren(kids);
+      } catch (e) {
+        // Nothing is said about it: the screen it would replace is a correct one
+        // that is merely a few minutes old, and a failure screen over it would be
+        // worse than a missing tick.
+        log.warn("could not refresh after playback", e);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+    // `detail` is read for its kind only, and re-running this when it changes
+    // would refetch on the answer it just set.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing, backend, itemId]);
+
   // Not a place the arrows may land while the failure screen is up.
   // `useFocusable` registers on the hook call, which is above the early return
   // that swaps this screen for the error - so the container stayed registered
@@ -220,13 +291,15 @@ export function Detail({
   // every press was discarded with nothing to report it - on all 256 series.
   const first = upNext
     ? `children-${itemId}-${upNext.item.id}`
-    : focusChildId
-      ? `children-${itemId}-${focusChildId}`
-      : detail && hasPlayButton(detail, children)
-        ? "detail-play"
-        : children[0]
-          ? `children-${itemId}-${children[0].id}`
-          : "detail-back";
+    : lastPlayedChild
+      ? `children-${itemId}-${lastPlayedChild}`
+      : focusChildId
+        ? `children-${itemId}-${focusChildId}`
+        : detail && hasPlayButton(detail, children)
+          ? "detail-play"
+          : children[0]
+            ? `children-${itemId}-${children[0].id}`
+            : "detail-back";
   useInitialFocus(first, settled);
 
   // A countdown arrives on a screen that never unmounted - the browse tree is

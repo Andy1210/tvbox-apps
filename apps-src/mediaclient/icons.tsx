@@ -179,3 +179,12 @@ export function PlaylistAddIcon({ className = "h-[2.6vh] w-[2.6vh]" }: { classNa
     </svg>
   );
 }
+
+/** The words: lines of text of uneven length, the way a lyric sheet looks. */
+export function LyricsIcon({ className = "h-[2.6vh] w-[2.6vh]" }: { className?: string }): React.JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" className={className} {...STROKE} aria-hidden="true">
+      <path d="M4 6h16M4 10h10M4 14h16M4 18h10" />
+    </svg>
+  );
+}

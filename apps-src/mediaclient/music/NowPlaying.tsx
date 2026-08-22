@@ -2,17 +2,24 @@
 //
 // A full screen rather than an overlay, because there is no picture underneath
 // to keep looking at - which is the whole difference from the film player. So
-// the artwork can be large, the queue can be on screen at the same time, and
-// nothing has to auto-hide.
+// the artwork can be large and the queue can be on screen beside it.
 //
 // The transport row is the first thing focus lands on. Someone arriving here
 // pressed a song a moment ago; what they want next is pause or skip, not the
 // bottom of a list.
+//
+// Left alone while a song plays, the screen settles: the panel on the right goes
+// away, the song moves to the middle, and its own artwork fills the background
+// behind it, blurred and dimmed. This is not decoration - a television holding
+// one static screen for an album's length is the thing the box's screensaver
+// exists to prevent, and the screensaver cannot come up over music that IS the
+// thing on show. Any press brings the panel back, and so does the next song.
 
-import { useRef, useState } from "react";
-import { FocusContext, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
+import { useEffect, useRef, useState } from "react";
+import { FocusContext, getCurrentFocusKey, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, Osk, useBackspace, useFocusableItem, useI18n } from "@sdk";
 import { Message } from "../Message";
+import { Lyrics } from "./Lyrics";
 import { TrackRow, TRACK_ROW_VH } from "./TrackRow";
 import { artworkScale } from "../posters";
 import { useFocusFallback, useInitialFocus } from "../focus";
@@ -24,6 +31,7 @@ import { log } from "../redact";
 import {
   Back10Icon,
   Forward10Icon,
+  LyricsIcon,
   NextIcon,
   PauseIcon,
   PlayIcon,
@@ -55,6 +63,16 @@ const QUEUE_LEAD = 6;
  */
 const SCRUB_STEP_MS = 5_000;
 
+/**
+ * How long a playing song sits untouched before the screen settles.
+ *
+ * Long enough to read the top of the queue and decide, short enough that the
+ * still picture is not what the room looks at all evening. Only while something
+ * is PLAYING: paused, this screen has the box's own screensaver coming over it
+ * instead, which is a better answer than a dimmer version of the same picture.
+ */
+const SETTLE_MS = 12_000;
+
 export function NowPlaying(): React.JSX.Element {
   const { t } = useI18n();
   const backend = useApp((s) => s.backend);
@@ -78,10 +96,17 @@ export function NowPlaying(): React.JSX.Element {
   const shuffle = useMusic((s) => s.shuffle);
   const repeat = useMusic((s) => s.repeat);
   const error = useMusic((s) => s.error);
+  const resume = useMusic((s) => s.resume);
   const music = useMusic();
 
   const [naming, setNaming] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  /** Which panel the right-hand column holds. */
+  const [panel, setPanel] = useState<"queue" | "lyrics">("queue");
+  /** Nothing pressed for a while, with a song playing: the screen has settled. */
+  const [settled, setSettled] = useState(false);
+  /** The words are time-tagged and following the song, so something IS moving. */
+  const [lyricsLive, setLyricsLive] = useState(false);
   // What the focused control is called. The row is icons now, and an icon row
   // with nothing naming it is a row of guesses - see the note on the row itself.
   const [hint, setHint] = useState<string | null>(null);
@@ -94,6 +119,65 @@ export function NowPlaying(): React.JSX.Element {
   const cover = useArtwork(
     item && backend ? backend.posterUrl(item, 600 * artworkScale(), 600 * artworkScale()) : undefined,
   );
+  /**
+   * What goes behind the settled screen.
+   *
+   * The item's own backdrop where the server has one - on this library a track
+   * inherits its artist's - and the cover blown up where it has not, which is
+   * the same picture the screen is already showing and is why it is blurred hard
+   * rather than shown as a picture. Asked for at backdrop size in both cases: a
+   * 600px cover across a 4K panel is soft even before the blur.
+   */
+  const wide = useArtwork(item && backend ? backend.backdropUrl(item, 1280, 720) : undefined);
+  const behind = wide ?? cover;
+
+  /**
+   * The settle timer.
+   *
+   * Restarted by any press, and by the next song - both of them are somebody or
+   * something saying the screen has news. Off unless a song is PLAYING: paused,
+   * the box's own screensaver is what comes over this screen, and two things
+   * dimming the same picture on two different clocks is one too many.
+   *
+   * Not while the cursor is IN the queue: that panel is what would disappear, and
+   * with it the row holding focus - a remote that stops working because nobody
+   * pressed anything. Somebody parked on a song row is reading the list.
+   */
+  const playing = state === "playing";
+  useEffect(() => {
+    setSettled(false);
+    if (!playing) return;
+    let timer = 0;
+    const arm = (): void => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        if ((getCurrentFocusKey() ?? "").startsWith("nq-")) return arm();
+        // Reading is the one thing on this screen that LOOKS like nothing
+        // happening: no press for a minute is what reading the words to a song
+        // is made of, and a karaoke view is moving on its own anyway, so it is
+        // not the still picture this exists to prevent.
+        //
+        // Held off by the words MOVING, not by the panel being the chosen one:
+        // with the lyrics switch off, or on a song the database does not have,
+        // the panel is a single static line and the screen would never settle at
+        // all - which is the opposite of what it is for.
+        if (panel === "lyrics" && lyricsLive) return arm();
+        setSettled(true);
+      }, SETTLE_MS);
+    };
+    const wake = (): void => {
+      setSettled(false);
+      arm();
+    };
+    arm();
+    window.addEventListener("keydown", wake, true);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("keydown", wake, true);
+    };
+    // The track is a dependency on purpose: a new song re-arms the timer, which
+    // is what brings the queue back as it changes.
+  }, [playing, item?.id, panel, lyricsLive]);
   useInitialFocus("np-toggle", Boolean(item) && !naming);
   // OFF while the keyboard is up. The keyboard replaces this screen, so np-toggle
   // is unmounted - and the fallback runs in the capture phase, ahead of spatial
@@ -161,11 +245,51 @@ export function NowPlaying(): React.JSX.Element {
 
   return (
     <div className="relative z-10 flex h-full gap-[3vw] px-[5vw] py-[4vh]">
+      {/* The artwork behind a settled screen. Its own layer at the bottom of this
+          one's stacking context, so it covers the padding too - a blurred image
+          with a hard edge inside the frame reads as a mistake. Faded in rather
+          than switched on: appearing between two frames is startling in a dark
+          room, which is the room this happens in. */}
+      {behind && (
+        <div
+          aria-hidden="true"
+          className={[
+            "pointer-events-none absolute inset-0 -z-10 transition-opacity duration-700",
+            settled ? "opacity-100" : "opacity-0",
+          ].join(" ")}
+        >
+          {/* scale, because a blur samples past the edge and leaves the frame
+              lighter all the way round without it. */}
+          <img src={behind} alt="" className="h-full w-full scale-110 object-cover blur-[1.4vh] brightness-50" />
+          {/* Dark enough that the settled screen is DIMMER than the one it
+              replaces. Measured on this library: a track's backdrop resolves to
+              the artist collage, and at a 70% scrim alone the "resting" screen
+              came out brighter than the player - which is backwards for
+              something whose whole reason is not holding a bright still picture
+              on a television. */}
+          <div className="absolute inset-0 bg-bg-0/80" />
+        </div>
+      )}
       {/* The song on the left, the queue on the right. Both are on screen at
           once on purpose: "what is next" is the question this screen gets asked
-          most, and a queue behind a button is a queue nobody looks at. */}
-      <div className="flex min-w-0 flex-1 flex-col justify-center">
-        {cover && <img src={cover} alt="" className="mb-[2.5vh] h-[34vh] w-[34vh] rounded-[1.5vh] object-cover" />}
+          most, and a queue behind a button is a queue nobody looks at - until
+          the screen settles, when the song has the middle to itself. */}
+      <div
+        className={[
+          "flex min-w-0 flex-col justify-center transition-all duration-500",
+          settled ? "mx-auto w-[64vw] text-center" : "flex-1",
+        ].join(" ")}
+      >
+        {cover && (
+          <img
+            src={cover}
+            alt=""
+            className={[
+              "mb-[2.5vh] h-[34vh] w-[34vh] rounded-[1.5vh] object-cover",
+              settled ? "self-center shadow-[0_2vh_6vh_rgba(0,0,0,0.6)]" : "",
+            ].join(" ")}
+          />
+        )}
         <h1 className="truncate text-[4.4vh] font-bold">{item.title}</h1>
         {artist && <p className="truncate text-[2.6vh] text-fg-dim">{artist}</p>}
         {item.parentTitle && item.parentTitle !== artist && (
@@ -190,6 +314,13 @@ export function NowPlaying(): React.JSX.Element {
 
         <Transport
           state={state}
+          centred={settled}
+          panel={panel}
+          onPanel={() => setPanel(panel === "queue" ? "lyrics" : "queue")}
+          // Stopped on a song that was left part-way is a THIRD thing the one
+          // button does, and the only one whose name was a lie before: it starts
+          // where the song was left, so it may say so.
+          canResume={Boolean(resume && resume.index === index)}
           shuffle={shuffle}
           repeat={repeat}
           onHint={setHint}
@@ -212,15 +343,25 @@ export function NowPlaying(): React.JSX.Element {
         <p className="mt-[1.2vh] h-[2.8vh] truncate text-[2.1vh] text-fg-dim">{hint}</p>
       </div>
 
-      <div className="flex w-[34vw] min-w-0 flex-col">
-        <h2 className="shrink-0 px-[1.5vw] pb-[1vh] text-[2.4vh] text-fg-dim">
-          {t("music.queue")} · {index + 1}/{queue.length}
-        </h2>
-        {/* py and px, because the focus ring scales a row by 4% and a scroll
+      {/* Unmounted rather than hidden, both when the screen settles and when the
+          words replace the list: a hidden subtree is still in the
+          spatial-navigation tree, so the arrows would walk into a panel nobody
+          can see. The settle timer refuses to fire while the cursor is in the
+          queue, so nothing focusable is ever taken away under a press. */}
+      {!settled && (
+        <div className="flex w-[34vw] min-w-0 flex-col">
+          <h2 className="shrink-0 px-[1.5vw] pb-[1vh] text-[2.4vh] text-fg-dim">
+            {panel === "lyrics" ? t("music.lyrics") : `${t("music.queue")} · ${index + 1}/${queue.length}`}
+          </h2>
+          {panel === "lyrics" && (
+            <Lyrics item={item} positionMs={positionMs} scrollKey="np-lyrics" onLive={setLyricsLive} />
+          )}
+          {/* py and px, because the focus ring scales a row by 4% and a scroll
             container clips both axes: without them the top row was cut in half
             and the focused one lost a slice off each side. */}
-        <ul className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-[1vw] py-[0.6vh]">
-          {/* Bounded, and windowed around the CURSOR rather than around what is
+          {panel === "queue" && (
+            <ul className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-[1vw] py-[0.6vh]">
+              {/* Bounded, and windowed around the CURSOR rather than around what is
               playing. A shuffle of this library is 572 rows, and every one of
               them would otherwise be a mounted focusable that spatial
               navigation measures on each press - the songs list windows for the
@@ -229,20 +370,22 @@ export function NowPlaying(): React.JSX.Element {
               Anchored on the playing track it drew only what was ahead, so a
               song that had just gone past could not be reached at all: the way
               back to it was off the list. */}
-          {queue.slice(qStart, qStart + QUEUE_ROWS).map((x, i) => (
-            <li key={`${x.id}-${qStart + i}`} style={{ height: `${TRACK_ROW_VH}vh` }}>
-              <TrackRow
-                item={x}
-                focusKey={`nq-${qStart + i}`}
-                ordinal={qStart + i + 1}
-                playing={qStart + i === index}
-                onFocused={() => setQueueCursor(qStart + i)}
-                onEnter={() => void music.playAt(qStart + i)}
-              />
-            </li>
-          ))}
-        </ul>
-      </div>
+              {queue.slice(qStart, qStart + QUEUE_ROWS).map((x, i) => (
+                <li key={`${x.id}-${qStart + i}`} style={{ height: `${TRACK_ROW_VH}vh` }}>
+                  <TrackRow
+                    item={x}
+                    focusKey={`nq-${qStart + i}`}
+                    ordinal={qStart + i + 1}
+                    playing={qStart + i === index}
+                    onFocused={() => setQueueCursor(qStart + i)}
+                    onEnter={() => void music.playAt(qStart + i)}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -372,6 +515,10 @@ function ScrubBar({
  */
 function Transport({
   state,
+  canResume,
+  centred,
+  panel,
+  onPanel,
   shuffle,
   repeat,
   onHint,
@@ -385,6 +532,12 @@ function Transport({
   onStop,
 }: {
   state: string;
+  /** Stopped, but on a song with somewhere to carry on from. */
+  canResume: boolean;
+  /** The screen has settled and the row is under a centred column. */
+  centred: boolean;
+  panel: "queue" | "lyrics";
+  onPanel: () => void;
   shuffle: boolean;
   repeat: RepeatMode;
   onHint: (text: string) => void;
@@ -448,7 +601,8 @@ function Transport({
 
   const on = t("music.on");
   const off = t("music.off");
-  const playLabel = state === "playing" ? t("music.pause") : state === "paused" ? t("music.resume") : t("music.play");
+  const playLabel =
+    state === "playing" ? t("music.pause") : state === "paused" || canResume ? t("music.resume") : t("music.play");
   const repeatLabel = repeat === "one" ? t("music.repeatOne") : `${t("music.repeat")} · ${repeat === "all" ? on : off}`;
 
   return (
@@ -460,7 +614,7 @@ function Transport({
           box.current = el;
           (ref as React.MutableRefObject<HTMLDivElement | null>).current = el;
         }}
-        className="mt-[2.5vh] flex flex-wrap items-center gap-[1vw]"
+        className={["mt-[2.5vh] flex flex-wrap items-center gap-[1vw]", centred ? "justify-center" : ""].join(" ")}
       >
         <Button
           focusKey="np-shuffle"
@@ -495,9 +649,10 @@ function Transport({
         </Button>
         <Button
           focusKey="np-toggle"
-          // Three states, not two. Stopped-with-a-queue restarts the track from
-          // the beginning, so calling it "Resume" promised something it does not
-          // do.
+          // Three states, not two: playing, paused, and stopped with a queue
+          // still in hand. That last one now carries on where the song was left
+          // when it has somewhere to carry on from, and starts it otherwise -
+          // which is what the two words are for.
           label={playLabel}
           big
           onHint={onHint}
@@ -537,6 +692,19 @@ function Transport({
           onArrow={edgeGuard("np-repeat")}
         >
           <RepeatIcon one={repeat === "one"} className="h-[2.8vh] w-[2.8vh]" />
+        </Button>
+        {/* The words to the song, in the panel the queue usually has. Next to
+            Save rather than beside the transport, because it changes what is on
+            the screen rather than what the music is doing. */}
+        <Button
+          focusKey="np-lyrics"
+          label={t("music.lyrics")}
+          active={panel === "lyrics"}
+          onHint={onHint}
+          onEnter={onPanel}
+          onArrow={edgeGuard("np-lyrics")}
+        >
+          <LyricsIcon className="h-[2.8vh] w-[2.8vh]" />
         </Button>
         <Button
           focusKey="np-save"

@@ -686,6 +686,17 @@ module.exports = (host) => {
         .then((r) => host.json(res, r))
         .catch((e) => host.json(res, { ok: false, error: String(e.message || e) }));
     },
+    // What is coming next, for the panel on the player screen. Its own route
+    // rather than part of /player: that one is polled every twenty seconds by a
+    // screen that is always up, and this is a heavier answer nobody needs unless
+    // the panel is on display.
+    "GET /queue": (req, res) => {
+      const n = new URL(req.url, "http://x").searchParams.get("limit");
+      spotifyApi
+        .queue(n)
+        .then((q) => host.json(res, q))
+        .catch((e) => host.json(res, { ok: false, items: [], error: String(e.message || e) }));
+    },
     // Shuffle and repeat are player-wide settings the cast metadata does not
     // carry, so the transport toggles read them from here.
     "GET /player": (req, res) => {
