@@ -132,6 +132,10 @@
     "savesWouldReplace": "{n} itt újabb, azt felülírná",
     "savesSame": "mindkettőn ugyanaz",
     "savesArriving": "{n} fájl érkezne",
-    "savesBringAll": "Mind áthozása"
+    "savesBringAll": "Mind áthozása",
+    "favourites": "Kedvencek",
+    "recentlyPlayed": "Nemrég játszott",
+    "favourite": "Kedvenc",
+    "unfavourite": "Levesz"
   }
 }

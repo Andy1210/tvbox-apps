@@ -1038,6 +1038,19 @@ async function control(action, state, accId) {
   } else if (action === "repeat") {
     const s = REPEAT_STATES.includes(state) ? state : "off";
     res = await write("PUT", "/me/player/repeat?state=" + s);
+  } else if (action === "seek") {
+    // A place in the song rather than a command about the queue, so it carries a
+    // value like the two above. Held to a whole number of milliseconds inside the
+    // track: Spotify answers 400 for a negative or non-numeric position, and a
+    // NaN would reach the URL as the string "NaN".
+    // A number, or a string that is one. Not a coercion: Number("") and
+    // Number(null) are both 0, so a caller that sent nothing would seek to the
+    // start of the song instead of being refused - and 0 is a real position, so
+    // the two cannot be told apart afterwards.
+    const raw = typeof state === "number" ? state : typeof state === "string" && state.trim() ? Number(state) : NaN;
+    const ms = Math.floor(raw);
+    if (!Number.isFinite(ms) || ms < 0) return { ok: false, error: "bad position" };
+    res = await write("PUT", "/me/player/seek?position_ms=" + ms);
   } else {
     const routes = {
       play: ["PUT", "/me/player/play"],
@@ -1237,6 +1250,58 @@ async function primaryArtistId(trackId, accId) {
   return id;
 }
 
+/**
+ * What is queued behind the current track, as the account that holds the box.
+ *
+ * `/me/player/queue` answers for the ACCOUNT, and an account can be playing in
+ * another room - so the same resolution the buttons use decides whose queue this
+ * is, and a box somebody else is driving answers with nothing rather than with a
+ * list belonging to another player. The rows are trimmed to what a panel on a
+ * television can show: Spotify returns up to twenty, and the reply carries a full
+ * track object each.
+ */
+async function queue(limit) {
+  if (!connected()) return { ok: false, connected: false, items: [] };
+  let owner;
+  try {
+    owner = await boxOwner(true);
+  } catch (e) {
+    return { ok: false, connected: true, items: [], error: "box_unreachable" };
+  }
+  if (owner.state === "other") return { ok: false, connected: true, items: [], error: "box_other_account" };
+  if (!owner.account) return { ok: false, connected: true, items: [], error: "box_not_found" };
+  let j;
+  try {
+    j = await apiGet(owner.account, "/me/player/queue");
+  } catch (e) {
+    return { ok: false, connected: true, items: [], error: String((e && e.message) || e) };
+  }
+  const n = Math.max(1, Math.min(Number(limit) || 12, 20));
+  const rows = Array.isArray(j && j.queue) ? j.queue.slice(0, n) : [];
+  return { ok: true, connected: true, items: rows.map(queueRow).filter(Boolean) };
+}
+
+/** One queued item, reduced to what the panel draws. */
+function queueRow(t) {
+  if (!t || typeof t !== "object") return null;
+  const artists = Array.isArray(t.artists)
+    ? t.artists
+        .map((a) => (a && a.name) || "")
+        .filter(Boolean)
+        .join(", ")
+    : "";
+  const images = (t.album && Array.isArray(t.album.images) && t.album.images) || [];
+  return {
+    uri: String(t.uri || ""),
+    name: String(t.name || ""),
+    artists,
+    duration_ms: Number(t.duration_ms) || 0,
+    // The smallest image Spotify offers: these are 5vh rows, and the largest is
+    // 640px each on a panel that draws a dozen of them.
+    image_url: images.length ? String(images[images.length - 1].url || "") : "",
+  };
+}
+
 module.exports = {
   setConfig,
   REDIRECT_URI,
@@ -1253,6 +1318,7 @@ module.exports = {
   play,
   control,
   playerState,
+  queue,
   boxPlayerState,
   recommendations,
   artistTopTracks,

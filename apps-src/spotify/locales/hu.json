@@ -93,6 +93,10 @@
     "shuffleFailed": "Elindult a lejátszás, de a keverést nem sikerült bekapcsolni.",
     "repeat_context": "Összes ismétlése",
     "repeat_track": "Egy szám ismétlése",
-    "quoted": "„{text}”"
+    "quoted": "„{text}”",
+    "upNext": "Következik",
+    "voiceSearching": "„{query}” keresése a Spotifyon…",
+    "voiceNoMatch": "A Spotify nem talált semmit erre: „{query}”.",
+    "voiceNoAccount": "Hanggal indított zenéhez kösd be a Spotify-fiókot az app beállításaiban."
   }
 }

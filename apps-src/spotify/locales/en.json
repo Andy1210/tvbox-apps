@@ -93,6 +93,10 @@
     "shuffleFailed": "Playback started, but shuffle could not be turned on.",
     "repeat_context": "Repeat all",
     "repeat_track": "Repeat one",
-    "quoted": "“{text}”"
+    "quoted": "“{text}”",
+    "upNext": "Up next",
+    "voiceSearching": "Looking for “{query}” on Spotify…",
+    "voiceNoMatch": "Spotify found nothing for “{query}”.",
+    "voiceNoAccount": "Connect a Spotify account in this app's settings to start music by voice."
   }
 }

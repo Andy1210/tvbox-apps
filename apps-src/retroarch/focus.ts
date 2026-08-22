@@ -13,6 +13,7 @@ export const RAIL = "rail"; // the console list on the left
 export const TILES = "tiles"; // the cover grid
 export const ALPHA = "alpha"; // the A-Z rail on the right
 export const SEARCH = "search";
+export const FAVOURITE = "favourite"; // the star beside it, acting on the focused cover
 export const EMPTY_ACTION = "empty-action"; // the only thing in the view when the library is empty
 export const TABS = "tab-games";
 export const CONSOLES_PAGE = "consoles-page";

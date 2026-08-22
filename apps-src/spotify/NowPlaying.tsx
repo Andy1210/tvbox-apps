@@ -1,10 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
-import { useI18n, useBackspace, FocusButton } from "@sdk";
+import { useI18n, useBackspace, useFocusableItem, FocusButton } from "@sdk";
 import { useSpotifyStore } from "./stores/spotify";
 import { Lyrics } from "./Lyrics";
 import { focusLost, jump } from "./focus";
-import { mmss, control, playerState, type PlayerState, type Repeat } from "./api";
+import { mmss, control, fetchQueue, playerState, type PlayerState, type QueueItem, type Repeat } from "./api";
+
+/**
+ * How long the screen goes untouched before the queue panel steps back.
+ *
+ * The panel answers "what is next", which is a question asked once and then
+ * finished with - after that it is a list of text over somebody's album art. Any
+ * press brings it back, and so does the next song, which is the other moment the
+ * question comes up.
+ */
+const PANEL_IDLE_MS = 10_000;
+
+/** How far one press carries the seek cursor. */
+const SEEK_STEP_MS = 10_000;
 
 // transport icons (inline SVG so they render regardless of font)
 const ICONS: Record<string, string> = {
@@ -91,11 +104,16 @@ function GearIcon() {
 // going on the box.
 export function NowPlaying({
   connected,
+  note,
+  onNoteDone,
   onSettings,
   onBrowse,
   onExit,
 }: {
   connected: boolean;
+  /** What a spoken request is doing, or why it did nothing. Empty means none. */
+  note?: string;
+  onNoteDone?: () => void;
   onSettings: () => void;
   onBrowse: () => void;
   onExit: () => void;
@@ -105,6 +123,11 @@ export function NowPlaying({
   const at = useSpotifyStore((s) => s.at);
   const [, setTick] = useState(0);
   const [showLyrics, setShowLyrics] = useState(false);
+  /** Where the seek cursor points while it is out; null means there is none. */
+  const [seekMs, setSeekMs] = useState<number | null>(null);
+  /** What is coming next, and whether the panel is on display. */
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [panel, setPanel] = useState(true);
   // Where focus goes when it has to come back to this screen without being told
   // where. That happens on its own: shuffle and repeat mount and unmount with
   // what the box is doing, and when the one holding focus goes, the library
@@ -113,8 +136,13 @@ export function NowPlaying({
   // person was on. The play button is the neighbour, and it is always there.
   const { ref, focusKey } = useFocusable({ focusKey: "sp-now", preferredChildFocusKey: "sp-playpause" });
 
-  // Back closes the lyrics overlay first, then exits to HOME.
+  // Back puts the seek cursor away first - while it is out, it is the only thing
+  // on screen that a press could be about - then closes the lyrics, then leaves.
   useBackspace(() => {
+    if (seekMs !== null) {
+      setSeekMs(null);
+      return;
+    }
     if (showLyrics) {
       setShowLyrics(false);
       return;
@@ -171,6 +199,13 @@ export function NowPlaying({
     const id = setTimeout(() => setCtrlErr(""), 8000);
     return () => clearTimeout(id);
   }, [ctrlErr]);
+  // A spoken request's answer goes away by itself too: it is a line about a press
+  // nobody in the room made, so nothing here can be waiting to dismiss it.
+  useEffect(() => {
+    if (!note || !onNoteDone) return;
+    const id = setTimeout(onNoteDone, 8000);
+    return () => clearTimeout(id);
+  }, [note, onNoteDone]);
   // Shuffle and repeat are player-wide SETTINGS, and the cast metadata does not
   // carry them - so they are read back from the Web API rather than assumed from
   // what was last pressed. The phone can change either of them too, which is why
@@ -261,6 +296,55 @@ export function NowPlaying({
       setTimeout(refreshPlayer, 700);
     });
   };
+  /**
+   * The panel steps back on its own, and every press brings it forward.
+   *
+   * Only while a song is PLAYING: paused or idle, this screen already asks the
+   * box for its screensaver (see Spotify.tsx), and a panel fading out on its own
+   * clock underneath that is two things dimming the same screen.
+   */
+  const trackId = state?.track_id;
+  useEffect(() => {
+    setPanel(true);
+    if (!playing) return;
+    let timer = 0;
+    const arm = (): void => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setPanel(false), PANEL_IDLE_MS);
+    };
+    const wake = (): void => {
+      setPanel(true);
+      arm();
+    };
+    arm();
+    window.addEventListener("keydown", wake, true);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("keydown", wake, true);
+    };
+    // The track is a dependency on purpose: the next song is the other moment
+    // "what is next" is worth answering.
+  }, [playing, trackId]);
+
+  /**
+   * What is queued, read when the track changes and only while it can be shown.
+   *
+   * The rows are not focusable: Spotify has no way to jump to an arbitrary
+   * position in a queue, so a row that took the cursor would be a press that
+   * cannot do anything - and it would also be a focusable this panel takes away
+   * when it steps back.
+   */
+  useEffect(() => {
+    if (!connected || !panel || !hasTrackNow) return;
+    let live = true;
+    void fetchQueue().then((q) => {
+      if (live) setQueue(q.ok ? q.items : []);
+    });
+    return () => {
+      live = false;
+    };
+  }, [connected, panel, hasTrackNow, trackId]);
+
   const pos = state ? Math.min(state.position_ms + (playing ? Date.now() - at : 0), state.duration_ms || Infinity) : 0;
   const pct = state && state.duration_ms ? Math.min(100, (pos / state.duration_ms) * 100) : 0;
   const hasTrack = !!state?.track_id;
@@ -365,121 +449,245 @@ export function NowPlaying({
             the lyrics are open or not. On its own backdrop, because the layer
             underneath is somebody's album art and amber prose on a bright photo
             is not readable from a sofa. */}
-        {connected && (ctrlErr || player?.otherAccount) && (
+        {(note || (connected && (ctrlErr || player?.otherAccount))) && (
           // left+right rather than a centred max-width: a shrink-to-fit box that
           // starts at the middle of the screen has 50vw to work with, so the long
           // messages (the Development Mode one is 190 characters) wrapped to four
           // lines and grew up into the controls.
           <div className="absolute bottom-[3vh] left-[15vw] right-[15vw] z-30 rounded-[1.4vh] bg-black/70 px-[2.4vw] py-[1.2vh] text-center text-[2.1vh] text-warn">
-            {ctrlErr || t("spotify.otherAccount")}
+            {note || ctrlErr || t("spotify.otherAccount")}
           </div>
         )}
 
-        <div
-          className={[
-            "relative z-10 h-full flex flex-col items-center justify-center gap-[2.4vh] px-[6vw]",
-            // while lyrics are open, start the content below the absolute playback
-            // strip (top-[11vh] + its height, taller when transport controls show)
-            // so the lyrics scroll area never underlaps it
-            hasTrack && showLyrics ? (connected ? "pt-[29vh]" : "pt-[22vh]") : "",
-          ].join(" ")}
-        >
-          {hasTrack && showLyrics ? (
-            <Lyrics state={state!} pos={pos} />
-          ) : hasTrack ? (
-            <>
-              {state!.cover_url ? (
-                <img
-                  src={state!.cover_url}
-                  alt=""
-                  className="w-[40vh] h-[40vh] rounded-[1.6vh] shadow-[0_2vh_6vh_rgba(0,0,0,0.6)] object-cover"
-                />
-              ) : (
-                <div className="w-[40vh] h-[40vh] rounded-[1.6vh] bg-white/10 flex items-center justify-center">
-                  <svg viewBox="0 0 24 24" fill="currentColor" className="w-[16vh] h-[16vh] text-white/30">
-                    <path d="M9 17.5a2.5 2.5 0 1 1-2.5-2.5c.36 0 .7.08 1 .21V6l9-2v8.5a2.5 2.5 0 1 1-2.5-2.5c.36 0 .7.08 1 .21V6.24L9 7.6v9.9z" />
-                  </svg>
-                </div>
-              )}
-              <div className="text-center max-w-[74vw]">
-                <div className="text-[3.6vh] font-bold truncate">{state!.title}</div>
-                <div className="text-[2.3vh] text-fg-dim truncate mt-[0.4vh]">{state!.artist}</div>
-                {state!.album && <div className="text-[1.8vh] text-fg-dim/70 truncate mt-[0.3vh]">{state!.album}</div>}
-              </div>
-              <div className="w-[60vw] max-w-[820px]">
-                <div className="h-[0.6vh] rounded-full bg-white/15 overflow-hidden">
-                  <div className="h-full bg-[#1DB954]" style={{ width: pct + "%" }} />
-                </div>
-                <div className="flex justify-between text-[1.5vh] text-fg-dim mt-[0.6vh] tabular-nums">
-                  <span>{mmss(pos)}</span>
-                  <span>{mmss(state!.duration_ms)}</span>
-                </div>
-              </div>
-              {connected ? (
-                <div className="flex items-center gap-[1.5vw] mt-[0.8vh]">
-                  {onThisBox && (
-                    <Ctrl
-                      fk="sp-shuffle"
-                      sm
-                      on={!!player?.shuffle}
-                      label={t("spotify.shuffle")}
-                      onEnter={() => setSetting("shuffle", !player?.shuffle)}
-                    >
-                      <TIcon name="shuffle" />
-                    </Ctrl>
+        <div className="relative z-10 h-full flex">
+          <div
+            className={[
+              "flex-1 min-w-0 h-full flex flex-col items-center justify-center gap-[2.4vh] px-[6vw]",
+              // while lyrics are open, start the content below the absolute playback
+              // strip (top-[11vh] + its height, taller when transport controls show)
+              // so the lyrics scroll area never underlaps it
+              hasTrack && showLyrics ? (connected ? "pt-[29vh]" : "pt-[22vh]") : "",
+            ].join(" ")}
+          >
+            {hasTrack && showLyrics ? (
+              <Lyrics state={state!} pos={pos} />
+            ) : hasTrack ? (
+              <>
+                {state!.cover_url ? (
+                  <img
+                    src={state!.cover_url}
+                    alt=""
+                    className="w-[40vh] h-[40vh] rounded-[1.6vh] shadow-[0_2vh_6vh_rgba(0,0,0,0.6)] object-cover"
+                  />
+                ) : (
+                  <div className="w-[40vh] h-[40vh] rounded-[1.6vh] bg-white/10 flex items-center justify-center">
+                    <svg viewBox="0 0 24 24" fill="currentColor" className="w-[16vh] h-[16vh] text-white/30">
+                      <path d="M9 17.5a2.5 2.5 0 1 1-2.5-2.5c.36 0 .7.08 1 .21V6l9-2v8.5a2.5 2.5 0 1 1-2.5-2.5c.36 0 .7.08 1 .21V6.24L9 7.6v9.9z" />
+                    </svg>
+                  </div>
+                )}
+                <div className="text-center max-w-[74vw]">
+                  <div className="text-[3.6vh] font-bold truncate">{state!.title}</div>
+                  <div className="text-[2.3vh] text-fg-dim truncate mt-[0.4vh]">{state!.artist}</div>
+                  {state!.album && (
+                    <div className="text-[1.8vh] text-fg-dim/70 truncate mt-[0.3vh]">{state!.album}</div>
                   )}
-                  <Ctrl fk="sp-prev" onEnter={() => doControl("prev")}>
-                    <TIcon name="prev" />
-                  </Ctrl>
-                  <Ctrl fk="sp-playpause" big onEnter={() => doControl("playpause")}>
-                    <TIcon name={playing ? "pause" : "play"} big />
-                  </Ctrl>
-                  <Ctrl fk="sp-next" onEnter={() => doControl("next")}>
-                    <TIcon name="next" />
-                  </Ctrl>
-                  {/* One button, three states. The icon alone cannot carry them
+                </div>
+                <SeekBar
+                  pos={pos}
+                  duration={state!.duration_ms}
+                  cursor={seekMs}
+                  // Seeking is a write to the account's player, so it needs the
+                  // Web API and it needs the box to BE the player: the same pair
+                  // the shuffle and repeat buttons are gated on. Without both, the
+                  // bar stays what it was - something to read.
+                  seekable={connected && onThisBox}
+                  onMove={(delta) =>
+                    setSeekMs((cur) => Math.max(0, Math.min(state!.duration_ms || 0, (cur ?? pos) + delta)))
+                  }
+                  onCommit={() => {
+                    if (seekMs === null) return;
+                    doControl("seek", String(Math.floor(seekMs)));
+                    setSeekMs(null);
+                  }}
+                  onToggle={() => doControl("playpause")}
+                />
+                {connected ? (
+                  <div className="flex items-center gap-[1.5vw] mt-[0.8vh]">
+                    {onThisBox && (
+                      <Ctrl
+                        fk="sp-shuffle"
+                        sm
+                        on={!!player?.shuffle}
+                        label={t("spotify.shuffle")}
+                        onEnter={() => setSetting("shuffle", !player?.shuffle)}
+                      >
+                        <TIcon name="shuffle" />
+                      </Ctrl>
+                    )}
+                    <Ctrl fk="sp-prev" onEnter={() => doControl("prev")}>
+                      <TIcon name="prev" />
+                    </Ctrl>
+                    <Ctrl fk="sp-playpause" big onEnter={() => doControl("playpause")}>
+                      <TIcon name={playing ? "pause" : "play"} big />
+                    </Ctrl>
+                    <Ctrl fk="sp-next" onEnter={() => doControl("next")}>
+                      <TIcon name="next" />
+                    </Ctrl>
+                    {/* One button, three states. The icon alone cannot carry them
                       from across a room, so the state is written next to it:
                       the icon says repeat, the word says what it repeats. */}
-                  {onThisBox && (
-                    <Ctrl
-                      fk="sp-repeat"
-                      sm
-                      on={repeat !== "off"}
-                      label={t("spotify.repeat")}
-                      onEnter={() => setSetting("repeat", repeatNext[repeat])}
-                    >
-                      <TIcon name={repeat === "track" ? "repeat_one" : "repeat"} />
-                    </Ctrl>
-                  )}
-                </div>
-              ) : null}
-              {/* Hidden while a message is up: the strip is anchored to the
+                    {onThisBox && (
+                      <Ctrl
+                        fk="sp-repeat"
+                        sm
+                        on={repeat !== "off"}
+                        label={t("spotify.repeat")}
+                        onEnter={() => setSetting("repeat", repeatNext[repeat])}
+                      >
+                        <TIcon name={repeat === "track" ? "repeat_one" : "repeat"} />
+                      </Ctrl>
+                    )}
+                  </div>
+                ) : null}
+                {/* Hidden while a message is up: the strip is anchored to the
                   bottom of the screen and this is the last thing above it, so the
                   two share the same few vh and the backdrop would cover it. */}
-              {connected && onThisBox && !ctrlErr && !player?.otherAccount && (repeat !== "off" || player?.shuffle) && (
-                <div className="flex items-center gap-[1.2vw] text-[1.6vh] text-[#1DB954] mt-[0.2vh]">
-                  {player?.shuffle && <span>{t("spotify.shuffle")}</span>}
-                  {repeat !== "off" && <span>{t("spotify.repeat_" + repeat)}</span>}
+                {connected &&
+                  onThisBox &&
+                  !ctrlErr &&
+                  !player?.otherAccount &&
+                  (repeat !== "off" || player?.shuffle) && (
+                    <div className="flex items-center gap-[1.2vw] text-[1.6vh] text-[#1DB954] mt-[0.2vh]">
+                      {player?.shuffle && <span>{t("spotify.shuffle")}</span>}
+                      {repeat !== "off" && <span>{t("spotify.repeat_" + repeat)}</span>}
+                    </div>
+                  )}
+                {!connected && (
+                  <div className="flex items-center gap-[0.8vw] text-[1.8vh] text-fg-dim mt-[0.5vh]">
+                    <span
+                      className={"w-[1.2vh] h-[1.2vh] rounded-full " + (playing ? "bg-[#1DB954]" : "bg-white/40")}
+                    />
+                    {t("spotify.controlHint", { device })}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="text-center">
+                <SpotifyMark />
+                <div className="text-[3vh] font-semibold mt-[2vh]">{t("spotify.notPlaying")}</div>
+                <div className="text-[2.1vh] text-fg-dim mt-[1.2vh] max-w-[62vw] mx-auto">
+                  {t("spotify.castHint", { device })}
                 </div>
-              )}
-              {!connected && (
-                <div className="flex items-center gap-[0.8vw] text-[1.8vh] text-fg-dim mt-[0.5vh]">
-                  <span className={"w-[1.2vh] h-[1.2vh] rounded-full " + (playing ? "bg-[#1DB954]" : "bg-white/40")} />
-                  {t("spotify.controlHint", { device })}
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="text-center">
-              <SpotifyMark />
-              <div className="text-[3vh] font-semibold mt-[2vh]">{t("spotify.notPlaying")}</div>
-              <div className="text-[2.1vh] text-fg-dim mt-[1.2vh] max-w-[62vw] mx-auto">
-                {t("spotify.castHint", { device })}
+              </div>
+            )}
+          </div>
+          {/* What is next, beside the song. Unmounted rather than hidden when it
+            steps back: nothing in it is focusable, but a hidden box still takes
+            layout, and the column beside it is meant to have the screen to
+            itself. Never over the lyrics, which are full screen. */}
+          {panel && !showLyrics && hasTrack && queue.length > 0 && (
+            <div className="w-[30vw] shrink-0 min-w-0 flex flex-col pt-[11vh] pb-[4vh] pr-[3vw]" aria-hidden="true">
+              <div className="shrink-0 pb-[1vh] text-[2.1vh] text-fg-dim">{t("spotify.upNext")}</div>
+              <div className="min-h-0 flex-1 overflow-hidden flex flex-col gap-[0.8vh]">
+                {queue.map((x, i) => (
+                  <div
+                    key={x.uri + i}
+                    className="flex items-center gap-[1vw] rounded-[1vh] bg-black/30 px-[1vw] py-[0.7vh]"
+                  >
+                    {x.image_url ? (
+                      <img
+                        src={x.image_url}
+                        alt=""
+                        className="w-[4.4vh] h-[4.4vh] rounded-[0.5vh] object-cover shrink-0"
+                      />
+                    ) : (
+                      <div className="w-[4.4vh] h-[4.4vh] rounded-[0.5vh] bg-white/10 shrink-0" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[1.9vh]">{x.name}</div>
+                      <div className="truncate text-[1.5vh] text-fg-dim">{x.artists}</div>
+                    </div>
+                    <div className="shrink-0 text-[1.5vh] text-fg-dim tabular-nums">{mmss(x.duration_ms)}</div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
         </div>
       </div>
     </FocusContext.Provider>
+  );
+}
+
+/**
+ * The bar, and the cursor on it.
+ *
+ * Focusable in its own right, which is what lets Left and Right mean a place in
+ * the song here and a move between buttons one row down, with no mode nobody can
+ * see: what has focus says which. The same shape the media client's player uses.
+ */
+function SeekBar({
+  pos,
+  duration,
+  cursor,
+  seekable,
+  onMove,
+  onCommit,
+  onToggle,
+}: {
+  pos: number;
+  duration: number;
+  /** Where the cursor points, or null when it is not out. */
+  cursor: number | null;
+  seekable: boolean;
+  onMove: (deltaMs: number) => void;
+  onCommit: () => void;
+  onToggle: () => void;
+}) {
+  const shown = cursor ?? pos;
+  const pct = duration > 0 ? Math.min(100, (shown / duration) * 100) : 0;
+  const playedPct = duration > 0 ? Math.min(100, (pos / duration) * 100) : 0;
+  const { ref, focused } = useFocusableItem({
+    focusKey: "sp-seek",
+    focusable: seekable,
+    onEnterPress: () => {
+      // While the cursor is out, OK is the only way to go where it points -
+      // pausing there would be an odd answer to a press aimed at a place in the
+      // song.
+      if (cursor !== null) onCommit();
+      else onToggle();
+    },
+    onArrowPress: (dir: string) => {
+      if (dir === "left" || dir === "right") {
+        // Consumed even with no length yet: otherwise the one press that behaves
+        // differently is the one nobody could predict.
+        if (duration > 0) onMove(dir === "left" ? -SEEK_STEP_MS : SEEK_STEP_MS);
+        return false;
+      }
+      return true;
+    },
+  });
+
+  return (
+    <div ref={ref} data-sfocus="sp-seek" className="w-[60vw] max-w-[820px]">
+      <div
+        className={[
+          "rounded-full bg-white/15 overflow-hidden relative transition-all",
+          focused ? "h-[1.1vh] ring-[0.3vh] ring-white/70" : "h-[0.6vh]",
+        ].join(" ")}
+      >
+        <div className="h-full bg-[#1DB954]" style={{ width: pct + "%" }} />
+        {/* Where the song IS, while the cursor is somewhere else. Without it
+            there is no way back to it. */}
+        {cursor !== null && (
+          <div className="absolute top-0 h-full w-[0.3vh] bg-white" style={{ left: playedPct + "%" }} />
+        )}
+      </div>
+      <div className="flex justify-between text-[1.5vh] text-fg-dim mt-[0.6vh] tabular-nums">
+        <span className={cursor !== null ? "text-white" : ""}>{mmss(shown)}</span>
+        <span>{mmss(duration)}</span>
+      </div>
+    </div>
   );
 }

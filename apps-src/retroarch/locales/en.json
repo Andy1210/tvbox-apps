@@ -132,6 +132,10 @@
     "savesWouldReplace": "{n} here are newer and would be replaced",
     "savesSame": "the same on both",
     "savesArriving": "{n} would arrive",
-    "savesBringAll": "Bring all"
+    "savesBringAll": "Bring all",
+    "favourites": "Favourites",
+    "recentlyPlayed": "Recently played",
+    "favourite": "Favourite",
+    "unfavourite": "Remove"
   }
 }
