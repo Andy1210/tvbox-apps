@@ -204,6 +204,11 @@ describe("adding to the queue rather than playing", () => {
     useMusic.getState().setShuffle(false);
     // The unshuffled order gained them too, or turning shuffle off would drop
     // everything added while it was on.
-    expect(useMusic.getState().queue.map((x) => x.id).sort()).toEqual(["a", "b", "c"]);
+    expect(
+      useMusic
+        .getState()
+        .queue.map((x) => x.id)
+        .sort(),
+    ).toEqual(["a", "b", "c"]);
   });
 });
