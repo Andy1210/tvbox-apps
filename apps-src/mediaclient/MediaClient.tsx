@@ -18,7 +18,7 @@ import { Search } from "./Search";
 import { Settings } from "./Settings";
 import { useMusic } from "./playback/music";
 import { usePlayer } from "./playback/player";
-import { useMusicMediaKeys } from "./playback/mediakeys";
+import { handleMusicCommand, useMusicMediaKeys } from "./playback/mediakeys";
 import { useApp } from "./state";
 import { deviceName } from "./identity";
 import { usePrefs } from "./prefs";
@@ -254,6 +254,32 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   // Here rather than on the player screen, because the screen is not mounted
   // for most of the time music is playing. See the module's own note.
   useMusicMediaKeys();
+
+  // Commands forwarded by the shell (MQTT: a spoken request, Home Assistant, a
+  // phone). Here for the same reason the media keys are: the music plays on while
+  // the box sits on another screen entirely, which is exactly when a spoken
+  // "next song" arrives. Subscribed once - re-subscribing on a state change would
+  // drop a command the shell had already handed over.
+  useEffect(() => {
+    const off = tvbox().onCommand?.((c) => {
+      const cmd = (c || {}) as { action?: string; state?: string };
+      // The queue decides FIRST, and the screen only follows a command it really
+      // took. `handleMusicCommand` stands down when a film owns the player or
+      // when this app is not the one playing - and navigating anyway walked the
+      // person to the music player behind the film they were watching, so that
+      // when it ended they were somewhere they had never asked to be.
+      const took = handleMusicCommand(cmd);
+      // The lyrics need a screen, and which screen is up is decided here rather
+      // than in the queue: the panel that draws them is on the player screen, so
+      // a request that arrives from the library has to walk there first. `go`
+      // keeps the history, so Back returns where the person was.
+      if (took && String(cmd.action || "").toLowerCase() === "lyrics" && String(cmd.state || "on") !== "off") {
+        const app = useApp.getState();
+        if (app.screen.name !== "nowPlaying") app.go({ name: "nowPlaying" });
+      }
+    });
+    return off;
+  }, []);
 
   /**
    * The add-to-queue mode belongs to the music screens, and ends with them.
