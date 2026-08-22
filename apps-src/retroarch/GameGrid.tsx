@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
+import { FocusContext, getCurrentFocusKey, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n, useFocusableItem, Osk } from "@sdk";
 import { coverUrl, shortSystem, type Entry, type SystemRow } from "./api";
 import { Alphabet, bucketOf } from "./Alphabet";
@@ -417,6 +417,8 @@ export function GameGrid({
   onSystem,
   onPlay,
   onEmptyAction,
+  marking,
+  onMarking,
 }: {
   systems: RailRow[];
   system: string;
@@ -428,12 +430,15 @@ export function GameGrid({
   onSystem: (system: string) => void;
   onPlay: (game: Entry) => void;
   onEmptyAction: () => void;
+  /** Marking favourites rather than starting games. Owned by the app, because
+   *  Back has to be able to end it and it must not survive leaving the app. */
+  marking: boolean;
+  onMarking: (on: boolean) => void;
 }) {
   const { t } = useI18n();
   const favourites = useLibrary((s) => s.favourites);
   const toggleFavourite = useLibrary((s) => s.toggleFavourite);
-  /** Marking favourites rather than starting games. See FavouriteButton. */
-  const [marking, setMarking] = useState(false);
+
   const { ref, focusKey } = useFocusable({ focusKey: "grid-page" });
   const [query, setQuery] = useState("");
   const [osk, setOsk] = useState(false);
@@ -520,14 +525,23 @@ export function GameGrid({
     // this grid, so a single re-focus lands before the tiles it names are back
     // and the cursor ends up wherever the recovery net puts it. Measured on the
     // box: it went to the letter strip.
-    const back = () => {
+    const back = (again: boolean) => {
       const list = gridRef.current;
       const next = list[pos] ?? list[list.length - 1];
+      // The second pass only repairs; it must not MOVE the cursor. Marking is
+      // OK-Right-OK-Right along a row, and a press inside the 250 ms was being
+      // dragged back to the cover just marked (measured: at 120 ms it was, at
+      // 300 ms it was not). So the retry runs only if the cursor is still where
+      // the first pass put it, or nowhere at all.
+      if (again) {
+        const now = getCurrentFocusKey() ?? "";
+        if (now && now !== (next ? tileKey(next) : "")) return;
+      }
       if (next) setFocus(tileKey(next));
       else jump(FAVOURITE, SEARCH, RAIL, TABS);
     };
-    setTimeout(back, 0);
-    setTimeout(back, 250);
+    setTimeout(() => back(false), 0);
+    setTimeout(() => back(true), 250);
   };
 
   // Move the mounted window when focus approaches either edge of it. The position
@@ -569,7 +583,7 @@ export function GameGrid({
               {/* Acts on the cover the cursor is on, and hands focus straight
                   back to it: a favourite is added while browsing, so leaving the
                   cursor on a button in the corner would cost a press per game. */}
-              {shown.length > 0 && <FavouriteButton on={marking} onPress={() => setMarking((v) => !v)} />}
+              {shown.length > 0 && <FavouriteButton on={marking} onPress={() => onMarking(!marking)} />}
               <SearchButton onPress={() => setOsk(true)} onClear={query ? () => setQuery("") : undefined} />
             </div>
           </div>
@@ -577,10 +591,16 @@ export function GameGrid({
               and no menu bar, and the only thing that can carry it is a line on
               the screen. Not focusable - it sits between the header and the
               covers, where Up from the first row would land on it. */}
-          {marking && (
+          {/* Only where there are covers to mark. The button is gated the same
+              way, so on the no-match, empty-library, loading and error screens
+              the banner would be saying what OK does on a screen where OK does
+              something else entirely - the rescan button, on the empty one. And
+              the amber is a literal: `--color-accent` is the media client's
+              token and does not exist in this app, so the tint was transparent. */}
+          {marking && shown.length > 0 && (
             <div
               aria-hidden="true"
-              className="mb-[1vh] shrink-0 rounded-[1vh] bg-[var(--color-accent)]/25 px-[1.5vw] py-[0.7vh] text-[1.7vh]"
+              className="mb-[1vh] shrink-0 rounded-[1vh] bg-[#f5c518]/20 px-[1.5vw] py-[0.7vh] text-[1.7vh]"
             >
               <span className="font-semibold">{t("retroarch.markingTitle")}</span>{" "}
               <span className="text-fg-dim">{t("retroarch.markingHint")}</span>

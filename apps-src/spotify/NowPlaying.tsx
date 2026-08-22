@@ -18,6 +18,13 @@ const PANEL_IDLE_MS = 10_000;
 
 /** How far one press carries the seek cursor. */
 const SEEK_STEP_MS = 10_000;
+/**
+ * How long a committed seek's position is shown before the box's clock wins.
+ *
+ * Long enough to cover the write and the SSE push after it, short enough that a
+ * seek the account refused corrects itself while somebody is still looking.
+ */
+const SEEK_SETTLE_MS = 5_000;
 
 // transport icons (inline SVG so they render regardless of font)
 const ICONS: Record<string, string> = {
@@ -130,11 +137,18 @@ export function NowPlaying({
    *
    * Playback position arrives over SSE from librespot, a beat after the write -
    * so without this the bar snaps back to where the song WAS the moment OK is
-   * pressed, and jumps forward again a second later. Cleared by the next track,
-   * and superseded as soon as the box reports somewhere near it, which is what
-   * makes it optimistic rather than a second clock.
+   * pressed, and jumps forward again a second later.
+   *
+   * The timestamp is the important half. The first cut kept the target while the
+   * report was more than three seconds away from it - which is true again as soon
+   * as playback moves PAST it, so once the song had run three seconds beyond the
+   * seek the bar reverted to the target and froze there for the rest of the
+   * track. Measured on the box: 0:44 for twenty-four seconds while the music
+   * played. It is a short window after a press, not a rule about distance, and it
+   * closes on its own - which is also what lets a REFUSED seek recover, since
+   * nothing would ever supersede one that went backwards.
    */
-  const [seekedTo, setSeekedTo] = useState<number | null>(null);
+  const [seekedTo, setSeekedTo] = useState<{ at: number; ms: number } | null>(null);
   /** What is coming next, and whether the panel is on display. */
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [panel, setPanel] = useState(true);
@@ -367,7 +381,12 @@ export function NowPlaying({
     : 0;
   // The asked-for place until the box reports somewhere near it, then the box's
   // own clock again.
-  const pos = seekedTo !== null && Math.abs(reported - seekedTo) > 3000 ? seekedTo : reported;
+  // The asked-for place for a few seconds after the press, and only while the box
+  // still disagrees with it. Both halves matter: the box's clock takes over the
+  // moment it agrees, and the window ends whatever happens.
+  const optimistic =
+    seekedTo !== null && Date.now() - seekedTo.at < SEEK_SETTLE_MS && Math.abs(reported - seekedTo.ms) > 3000;
+  const pos = optimistic ? seekedTo.ms : reported;
   const pct = state && state.duration_ms ? Math.min(100, (pos / state.duration_ms) * 100) : 0;
   const hasTrack = !!state?.track_id;
   const device = state?.device_name || "tvbox";
@@ -519,6 +538,13 @@ export function NowPlaying({
                   pos={pos}
                   duration={state!.duration_ms}
                   cursor={seekMs}
+                  // The panel is drawn OVER the right of the screen rather than
+                  // beside the song, which is what keeps the cover and the
+                  // buttons from sliding - but at this box's 1360px the
+                  // full-width bar ran 136px underneath it, with the duration
+                  // wedged between two song titles. The bar is the only thing
+                  // that reaches that far, so the bar is what gives way.
+                  narrow={panel && queue.length > 0}
                   // Seeking is a write to the account's player, so it needs the
                   // Web API and it needs the box to BE the player: the same pair
                   // the shuffle and repeat buttons are gated on. Without both, the
@@ -530,7 +556,7 @@ export function NowPlaying({
                   onCommit={() => {
                     if (seekMs === null) return;
                     doControl("seek", String(Math.floor(seekMs)));
-                    setSeekedTo(seekMs);
+                    setSeekedTo({ at: Date.now(), ms: seekMs });
                     setSeekMs(null);
                   }}
                   onToggle={() => doControl("playpause")}
@@ -663,6 +689,7 @@ function SeekBar({
   duration,
   cursor,
   seekable,
+  narrow,
   onMove,
   onCommit,
   onToggle,
@@ -672,6 +699,8 @@ function SeekBar({
   /** Where the cursor points, or null when it is not out. */
   cursor: number | null;
   seekable: boolean;
+  /** The queue panel is up, so the bar must stop before it. */
+  narrow: boolean;
   onMove: (deltaMs: number) => void;
   onCommit: () => void;
   onToggle: () => void;
@@ -701,19 +730,44 @@ function SeekBar({
   });
 
   return (
-    <div ref={ref} data-sfocus="sp-seek" className="w-[60vw] max-w-[820px]">
+    <div
+      ref={ref}
+      data-sfocus="sp-seek"
+      className={["transition-all duration-300", narrow ? "w-[36vw] max-w-[520px]" : "w-[60vw] max-w-[820px]"].join(
+        " ",
+      )}
+    >
       <div
         className={[
-          "rounded-full bg-white/15 overflow-hidden relative transition-all",
+          "relative rounded-full bg-white/15 transition-all",
           focused ? "h-[1.1vh] ring-[0.3vh] ring-white/70" : "h-[0.6vh]",
         ].join(" ")}
       >
-        <div className="h-full bg-[#1DB954]" style={{ width: pct + "%" }} />
-        {/* Where the song IS, while the cursor is somewhere else. Without it
-            there is no way back to it. */}
+        <div className="absolute top-0 left-0 h-full rounded-full bg-[#1DB954]" style={{ width: pct + "%" }} />
+        {/* Where the song IS, while the cursor is somewhere else - without it
+            there is no way back to it. It differs from the cursor in SHAPE rather
+            than in size: at three metres a size difference alone is a few
+            arc-minutes and reads as one mark that moved. */}
         {cursor !== null && (
-          <div className="absolute top-0 h-full w-[0.3vh] bg-white" style={{ left: playedPct + "%" }} />
+          <div
+            className="absolute top-1/2 h-[2.2vh] w-[0.35vh] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white"
+            style={{ left: playedPct + "%" }}
+          />
         )}
+        {/* The cursor, and the only thing on this bar that says it has focus:
+            every other control on this screen turns solid white, and a half-vh
+            height change does not read across a room. */}
+        <div
+          className={[
+            "absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-[0_0_1.5vh_rgba(0,0,0,0.7)]",
+            cursor !== null
+              ? "h-[2.6vh] w-[2.6vh] border-[0.3vh] border-white bg-[#1DB954]"
+              : focused
+                ? "h-[1.8vh] w-[1.8vh] bg-white"
+                : "h-[1.2vh] w-[1.2vh] bg-white/80",
+          ].join(" ")}
+          style={{ left: pct + "%" }}
+        />
       </div>
       <div className="flex justify-between text-[1.5vh] text-fg-dim mt-[0.6vh] tabular-nums">
         <span className={cursor !== null ? "text-white" : ""}>{mmss(shown)}</span>

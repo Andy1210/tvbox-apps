@@ -105,6 +105,8 @@ export function NowPlaying(): React.JSX.Element {
   const [panel, setPanel] = useState<"queue" | "lyrics">("queue");
   /** Nothing pressed for a while, with a song playing: the screen has settled. */
   const [settled, setSettled] = useState(false);
+  /** The words are time-tagged and following the song, so something IS moving. */
+  const [lyricsLive, setLyricsLive] = useState(false);
   // What the focused control is called. The row is icons now, and an icon row
   // with nothing naming it is a row of guesses - see the note on the row itself.
   const [hint, setHint] = useState<string | null>(null);
@@ -152,9 +154,14 @@ export function NowPlaying(): React.JSX.Element {
         if ((getCurrentFocusKey() ?? "").startsWith("nq-")) return arm();
         // Reading is the one thing on this screen that LOOKS like nothing
         // happening: no press for a minute is what reading the words to a song
-        // is made of, and the karaoke view is moving on its own anyway, so it is
+        // is made of, and a karaoke view is moving on its own anyway, so it is
         // not the still picture this exists to prevent.
-        if (panel === "lyrics") return arm();
+        //
+        // Held off by the words MOVING, not by the panel being the chosen one:
+        // with the lyrics switch off, or on a song the database does not have,
+        // the panel is a single static line and the screen would never settle at
+        // all - which is the opposite of what it is for.
+        if (panel === "lyrics" && lyricsLive) return arm();
         setSettled(true);
       }, SETTLE_MS);
     };
@@ -170,7 +177,7 @@ export function NowPlaying(): React.JSX.Element {
     };
     // The track is a dependency on purpose: a new song re-arms the timer, which
     // is what brings the queue back as it changes.
-  }, [playing, item?.id, panel]);
+  }, [playing, item?.id, panel, lyricsLive]);
   useInitialFocus("np-toggle", Boolean(item) && !naming);
   // OFF while the keyboard is up. The keyboard replaces this screen, so np-toggle
   // is unmounted - and the fallback runs in the capture phase, ahead of spatial
@@ -346,7 +353,9 @@ export function NowPlaying(): React.JSX.Element {
           <h2 className="shrink-0 px-[1.5vw] pb-[1vh] text-[2.4vh] text-fg-dim">
             {panel === "lyrics" ? t("music.lyrics") : `${t("music.queue")} · ${index + 1}/${queue.length}`}
           </h2>
-          {panel === "lyrics" && <Lyrics item={item} positionMs={positionMs} scrollKey="np-lyrics" />}
+          {panel === "lyrics" && (
+            <Lyrics item={item} positionMs={positionMs} scrollKey="np-lyrics" onLive={setLyricsLive} />
+          )}
           {/* py and px, because the focus ring scales a row by 4% and a scroll
             container clips both axes: without them the top row was cut in half
             and the focused one lost a slice off each side. */}

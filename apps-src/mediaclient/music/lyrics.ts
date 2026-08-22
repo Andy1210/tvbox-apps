@@ -157,20 +157,26 @@ export async function fetchLyrics(q: LyricsQuery): Promise<Lyrics> {
   if (q.album) exact.set("album_name", q.album);
   if (durSec > 0) exact.set("duration", String(durSec));
   const strict = await getJson("https://lrclib.net/api/get?" + exact.toString());
-  let asked = strict !== null; // null is the only value that means "we could not ask"
+  // `null` is the only value that means the question failed. A 404 on the exact
+  // match is an ANSWER, but not a final one - it is why the loose search exists -
+  // so the two are tracked separately. Treating a 404 as "we asked" was enough to
+  // cache the miss even when the search that follows it never answered: measured
+  // on the box, one bad moment gave "no lyrics for this song" for the rest of the
+  // session, with no way to ask again from a remote.
+  let answered = strict !== null && strict !== NO_ROW;
   let row = strict === NO_ROW ? null : (strict as LrclibRow | null);
 
   if (!row) {
     const loose = new URLSearchParams({ track_name: title, artist_name: artist });
     const list = await getJson("https://lrclib.net/api/search?" + loose.toString());
-    asked = asked || list !== null;
+    answered = list !== null;
     row = Array.isArray(list) && list.length ? best(list as LrclibRow[], durSec) : null;
   }
 
   const out = toLyrics(row);
   // Only a real answer is remembered. A timeout or an offline box is not "this
   // song has no words", and caching it as one is permanent from the sofa.
-  if (asked) {
+  if (answered) {
     if (cache.size >= CACHE_MAX) cache.clear();
     cache.set(key, out);
   }

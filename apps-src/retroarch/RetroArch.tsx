@@ -112,6 +112,16 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [starting, setStarting] = useState("");
+  /**
+   * Marking favourites rather than starting games.
+   *
+   * Here rather than in the grid, because the two things that end a mode are
+   * both here: Back, which used to leave the APP with it still set (the window
+   * is hidden, not destroyed, so it came back armed), and changing tab, which
+   * used to end it silently by unmounting the grid. A mode that outlives leaving
+   * and dies on a tab change is the wrong way round in both halves.
+   */
+  const [marking, setMarking] = useState(false);
 
   const loadSystems = useCallback(() => {
     return fetchSystems()
@@ -207,6 +217,12 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
   // is left through the shell (window.tvbox.home()), which is also what the Home
   // button does - so there is exactly one way out and it always works.
   useBackspace(() => {
+    // A mode where OK does something else is the first thing Back should undo -
+    // and leaving the app with it set is how the next visit surprises somebody.
+    if (marking) {
+      setMarking(false);
+      return;
+    }
     if (view !== "games") {
       setView("games");
       setFocus("tab-games");
@@ -268,6 +284,12 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
     }, 60); // after the render that changed what exists
     return () => clearTimeout(id);
   }, [view, systems, games, loading, starting]);
+
+  // Off the games view there is nothing to mark, and the banner that says what
+  // OK does is not drawn there either.
+  useEffect(() => {
+    if (view !== "games" && marking) setMarking(false);
+  }, [view, marking]);
 
   const total = systems.reduce((n, s) => n + s.games, 0);
   /**
@@ -371,6 +393,8 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
               systems={rail}
               system={system}
               title={railTitle}
+              marking={marking}
+              onMarking={setMarking}
               games={games}
               loading={loading}
               error={error}

@@ -20,6 +20,7 @@ export function Lyrics({
   item,
   positionMs,
   scrollKey,
+  onLive,
 }: {
   item: MediaItem | undefined;
   positionMs: number;
@@ -31,6 +32,13 @@ export function Lyrics({
    * lyrics were on display would be a screen where the cursor cannot move.
    */
   scrollKey: string;
+  /**
+   * Whether anything here is MOVING - i.e. the words are time-tagged and follow
+   * the song. The player holds its settle off for that and only that: a panel
+   * showing one static line ("no lyrics for this song", or the switch being off)
+   * is exactly the still picture settling exists for.
+   */
+  onLive?: (live: boolean) => void;
 }): React.JSX.Element {
   const { t } = useI18n();
   // The one thing this app sends outside the house, so it is asked for rather
@@ -75,6 +83,11 @@ export function Lyrics({
   useEffect(() => {
     if (active >= 0) activeRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [active]);
+
+  useEffect(() => {
+    onLive?.(synced.length > 0);
+    return () => onLive?.(false);
+  }, [synced.length, onLive]);
 
   const plainOnly = !loading && !!data && !data.instrumental && !synced.length && !!data.plain;
   useEffect(() => {
