@@ -899,6 +899,32 @@ module.exports = (host) => {
       });
       startLibrespot();
     },
+    // The app was closed from the Running row (or by its own Exit), and the
+    // music has to go with it - it did not, because the sound is librespot's and
+    // the shell only ever ended its own mpv.
+    //
+    // PAUSE, not stop: librespot is the Connect DEVICE, and it runs whenever the
+    // box has Spotify enabled, whether or not this app is open - that is what
+    // lets a phone cast here and have `onCastStart` open the app. Stopping the
+    // daemon would take the box off Spotify Connect until something started it
+    // again, so closing the app would quietly cost the household the feature.
+    //
+    // Gated on the BOX being the device that is playing, because the pause goes
+    // to the account, not to the speaker: without the check, closing the app
+    // here would stop the same account's music on somebody's phone in another
+    // room. `boxPlayerState` answers both halves in one read, and answers
+    // `box: false` for every case it cannot tell - no account linked, nobody we
+    // know holding the player - which is the safe direction.
+    appClosed() {
+      spotifyApi
+        .boxPlayerState()
+        .then((s) => {
+          if (!s || !s.box || !s.is_playing) return;
+          host.log("spotify: the app was closed while the box was playing - pausing");
+          return spotifyApi.control("pause");
+        })
+        .catch((e) => host.log("spotify: could not pause on close:", String(e.message || e)));
+    },
     stop() {
       if (host.widget) host.widget.clear();
       autoplay.stop();

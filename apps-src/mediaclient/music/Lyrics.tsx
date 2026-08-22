@@ -10,7 +10,6 @@ import { useEffect, useRef, useState } from "react";
 import { getCurrentFocusKey } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n } from "@sdk";
 import { fetchLyrics, type Lyrics as LyricsData } from "./lyrics";
-import { usePrefs } from "../prefs";
 import type { MediaItem } from "../backends/types";
 
 /** How far one press moves the plain view - about two thirds of the panel. */
@@ -43,7 +42,6 @@ export function Lyrics({
   const { t } = useI18n();
   // The one thing this app sends outside the house, so it is asked for rather
   // than assumed - and the panel says so instead of showing nothing.
-  const enabled = usePrefs((s) => s.lyrics);
   const [data, setData] = useState<LyricsData | null>(null);
   const [loading, setLoading] = useState(true);
   const activeRef = useRef<HTMLParagraphElement | null>(null);
@@ -55,11 +53,6 @@ export function Lyrics({
   const durationMs = item?.durationMs;
 
   useEffect(() => {
-    if (!enabled) {
-      setData(null);
-      setLoading(false);
-      return;
-    }
     let live = true;
     setLoading(true);
     setData(null);
@@ -71,7 +64,7 @@ export function Lyrics({
     return () => {
       live = false;
     };
-  }, [enabled, title, artist, album, durationMs]);
+  }, [title, artist, album, durationMs]);
 
   const synced = data?.synced ?? [];
   let active = -1;
@@ -112,15 +105,13 @@ export function Lyrics({
     return () => window.removeEventListener("keydown", onKey, true);
   }, [plainOnly, scrollKey]);
 
-  const message = !enabled
-    ? t("music.lyricsOff")
-    : loading
-      ? t("common.loading")
-      : !data || (!synced.length && !data.plain && !data.instrumental)
-        ? t("music.noLyrics")
-        : data.instrumental
-          ? t("music.instrumental")
-          : null;
+  const message = loading
+    ? t("common.loading")
+    : !data || (!synced.length && !data.plain && !data.instrumental)
+      ? t("music.noLyrics")
+      : data.instrumental
+        ? t("music.instrumental")
+        : null;
 
   if (message) return <p className="px-[1.5vw] py-[2vh] text-[2.1vh] text-fg-dim">{message}</p>;
 

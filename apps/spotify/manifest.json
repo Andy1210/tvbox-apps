@@ -2,7 +2,7 @@
   "id": "spotify",
   "manifestVersion": 1,
   "name": "Spotify",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "changelog": [
     {
       "version": "1.4.0",
@@ -38,7 +38,7 @@
     },
     {
       "version": "1.0.0",
-      "notes": "Initial release — Spotify Connect, now-playing, and library browsing."
+      "notes": "Initial release \u2014 Spotify Connect, now-playing, and library browsing."
     }
   ],
   "type": "webclient",
@@ -51,7 +51,7 @@
   },
   "description": {
     "en": "Turn the box into a Spotify Connect speaker: open Spotify on your phone or computer and pick the box as the playback device. Optional account features (free API keys) add on-screen search, playlists and Liked Songs.",
-    "hu": "A box Spotify Connect hangszóróvá válik: nyisd meg a Spotify-t a telefonodon vagy gépeden, és válaszd ki a boxot lejátszási eszköznek. Opcionális fiók-funkciók (ingyenes API-kulcsok) képernyős keresést, lejátszási listákat és kedvelt számokat adnak."
+    "hu": "A box Spotify Connect hangsz\u00f3r\u00f3v\u00e1 v\u00e1lik: nyisd meg a Spotify-t a telefonodon vagy g\u00e9peden, \u00e9s v\u00e1laszd ki a boxot lej\u00e1tsz\u00e1si eszk\u00f6znek. Opcion\u00e1lis fi\u00f3k-funkci\u00f3k (ingyenes API-kulcsok) k\u00e9perny\u0151s keres\u00e9st, lej\u00e1tsz\u00e1si list\u00e1kat \u00e9s kedvelt sz\u00e1mokat adnak."
   },
   "requires": {
     "bin": ["librespot"],
