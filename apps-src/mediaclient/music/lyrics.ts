@@ -37,6 +37,16 @@ const cache = new Map<string, Lyrics>();
 const CACHE_MAX = 200;
 /** LRCLIB is somebody else's free service; a slow answer is not worth a wait. */
 const TIMEOUT_MS = 8000;
+/**
+ * How much of an answer is worth drawing.
+ *
+ * A song has a few dozen lines. These are the bounds on somebody else's server
+ * having a bad day, or on a fork of it somebody points this at: `parseLrc` mints
+ * one element per stamped line, and a page that tries to draw a hundred thousand
+ * of them is a media app nobody can get out of.
+ */
+const MAX_LINES = 400;
+const MAX_PLAIN_CHARS = 20000;
 /** How far two lengths may differ and still be the same recording. */
 const DURATION_SLACK_S = 7;
 
@@ -69,17 +79,30 @@ export function parseLrc(lrc: string): LyricLine[] {
 function toLyrics(row: LrclibRow | null): Lyrics {
   if (!row) return EMPTY;
   if (row.instrumental) return { synced: [], plain: "", instrumental: true };
-  const synced = parseLrc(row.syncedLyrics ?? "");
-  const plain = String(row.plainLyrics ?? "").trim();
+  const synced = parseLrc(row.syncedLyrics ?? "").slice(0, MAX_LINES);
+  const plain = String(row.plainLyrics ?? "")
+    .slice(0, MAX_PLAIN_CHARS)
+    .trim();
   if (!synced.length && !plain) return EMPTY;
   return { synced, plain, instrumental: false };
 }
+
+/** The answer came back and said no. Distinguished from "we could not ask". */
+const NO_ROW = Symbol("no lyrics row");
 
 async function getJson(url: string): Promise<unknown> {
   const stop = new AbortController();
   const timer = setTimeout(() => stop.abort(), TIMEOUT_MS);
   try {
-    const r = await fetch(url, { signal: stop.signal, cache: "no-store" });
+    // No referrer: the default would tell LRCLIB which page asked, which is the
+    // box's own address and none of their business. `no-store` so a song's words
+    // are not left in the app's HTTP cache either.
+    const r = await fetch(url, { signal: stop.signal, cache: "no-store", referrerPolicy: "no-referrer" });
+    // A 404 is an ANSWER - this database does not have the song - and anything
+    // else is the question failing. They must not be cached the same way: one
+    // bad moment on the network would otherwise mean "no lyrics for this track"
+    // for the rest of the evening, with no way to ask again from a remote.
+    if (r.status === 404) return NO_ROW;
     if (!r.ok) return null;
     return await r.json();
   } catch (e) {
@@ -133,17 +156,24 @@ export async function fetchLyrics(q: LyricsQuery): Promise<Lyrics> {
   const exact = new URLSearchParams({ track_name: title, artist_name: artist });
   if (q.album) exact.set("album_name", q.album);
   if (durSec > 0) exact.set("duration", String(durSec));
-  let row = (await getJson("https://lrclib.net/api/get?" + exact.toString())) as LrclibRow | null;
+  const strict = await getJson("https://lrclib.net/api/get?" + exact.toString());
+  let asked = strict !== null; // null is the only value that means "we could not ask"
+  let row = strict === NO_ROW ? null : (strict as LrclibRow | null);
 
   if (!row) {
     const loose = new URLSearchParams({ track_name: title, artist_name: artist });
-    const list = (await getJson("https://lrclib.net/api/search?" + loose.toString())) as LrclibRow[] | null;
-    row = Array.isArray(list) && list.length ? best(list, durSec) : null;
+    const list = await getJson("https://lrclib.net/api/search?" + loose.toString());
+    asked = asked || list !== null;
+    row = Array.isArray(list) && list.length ? best(list as LrclibRow[], durSec) : null;
   }
 
   const out = toLyrics(row);
-  if (cache.size >= CACHE_MAX) cache.clear();
-  cache.set(key, out);
+  // Only a real answer is remembered. A timeout or an offline box is not "this
+  // song has no words", and caching it as one is permanent from the sofa.
+  if (asked) {
+    if (cache.size >= CACHE_MAX) cache.clear();
+    cache.set(key, out);
+  }
   return out;
 }
 

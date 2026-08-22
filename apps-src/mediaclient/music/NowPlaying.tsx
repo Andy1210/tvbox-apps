@@ -150,6 +150,11 @@ export function NowPlaying(): React.JSX.Element {
       window.clearTimeout(timer);
       timer = window.setTimeout(() => {
         if ((getCurrentFocusKey() ?? "").startsWith("nq-")) return arm();
+        // Reading is the one thing on this screen that LOOKS like nothing
+        // happening: no press for a minute is what reading the words to a song
+        // is made of, and the karaoke view is moving on its own anyway, so it is
+        // not the still picture this exists to prevent.
+        if (panel === "lyrics") return arm();
         setSettled(true);
       }, SETTLE_MS);
     };

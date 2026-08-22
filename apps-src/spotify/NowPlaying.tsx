@@ -125,6 +125,16 @@ export function NowPlaying({
   const [showLyrics, setShowLyrics] = useState(false);
   /** Where the seek cursor points while it is out; null means there is none. */
   const [seekMs, setSeekMs] = useState<number | null>(null);
+  /**
+   * Where a committed seek asked to go, until the box says it got there.
+   *
+   * Playback position arrives over SSE from librespot, a beat after the write -
+   * so without this the bar snaps back to where the song WAS the moment OK is
+   * pressed, and jumps forward again a second later. Cleared by the next track,
+   * and superseded as soon as the box reports somewhere near it, which is what
+   * makes it optimistic rather than a second clock.
+   */
+  const [seekedTo, setSeekedTo] = useState<number | null>(null);
   /** What is coming next, and whether the panel is on display. */
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [panel, setPanel] = useState(true);
@@ -304,6 +314,9 @@ export function NowPlaying({
    * clock underneath that is two things dimming the same screen.
    */
   const trackId = state?.track_id;
+  // A new song is a new clock: an optimistic position from the last one would
+  // otherwise hold the bar somewhere in the middle of it.
+  useEffect(() => setSeekedTo(null), [trackId]);
   useEffect(() => {
     setPanel(true);
     if (!playing) return;
@@ -345,7 +358,12 @@ export function NowPlaying({
     };
   }, [connected, panel, hasTrackNow, trackId]);
 
-  const pos = state ? Math.min(state.position_ms + (playing ? Date.now() - at : 0), state.duration_ms || Infinity) : 0;
+  const reported = state
+    ? Math.min(state.position_ms + (playing ? Date.now() - at : 0), state.duration_ms || Infinity)
+    : 0;
+  // The asked-for place until the box reports somewhere near it, then the box's
+  // own clock again.
+  const pos = seekedTo !== null && Math.abs(reported - seekedTo) > 3000 ? seekedTo : reported;
   const pct = state && state.duration_ms ? Math.min(100, (pos / state.duration_ms) * 100) : 0;
   const hasTrack = !!state?.track_id;
   const device = state?.device_name || "tvbox";
@@ -459,10 +477,10 @@ export function NowPlaying({
           </div>
         )}
 
-        <div className="relative z-10 h-full flex">
+        <div className="relative z-10 h-full">
           <div
             className={[
-              "flex-1 min-w-0 h-full flex flex-col items-center justify-center gap-[2.4vh] px-[6vw]",
+              "h-full flex flex-col items-center justify-center gap-[2.4vh] px-[6vw]",
               // while lyrics are open, start the content below the absolute playback
               // strip (top-[11vh] + its height, taller when transport controls show)
               // so the lyrics scroll area never underlaps it
@@ -508,6 +526,7 @@ export function NowPlaying({
                   onCommit={() => {
                     if (seekMs === null) return;
                     doControl("seek", String(Math.floor(seekMs)));
+                    setSeekedTo(seekMs);
                     setSeekMs(null);
                   }}
                   onToggle={() => doControl("playpause")}
@@ -582,12 +601,20 @@ export function NowPlaying({
               </div>
             )}
           </div>
-          {/* What is next, beside the song. Unmounted rather than hidden when it
-            steps back: nothing in it is focusable, but a hidden box still takes
-            layout, and the column beside it is meant to have the screen to
-            itself. Never over the lyrics, which are full screen. */}
+          {/* What is next, OVER the right of the screen rather than beside the
+            song in the layout. As a flex sibling it moved the cover, the bar and
+            the transport row sideways by half its width every time it came and
+            went - on a ten-second timer, and back on the next press, so the
+            button being aimed at moved as it was pressed. Absolute, it changes
+            nothing underneath: the cover is 40vh wide and centred, so it ends
+            well before this panel starts. Unmounted rather than hidden, since a
+            hidden box still takes layout. Never over the lyrics, which are full
+            screen. */}
           {panel && !showLyrics && hasTrack && queue.length > 0 && (
-            <div className="w-[30vw] shrink-0 min-w-0 flex flex-col pt-[11vh] pb-[4vh] pr-[3vw]" aria-hidden="true">
+            <div
+              className="absolute top-0 right-0 bottom-0 z-20 flex w-[30vw] min-w-0 flex-col pt-[11vh] pb-[4vh] pr-[3vw]"
+              aria-hidden="true"
+            >
               <div className="shrink-0 pb-[1vh] text-[2.1vh] text-fg-dim">{t("spotify.upNext")}</div>
               <div className="min-h-0 flex-1 overflow-hidden flex flex-col gap-[0.8vh]">
                 {queue.map((x, i) => (

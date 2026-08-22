@@ -136,6 +136,8 @@
     "favourites": "Kedvencek",
     "recentlyPlayed": "Nemrég játszott",
     "favourite": "Kedvenc",
-    "unfavourite": "Levesz"
+    "markingTitle": "Kedvencek jelölése",
+    "markingHint": "Az OK megjelöli a játékot, nem indítja el. A „Kedvenc” újbóli megnyomása kilép.",
+    "markingDone": "Kész"
   }
 }

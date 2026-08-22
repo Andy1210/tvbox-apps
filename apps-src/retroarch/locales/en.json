@@ -136,6 +136,8 @@
     "favourites": "Favourites",
     "recentlyPlayed": "Recently played",
     "favourite": "Favourite",
-    "unfavourite": "Remove"
+    "markingTitle": "Adding to favourites",
+    "markingHint": "OK marks the cover instead of starting the game. Press “Favourite” again to stop.",
+    "markingDone": "Done"
   }
 }

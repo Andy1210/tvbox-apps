@@ -385,7 +385,7 @@ function Header({
             <FocusButton
               focusKey="ml-add"
               onEnter={onAdding}
-              className={adding ? chip + " !bg-[var(--color-accent)]" : chip}
+              className={adding ? chip + " !bg-[var(--color-accent)] !text-[#0d1014]" : chip}
             >
               {t("music.addMode")}
             </FocusButton>

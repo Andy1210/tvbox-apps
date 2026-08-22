@@ -141,7 +141,10 @@ export function MusicItem({
             {t("music.tracksN", { n: String(tracks.length) })}
             {totalMs > 0 && ` · ${clock(totalMs)}`}
           </p>
-          {note && <p className="mt-[0.6vh] text-[2vh] text-fg-dim">{note}</p>}
+          {/* Reserved whether or not there is anything in it: without a fixed
+              height the first add pushed the header and the whole track list
+              down by its height, under the cursor. */}
+          <p className="mt-[0.6vh] h-[2.6vh] truncate text-[2vh] text-fg-dim">{note}</p>
 
           <Actions
             adding={adding}
@@ -246,7 +249,7 @@ function Actions({
         <FocusButton
           focusKey="mi-add"
           onEnter={onAdding}
-          className={adding ? chip + " !bg-[var(--color-accent)]" : chip}
+          className={adding ? chip + " !bg-[var(--color-accent)] !text-[#0d1014]" : chip}
         >
           {t("music.addMode")}
         </FocusButton>

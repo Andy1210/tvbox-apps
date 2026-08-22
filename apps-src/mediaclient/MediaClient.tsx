@@ -265,7 +265,10 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
    * unmounts one of them and that must not end the mode.
    */
   const musicScreen =
-    screen.name === "music" || screen.name === "musicList" || screen.name === "musicItem" || screen.name === "nowPlaying";
+    screen.name === "music" ||
+    screen.name === "musicList" ||
+    screen.name === "musicItem" ||
+    screen.name === "nowPlaying";
   useEffect(() => {
     if (!musicScreen && useMusic.getState().adding) useMusic.getState().setAdding(false);
   }, [musicScreen]);
@@ -283,8 +286,10 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
       >
         {/* Above the screens, because it is what says OK is adding rather than
             playing - and a mode nothing names is a remote that has changed
-            meaning. */}
-        <AddBanner />
+            meaning. NOT on the player: OK on a queue row there starts that song,
+            mode or no mode, so the line would be describing the one screen where
+            it is not true. */}
+        {screen.name !== "nowPlaying" && <AddBanner />}
         {screen.name === "boot" && <Message loading />}
         {screen.name === "login" && <Login />}
         {screen.name === "profiles" && <Profiles />}

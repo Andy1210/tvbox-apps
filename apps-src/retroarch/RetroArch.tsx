@@ -123,12 +123,18 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
           if (cur && (isVirtual(cur) || d.systems.some((s) => s.system === cur))) return cur;
           const saved = localStorage.getItem(LAST_SYSTEM) || "";
           const first = d.systems.find((s) => s.games > 0) || d.systems[0];
-          if (isVirtual(saved) || d.systems.some((s) => s.system === saved)) return saved;
+          // A category is only a place to open on while it still HOLDS
+          // something: unfavourite the last game and the app would otherwise
+          // start on a screen headed "Kedvencek", reading "this console has no
+          // games", offering a full library rescan - with no rail row for the
+          // category it claims to be in.
+          const stocked = saved === FAVOURITES ? favourites.length > 0 : saved === RECENT ? recent.length > 0 : false;
+          if (stocked || d.systems.some((s) => s.system === saved)) return saved;
           return first ? first.system : "";
         });
       })
       .catch(() => setError(t("retroarch.stateError")));
-  }, [t]);
+  }, [t, favourites.length, recent.length]);
 
   useEffect(() => {
     loadSystems();
@@ -211,13 +217,16 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
 
   const onPlay = (game: Entry) => {
     setStarting(game.label);
-    // Remembered before the launch answers: the shell hides this window the
-    // moment it takes the screen, and a game that started is one that was played
-    // whether or not this page is still around to hear about it.
-    notePlayed({ system: game.system, label: game.label });
     play(game.system, game.i)
       .then((r) => {
-        if (r.ok) return; // the shell is taking the screen; this window is about to be hidden
+        if (r.ok) {
+          // Only a launch the box ACCEPTED. Filing it before the answer put
+          // covers that cannot start - no core, missing rom - into "recently
+          // played", which is a row of dead ends. This window is hidden a moment
+          // later, but the store has already been written by then.
+          notePlayed({ system: game.system, label: game.label });
+          return; // the shell is taking the screen; this window is about to be hidden
+        }
         setStarting("");
         setError(
           r.error === "no_core"

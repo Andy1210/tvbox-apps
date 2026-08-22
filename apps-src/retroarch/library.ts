@@ -29,6 +29,8 @@ const RECENT_KEY = "tvbox.retroarch.recent";
 export const RECENT_MAX = 18;
 /** A bound on the other list too: a file nobody meant to grow without end. */
 const FAV_MAX = 300;
+/** ...and on a single entry, for the same reason - these are read back. */
+const MAX_FIELD = 200;
 
 export const sameGame = (a: GameRef, b: GameRef): boolean => a.system === b.system && a.label === b.label;
 
@@ -39,9 +41,17 @@ function read(key: string): GameRef[] {
     // Held to the shape rather than trusted: this store is shared by every local
     // app on the box's one origin, and a row with no label would draw an empty
     // tile that cannot be played or removed.
-    return raw
-      .filter((x) => x && typeof x.system === "string" && typeof x.label === "string" && x.system && x.label)
-      .map((x) => ({ system: String(x.system), label: String(x.label) }));
+    return (
+      raw
+        .filter((x) => x && typeof x.system === "string" && typeof x.label === "string" && x.system && x.label)
+        .map((x) => ({ system: String(x.system).slice(0, MAX_FIELD), label: String(x.label).slice(0, MAX_FIELD) }))
+        // Bounded on the way IN as well as on the way out. The cap below is
+        // enforced when this code writes, and this store is shared by every
+        // local app on the box's one origin (and replayed by a restore), so a
+        // list somebody else left here decides how many console playlists the
+        // grid reads when the category is opened.
+        .slice(0, FAV_MAX)
+    );
   } catch {
     return [];
   }

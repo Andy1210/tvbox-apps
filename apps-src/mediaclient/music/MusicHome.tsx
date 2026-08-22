@@ -297,7 +297,7 @@ function Actions({
             focusKey="mh-stopadding"
             onFocused={onReachTop}
             onEnter={onStopAdding}
-            className={chip + " !bg-[var(--color-accent)]"}
+            className={chip + " !bg-[var(--color-accent)] !text-[#0d1014]"}
           >
             {t("music.addModeOff")}
           </FocusButton>

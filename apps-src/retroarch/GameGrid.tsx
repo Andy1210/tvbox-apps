@@ -87,14 +87,19 @@ function Tile({
   game,
   pos,
   starred,
+  marking,
   onPlay,
+  onMark,
   onFocusPos,
 }: {
   game: Entry;
   pos: number;
   /** In the favourites, and marked so from across a room. */
   starred: boolean;
+  /** The favourites mode is on, so OK marks this cover instead of starting it. */
+  marking: boolean;
   onPlay: (game: Entry) => void;
+  onMark: (game: Entry, pos: number) => void;
   onFocusPos: (pos: number) => void;
 }) {
   // onFocus is norigin's callback, not the DOM event: nothing here ever takes real
@@ -102,7 +107,7 @@ function Tile({
   const { ref, focused } = useFocusableItem(
     {
       focusKey: tileKey(game),
-      onEnterPress: () => onPlay(game),
+      onEnterPress: () => (marking ? onMark(game, pos) : onPlay(game)),
       onFocus: () => onFocusPos(pos),
       onArrowPress: (dir) => {
         if (dir === "up" && pos < COLS) {
@@ -129,7 +134,7 @@ function Tile({
   return (
     <div
       ref={ref}
-      onClick={() => onPlay(game)}
+      onClick={() => (marking ? onMark(game, pos) : onPlay(game))}
       className={[
         "rounded-[1vh] overflow-hidden bg-white/5 flex flex-col",
         "transition-[transform,outline-color] duration-150 outline outline-[3px] outline-transparent outline-offset-2",
@@ -240,8 +245,20 @@ function SearchButton({ onPress, onClear }: { onPress: () => void; onClear?: () 
   );
 }
 
-// The star, next to Search. Same arrow wiring as its neighbour: up to the tabs,
-// down back into the covers.
+/**
+ * The star, next to Search: a MODE rather than an action on the focused cover.
+ *
+ * An action here could only act on whatever the cursor was on when it reached
+ * this button - and reaching it means walking UP through every row above,
+ * changing the focused cover at each step. Measured against the code: from any
+ * row but the first, pressing the star marked a game in row 0 instead of the one
+ * being looked at, so everything below the first six covers was unmarkable.
+ *
+ * As a mode, OK on a cover marks THAT cover and the cursor never has to leave
+ * the grid. The same shape the media client's "add songs" uses, and for the same
+ * reason - which also means it needs the same thing: a line on screen saying
+ * what OK does now.
+ */
 function FavouriteButton({ on, onPress }: { on: boolean; onPress: () => void }) {
   const { t } = useI18n();
   const { ref, focused } = useFocusableItem({
@@ -277,7 +294,7 @@ function FavouriteButton({ on, onPress }: { on: boolean; onPress: () => void }) 
       >
         <path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z" strokeLinejoin="round" />
       </svg>
-      {on ? t("retroarch.unfavourite") : t("retroarch.favourite")}
+      {on ? t("retroarch.markingDone") : t("retroarch.favourite")}
     </div>
   );
 }
@@ -339,7 +356,9 @@ function Tiles({
   end,
   scroller,
   favourites,
+  marking,
   onPlay,
+  onMark,
   onFocusPos,
 }: {
   mounted: Entry[];
@@ -348,7 +367,9 @@ function Tiles({
   end: number;
   scroller: MutableRefObject<HTMLDivElement | null>;
   favourites: GameRef[];
+  marking: boolean;
   onPlay: (game: Entry) => void;
+  onMark: (game: Entry, pos: number) => void;
   onFocusPos: (pos: number) => void;
 }) {
   const { ref, focusKey } = useFocusable({ focusKey: TILES });
@@ -373,7 +394,9 @@ function Tiles({
               game={g}
               pos={start * COLS + k}
               starred={favourites.some((f) => sameGame(f, g))}
+              marking={marking}
               onPlay={onPlay}
+              onMark={onMark}
               onFocusPos={onFocusPos}
             />
           ))}
@@ -409,8 +432,8 @@ export function GameGrid({
   const { t } = useI18n();
   const favourites = useLibrary((s) => s.favourites);
   const toggleFavourite = useLibrary((s) => s.toggleFavourite);
-  /** Which cover the star button acts on: the one the cursor is on. */
-  const [at, setAt] = useState(0);
+  /** Marking favourites rather than starting games. See FavouriteButton. */
+  const [marking, setMarking] = useState(false);
   const { ref, focusKey } = useFocusable({ focusKey: "grid-page" });
   const [query, setQuery] = useState("");
   const [osk, setOsk] = useState(false);
@@ -426,6 +449,10 @@ export function GameGrid({
     const q = query.trim().toLowerCase();
     return q ? games.filter((g) => g.label.toLowerCase().includes(q)) : games;
   }, [games, query]);
+  // What the grid holds right now, read from inside a timeout that runs after the
+  // store change has re-rendered - `shown` there would be the closure's old one.
+  const gridRef = useRef<Entry[]>(shown);
+  gridRef.current = shown;
 
   // A new list starts at the top.
   useEffect(() => {
@@ -478,10 +505,34 @@ export function GameGrid({
     setFocus(tileKey(g));
   }, [pendingPos, start, end, shown]);
 
+  /**
+   * Mark or unmark the cover the cursor is on.
+   *
+   * Focus is put back deliberately rather than left to spatial navigation: in a
+   * CATEGORY the list is the favourites, so unmarking removes the tile the
+   * cursor is standing on. Aiming at the same position lands on whatever moved
+   * up into it - the neighbour, or the last cover when the end of the list went.
+   */
+  const mark = (game: Entry, pos: number) => {
+    toggleFavourite({ system: game.system, label: game.label });
+    // Twice, and the second one is the point. Marking a game changes the RAIL -
+    // the category appears or empties - which re-reads the consoles and rebuilds
+    // this grid, so a single re-focus lands before the tiles it names are back
+    // and the cursor ends up wherever the recovery net puts it. Measured on the
+    // box: it went to the letter strip.
+    const back = () => {
+      const list = gridRef.current;
+      const next = list[pos] ?? list[list.length - 1];
+      if (next) setFocus(tileKey(next));
+      else jump(FAVOURITE, SEARCH, RAIL, TABS);
+    };
+    setTimeout(back, 0);
+    setTimeout(back, 250);
+  };
+
   // Move the mounted window when focus approaches either edge of it. The position
   // is the one in the FILTERED list, not the playlist index the focus key carries.
   const onFocusPos = (pos: number) => {
-    setAt(pos);
     const b = bucketOf((shown[pos] || { label: "" }).label);
     if (b !== bucket) setBucket(b);
     const row = Math.floor(pos / COLS);
@@ -518,19 +569,23 @@ export function GameGrid({
               {/* Acts on the cover the cursor is on, and hands focus straight
                   back to it: a favourite is added while browsing, so leaving the
                   cursor on a button in the corner would cost a press per game. */}
-              {shown[at] && (
-                <FavouriteButton
-                  on={favourites.some((f) => sameGame(f, shown[at]))}
-                  onPress={() => {
-                    const g = shown[at];
-                    toggleFavourite({ system: g.system, label: g.label });
-                    setFocus(tileKey(g));
-                  }}
-                />
-              )}
+              {shown.length > 0 && <FavouriteButton on={marking} onPress={() => setMarking((v) => !v)} />}
               <SearchButton onPress={() => setOsk(true)} onClear={query ? () => setQuery("") : undefined} />
             </div>
           </div>
+          {/* A mode where OK does something else has to say so: there is no pointer
+              and no menu bar, and the only thing that can carry it is a line on
+              the screen. Not focusable - it sits between the header and the
+              covers, where Up from the first row would land on it. */}
+          {marking && (
+            <div
+              aria-hidden="true"
+              className="mb-[1vh] shrink-0 rounded-[1vh] bg-[var(--color-accent)]/25 px-[1.5vw] py-[0.7vh] text-[1.7vh]"
+            >
+              <span className="font-semibold">{t("retroarch.markingTitle")}</span>{" "}
+              <span className="text-fg-dim">{t("retroarch.markingHint")}</span>
+            </div>
+          )}
           {error ? (
             <div className="flex-1 flex items-center justify-center text-[2vh] text-fg-dim">{error}</div>
           ) : loading ? (
@@ -555,7 +610,9 @@ export function GameGrid({
               end={end}
               scroller={scroller}
               favourites={favourites}
+              marking={marking}
               onPlay={onPlay}
+              onMark={mark}
               onFocusPos={onFocusPos}
             />
           )}
