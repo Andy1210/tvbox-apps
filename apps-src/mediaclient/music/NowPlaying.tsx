@@ -253,8 +253,14 @@ export function NowPlaying(): React.JSX.Element {
         >
           {/* scale, because a blur samples past the edge and leaves the frame
               lighter all the way round without it. */}
-          <img src={behind} alt="" className="h-full w-full scale-110 object-cover blur-[1.4vh]" />
-          <div className="absolute inset-0 bg-bg-0/70" />
+          <img src={behind} alt="" className="h-full w-full scale-110 object-cover blur-[1.4vh] brightness-50" />
+          {/* Dark enough that the settled screen is DIMMER than the one it
+              replaces. Measured on this library: a track's backdrop resolves to
+              the artist collage, and at a 70% scrim alone the "resting" screen
+              came out brighter than the player - which is backwards for
+              something whose whole reason is not holding a bright still picture
+              on a television. */}
+          <div className="absolute inset-0 bg-bg-0/80" />
         </div>
       )}
       {/* The song on the left, the queue on the right. Both are on screen at

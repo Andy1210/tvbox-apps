@@ -158,7 +158,7 @@ describe("carrying on where a song was left", () => {
 
 describe("adding to the queue rather than playing", () => {
   it("builds a queue out of nothing and starts nothing", async () => {
-    useMusic.getState().enqueue([track("a"), track("b")], "end");
+    useMusic.getState().enqueue(fakeBackend(), [track("a"), track("b")], "end");
     await settle();
     expect(starts).toEqual([]);
     expect(useMusic.getState().state).toBe("stopped");
@@ -168,16 +168,29 @@ describe("adding to the queue rather than playing", () => {
     expect(useMusic.getState().queue.map((x) => x.id)).toEqual(["a", "b"]);
   });
 
+  it("can be PLAYED afterwards, which is the whole point of building one", async () => {
+    // The bug this covers: `enqueue` did not record the backend, so the store
+    // had a queue it could not turn into a URL. Play did nothing at all - no
+    // sound, no error, nothing on screen - and only in a session where nothing
+    // had been played first, which is why it survived being tried by hand.
+    useMusic.getState().enqueue(fakeBackend(), [track("a"), track("b")], "end");
+    await settle();
+    useMusic.getState().toggle();
+    await settle();
+    expect(starts).toEqual([{ url: "http://server/library/parts/a/file.mp3", at: 0 }]);
+    expect(useMusic.getState().state).toBe("playing");
+  });
+
   it("leaves the playing track where it is when songs are added to the end", async () => {
     await start([track("a"), track("b")], { startIndex: 1 });
-    useMusic.getState().enqueue([track("c")], "end");
+    useMusic.getState().enqueue(fakeBackend(), [track("c")], "end");
     expect(useMusic.getState().index).toBe(1);
     expect(useMusic.getState().queue.map((x) => x.id)).toEqual(["a", "b", "c"]);
   });
 
   it("counts what one run of the mode added, and starts again at the next", () => {
     useMusic.getState().setAdding(true);
-    useMusic.getState().enqueue([track("a"), track("b")], "end");
+    useMusic.getState().enqueue(fakeBackend(), [track("a"), track("b")], "end");
     expect(useMusic.getState().added).toBe(2);
     useMusic.getState().setAdding(false);
     useMusic.getState().setAdding(true);
@@ -187,7 +200,7 @@ describe("adding to the queue rather than playing", () => {
   it("keeps the songs when shuffle is switched off afterwards", async () => {
     await start([track("a"), track("b")]);
     useMusic.getState().setShuffle(true);
-    useMusic.getState().enqueue([track("c")], "end");
+    useMusic.getState().enqueue(fakeBackend(), [track("c")], "end");
     useMusic.getState().setShuffle(false);
     // The unshuffled order gained them too, or turning shuffle off would drop
     // everything added while it was on.

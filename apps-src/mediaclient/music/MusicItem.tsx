@@ -155,7 +155,8 @@ export function MusicItem({
               // first track (see `enqueue`), so the songs are reachable on the
               // player screen and Play there starts them - which is what "add to
               // the queue" says it does, and it used to start playing instead.
-              enqueue(tracks, "end");
+              if (!backend) return;
+              enqueue(backend, tracks, "end");
               setNote(t("music.queued", { n: String(tracks.length) }));
             }}
             onAdding={() => {
@@ -201,7 +202,8 @@ export function MusicItem({
                 onEnter={() => {
                   // The mode is what OK means here now; the banner says so.
                   if (adding) {
-                    enqueue([item], "end");
+                    if (!backend) return;
+                    enqueue(backend, [item], "end");
                     setNote(t("music.addedOne", { title: item.title }));
                     return;
                   }

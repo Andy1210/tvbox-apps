@@ -208,7 +208,7 @@ export function MusicList({
     // so the way to add three tracks off one album is to walk into it - and each
     // of those screens carries a chip that adds the whole thing.
     if (adding && lens === "tracks") {
-      enqueue([item], "end");
+      enqueue(backend, [item], "end");
       setNote(t("music.addedOne", { title: item.title }));
       return;
     }

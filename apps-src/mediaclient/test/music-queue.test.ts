@@ -186,9 +186,9 @@ describe("the transport", () => {
 describe("editing the queue", () => {
   it("adds after the playing song, or at the end", async () => {
     await start([track("a"), track("b")]);
-    useMusic.getState().enqueue([track("x")], "next");
+    useMusic.getState().enqueue(fakeBackend(), [track("x")], "next");
     expect(useMusic.getState().queue.map((t) => t.id)).toEqual(["a", "x", "b"]);
-    useMusic.getState().enqueue([track("z")], "end");
+    useMusic.getState().enqueue(fakeBackend(), [track("z")], "end");
     expect(useMusic.getState().queue.map((t) => t.id)).toEqual(["a", "x", "b", "z"]);
   });
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
+import { FocusContext, getCurrentFocusKey, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n, useBackspace, useFocusableItem, FocusButton, Osk } from "@sdk";
 import {
   fetchLiked,
@@ -205,7 +205,11 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
   useEffect(() => {
     const id = setTimeout(() => {
       if (openPl) {
-        jump("br-pt-all", "br-tab-playlists");
+        // The row first, when there is one to come back to - coming back from
+        // the player into an open playlist should land where the press was.
+        // `jump` walks on if the key is not mounted, so a stale one costs
+        // nothing and the old behaviour is the fallback.
+        jump(useBrowse.getState().cameFrom, "br-pt-all", "br-tab-playlists");
         return; // the row to come back to is still needed
       }
       jump(useBrowse.getState().cameFrom, "br-tab-" + tab);
@@ -233,6 +237,12 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
     const r = await play(body);
     setStarting(false);
     if (r.ok) {
+      // The row that was pressed, so Back from the player lands on it rather
+      // than on the tab: "that was the wrong song, try the next one" is the
+      // press this whole return path exists for, and it cost several more.
+      // Read here rather than passed down: every list on this screen has its own
+      // key scheme, and the focused one is the one that was just pressed.
+      remember({ cameFrom: getCurrentFocusKey() || "" });
       onPlayed();
       return;
     }

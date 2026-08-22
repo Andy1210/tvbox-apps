@@ -165,7 +165,16 @@ interface MusicState {
   commitScrub(): void;
   cancelScrub(): void;
   stop(): Promise<void>;
-  enqueue(tracks: MediaItem[], where: "next" | "end"): void;
+  /**
+   * Add songs without starting anything.
+   *
+   * Takes the backend for the same reason `playQueue` does: the module keeps ONE
+   * of them, and it is what turns a track into a URL. A queue built only by
+   * adding used to leave it unset, so Play on that queue reached `playAt`, found
+   * no backend and returned - no sound, no error, nothing on screen. Measured on
+   * the box, and invisible in any session where something had been played first.
+   */
+  enqueue(be: MediaBackend, tracks: MediaItem[], where: "next" | "end"): void;
   setAdding(on: boolean): void;
   removeAt(index: number): void;
   setShuffle(on: boolean): void;
@@ -248,11 +257,7 @@ export const useMusic = create<MusicState>((set, get) => ({
 
     // Where this track is picked up. What this store remembers wins over what the
     // server does: both are the same track, and ours is this evening's.
-    const from = opts?.fromStart
-      ? 0
-      : resume && resume.index === index
-        ? resume.ms
-        : (item.viewOffsetMs ?? 0);
+    const from = opts?.fromStart ? 0 : resume && resume.index === index ? resume.ms : (item.viewOffsetMs ?? 0);
     // Not the last few seconds. A track left there is one that finished, and
     // starting it at its own end plays nothing and advances the queue - the one
     // resume that looks like a broken file.
@@ -419,8 +424,9 @@ export const useMusic = create<MusicState>((set, get) => ({
     });
   },
 
-  enqueue(tracks, where) {
+  enqueue(be, tracks, where) {
     if (!tracks.length) return;
+    backend = be;
     const { queue, index, source, added } = get();
     const at = where === "next" ? Math.max(0, index) + 1 : queue.length;
     set({

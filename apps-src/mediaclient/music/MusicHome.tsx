@@ -129,7 +129,7 @@ export function MusicHome({ libraryId, title }: { libraryId: string; title: stri
     // This screen has one rail of songs, and while the add mode is on it obeys
     // the same rule as every other song: OK adds it.
     if (adding) {
-      enqueue([item], "end");
+      enqueue(backend, [item], "end");
       setNote(t("music.addedOne", { title: item.title }));
       return;
     }
