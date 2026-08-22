@@ -47,7 +47,8 @@ export function MusicItem({
   const playQueue = useMusic((s) => s.playQueue);
   const enqueue = useMusic((s) => s.enqueue);
   const playingId = useMusic((s) => s.queue[s.index]?.id);
-  const playing = useMusic((s) => s.queue[s.index] !== undefined);
+  const adding = useMusic((s) => s.adding);
+  const setAdding = useMusic((s) => s.setAdding);
 
   const [header, setHeader] = useState<MediaItem | null>(null);
   const [tracks, setTracks] = useState<MediaItem[] | null>(null);
@@ -143,20 +144,20 @@ export function MusicItem({
           {note && <p className="mt-[0.6vh] text-[2vh] text-fg-dim">{note}</p>}
 
           <Actions
+            adding={adding}
             onPlay={() => void play(false)}
             onShuffle={() => void play(true)}
             onQueue={() => {
-              // With nothing playing there is no queue to add to: the store would
-              // hold the songs at index -1, where no screen can show them and no
-              // chip can reach the player, and the next Play would throw them
-              // away - while the screen said they had been added. So the first
-              // "add" is a play.
-              if (!playing) {
-                void play(false);
-                return;
-              }
+              // Nothing is started. A queue built from nothing points at its own
+              // first track (see `enqueue`), so the songs are reachable on the
+              // player screen and Play there starts them - which is what "add to
+              // the queue" says it does, and it used to start playing instead.
               enqueue(tracks, "end");
               setNote(t("music.queued", { n: String(tracks.length) }));
+            }}
+            onAdding={() => {
+              setNote(null);
+              setAdding(!adding);
             }}
           />
         </div>
@@ -194,7 +195,15 @@ export function MusicItem({
                 // albums, so there it earns its place.
                 artUrl={kind === "album" ? undefined : art(item, 160)}
                 playing={item.id === playingId}
-                onEnter={() => void play(false, i)}
+                onEnter={() => {
+                  // The mode is what OK means here now; the banner says so.
+                  if (adding) {
+                    enqueue([item], "end");
+                    setNote(t("music.addedOne", { title: item.title }));
+                    return;
+                  }
+                  void play(false, i);
+                }}
               />
             </li>
           ))}
@@ -205,13 +214,17 @@ export function MusicItem({
 }
 
 function Actions({
+  adding,
   onPlay,
   onShuffle,
   onQueue,
+  onAdding,
 }: {
+  adding: boolean;
   onPlay: () => void;
   onShuffle: () => void;
   onQueue: () => void;
+  onAdding: () => void;
 }): React.JSX.Element {
   const { t } = useI18n();
   const { ref, focusKey } = useFocusable({ focusKey: "mi-actions", saveLastFocusedChild: true });
@@ -227,6 +240,15 @@ function Actions({
         </FocusButton>
         <FocusButton focusKey="mi-queue" onEnter={onQueue} className={chip}>
           {t("music.addToQueue")}
+        </FocusButton>
+        {/* The same switch as on the songs list, so the mode can be left where
+            it is being used rather than only where it was turned on. */}
+        <FocusButton
+          focusKey="mi-add"
+          onEnter={onAdding}
+          className={adding ? chip + " !bg-[var(--color-accent)]" : chip}
+        >
+          {t("music.addMode")}
         </FocusButton>
       </div>
     </FocusContext.Provider>

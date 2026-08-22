@@ -5,6 +5,7 @@ import { Home } from "./Home";
 import { Library } from "./Library";
 import { Login } from "./Login";
 import { Message } from "./Message";
+import { AddBanner } from "./music/AddBanner";
 import { MiniPlayer } from "./music/MiniPlayer";
 import { MusicHome } from "./music/MusicHome";
 import { MusicItem } from "./music/MusicItem";
@@ -15,6 +16,7 @@ import { Player } from "./Player";
 import { Profiles } from "./Profiles";
 import { Search } from "./Search";
 import { Settings } from "./Settings";
+import { useMusic } from "./playback/music";
 import { usePlayer } from "./playback/player";
 import { useMusicMediaKeys } from "./playback/mediakeys";
 import { useApp } from "./state";
@@ -176,11 +178,13 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
    * keys land in this window, so this is where the counting has to be, on the
    * same delay the person chose for the launcher.
    *
-   * Not while anything is loaded in the player, paused included: the shell
-   * refuses then anyway, because reaching the launcher would END mpv rather
-   * than hide it. And not on the sign-in screen, which is a code being read off
-   * the television while somebody types it into a phone - the one screen where
-   * minutes without a press mean attention rather than absence.
+   * Not while a FILM is loaded, paused included: the shell refuses then anyway,
+   * because reaching the launcher would END mpv rather than hide it. Music is
+   * the exception the shell makes - audio outlives the launcher coming forward -
+   * so a paused song is asked over and a playing one is not. And not on the
+   * sign-in screen, which is a code being read off the television while somebody
+   * types it into a phone - the one screen where minutes without a press mean
+   * attention rather than absence.
    *
    * The profile picker is NOT excluded, though it also asks for something: it
    * shows nothing that has to be read off the screen, the window is hidden
@@ -193,9 +197,19 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
    */
   const ambient = useConfigStore((s) => s.config?.ambient);
   const waitingToSignIn = screen.name === "login";
+  /**
+   * Music PLAYING, which is a different question from music being loaded.
+   *
+   * A song paused on the player screen is a still picture like any other and the
+   * screensaver belongs over it - the shell allows that now, because audio-only
+   * playback survives the launcher coming forward, so nothing is lost by asking.
+   * A song that is actually playing is what the screen is FOR, and the player's
+   * own idle view is what keeps that from being a static picture.
+   */
+  const musicPlaying = useMusic((s) => s.state === "playing");
   useEffect(() => {
     const minutes = ambient?.idleMinutes ?? 0;
-    if (!ambient?.enabled || minutes <= 0 || playing || waitingToSignIn) return;
+    if (!ambient?.enabled || minutes <= 0 || playing || musicPlaying || waitingToSignIn) return;
     let last = Date.now();
     const bump = (): void => {
       last = Date.now();
@@ -224,7 +238,7 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
       document.removeEventListener("visibilitychange", bump);
       clearInterval(id);
     };
-  }, [ambient?.enabled, ambient?.idleMinutes, playing, waitingToSignIn]);
+  }, [ambient?.enabled, ambient?.idleMinutes, playing, musicPlaying, waitingToSignIn]);
 
   // Back walks the screens first and only leaves the app from the top, which is
   // what the remote's Back means everywhere else on this box.
@@ -241,6 +255,21 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   // for most of the time music is playing. See the module's own note.
   useMusicMediaKeys();
 
+  /**
+   * The add-to-queue mode belongs to the music screens, and ends with them.
+   *
+   * It changes what OK does, and its banner is drawn on those screens only - so
+   * carried into the film side of the app it would be a mode nothing on screen
+   * mentions, waiting to surprise whoever comes back. Turned off here rather
+   * than by each screen's teardown, because walking between two music screens
+   * unmounts one of them and that must not end the mode.
+   */
+  const musicScreen =
+    screen.name === "music" || screen.name === "musicList" || screen.name === "musicItem" || screen.name === "nowPlaying";
+  useEffect(() => {
+    if (!musicScreen && useMusic.getState().adding) useMusic.getState().setAdding(false);
+  }, [musicScreen]);
+
   return (
     <div className="flex h-full flex-col">
       <div id="player-stage" className="pointer-events-none absolute inset-0">
@@ -252,6 +281,10 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
         // browsing screens behind it must not be drawn over the picture.
         hidden={playing}
       >
+        {/* Above the screens, because it is what says OK is adding rather than
+            playing - and a mode nothing names is a remote that has changed
+            meaning. */}
+        <AddBanner />
         {screen.name === "boot" && <Message loading />}
         {screen.name === "login" && <Login />}
         {screen.name === "profiles" && <Profiles />}
