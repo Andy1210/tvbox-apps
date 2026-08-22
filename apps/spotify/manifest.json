@@ -6,7 +6,7 @@
   "changelog": [
     {
       "version": "1.4.1",
-      "notes": "Closing Spotify from the running apps row now stops the music, instead of leaving it playing with the app gone."
+      "notes": "Closing Spotify from the running apps row now pauses the music, instead of leaving it playing with the app gone."
     },
     {
       "version": "1.4.0",
