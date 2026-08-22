@@ -103,6 +103,15 @@ export function Spotify({ onExit }: { onExit: () => void }) {
   const [auth, setAuth] = useState<AuthStatus | null>(null);
   /** What a spoken request did, when it did not simply start playing. */
   const [asked, setAsked] = useState("");
+  /**
+   * A spoken request waiting for the app to know whether it has an account.
+   *
+   * The command is what OPENS this app, so it arrives while the first
+   * `authStatus()` is still in the air - acting on it there answered every
+   * voice request with "connect an account", on a box that has one. Held until
+   * the answer is in, then run once.
+   */
+  const [wanted, setWanted] = useState<string | null>(null);
   const enabled = useConfigStore((s) => s.config?.spotify.enabled ?? false);
   const loadConfig = useConfigStore((s) => s.load);
   // The SSE stream is owned by App (kept connected launcher-wide so now-playing
@@ -129,7 +138,9 @@ export function Spotify({ onExit }: { onExit: () => void }) {
   // A spoken request. The listener is here rather than on the player screen
   // because that screen is not the one on display when the request arrives - the
   // box may have been sitting in the library, or the app may have just been
-  // opened by the command itself.
+  // opened by the command itself. Subscribed ONCE: re-subscribing when something
+  // else on this screen changes would drop a request the shell had already
+  // handed over, which is exactly the moment this arrives in.
   const connected = !!auth?.connected;
   useEffect(() => {
     const off = tvbox().onCommand?.((c) => {
@@ -138,26 +149,34 @@ export function Spotify({ onExit }: { onExit: () => void }) {
       const query = String(cmd.query ?? "").trim();
       if (!query) return;
       setView("now"); // whatever it finds, this is the screen that shows it
-      if (!connected) {
-        // Search and play are Web API calls; without an account this app is a
-        // speaker somebody else casts to, and there is nothing here to search.
-        setAsked(t("spotify.voiceNoAccount"));
-        return;
-      }
-      setAsked(t("spotify.voiceSearching", { query }));
-      void search(query).then(async (r) => {
-        if (!r.tracks.length) {
-          setAsked(t("spotify.voiceNoMatch", { query }));
-          return;
-        }
-        // The result list is the running order, so what was asked for is
-        // followed by more of the same rather than by silence.
-        const out = await play({ uris: r.tracks.slice(0, URIS_MAX).map((x) => x.uri) });
-        setAsked(out.ok ? "" : t("spotify.playError", { error: out.error || "?" }));
-      });
+      setWanted(query);
     });
     return off;
-  }, [connected, t]);
+  }, []);
+
+  useEffect(() => {
+    // Not until the account is known - see `wanted`.
+    if (wanted === null || auth === null) return;
+    const query = wanted;
+    setWanted(null);
+    if (!connected) {
+      // Search and play are Web API calls; without an account this app is a
+      // speaker somebody else casts to, and there is nothing here to search.
+      setAsked(t("spotify.voiceNoAccount"));
+      return;
+    }
+    setAsked(t("spotify.voiceSearching", { query }));
+    void search(query).then(async (r) => {
+      if (!r.tracks.length) {
+        setAsked(t("spotify.voiceNoMatch", { query }));
+        return;
+      }
+      // The result list is the running order, so what was asked for is followed
+      // by more of the same rather than by silence.
+      const out = await play({ uris: r.tracks.slice(0, URIS_MAX).map((x) => x.uri) });
+      setAsked(out.ok ? "" : t("spotify.playError", { error: out.error || "?" }));
+    });
+  }, [wanted, auth, connected, t]);
 
   // The box's screensaver, over this app. While an app is in front the launcher's
   // window is hidden and its idle timer is suppressed there on purpose - so
