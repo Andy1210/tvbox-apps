@@ -152,8 +152,16 @@ export function Spotify({ onExit }: { onExit: () => void }) {
   const connected = !!auth?.connected;
   useEffect(() => {
     const off = tvbox().onCommand?.((c) => {
-      const cmd = c as PlayMedia & { state?: string };
+      const cmd = c as PlayMedia & { state?: string; sounding?: string };
       if (!cmd) return;
+      // The shell says which app it believes is making the sound, and a forwarded
+      // command reaches the foreground app as well as that one - so with the media
+      // client playing and this app on screen, a lyrics request would have opened
+      // the words of THIS app's paused track over somebody else's music. Empty
+      // means the shell does not know (or predates the field); a cast
+      // (`play_media`) never travels this way, so it is unaffected.
+      const sounding = String(cmd.sounding || "");
+      if (sounding && sounding !== "spotify") return;
       const action = String(cmd.action || "");
       if (action === "lyrics") {
         // The player screen is the only one that has them, whichever screen the
@@ -258,6 +266,7 @@ export function Spotify({ onExit }: { onExit: () => void }) {
       connected={connected}
       note={asked}
       lyrics={lyrics}
+      onLyricsDone={() => setLyrics(null)}
       onNoteDone={() => setAsked("")}
       onSettings={() => setView("settings")}
       onBrowse={() => {
