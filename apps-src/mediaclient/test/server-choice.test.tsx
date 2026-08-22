@@ -160,7 +160,7 @@ describe("changing the server after a sign-out", () => {
           ? JSON.stringify({ Authenticated: false, Secret: "s", Code: "123456" })
           : u.includes("/QuickConnect/Connect")
             ? JSON.stringify({ Authenticated: false, Secret: "s", Code: "123456" })
-            : JSON.stringify({ ServerName: "Lucy", Version: "10.11.11", Id: "srv" });
+            : JSON.stringify({ ServerName: "Otthon", Version: "10.11.11", Id: "srv" });
       return new Response(body, { status: 200, headers: { "Content-Type": "application/json" } });
     });
   }

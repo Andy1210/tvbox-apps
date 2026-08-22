@@ -2,15 +2,27 @@
   "id": "spotify",
   "manifestVersion": 1,
   "name": "Spotify",
-  "version": "1.4.1",
+  "version": "1.5.2",
   "changelog": [
+    {
+      "version": "1.5.2",
+      "notes": "A spoken lyrics request no longer opens this app's own track while something else is playing, and coming back from the library no longer re-opens the words."
+    },
+    {
+      "version": "1.5.1",
+      "notes": "A voice command now reaches whichever app is actually making the sound, so a spoken pause or skip no longer acts on this one while something else is playing."
+    },
+    {
+      "version": "1.5.0",
+      "notes": "Shuffle, repeat and the lyrics can now be asked for by voice, and a spoken pause reaches the music even when Spotify is not the screen you are looking at."
+    },
     {
       "version": "1.4.1",
       "notes": "Closing Spotify from the running apps row now pauses the music, instead of leaving it playing with the app gone."
     },
     {
       "version": "1.4.0",
-      "notes": "You can move inside a song now: press Up onto the bar, the arrows carry a marker along it, OK jumps there and Back leaves it where it was. What is coming next is listed beside the song, and steps out of the way after a few seconds of nothing being pressed - any button brings it back, and so does the next song. Starting a track from the library and pressing Back returns to the list you started it from, with your search still in it. And Lucy can start music here by voice."
+      "notes": "You can move inside a song now: press Up onto the bar, the arrows carry a marker along it, OK jumps there and Back leaves it where it was. What is coming next is listed beside the song, and steps out of the way after a few seconds of nothing being pressed - any button brings it back, and so does the next song. Starting a track from the library and pressing Back returns to the list you started it from, with your search still in it. And music can be started here by voice."
     },
     {
       "version": "1.3.0",

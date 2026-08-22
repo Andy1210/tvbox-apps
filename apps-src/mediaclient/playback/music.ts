@@ -145,6 +145,17 @@ interface MusicState {
    */
   scrubMs: number | null;
 
+  /**
+   * A spoken request to show or hide the lyrics.
+   *
+   * Here rather than in the screen that draws them, for the reason the whole
+   * module is: music plays while the box is somewhere else entirely, so the
+   * screen holding the lyrics panel is usually not mounted when the request
+   * arrives. `at` is what makes the same request twice fire twice - somebody
+   * asking again because the television was showing something else.
+   */
+  lyricsAsk: { state: string; at: number } | null;
+
   playQueue(
     backend: MediaBackend,
     tracks: MediaItem[],
@@ -179,6 +190,7 @@ interface MusicState {
   removeAt(index: number): void;
   setShuffle(on: boolean): void;
   setRepeat(mode: RepeatMode): void;
+  askLyrics(state: string): void;
 }
 
 let backend: MediaBackend | null = null;
@@ -210,6 +222,7 @@ export const useMusic = create<MusicState>((set, get) => ({
   adding: false,
   added: 0,
   scrubMs: null,
+  lyricsAsk: null,
 
   async playQueue(be, tracks, opts) {
     if (!tracks.length) return;
@@ -484,6 +497,12 @@ export const useMusic = create<MusicState>((set, get) => ({
   setRepeat(mode) {
     set({ repeat: mode });
   },
+
+  askLyrics(state) {
+    // An empty state CLEARS it: the screen that draws the words consumes the
+    // request, so it cannot re-open the panel the next time that screen mounts.
+    set({ lyricsAsk: state ? { state, at: Date.now() } : null });
+  },
 }));
 
 function nowPlayingFor(s: MusicState): NowPlayingReport {
@@ -611,6 +630,10 @@ export function resetMusic(): void {
       adding: false,
       added: 0,
       scrubMs: null,
+      // A spoken request belongs to the queue it was asked about. Left behind,
+      // it re-opens the lyrics panel on the next person's first song - this runs
+      // when the account changes.
+      lyricsAsk: null,
     });
   };
   backend = null;

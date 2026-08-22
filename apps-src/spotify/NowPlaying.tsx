@@ -112,6 +112,8 @@ function GearIcon() {
 export function NowPlaying({
   connected,
   note,
+  lyrics,
+  onLyricsDone,
   onNoteDone,
   onSettings,
   onBrowse,
@@ -120,6 +122,13 @@ export function NowPlaying({
   connected: boolean;
   /** What a spoken request is doing, or why it did nothing. Empty means none. */
   note?: string;
+  /**
+   * A spoken lyrics request. `at` is what distinguishes the same one asked twice.
+   */
+  lyrics?: { state: string; at: number } | null;
+  /** Consume it: this screen unmounts whenever the library is opened, and a
+   *  request left standing re-opened the panel on the way back. */
+  onLyricsDone?: () => void;
   onNoteDone?: () => void;
   onSettings: () => void;
   onBrowse: () => void;
@@ -185,6 +194,17 @@ export function NowPlaying({
     return () => clearInterval(id);
   }, [showLyrics]);
   // close lyrics when playback stops; focus the toggle when opening them
+  // A spoken request. The functional setter is what makes "toggle" mean the value
+  // on screen rather than the one this effect closed over, and the dependency is
+  // the request alone: re-running it whenever the track ticks would put the
+  // lyrics back up after somebody pressed them away.
+  useEffect(() => {
+    if (!lyrics) return;
+    const want = String(lyrics.state || "on");
+    setShowLyrics((shown) => (want === "toggle" ? !shown : want !== "off"));
+    onLyricsDone?.();
+  }, [lyrics, onLyricsDone]);
+
   useEffect(() => {
     if (!hasTrackNow) setShowLyrics(false);
   }, [hasTrackNow]);

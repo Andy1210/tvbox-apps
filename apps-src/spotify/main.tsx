@@ -2,7 +2,7 @@ import { createRoot } from "react-dom/client";
 import { initSpatialNavigation, configureI18n, useConfigStore, postNowPlaying, tvbox } from "@sdk";
 import { Spotify } from "./Spotify";
 import { useSpotifyStore } from "./stores/spotify";
-import { control } from "./api";
+import { control, playerState } from "./api";
 import hu from "./locales/hu.json";
 import en from "./locales/en.json";
 import "./index.css";
@@ -67,16 +67,66 @@ useSpotifyStore.subscribe((s) => {
 
 // Media commands forwarded from the shell (MQTT tv_control) -> route transport to
 // the connected Spotify account. No-op if no account is connected. Mirrors App.
+//
+// The lyrics are deliberately NOT here: they are a screen rather than a player
+// setting, so that one is answered by the view that shows them (Spotify.tsx).
 const bridge = tvbox();
 if (bridge.onCommand) {
-  const map: Record<string, string> = { play: "play", resume: "play", pause: "pause", next: "next", previous: "prev" };
+  // `stop` maps to pause because librespot has no stop: the box is a Connect
+  // speaker, and the nearest thing to stopping is to stop playing. Without the
+  // row, a spoken "állítsd le a zenét" reached this app and did nothing at all -
+  // the shell's own stop only touches mpv, which is not what makes this sound.
+  const map: Record<string, string> = {
+    play: "play",
+    resume: "play",
+    pause: "pause",
+    stop: "pause",
+    next: "next",
+    previous: "prev",
+  };
+  // Nothing here has a screen to say it on - this is voice or MQTT, arriving with
+  // nobody necessarily looking - so a refusal is at least written down. The
+  // refusals worth finding here are the box_* ones: the box is being driven by an
+  // account this box has not linked, or it is not addressable at all.
+  const run = (action: string, state?: boolean | string) =>
+    void control(action, state).then((err) => err && console.warn("[spotify] remote " + action + " refused: " + err));
   bridge.onCommand((cmd: unknown) => {
-    const a = map[String((cmd as { action?: string } | null)?.action || "").toLowerCase()];
-    // Nothing here has a screen to say it on - this is voice or MQTT, arriving
-    // with nobody necessarily looking - so a refusal is at least written down.
-    // The refusals worth finding here are the box_* ones: the box is being driven
-    // by an account this box has not linked, or it is not addressable at all.
-    if (a) void control(a).then((err) => err && console.warn("[spotify] remote " + a + " refused: " + err));
+    const c = (cmd || {}) as { action?: string; state?: string; sounding?: string };
+    // The shell says which app it believes is making the sound, and the command
+    // reaches the foreground app as well as that one - so this app stands down
+    // when the sound is somebody else's. Empty means the shell does not know (or
+    // predates the field), and then this app answers as it always did.
+    const sounding = String(c.sounding || "");
+    if (sounding && sounding !== "spotify") return;
+    const action = String(c.action || "").toLowerCase();
+    const state = String(c.state || "").toLowerCase();
+    const a = map[action];
+    if (a) return run(a);
+    // Shuffle and repeat arrive in the house's vocabulary and Spotify's API has
+    // its own, so the translation happens here - the shell knows nothing about
+    // either. Repeat's "one"/"all" are Spotify's "track"/"context".
+    if (action === "shuffle") {
+      if (state === "toggle") {
+        // A toggle needs the value the player is actually on, and the cast
+        // metadata does not carry it - the phone can have changed it too.
+        void playerState().then((p) => p.ok && run("shuffle", !p.shuffle));
+        return;
+      }
+      if (state === "on" || state === "off") return run("shuffle", state === "on");
+      return;
+    }
+    if (action === "repeat") {
+      const wanted: Record<string, string> = { off: "off", one: "track", all: "context" };
+      if (state === "toggle") {
+        // Through the three in the order the buttons cycle them, so a spoken
+        // toggle and a pressed one mean the same thing.
+        const next: Record<string, string> = { off: "context", context: "track", track: "off" };
+        void playerState().then((p) => p.ok && run("repeat", next[p.repeat] || "context"));
+        return;
+      }
+      if (wanted[state]) return run("repeat", wanted[state]);
+      return;
+    }
   });
 }
 

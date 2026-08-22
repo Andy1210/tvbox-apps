@@ -3,7 +3,7 @@ import { useMusic, resetMusic } from "../playback/music";
 import { usePlayer, resetPlayer } from "../playback/player";
 import { resetPlayerOwner } from "../playback/owner";
 import { renderHook } from "@testing-library/react";
-import { handleMusicKey, useMusicMediaKeys } from "../playback/mediakeys";
+import { handleMusicCommand, handleMusicKey, useMusicMediaKeys } from "../playback/mediakeys";
 import type { MediaBackend, MediaItem } from "../backends/types";
 
 /**
@@ -301,5 +301,158 @@ describe("the listener that carries those presses", () => {
     dispatch("MediaPlayPause");
     expect(pauses).toBe(0);
     expect(useMusic.getState().state).toBe("playing");
+  });
+});
+
+/**
+ * A command forwarded by the shell (MQTT: a spoken request, Home Assistant, a
+ * phone), which is NOT the same decision as a key press.
+ *
+ * The shell owns the player this queue plays through and acts on a transport
+ * command itself before forwarding it, so the half of these assertions that
+ * matters most is what the app must NOT do: pausing here as well toggles the
+ * pause straight back off, and the music comes back on while the room was told
+ * it stopped.
+ */
+describe("a command forwarded from the shell", () => {
+  it("does not pause the box a second time, but stops the screen claiming it plays", async () => {
+    await start([track("a")]);
+    expect(handleMusicCommand({ action: "pause" })).toBe(true);
+    // The shell already did this to mpv. Doing it again un-pauses.
+    expect(pauses).toBe(0);
+    expect(useMusic.getState().state).toBe("paused");
+    expect(handleMusicCommand({ action: "resume" })).toBe(true);
+    expect(resumes).toBe(0);
+    expect(useMusic.getState().state).toBe("playing");
+  });
+
+  it("leaves a stop to the shell, whose own stop reaches the queue as `finished`", async () => {
+    await start([track("a"), track("b")]);
+    expect(handleMusicCommand({ action: "stop" })).toBe(true);
+    expect(stops).toBe(0);
+    expect(useMusic.getState().index).toBe(0);
+  });
+
+  it("steps the queue, which the shell has no way of doing", async () => {
+    await start([track("a"), track("b")]);
+    expect(handleMusicCommand({ action: "next" })).toBe(true);
+    await settle();
+    expect(useMusic.getState().index).toBe(1);
+    expect(handleMusicCommand({ action: "previous" })).toBe(true);
+    await settle();
+    expect(useMusic.getState().index).toBe(0);
+  });
+
+  it("sets shuffle from the word it was given, and toggles from what is on", async () => {
+    await start([track("a"), track("b")]);
+    expect(handleMusicCommand({ action: "shuffle", state: "on" })).toBe(true);
+    expect(useMusic.getState().shuffle).toBe(true);
+    expect(handleMusicCommand({ action: "shuffle", state: "off" })).toBe(true);
+    expect(useMusic.getState().shuffle).toBe(false);
+    expect(handleMusicCommand({ action: "shuffle", state: "toggle" })).toBe(true);
+    expect(useMusic.getState().shuffle).toBe(true);
+  });
+
+  it("refuses a state it cannot read rather than falling back to a default", async () => {
+    await start([track("a")]);
+    // "true" and "random" are not this vocabulary. Taking either as "on" is how
+    // a request to STOP shuffling would switch it on.
+    expect(handleMusicCommand({ action: "shuffle", state: "true" })).toBe(false);
+    expect(handleMusicCommand({ action: "shuffle", state: "random" })).toBe(false);
+    expect(handleMusicCommand({ action: "shuffle" })).toBe(false);
+    expect(useMusic.getState().shuffle).toBe(false);
+    // Spotify's own words for repeat, which the box must not accept as ours.
+    expect(handleMusicCommand({ action: "repeat", state: "context" })).toBe(false);
+    expect(handleMusicCommand({ action: "repeat", state: "track" })).toBe(false);
+    expect(useMusic.getState().repeat).toBe("off");
+  });
+
+  it("sets repeat in the queue's own vocabulary", async () => {
+    await start([track("a")]);
+    expect(handleMusicCommand({ action: "repeat", state: "one" })).toBe(true);
+    expect(useMusic.getState().repeat).toBe("one");
+    expect(handleMusicCommand({ action: "repeat", state: "all" })).toBe(true);
+    expect(useMusic.getState().repeat).toBe("all");
+    expect(handleMusicCommand({ action: "repeat", state: "off" })).toBe(true);
+    expect(useMusic.getState().repeat).toBe("off");
+  });
+
+  it("records a lyrics request for the screen that draws them", async () => {
+    await start([track("a")]);
+    expect(useMusic.getState().lyricsAsk).toBeNull();
+    expect(handleMusicCommand({ action: "lyrics" })).toBe(true);
+    expect(useMusic.getState().lyricsAsk?.state).toBe("on");
+    expect(handleMusicCommand({ action: "lyrics", state: "off" })).toBe(true);
+    expect(useMusic.getState().lyricsAsk?.state).toBe("off");
+  });
+
+  it("stands down on a queue that was STOPPED, so nothing starts unasked", async () => {
+    await start([track("a"), track("b")]);
+    await useMusic.getState().stop();
+    await settle();
+    // The queue deliberately survives a stop (so Play can carry on), which is
+    // exactly why the command has to be refused: without the ownership test a
+    // spoken "next song" hours later started track b out of nowhere.
+    const before = played.length;
+    expect(handleMusicCommand({ action: "next" })).toBe(false);
+    await settle();
+    expect(played.length).toBe(before);
+    expect(useMusic.getState().index).toBe(0);
+    expect(useMusic.getState().state).toBe("stopped");
+  });
+
+  it("stands down when the SHELL says somebody else is making the sound", async () => {
+    await start([track("a"), track("b")]);
+    // The shell forwards to the foreground app as well as to the sounding one, and
+    // only it can tell them apart: a queue paused here with Spotify playing used
+    // to take a spoken "next song" and start house music over it. Note the queue
+    // here is PLAYING and this app owns the player - ownership cannot answer this
+    // question, which is why the shell has to say.
+    expect(handleMusicCommand({ action: "next", sounding: "spotify" })).toBe(false);
+    expect(handleMusicCommand({ action: "lyrics", sounding: "spotify" })).toBe(false);
+    expect(handleMusicCommand({ action: "shuffle", state: "on", sounding: "spotify" })).toBe(false);
+    expect(useMusic.getState().index).toBe(0);
+    expect(useMusic.getState().lyricsAsk).toBeNull();
+    expect(useMusic.getState().shuffle).toBe(false);
+    // ...and it acts when the sound is its own, or when the shell does not say.
+    expect(handleMusicCommand({ action: "shuffle", state: "on", sounding: "mediaclient" })).toBe(true);
+    expect(useMusic.getState().shuffle).toBe(true);
+  });
+
+  it("still sets shuffle and repeat on a queue that is not playing", async () => {
+    await start([track("a"), track("b")]);
+    await useMusic.getState().stop();
+    await settle();
+    // These two are store writes and touch no player, so requiring ownership for
+    // them dropped a spoken "kapcsold ki a keverést" on a stopped queue - and
+    // they are outside the silence policy, so the room heard it had been done.
+    expect(handleMusicCommand({ action: "shuffle", state: "on" })).toBe(true);
+    expect(useMusic.getState().shuffle).toBe(true);
+    expect(handleMusicCommand({ action: "repeat", state: "all" })).toBe(true);
+    expect(useMusic.getState().repeat).toBe("all");
+    // ...while the ones that touch it still stand down.
+    expect(handleMusicCommand({ action: "next" })).toBe(false);
+    expect(handleMusicCommand({ action: "lyrics" })).toBe(false);
+  });
+
+  it("stands down while a film owns the player", async () => {
+    await start([track("a"), track("b")]);
+    usePlayer.setState({ current: { id: "film" } as never });
+    expect(handleMusicCommand({ action: "next" })).toBe(false);
+    await settle();
+    expect(useMusic.getState().index).toBe(0);
+  });
+
+  it("stands down with nothing queued", () => {
+    expect(handleMusicCommand({ action: "next" })).toBe(false);
+    expect(handleMusicCommand({ action: "shuffle", state: "on" })).toBe(false);
+    expect(useMusic.getState().shuffle).toBe(false);
+  });
+
+  it("answers an action it does not know, and a payload that is not one", async () => {
+    await start([track("a")]);
+    expect(handleMusicCommand({ action: "tv_off" })).toBe(false);
+    expect(handleMusicCommand({ action: "" })).toBe(false);
+    expect(handleMusicCommand(null)).toBe(false);
   });
 });

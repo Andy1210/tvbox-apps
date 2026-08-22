@@ -104,6 +104,14 @@ export function Spotify({ onExit }: { onExit: () => void }) {
   /** What a spoken request did, when it did not simply start playing. */
   const [asked, setAsked] = useState("");
   /**
+   * A spoken request for the lyrics: what was asked for, and when.
+   *
+   * The timestamp is what makes the same request twice fire twice - somebody
+   * asking again because the screen was on something else. The view that SHOWS
+   * the lyrics owns the toggle, so this only carries the request down to it.
+   */
+  const [lyrics, setLyrics] = useState<{ state: string; at: number } | null>(null);
+  /**
    * A spoken request waiting for the app to know whether it has an account.
    *
    * The command is what OPENS this app, so it arrives while the first
@@ -144,8 +152,25 @@ export function Spotify({ onExit }: { onExit: () => void }) {
   const connected = !!auth?.connected;
   useEffect(() => {
     const off = tvbox().onCommand?.((c) => {
-      const cmd = c as PlayMedia;
-      if (!cmd || String(cmd.action || "") !== "play_media") return;
+      const cmd = c as PlayMedia & { state?: string; sounding?: string };
+      if (!cmd) return;
+      // The shell says which app it believes is making the sound, and a forwarded
+      // command reaches the foreground app as well as that one - so with the media
+      // client playing and this app on screen, a lyrics request would have opened
+      // the words of THIS app's paused track over somebody else's music. Empty
+      // means the shell does not know (or predates the field); a cast
+      // (`play_media`) never travels this way, so it is unaffected.
+      const sounding = String(cmd.sounding || "");
+      if (sounding && sounding !== "spotify") return;
+      const action = String(cmd.action || "");
+      if (action === "lyrics") {
+        // The player screen is the only one that has them, whichever screen the
+        // request arrived on - the box may have been sitting in the library.
+        setView("now");
+        setLyrics({ state: String(cmd.state || "on"), at: Date.now() });
+        return;
+      }
+      if (action !== "play_media") return;
       const query = String(cmd.query ?? "").trim();
       if (!query) return;
       setView("now"); // whatever it finds, this is the screen that shows it
@@ -240,6 +265,8 @@ export function Spotify({ onExit }: { onExit: () => void }) {
     <NowPlaying
       connected={connected}
       note={asked}
+      lyrics={lyrics}
+      onLyricsDone={() => setLyrics(null)}
       onNoteDone={() => setAsked("")}
       onSettings={() => setView("settings")}
       onBrowse={() => {
