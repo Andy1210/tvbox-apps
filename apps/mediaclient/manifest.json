@@ -2,14 +2,14 @@
   "id": "mediaclient",
   "manifestVersion": 1,
   "name": {
-    "hu": "Média",
+    "hu": "M\u00e9dia",
     "en": "Media"
   },
-  "version": "0.61.0",
+  "version": "0.61.1",
   "changelog": [
     {
       "version": "0.61.0",
-      "notes": "Music picks up where you left it: a song you were part-way through carries on rather than starting again, and Play on a queue you stopped means carry on. There is a way to build a queue now - press “Add songs” on the songs list or on an album, and OK adds what you press instead of playing it, with a line at the top saying so. The player shows the words to the song beside it, and after a few seconds of a playing song the list steps back and the song moves to the middle over its own artwork. The screensaver comes up over a PAUSED song as well. A series' theme fades in instead of starting at full volume, and no longer plays again when you come back from an episode. And after watching a few episodes, the list is up to date when you return: the ticks are there and the cursor is on the one you watched, not the one you started from."
+      "notes": "Music picks up where you left it: a song you were part-way through carries on rather than starting again, and Play on a queue you stopped means carry on. There is a way to build a queue now - press \u201cAdd songs\u201d on the songs list or on an album, and OK adds what you press instead of playing it, with a line at the top saying so. The player shows the words to the song beside it, and after a few seconds of a playing song the list steps back and the song moves to the middle over its own artwork. The screensaver comes up over a PAUSED song as well. A series' theme fades in instead of starting at full volume, and no longer plays again when you come back from an episode. And after watching a few episodes, the list is up to date when you return: the ticks are there and the cursor is on the one you watched, not the one you started from."
     },
     {
       "version": "0.60.1",
@@ -118,12 +118,12 @@
   "accent": "#cc7b19",
   "icon": "<svg viewBox='0 0 24 24' fill='none' stroke='#cc7b19' stroke-width='2'><rect x='2.5' y='4' width='19' height='16' rx='2.5'/><path d='M10 9.5v5l4.5-2.5z' stroke-linejoin='round'/></svg>",
   "tagline": {
-    "hu": "A saját médiaszervered",
+    "hu": "A saj\u00e1t m\u00e9diaszervered",
     "en": "Your own media server"
   },
   "description": {
     "en": "Watch the films and series on your own Plex or Jellyfin server, with the box playing the video natively. Sign in once from the TV without typing, and it remembers where every film got to.",
-    "hu": "A saját Plex- vagy Jellyfin-szervereden lévő filmek és sorozatok nézése, a videót a box natívan játssza. Egyszeri belépés a TV-ről gépelés nélkül, és megjegyzi, hol tartottál minden filmben."
+    "hu": "A saj\u00e1t Plex- vagy Jellyfin-szervereden l\u00e9v\u0151 filmek \u00e9s sorozatok n\u00e9z\u00e9se, a vide\u00f3t a box nat\u00edvan j\u00e1tssza. Egyszeri bel\u00e9p\u00e9s a TV-r\u0151l g\u00e9pel\u00e9s n\u00e9lk\u00fcl, \u00e9s megjegyzi, hol tartott\u00e1l minden filmben."
   },
   "requires": {
     "bin": ["mpv"]

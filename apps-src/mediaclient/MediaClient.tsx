@@ -292,52 +292,63 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
             the player, because the mode is cleared in an EFFECT - so leaving for
             a film would otherwise draw the banner over it for one frame. */}
         {musicScreen && screen.name !== "nowPlaying" && <AddBanner />}
-        {screen.name === "boot" && <Message loading />}
-        {screen.name === "login" && <Login />}
-        {screen.name === "profiles" && <Profiles />}
-        {screen.name === "home" && <Home />}
-        {screen.name === "library" && (
-          // Keyed on the library so switching between two of them starts a fresh
-          // grid rather than showing the previous one's rows while it reloads.
-          <Library key={screen.libraryId} libraryId={screen.libraryId} title={screen.title} />
-        )}
-        {screen.name === "item" && (
-          <Detail
-            key={screen.itemId}
-            itemId={screen.itemId}
-            focusChildId={screen.focusChildId}
-            queueFrom={screen.queueFrom}
-          />
-        )}
-        {screen.name === "person" && (
-          <Person key={screen.personId} personId={screen.personId} personName={screen.personName} />
-        )}
-        {screen.name === "music" && (
-          <MusicHome key={screen.libraryId} libraryId={screen.libraryId} title={screen.title} />
-        )}
-        {screen.name === "musicList" && (
-          // Keyed on the lens too: songs, albums and artists are three different
-          // lists, and reusing the mounted one would show the old rows and the
-          // old letter strip while the new ones load.
-          <MusicList
-            key={`${screen.libraryId}-${screen.lens}`}
-            libraryId={screen.libraryId}
-            lens={screen.lens}
-            title={screen.title}
-          />
-        )}
-        {screen.name === "musicItem" && (
-          <MusicItem
-            key={screen.itemId}
-            itemId={screen.itemId}
-            kind={screen.kind}
-            title={screen.title}
-            libraryId={screen.libraryId}
-          />
-        )}
-        {screen.name === "nowPlaying" && <NowPlaying />}
-        {screen.name === "search" && <Search />}
-        {screen.name === "settings" && <Settings />}
+        {/* The screens get their own box, and the box may SHRINK.
+            Every screen root is `h-full`, i.e. the whole height of this column -
+            and a flex item's automatic minimum size is its content, so a screen
+            with a long list refuses to give any of it back. The bar below is
+            then laid out past the bottom edge and `overflow-hidden` cuts it off:
+            measured on the box at 768 px tall, the bar sat at 768..828. It
+            showed on a short page for the same reason - there the content was
+            small enough that shrinking was allowed. `min-h-0` is what lets the
+            column take the bar's height out of the screen's share. */}
+        <div className="flex min-h-0 flex-1 flex-col">
+          {screen.name === "boot" && <Message loading />}
+          {screen.name === "login" && <Login />}
+          {screen.name === "profiles" && <Profiles />}
+          {screen.name === "home" && <Home />}
+          {screen.name === "library" && (
+            // Keyed on the library so switching between two of them starts a fresh
+            // grid rather than showing the previous one's rows while it reloads.
+            <Library key={screen.libraryId} libraryId={screen.libraryId} title={screen.title} />
+          )}
+          {screen.name === "item" && (
+            <Detail
+              key={screen.itemId}
+              itemId={screen.itemId}
+              focusChildId={screen.focusChildId}
+              queueFrom={screen.queueFrom}
+            />
+          )}
+          {screen.name === "person" && (
+            <Person key={screen.personId} personId={screen.personId} personName={screen.personName} />
+          )}
+          {screen.name === "music" && (
+            <MusicHome key={screen.libraryId} libraryId={screen.libraryId} title={screen.title} />
+          )}
+          {screen.name === "musicList" && (
+            // Keyed on the lens too: songs, albums and artists are three different
+            // lists, and reusing the mounted one would show the old rows and the
+            // old letter strip while the new ones load.
+            <MusicList
+              key={`${screen.libraryId}-${screen.lens}`}
+              libraryId={screen.libraryId}
+              lens={screen.lens}
+              title={screen.title}
+            />
+          )}
+          {screen.name === "musicItem" && (
+            <MusicItem
+              key={screen.itemId}
+              itemId={screen.itemId}
+              kind={screen.kind}
+              title={screen.title}
+              libraryId={screen.libraryId}
+            />
+          )}
+          {screen.name === "nowPlaying" && <NowPlaying />}
+          {screen.name === "search" && <Search />}
+          {screen.name === "settings" && <Settings />}
+        </div>
         {/* Outside the screens, because it belongs to none of them: it is what
             says the music is still on while you browse for the next thing. */}
         <MiniPlayer />
