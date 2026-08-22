@@ -30,17 +30,6 @@ export interface Prefs {
   /** Play a series' theme while looking at it. */
   themeMusic: boolean;
   /**
-   * Ask an outside service for the words to a song.
-   *
-   * The only thing in this app that leaves the house. LRCLIB is looked up by the
-   * track's title, artist, album and length, so switching it on tells somebody
-   * else's server what this household is listening to, track by track - which is
-   * a choice to make rather than a default to inherit, however useful the
-   * feature is. Off until somebody turns it on; the player then says so instead
-   * of quietly fetching.
-   */
-  lyrics: boolean;
-  /**
    * Offer this box to phones as a Plex player.
    *
    * Read by the box itself (`apps/mediaclient/plugin.js`), which is what answers
@@ -73,7 +62,6 @@ export const DEFAULTS: Prefs = {
   subColor: "#ffffff",
   autoSkip: false,
   themeMusic: true,
-  lyrics: false,
   cast: true,
   homeRows: [...ROW_IDS],
   hiddenRows: [],
@@ -91,9 +79,6 @@ export function sane(v: Partial<Prefs>): Prefs {
     // on a value nothing here ever wrote.
     autoSkip: v.autoSkip === true,
     themeMusic: v.themeMusic !== false,
-    // Strictly boolean, and OFF unless it was turned on: this is the switch that
-    // sends what is playing to a server outside the house.
-    lyrics: v.lyrics === true,
     // On unless it was turned off - an absent value is a box that has never
     // been asked, and a television nobody can send anything to is the surprise.
     cast: v.cast !== false,
@@ -133,14 +118,13 @@ export const usePrefs = create<PrefsState>((set, get) => ({
 
   async set(key, value) {
     set({ [key]: value } as Pick<Prefs, typeof key>);
-    const { subScale, subPos, subColor, autoSkip, themeMusic, lyrics, cast, homeRows, hiddenRows } = get();
+    const { subScale, subPos, subColor, autoSkip, themeMusic, cast, homeRows, hiddenRows } = get();
     const w = await writeJson(KEY, {
       subScale,
       subPos,
       subColor,
       autoSkip,
       themeMusic,
-      lyrics,
       cast,
       homeRows,
       hiddenRows,

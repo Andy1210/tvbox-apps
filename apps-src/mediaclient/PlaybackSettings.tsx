@@ -104,17 +104,6 @@ export function PlaybackSettings({ onClose }: { onClose: () => void }): React.JS
               </Choice>
             </Group>
 
-            {/* The one switch in this app that sends anything out of the house,
-                so it says so rather than being a feature toggle among others. */}
-            <Group title={t("settings.lyrics")} note={t("settings.lyricsHint")}>
-              <Choice focusKey="ps-lyrics-off" active={!p.lyrics} onEnter={() => void p.set("lyrics", false)}>
-                {t("settings.off")}
-              </Choice>
-              <Choice focusKey="ps-lyrics-on" active={p.lyrics} onEnter={() => void p.set("lyrics", true)}>
-                {t("settings.on")}
-              </Choice>
-            </Group>
-
             <Group title={t("settings.autoSkip")} note={t("settings.autoSkipHint")}>
               <Choice focusKey="ps-skip-off" active={!p.autoSkip} onEnter={() => void p.set("autoSkip", false)}>
                 {t("settings.off")}

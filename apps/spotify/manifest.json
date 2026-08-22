@@ -2,8 +2,12 @@
   "id": "spotify",
   "manifestVersion": 1,
   "name": "Spotify",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "changelog": [
+    {
+      "version": "1.4.1",
+      "notes": "Closing Spotify from the running apps row now pauses the music, instead of leaving it playing with the app gone."
+    },
     {
       "version": "1.4.0",
       "notes": "You can move inside a song now: press Up onto the bar, the arrows carry a marker along it, OK jumps there and Back leaves it where it was. What is coming next is listed beside the song, and steps out of the way after a few seconds of nothing being pressed - any button brings it back, and so does the next song. Starting a track from the library and pressing Back returns to the list you started it from, with your search still in it. And Lucy can start music here by voice."
