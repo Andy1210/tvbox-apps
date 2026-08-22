@@ -20,6 +20,7 @@
 
 import { useEffect } from "react";
 import { useMusic } from "./music";
+import { ownsPlayer } from "./owner";
 import { usePlayer } from "./player";
 
 /** Inside a song. The queue steppers move between them - see the note below. */
@@ -165,6 +166,14 @@ export function handleMusicCommand(cmd: { action?: string; state?: string } | nu
   if (usePlayer.getState().current) return false;
   const m = useMusic.getState();
   if (!m.queue.length) return false;
+  // ...and this app has to be the one PLAYING. A key press comes from somebody
+  // looking at this screen; a forwarded command is aimed at whatever is making
+  // the sound in the room, and the shell delivers it to the foreground app as
+  // well. Without the claim, two measured wrongs: a spoken "next song" over a
+  // queue that was STOPPED started music nobody asked for (the queue deliberately
+  // survives a stop), and with Spotify playing in the background a lyrics request
+  // brought up the words of this app's last song instead.
+  if (!ownsPlayer("music")) return false;
   const action = String(cmd?.action || "").toLowerCase();
   const state = String(cmd?.state || "").toLowerCase();
   switch (action) {

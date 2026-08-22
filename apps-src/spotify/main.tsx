@@ -72,7 +72,18 @@ useSpotifyStore.subscribe((s) => {
 // setting, so that one is answered by the view that shows them (Spotify.tsx).
 const bridge = tvbox();
 if (bridge.onCommand) {
-  const map: Record<string, string> = { play: "play", resume: "play", pause: "pause", next: "next", previous: "prev" };
+  // `stop` maps to pause because librespot has no stop: the box is a Connect
+  // speaker, and the nearest thing to stopping is to stop playing. Without the
+  // row, a spoken "állítsd le a zenét" reached this app and did nothing at all -
+  // the shell's own stop only touches mpv, which is not what makes this sound.
+  const map: Record<string, string> = {
+    play: "play",
+    resume: "play",
+    pause: "pause",
+    stop: "pause",
+    next: "next",
+    previous: "prev",
+  };
   // Nothing here has a screen to say it on - this is voice or MQTT, arriving with
   // nobody necessarily looking - so a refusal is at least written down. The
   // refusals worth finding here are the box_* ones: the box is being driven by an

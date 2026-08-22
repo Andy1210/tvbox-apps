@@ -386,6 +386,33 @@ describe("a command forwarded from the shell", () => {
     expect(useMusic.getState().lyricsAsk?.state).toBe("off");
   });
 
+  it("stands down on a queue that was STOPPED, so nothing starts unasked", async () => {
+    await start([track("a"), track("b")]);
+    await useMusic.getState().stop();
+    await settle();
+    // The queue deliberately survives a stop (so Play can carry on), which is
+    // exactly why the command has to be refused: without the ownership test a
+    // spoken "next song" hours later started track b out of nowhere.
+    const before = played.length;
+    expect(handleMusicCommand({ action: "next" })).toBe(false);
+    await settle();
+    expect(played.length).toBe(before);
+    expect(useMusic.getState().index).toBe(0);
+    expect(useMusic.getState().state).toBe("stopped");
+  });
+
+  it("stands down when something else is making the sound", async () => {
+    await start([track("a"), track("b")]);
+    // Spotify plays through its own service, so this app holds nothing - and the
+    // shell forwards the command to the FOREGROUND app as well as to the player.
+    // Acting here showed this app's own song's lyrics over somebody else's music.
+    resetPlayerOwner();
+    expect(handleMusicCommand({ action: "lyrics" })).toBe(false);
+    expect(useMusic.getState().lyricsAsk).toBeNull();
+    expect(handleMusicCommand({ action: "shuffle", state: "on" })).toBe(false);
+    expect(useMusic.getState().shuffle).toBe(false);
+  });
+
   it("stands down while a film owns the player", async () => {
     await start([track("a"), track("b")]);
     usePlayer.setState({ current: { id: "film" } as never });

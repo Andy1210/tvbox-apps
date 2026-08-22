@@ -628,6 +628,10 @@ export function resetMusic(): void {
       adding: false,
       added: 0,
       scrubMs: null,
+      // A spoken request belongs to the queue it was asked about. Left behind,
+      // it re-opens the lyrics panel on the next person's first song - this runs
+      // when the account changes.
+      lyricsAsk: null,
     });
   };
   backend = null;

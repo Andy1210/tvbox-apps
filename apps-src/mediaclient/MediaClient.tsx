@@ -263,15 +263,20 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   useEffect(() => {
     const off = tvbox().onCommand?.((c) => {
       const cmd = (c || {}) as { action?: string; state?: string };
+      // The queue decides FIRST, and the screen only follows a command it really
+      // took. `handleMusicCommand` stands down when a film owns the player or
+      // when this app is not the one playing - and navigating anyway walked the
+      // person to the music player behind the film they were watching, so that
+      // when it ended they were somewhere they had never asked to be.
+      const took = handleMusicCommand(cmd);
       // The lyrics need a screen, and which screen is up is decided here rather
       // than in the queue: the panel that draws them is on the player screen, so
       // a request that arrives from the library has to walk there first. `go`
       // keeps the history, so Back returns where the person was.
-      if (String(cmd.action || "").toLowerCase() === "lyrics" && String(cmd.state || "on") !== "off") {
+      if (took && String(cmd.action || "").toLowerCase() === "lyrics" && String(cmd.state || "on") !== "off") {
         const app = useApp.getState();
-        if (app.screen.name !== "nowPlaying" && useMusic.getState().queue.length) app.go({ name: "nowPlaying" });
+        if (app.screen.name !== "nowPlaying") app.go({ name: "nowPlaying" });
       }
-      handleMusicCommand(cmd);
     });
     return off;
   }, []);
