@@ -350,6 +350,10 @@ export function NowPlaying({
   useEffect(() => {
     if (!connected || !panel || !hasTrackNow) return;
     let live = true;
+    // Cleared first: the rows belong to the song that was playing, and a read
+    // takes a moment - so without this the panel says "up next" over the
+    // previous track's queue for as long as the request is in the air.
+    setQueue([]);
     void fetchQueue().then((q) => {
       if (live) setQueue(q.ok ? q.items : []);
     });

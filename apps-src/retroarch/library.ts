@@ -34,7 +34,7 @@ const MAX_FIELD = 200;
 
 export const sameGame = (a: GameRef, b: GameRef): boolean => a.system === b.system && a.label === b.label;
 
-function read(key: string): GameRef[] {
+function read(key: string, cap: number): GameRef[] {
   try {
     const raw = JSON.parse(localStorage.getItem(key) || "[]");
     if (!Array.isArray(raw)) return [];
@@ -45,12 +45,12 @@ function read(key: string): GameRef[] {
       raw
         .filter((x) => x && typeof x.system === "string" && typeof x.label === "string" && x.system && x.label)
         .map((x) => ({ system: String(x.system).slice(0, MAX_FIELD), label: String(x.label).slice(0, MAX_FIELD) }))
-        // Bounded on the way IN as well as on the way out. The cap below is
-        // enforced when this code writes, and this store is shared by every
-        // local app on the box's one origin (and replayed by a restore), so a
-        // list somebody else left here decides how many console playlists the
-        // grid reads when the category is opened.
-        .slice(0, FAV_MAX)
+        // Bounded on the way IN as well as on the way out, and to the SAME cap
+        // each list is written with - `recent` is eighteen, and reading three
+        // hundred of them would be eighteen rows on screen and a console
+        // playlist read for every one of them. This store is shared by every
+        // local app on the box's one origin, and replayed by a restore.
+        .slice(0, cap)
     );
   } catch {
     return [];
@@ -76,8 +76,8 @@ interface LibraryStore {
 }
 
 export const useLibrary = create<LibraryStore>((set, get) => ({
-  favourites: read(FAV_KEY),
-  recent: read(RECENT_KEY),
+  favourites: read(FAV_KEY, FAV_MAX),
+  recent: read(RECENT_KEY, RECENT_MAX),
 
   toggleFavourite(ref) {
     const list = get().favourites;

@@ -288,8 +288,10 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
             playing - and a mode nothing names is a remote that has changed
             meaning. NOT on the player: OK on a queue row there starts that song,
             mode or no mode, so the line would be describing the one screen where
-            it is not true. */}
-        {screen.name !== "nowPlaying" && <AddBanner />}
+            it is not true. And gated on the music screens rather than only on
+            the player, because the mode is cleared in an EFFECT - so leaving for
+            a film would otherwise draw the banner over it for one frame. */}
+        {musicScreen && screen.name !== "nowPlaying" && <AddBanner />}
         {screen.name === "boot" && <Message loading />}
         {screen.name === "login" && <Login />}
         {screen.name === "profiles" && <Profiles />}

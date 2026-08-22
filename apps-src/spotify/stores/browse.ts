@@ -45,7 +45,12 @@ interface BrowseStore {
   shownFor: string | undefined;
 
   set(patch: Partial<Omit<BrowseStore, "set" | "forgetLists">>): void;
-  /** Everything that was read from an account, kept: the tab and the query. */
+  /**
+   * Everything that was read from an account. The tab and the query survive -
+   * they are what the person typed, not what the account answered - but
+   * `cameFrom` does not: it names a ROW in a list that is being dropped, and
+   * the next account's list can have a row with the same key.
+   */
   forgetLists(): void;
 }
 
@@ -61,5 +66,5 @@ export const useBrowse = create<BrowseStore>((set) => ({
   shownFor: undefined,
 
   set: (patch) => set(patch),
-  forgetLists: () => set({ liked: null, playlists: null, openPl: null, plTracks: null, results: null }),
+  forgetLists: () => set({ liked: null, playlists: null, openPl: null, plTracks: null, results: null, cameFrom: "" }),
 }));
