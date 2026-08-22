@@ -331,6 +331,13 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
    * It refuses the request anyway while a native program is on screen.
    */
   const ambient = useConfigStore((s) => s.config?.ambient);
+  // The store is empty until somebody fills it, and nothing else in this app
+  // reads the box's config - so without this the delay below is always zero and
+  // the screensaver never comes up over the games grid.
+  const loadConfig = useConfigStore((s) => s.load);
+  useEffect(() => {
+    void loadConfig().catch(() => {});
+  }, [loadConfig]);
   useEffect(() => {
     const minutes = ambient?.idleMinutes ?? 0;
     if (!ambient?.enabled || minutes <= 0) return;
