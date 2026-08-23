@@ -351,7 +351,26 @@ module.exports = (host) => {
       // "[<ts> LEVEL  target] …"); anything else is the supervisor talking about
       // it. Both matter in shell.log, but only the daemon's errors do.
       if (!line.startsWith("[") || line.includes(" ERROR ")) host.log("librespot " + line);
-      credGuard.note(line, { withToken: startUsedToken });
+      // Wrapped because this runs inside the supervisor's stderr handler, which
+      // does not guard it: anything thrown here would surface as an unhandled
+      // exception in the shell's main process rather than as a log line.
+      try {
+        if (credGuard.note(line, { withToken: startUsedToken })) {
+          // The box has just been signed out, so the same two things a deliberate
+          // teardown does have to happen: the now-playing claim is no longer true
+          // (it feeds the HOME sound card and the box's media_player, both of
+          // which would keep showing a track from an account that no longer holds
+          // the box), and the cached Connect device id belongs to an instance that
+          // is gone. Before the guard existed, the supervisor's give-up ceiling
+          // did the first of these - five failures in, not two - so leaving it out
+          // would have made the recovery quieter AND less correct than the
+          // failure it replaces.
+          spotify.clear();
+          spotifyApi.forgetBoxDevice();
+        }
+      } catch (e) {
+        host.log("librespot credential guard failed: " + e.message);
+      }
     };
     host.spawnService("librespot", {
       argv: librespotArgv, // recomputed each (re)start -> picks up rename + sink
