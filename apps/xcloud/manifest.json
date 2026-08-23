@@ -1,0 +1,132 @@
+{
+  "id": "xcloud",
+  "manifestVersion": 1,
+  "name": "Xbox Cloud Gaming",
+  "version": "2.9.3",
+  "type": "webclient",
+  "status": "ready",
+  "accent": "#107c10",
+  "icon": "<svg viewBox='0 0 24 24'><circle cx='12' cy='12' r='12' fill='#107c10'/><path fill='#fff' d='M4.102 21.033C6.211 22.881 8.977 24 12 24c3.026 0 5.789-1.119 7.902-2.967 1.877-1.912-4.316-8.709-7.902-11.417-3.582 2.708-9.779 9.505-7.898 11.417zm11.16-14.406c2.5 2.961 7.484 10.313 6.076 12.912C23.002 17.48 24 14.861 24 12.004c0-3.34-1.365-6.362-3.57-8.536 0 0-.027-.022-.082-.042-.063-.022-.152-.045-.281-.045-.592 0-1.985.434-4.805 3.246zM3.654 3.426c-.057.02-.082.041-.086.042C1.365 5.642 0 8.664 0 12.004c0 2.854.998 5.473 2.661 7.533-1.401-2.605 3.579-9.951 6.08-12.91-2.82-2.813-4.216-3.245-4.806-3.245-.131 0-.223.021-.281.046v-.002zM12 3.551S9.055 1.828 6.755 1.746c-.903-.033-1.454.295-1.521.339C7.379.646 9.659 0 11.984 0H12c2.334 0 4.605.646 6.766 2.085-.068-.046-.615-.372-1.52-.339C14.946 1.828 12 3.545 12 3.545v.006z'/></svg>",
+  "tagline": {
+    "en": "Cloud gaming",
+    "hu": "Felhőjáték"
+  },
+  "description": {
+    "en": "Stream Xbox Game Pass Ultimate games straight to the TV - no console needed. Sign in with the code shown on screen, then pair a Bluetooth or USB controller. Needs a fast connection; the picture is a live H.264 video stream.",
+    "hu": "Xbox Game Pass Ultimate játékok streamelése egyenesen a TV-re - konzol nélkül. Jelentkezz be a képernyőn megjelenő kóddal, aztán párosíts egy Bluetooth- vagy USB-kontrollert. Gyors internet kell hozzá; a kép élő H.264 videófolyam."
+  },
+  "changelog": [
+    {
+      "version": "2.9.3",
+      "notes": "A game that cannot start now says so instead of leaving the screen on Starting for good, quitting from the Xbox guide goes straight back to the library rather than ending on an error, and the genre filters stay where they are while the catalogue is still loading."
+    },
+    {
+      "version": "2.9.2",
+      "notes": "A catalogue read that was interrupted is no longer remembered as the whole library."
+    },
+    {
+      "version": "2.9.1",
+      "notes": "Scrolling and the controller now come from the shared toolkit the box ships, so every app moves the same way."
+    },
+    {
+      "version": "2.9.0",
+      "notes": "The second review round, and it found real breakage: the library opened with its top row cut off and the header out of reach, opening the on-screen keyboard and changing your mind left the screen with nothing to press, and a game whose picture never arrived dropped back to the grid without a word. Settings now walks row by row instead of skipping whole settings, the chosen option no longer looks like the cursor, Back works on the sign-in screens, search says which titles are outside the subscription, and the catalogue is read in the box's own language again."
+    },
+    {
+      "version": "2.7.0",
+      "notes": "The stream now notices when the server ends a session, quitting a game no longer risks the one already running, and the app asks Microsoft for far less."
+    },
+    {
+      "version": "2.6.2",
+      "notes": "Starting a game with the controller no longer quits it immediately."
+    },
+    {
+      "version": "2.6.1",
+      "notes": "Refreshing the catalogue no longer empties it, and a screen with no games still has its menu so there is a way back."
+    },
+    {
+      "version": "2.6.0",
+      "notes": "The controller can answer the dialogs over a running game. Games and the catalogue now come in the language the box is set to, instead of always English."
+    },
+    {
+      "version": "2.5.2",
+      "notes": "The controller can answer the dialogs over a running game, and stops reaching the game while one is up."
+    },
+    {
+      "version": "2.5.1",
+      "notes": "The quit confirmation actually appears."
+    },
+    {
+      "version": "2.5.0",
+      "notes": "Quitting from the Xbox guide now shows its confirmation instead of leaving a dark overlay over a game that is still running."
+    },
+    {
+      "version": "2.4.3",
+      "notes": "Diagnostics for the dialog the server expects the client to draw."
+    },
+    {
+      "version": "2.4.2",
+      "notes": "Quitting a game from the Xbox guide returns to the library instead of leaving a frozen picture."
+    },
+    {
+      "version": "2.4.1",
+      "notes": "Quitting a game from the Xbox guide returns to the library at once instead of freezing for half a minute. The waiting screen is calmer."
+    },
+    {
+      "version": "2.4.0",
+      "notes": "A settings screen: picture quality, resolution, sound and the game language, plus a way to refresh the catalogue. The button that only went back to the launcher is gone - the remote Home key already does that."
+    },
+    {
+      "version": "2.3.0",
+      "notes": "The Xbox button opens the Xbox guide instead of leaving the game. A proper waiting animation while a game starts, and scrolling up to a row no longer cuts off its title."
+    },
+    {
+      "version": "2.2.1",
+      "notes": "The game has sound."
+    },
+    {
+      "version": "2.2.0",
+      "notes": "The controller works in a game. The waiting screen shows how long it has been waiting and can be left with the remote, and a dropped stream no longer leaves a screen with nothing to press."
+    },
+    {
+      "version": "2.1.4",
+      "notes": "The controller works in a game again."
+    },
+    {
+      "version": "2.1.3",
+      "notes": "Diagnostics for controller input."
+    },
+    {
+      "version": "2.1.2",
+      "notes": "Starting a game works again - the screen used to sit on Starting and nothing happened."
+    },
+    {
+      "version": "2.1.1",
+      "notes": "The white highlight around the focused game is no longer clipped at the edges of a row."
+    },
+    {
+      "version": "2.1.0",
+      "notes": "Two new rows - what was just added to Game Pass and what is about to leave - a genre filter, and search behind an icon rather than an emoji. The library now draws as soon as the first titles arrive instead of waiting for all of them, and moving through it is smooth."
+    },
+    {
+      "version": "2.0.1",
+      "notes": "The sign-in screen shows a QR code, so the phone opens the page with the code already filled in, and the code itself is easier to read from the sofa."
+    },
+    {
+      "version": "2.0.0",
+      "notes": "The app is now ours rather than Microsoft's web page: a ten-foot library, sign-in with a code on your phone, and the stream rendered here. The queue is shown honestly, and the Xbox button leaves the game."
+    },
+    {
+      "version": "1.1.0",
+      "notes": "Groundwork for a built-in Xbox client: the app can now sign in to a Microsoft account by itself and read the Game Pass library. Nothing on screen has changed yet."
+    }
+  ],
+  "service": "xcloud",
+  "runtime": {
+    "serve": "local",
+    "entry": "index.html",
+    "capabilities": [
+      "nav"
+    ]
+  }
+}

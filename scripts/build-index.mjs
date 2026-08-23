@@ -228,6 +228,15 @@ for (const entry of readdirSync(appsDir).sort()) {
     validate(m, entry + "/manifest.json", entry);
     const files = packageFiles(full, (msg) => err(entry, msg));
     if (!files.some((x) => x.path === "manifest.json")) err(entry, "package must contain manifest.json");
+    // A locally served app IS its bundle, and the bundle is built rather than
+    // committed (apps/*/web/ is gitignored). So a package whose UI was not built
+    // indexes fine and publishes an app that serves nothing - which is what an
+    // app missing from CI's build loop looks like from here: silent, and only
+    // visible on a television. The entry file has to exist in what we are about
+    // to hash.
+    const entryFile = m.runtime && m.runtime.serve === "local" ? m.runtime.entry || "index.html" : null;
+    if (entryFile && !files.some((x) => x.path === "web/" + entryFile))
+      err(entry, "runtime.serve is local but web/" + entryFile + " is not in the package - was its UI built?");
     packages[m.id] = { files };
     apps.push(m);
   } else if (entry.endsWith(".json")) {

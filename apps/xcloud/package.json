@@ -1,0 +1,6 @@
+{
+  "name": "tvbox-app-xcloud",
+  "private": true,
+  "type": "commonjs",
+  "description": "Host-side plugin for the tvbox Xbox Cloud Gaming app. CommonJS: the shell loads plugin.js with require(), and this states it explicitly so the files are read the same way in the repo (whose root package.json is type:module) as they are on a box."
+}

@@ -1,0 +1,124 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { FocusButton, useBackspace, useI18n } from "@sdk";
+import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
+import { startGamepadNav } from "@sdk/gamepad";
+import * as api from "./api";
+import { SignIn } from "./SignIn";
+import { Library } from "./Library";
+import { Stream } from "./Stream";
+
+type View = { name: "loading" } | { name: "signin" } | { name: "library" } | { name: "stream"; title: api.Title };
+
+export function XCloud({ onExit }: { onExit: () => void }) {
+  const { t } = useI18n();
+  const [view, setView] = useState<View>({ name: "loading" });
+  const [status, setStatus] = useState<api.Status | null>(null);
+
+  // The pad drives the UI while browsing and belongs to the GAME while streaming.
+  // Both halves are needed: without the start, a controller cannot browse the
+  // library it is about to play from; without the stop, every press moves the
+  // focus behind the video as well as reaching the game.
+  const stopPadNav = useRef<null | (() => void)>(null);
+  const [padForUi, setPadForUi] = useState(false);
+  // The pad drives the UI everywhere except a game that is actually playing. Both
+  // halves are needed: without the start, a controller cannot browse the library
+  // it is about to play from; without the stop, every press moves the focus behind
+  // the video as well as reaching the game. And a dialog over a running game is
+  // OUR screen, so the pad comes back for it - `padForUi`.
+  const padToGame = view.name === "stream" && !padForUi;
+  useEffect(() => {
+    if (padToGame) {
+      stopPadNav.current?.();
+      stopPadNav.current = null;
+      return;
+    }
+    if (stopPadNav.current) return;
+    // A button still held when this starts fires nothing until it is released -
+    // the SDK adopts what is down at `start()` rather than reading it as a fresh
+    // press. This app is why: the A press that launches a game is still down when
+    // the stream screen asks for the pad back, and it was replayed as Enter onto
+    // the freshly focused Leave button, so the game started and quit in the same
+    // instant. The app used to poll for a quiet pad before arming; the SDK does
+    // it for everyone now.
+    stopPadNav.current = startGamepadNav();
+  }, [padToGame]);
+  useEffect(() => () => stopPadNav.current?.(), []);
+
+  const refresh = useCallback(async () => {
+    try {
+      const s = await api.getStatus();
+      setStatus(s);
+      setView(s.signedIn && s.usable !== false ? { name: "library" } : { name: "signin" });
+    } catch {
+      setView({ name: "signin" });
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  // A stream that is left, fails, or is exited must not stay running on a real
+  // machine, so the way back always goes through here.
+  const leaveStream = useCallback(() => {
+    void api.stopSession().catch(() => {});
+    setView({ name: "library" });
+  }, []);
+
+  if (view.name === "loading") {
+    // It is loading the STATUS, not the catalogue - and after a while it has to
+    // offer a way out, or an app whose plugin never answers is a screen with
+    // nothing focused that only Home escapes.
+    return <Splash onExit={onExit}>{t("connecting")}</Splash>;
+  }
+  if (view.name === "signin") {
+    return <SignIn status={status} onSignedIn={refresh} onSignedOut={refresh} onExit={onExit} />;
+  }
+  if (view.name === "stream") {
+    return <Stream title={view.title} onLeave={leaveStream} onUiNeedsPad={setPadForUi} />;
+  }
+  return (
+    <Library
+      status={status}
+      onPlay={(title) => setView({ name: "stream", title })}
+      onSignedOut={refresh}
+      onExit={onExit}
+    />
+  );
+}
+
+export function Splash({ children, onExit }: { children: React.ReactNode; onExit?: () => void }) {
+  const { t } = useI18n();
+  // Long enough that an ordinary cold start never shows it - the plugin answers in
+  // milliseconds - and short enough that nobody sits in front of a still screen
+  // wondering. Until then there is deliberately nothing to press: a button that
+  // appears at once invites leaving a start that was going to work.
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    const id = setTimeout(() => setStuck(true), 10000);
+    return () => clearTimeout(id);
+  }, []);
+  useBackspace(() => onExit?.());
+  useEffect(() => {
+    if (!stuck) return;
+    const id = setTimeout(() => setFocus("splash-exit"), 0);
+    return () => clearTimeout(id);
+  }, [stuck]);
+  return (
+    <div className="flex h-screen w-screen flex-col items-center justify-center gap-[3vh] bg-bg-0 text-fg-dim">
+      <p className="text-[2.2vh]">{children}</p>
+      {stuck && onExit && (
+        <>
+          <p className="text-[1.7vh] text-warn">{t("errors.slow")}</p>
+          <FocusButton
+            focusKey="splash-exit"
+            className="rounded-xl bg-bg-1 px-10 py-4 text-[1.9vh] text-fg"
+            onEnter={onExit}
+          >
+            {t("signin.exit")}
+          </FocusButton>
+        </>
+      )}
+    </div>
+  );
+}

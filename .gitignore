@@ -12,3 +12,6 @@ _site/
 # Review agents write throwaway probes here. They must never be committed - it
 # has happened twice by way of a directory-level `git add`.
 apps-src/*/test/zz*
+
+# Claude Code session state (worktrees, local settings)
+.claude/

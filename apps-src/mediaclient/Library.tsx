@@ -8,7 +8,7 @@ import { artworkScale } from "./posters";
 import { useFocusFallback, useInitialFocus } from "./focus";
 import { usePlayer } from "./playback/player";
 import { classify, useApp } from "./state";
-import { createMover, nearest } from "./moveTo";
+import { createMover, nearest, pinScroll } from "@sdk/moveTo";
 import { LibraryFilters, type LibraryView } from "./LibraryFilters";
 import { LetterStrip, type Letter } from "./LetterStrip";
 import type { MediaItem } from "./backends/types";
@@ -126,6 +126,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
    */
   const [scrollTop, setScrollTop] = useState(0);
   const mover = useMemo(() => createMover("y"), []);
+  const pin = useMemo(() => pinScroll(), []);
   /**
    * Two heights, because they answer two different questions.
    *
@@ -358,9 +359,15 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     (node: HTMLDivElement | null) => {
       scroller.current = node;
       (gridRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
+      // `overflow-hidden` clips but stays scrollable programmatically, and the
+      // browser scrolls the nearest such ancestor whenever focus lands outside it
+      // - as does `scrollIntoView`, which FocusButton calls. The grid then carries
+      // a second offset that nothing here can see, on top of the transform, and a
+      // row looks cropped for a reason the transform cannot explain.
+      pin(node);
       if (node) measure();
     },
-    [measure, gridRef],
+    [measure, gridRef, pin],
   );
 
   const poster = (item: MediaItem): string | undefined =>
@@ -657,6 +664,12 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
             // contents are rebuilt underneath it re-rasters what a transform
             // simply moves.
             //
+            // Pinned: `overflow-hidden` clips but stays scrollable
+            // programmatically, and the browser scrolls the nearest such ancestor
+            // whenever focus lands outside it - as does `scrollIntoView`, which
+            // FocusButton calls. The page then carries a second offset nothing
+            // here can see, and the row looks cropped for no reason the transform
+            // explains.
             className="no-scrollbar relative flex-1 overflow-hidden px-[3vw] pt-[1.2vh] pb-[2vh]"
           >
             {total === 0 && (
