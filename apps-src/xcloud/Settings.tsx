@@ -47,9 +47,10 @@ export function Settings({ status, onClose, onSignedOut }: {
         setValues(r.settings);
         setError(null);
       } catch (e) {
-        // The plugin names the key it refused; showing that beats "could not
-        // save", which is not something anyone can act on.
-        setError(String((e as api.ApiError).message || e));
+        // The plugin names the key it refused, which beats "could not save" - but
+        // it is our own message about our own field, so it is bounded before it
+        // goes on a television.
+        setError(String((e as api.ApiError).message || e).slice(0, 200));
       } finally {
         setBusy(false);
       }

@@ -71,7 +71,10 @@ function xstsFailure(res) {
   const known = XERR[xerr];
   if (known) return new AuthError(known[0], known[1], { xerr, redirect: body.Redirect });
   if (res.status === 401) return new AuthError("xsts_denied", "Xbox Live refused the sign-in (XErr " + (xerr || "unknown") + ").", { xerr });
-  return new AuthError("xsts_failed", "Xbox Live authorization failed: " + http.describe(res), { status: res.status });
+  // Status only here too. A refusal carries no token, but this endpoint's happy
+  // path does, and one guard for the whole file is one fewer thing to get wrong.
+  // The XErr is already pulled out above, which is the part worth reading.
+  return new AuthError("xsts_failed", "Xbox Live authorization failed: " + http.describeStatus(res), { status: res.status });
 }
 
 // ---------------------------------------------------------------- device code
@@ -83,7 +86,9 @@ async function startDeviceCodeAuth() {
   });
   const body = res.json();
   if (!res.ok || !body || !body.device_code) {
-    throw new AuthError("devicecode_failed", "Could not start sign-in: " + http.describe(res), { status: res.status });
+    // The status only: this endpoint's body is a token response, and a 200 that
+    // merely lacks the expected field is a successful one.
+    throw new AuthError("devicecode_failed", "Could not start sign-in: " + http.describeStatus(res), { status: res.status });
   }
   return {
     userCode: body.user_code,
@@ -137,7 +142,7 @@ async function pollForDeviceCode(deviceCode, opts) {
       case "bad_verification_code":
         throw new AuthError("bad_code", "Microsoft did not recognise this sign-in request. Start again.");
       default:
-        throw new AuthError("devicecode_failed", "Sign-in failed: " + (body.error_description || http.describe(res)), {
+        throw new AuthError("devicecode_failed", "Sign-in failed: " + (body.error_description || http.describeStatus(res)), {
           status: res.status,
           error: body.error,
         });
@@ -173,7 +178,7 @@ async function refreshUserToken() {
       store.clear();
       throw new AuthError("reauth_required", "The Xbox sign-in expired. Sign in again.", { error: body.error });
     }
-    throw new AuthError("refresh_failed", "Could not refresh the Xbox sign-in: " + http.describe(res), { status: res.status });
+    throw new AuthError("refresh_failed", "Could not refresh the Xbox sign-in: " + http.describeStatus(res), { status: res.status });
   }
   return store.setUserToken(body);
 }
@@ -253,7 +258,7 @@ async function getStreamingToken(offering) {
   if (!res.ok) {
     throw new AuthError(
       res.status === 401 || res.status === 403 ? "offering_unavailable" : "streaming_token_failed",
-      "Could not get a streaming token for " + offering + ": " + http.describe(res),
+      "Could not get a streaming token for " + offering + ": " + http.describeStatus(res),
       { status: res.status, offering },
     );
   }
@@ -279,10 +284,16 @@ async function getStreamingToken(offering) {
 
 // `baseUri` is a full URL and every gssv path is appended to its HOST, so take
 // the hostname rather than string-concatenating onto the URL.
+// Where the account's bearer token is sent, so it is held to Microsoft's own
+// streaming domain rather than to whatever the token response happens to name.
+// One line, and the alternative is trusting a field to point somewhere sensible.
+const STREAM_HOST = /(^|\.)gssv-play-prod\.xboxlive\.com$/i;
+
 function hostOf(region) {
   if (!region || !region.baseUri) return "";
   try {
-    return new URL(region.baseUri).hostname;
+    const host = new URL(region.baseUri).hostname;
+    return STREAM_HOST.test(host) ? host : "";
   } catch {
     return "";
   }
@@ -316,7 +327,7 @@ async function getTransferToken() {
   });
   const body = res.json() || {};
   if (!res.ok || !body.access_token) {
-    throw new AuthError("transfer_token_failed", "Could not get the session transfer token: " + http.describe(res), { status: res.status });
+    throw new AuthError("transfer_token_failed", "Could not get the session transfer token: " + http.describeStatus(res), { status: res.status });
   }
   return { lpt: body.access_token, userId: body.user_id || "" };
 }

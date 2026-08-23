@@ -218,7 +218,9 @@ export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<S
     if (!isHandshakeAck(raw)) {
       const dialog = parseDialog(raw);
       if (dialog) {
-        console.log("[xcloud] dialog:", dialog.title, "|", dialog.buttons.join(" / "));
+        // Already capped by parseDialog, but the log line is capped everywhere
+        // else on this channel and there is no reason for this one to differ.
+        console.log("[xcloud] dialog:", dialog.title.slice(0, 120), "|", dialog.buttons.join(" / ").slice(0, 120));
         cb.onDialog?.(dialog);
         return;
       }

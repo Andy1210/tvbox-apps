@@ -205,9 +205,24 @@ const named = (rows) => (rows || []).reduce((n, t) => n + (t.name ? 1 : 0), 0);
 // What a UI request gets. Cached rows are served immediately and a stale cache is
 // refreshed BEHIND the answer, so the grid is never blank because of a slow
 // catalogue - only an empty cache waits.
+// One state holds one language, so every switch is a full pass over the whole
+// catalogue - ~101 requests to Microsoft and ~17 s. A person changes the language
+// at most once in a sitting; a caller that alternates does it every time.
+//
+// This route is a GET, and the shell gates only non-GET, so an `<img src>` on any
+// page the box loads can ask - measured. The switch is therefore rate limited
+// rather than the request: what is served in the meantime is the language already
+// held, which is wrong only for whoever asked for the other one.
+const LANGUAGE_SWITCH_MS = 60000;
+let lastSwitch = 0;
+
 async function get(opts) {
   loadCache();
-  const language = (opts && opts.language) || "en-US";
+  let language = (opts && opts.language) || "en-US";
+  if (state.titles.length && state.language && state.language !== language) {
+    if (Date.now() - lastSwitch < LANGUAGE_SWITCH_MS) language = state.language;
+    else lastSwitch = Date.now();
+  }
   if (isFresh(language)) return answer({ cached: true });
 
   if (state.titles.length > 0 && state.language === language) {
@@ -308,6 +323,8 @@ function invalidate() {
   collections.clear();
   // Anything running now belongs to the library being forgotten.
   generation++;
+  // There is no language left to protect, so the next reader may pick one freely.
+  lastSwitch = 0;
   inFlight = null;
   inFlightLanguage = null;
   firstScreen = null;

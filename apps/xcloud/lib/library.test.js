@@ -357,6 +357,26 @@ test("the cache is keyed on LANGUAGE, not only on age", async () => {
   assert.equal(calls.titles, 0, "and the same one must not");
 });
 
+test("switching language repeatedly does not refetch the catalogue each time", async () => {
+  fresh();
+  stub(60);
+  await library.get({ language: "hu-HU" });
+  assert.equal(calls.titles, 1);
+
+  // One state holds one language, so a switch is a full pass - ~101 requests and
+  // ~17 s. This route is an ungated GET, so a page on the box can ask for the
+  // other language over and over; the SWITCH is limited, not the request.
+  stub(60);
+  await library.get({ language: "en-US" });
+  assert.equal(calls.titles, 1, "the first switch is honoured");
+
+  stub(60);
+  const back = await library.get({ language: "hu-HU" });
+  assert.equal(calls.titles, 0, "an immediate switch back is served from what is held");
+  assert.equal(library._state().language, "en-US");
+  assert.equal(back.titles.length, 60, "and it is still a usable answer, just not that language");
+});
+
 test("the localised categories reach the reduced row", async () => {
   fresh();
   stub(20);

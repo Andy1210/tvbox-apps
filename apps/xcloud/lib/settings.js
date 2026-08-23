@@ -37,6 +37,19 @@ const ALLOWED = {
   gameLocale: ["", "en-US", "en-GB", "hu-HU", "de-DE", "fr-FR", "es-ES", "it-IT", "pl-PL"],
 };
 
+// Which languages a catalogue read may ask for. The same set as `gameLocale`
+// minus the empty "follow the box".
+//
+// NOT a pattern: `/^[a-z]{2}(-[A-Z]{2})?$/` accepts 457,652 values, and each
+// distinct one is a full pass over the catalogue (~101 requests to Microsoft,
+// ~17 s) plus a collections entry that nothing ever evicts. Reachable by a plain
+// GET, which the shell does not gate - measured, 20,000 values cost 20 MiB of the
+// shell's heap and every one of them re-fetched. A language nobody can choose is
+// not one to fetch.
+const LANGUAGES = ALLOWED.gameLocale.filter(Boolean);
+const DEFAULT_LANGUAGE = "en-US";
+const language = (asked) => (LANGUAGES.includes(String(asked)) ? String(asked) : DEFAULT_LANGUAGE);
+
 let cache = null;
 
 function load() {
@@ -82,6 +95,7 @@ function save() {
   try {
     fs.mkdirSync(path.dirname(FILE), { recursive: true });
     fs.writeFileSync(tmp, JSON.stringify(cache));
+    fs.chmodSync(tmp, 0o600); // the default umask leaves this 0644
     fs.renameSync(tmp, FILE);
   } catch (e) {
     // A setting that cannot be written is still in effect for this session, so
@@ -108,4 +122,4 @@ function reset() {
 // Test seam: the plugin never calls this.
 const _reload = () => (cache = null);
 
-module.exports = { FILE, DEFAULTS, ALLOWED, get, set, reset, _reload };
+module.exports = { FILE, DEFAULTS, ALLOWED, LANGUAGES, DEFAULT_LANGUAGE, language, get, set, reset, _reload };

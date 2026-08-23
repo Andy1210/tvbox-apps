@@ -72,6 +72,68 @@ describe("what is not a dialog", () => {
   });
 });
 
+describe("what the server sends is bounded before it is drawn", () => {
+  const huge = (n: number) => "x".repeat(n);
+  const big = JSON.stringify({
+    type: "Message",
+    id: "{x}",
+    content: JSON.stringify({
+      TitleText: huge(200000),
+      ContentText: huge(200000),
+      CommandLabel1: huge(200000),
+      CommandLabel2: "B",
+    }),
+  });
+
+  it("caps the title, the body and the labels", () => {
+    // Nothing bounds this at the source, the panel has no scroll, and the same
+    // string went into a log that is never rotated.
+    const d = parseDialog(big)!;
+    expect(d.title.length).toBeLessThan(220);
+    expect(d.body.length).toBeLessThan(620);
+    expect(d.buttons[0].length).toBeLessThan(80);
+    expect(d.buttons[1]).toBe("B");
+  });
+
+  it("caps the id it will echo back", () => {
+    const d = parseDialog(JSON.stringify({ type: "Message", id: huge(5000), content: JSON.stringify({ TitleText: "T", CommandLabel1: "A" }) }))!;
+    expect(d.id.length).toBeLessThan(120);
+  });
+
+  it("refuses an id that is not a string", () => {
+    // It is echoed back to the server and used as a key; the type said string and
+    // nothing checked.
+    expect(parseDialog(JSON.stringify({ type: "Message", id: { a: 1 }, content: JSON.stringify({ TitleText: "T", CommandLabel1: "A" }) }))).toBeNull();
+  });
+
+  it("refuses a fractional index rather than focusing nothing", () => {
+    // 0.5 passes a range check, and `setFocus("dlg-0.5")` finds no such key -
+    // spatial navigation gives up silently, so the D-pad has no origin and the
+    // dialog cannot be answered at all.
+    const d = parseDialog(
+      JSON.stringify({
+        type: "Message",
+        id: "{x}",
+        content: JSON.stringify({ TitleText: "T", CommandLabel1: "A", CommandLabel2: "B", DefaultIndex: 0.5, CancelIndex: 1.5 }),
+      }),
+    )!;
+    expect(Number.isInteger(d.defaultIndex)).toBe(true);
+    expect(Number.isInteger(d.cancelIndex)).toBe(true);
+  });
+});
+
+describe("the declared system UIs", () => {
+  it("are only the ones this client can draw", async () => {
+    // The list is a promise. Declaring a UI and rendering nothing is what left a
+    // dimmed screen over a running game waiting for an answer nobody could give -
+    // and 27 is a PURCHASE, which a generic dialog renderer would make
+    // confirmable with a D-pad.
+    const { sessionConfig } = await import("../stream/channels");
+    const ui = JSON.parse(JSON.parse(sessionConfig({ width: 1920, height: 1080 })[0]).content);
+    expect(ui.systemUis).toEqual([19]);
+  });
+});
+
 describe("the envelope", () => {
   const content = JSON.stringify({ TitleText: "T", CommandLabel1: "A", CommandLabel2: "B" });
 

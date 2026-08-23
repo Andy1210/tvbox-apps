@@ -33,6 +33,13 @@ let signin = null;
 // never does.
 let live = null;
 
+// Module scope, because the timers below are module scope too. It was defined
+// inside the factory and called from `startKeepalive`, which is a ReferenceError
+// on a path with no catch - it fires about five seconds into every stream, and it
+// is why the "the server ended the session" detection this polling exists for
+// never once ran.
+let log = (...a) => console.log("[xcloud]", ...a);
+
 // How often to ask the server whether the session is still there. Nothing tells
 // us when someone quits from the Xbox guide, and the only thing that eventually
 // notices is WebRTC's own ICE timeout - about thirty seconds of a frozen picture
@@ -119,7 +126,7 @@ function errorPayload(e) {
 }
 
 module.exports = (host) => {
-  const log = (...a) => (host.log ? host.log("xcloud", ...a) : console.log("[xcloud]", ...a));
+  log = (...a) => (host.log ? host.log("xcloud", ...a) : console.log("[xcloud]", ...a));
 
   // The account, and what it can reach. Deliberately says nothing about tokens
   // beyond whether they work.
@@ -153,6 +160,10 @@ module.exports = (host) => {
     // runs HERE rather than in the page: it lasts up to fifteen minutes, and a
     // page that navigates away mid-sign-in would otherwise abandon it.
     "POST /signin/start": (req, res) => {
+      // A sign-in that FAILED is not one to hand back: its code is dead, so
+      // "Retry" re-showed the same dead code and failed again, and the only way
+      // out was Retry then Cancel then Start - which nobody would find.
+      if (signin && signin.state === "failed") signin = null;
       if (signin) return host.json(res, { ok: true, ...signin.public });
       auth
         .startDeviceCodeAuth()
@@ -307,20 +318,21 @@ module.exports = (host) => {
           if (!/^[A-Za-z0-9._-]{1,120}$/.test(titleId)) {
             return host.json(res, { ok: false, code: "bad_request", error: "titleId missing or malformed" });
           }
-          // A second start replaces the first: one screen, one stream.
-          await endSession();
-
           const chosen = settings.get();
           // The page's own language, which is the only honest source: the box's
           // `config.locale` is unset and the UI language lives in a localStorage
           // key no plugin can read. An explicit setting still wins.
-          const pageLocale = /^[a-z]{2}(-[A-Z]{2})?$/.test(String(data.locale || "")) ? String(data.locale) : "";
+          const pageLocale = settings.LANGUAGES.includes(String(data.locale || "")) ? String(data.locale) : "";
           // A game's language is fixed when the session starts; there is no
           // changing it once it runs.
           const width = Number(data.width) || 1920;
           const height = Number(data.height) || 1080;
           const cap = chosen.maxHeight || height;
           const scale = Math.min(1, cap / height);
+          // The running session is ended only once the new one EXISTS. Ending it
+          // first meant a start that could not succeed - an expired token, no
+          // capacity, a name the server refuses - took the game that was playing
+          // with it.
           const controller = new AbortController();
           const session = await sessions.start(titleId, {
             locale: chosen.gameLocale || pageLocale || locale(),
@@ -328,6 +340,9 @@ module.exports = (host) => {
             height: Math.round(height * scale),
             timezoneOffsetMinutes: -new Date().getTimezoneOffset(),
           });
+          // One screen, one stream: whatever was running goes now that its
+          // replacement is real.
+          await endSession();
           live = { session, controller, state: "Provisioning", queueSeconds: null, queuedFor: 0, error: null, config: null, ended: null };
           host.json(res, { ok: true, id: session.id, type: session.type, titleId });
 
@@ -437,22 +452,22 @@ module.exports = (host) => {
   // is in lives in a localStorage key the launcher and every local app share -
   // which a host-side plugin cannot read. Without this the catalogue's categories,
   // which the server localises, came back in English on a Hungarian box.
-  const LOCALE = /^[a-z]{2}(-[A-Z]{2})?$/;
-
+  // Held to the list of languages this app can be in, not to a pattern: see
+  // settings.js. Anything else falls back rather than being fetched.
   function locale(req) {
     if (req) {
       try {
         const asked = new URL(req.url, host.base).searchParams.get("lang") || "";
-        if (LOCALE.test(asked)) return asked;
+        if (settings.LANGUAGES.includes(asked)) return asked;
       } catch {
         /* a url we cannot parse is not a language */
       }
     }
     try {
       const l = host.config && host.config.get ? host.config.get("locale") : null;
-      return l && LOCALE.test(l) ? l : "en-US";
+      return settings.language(l);
     } catch {
-      return "en-US";
+      return settings.DEFAULT_LANGUAGE;
     }
   }
 

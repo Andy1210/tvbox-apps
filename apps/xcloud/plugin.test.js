@@ -20,6 +20,7 @@ const DIR = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-xcloud-plugin-"));
 process.env.TVBOX_XCLOUD_TOKENS = path.join(DIR, "tokens.json");
 process.env.TVBOX_XCLOUD_CACHE = path.join(DIR, "library.json");
 
+const sessions = require("./lib/session");
 const plugin = require("./plugin");
 
 function mount() {
@@ -125,6 +126,54 @@ test("no route hands out a credential", async () => {
     }
   } finally {
     instance.stop();
+  }
+});
+
+test("the keepalive and alive timers run without throwing", async (t) => {
+  // These live at module scope and were calling a `log` defined inside the
+  // factory - a ReferenceError, on a path with no catch, about five seconds into
+  // every stream. Nothing exercised them, so nothing said so, and the "the server
+  // ended the session" detection they exist for never once ran.
+  const real = { start: sessions.start, waitReady: sessions.waitReady, configuration: sessions.configuration, keepalive: sessions.keepalive, alive: sessions.alive, stop: sessions.stop };
+  const calls = { keepalive: 0, alive: 0 };
+  sessions.start = async () => ({ id: "S1", type: "cloud", target: "GAME" });
+  sessions.waitReady = async () => ({ state: "Provisioned" });
+  sessions.configuration = async () => ({ keepAliveMs: 60000, noConnectionTimeoutMs: 300000, serverDetails: {}, overrides: {} });
+  sessions.keepalive = async () => {
+    calls.keepalive++;
+    return { reason: "SessionEnding" };
+  };
+  sessions.alive = async () => {
+    calls.alive++;
+    return { alive: false, state: "Gone" };
+  };
+  sessions.stop = async () => {};
+
+  t.mock.timers.enable({ apis: ["setInterval", "setTimeout"] });
+  const { table, instance } = mount();
+  try {
+    await callRoute(table.t, "POST /session/start", { body: { titleId: "GAME" } });
+    // The ladder resolves on its own microtasks; let them run.
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    t.mock.timers.tick(6000); // past one alive poll
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.ok(calls.alive > 0, "the alive poll has to actually run");
+
+    t.mock.timers.tick(61000); // past one keepalive
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.ok(calls.keepalive > 0, "the keepalive has to actually run");
+
+    const state = await callRoute(table.t, "GET /session/state");
+    assert.ok(state.ended, "and what they learn has to reach the screen: " + JSON.stringify(state));
+  } finally {
+    t.mock.timers.reset();
+    instance.stop();
+    Object.assign(sessions, real);
   }
 });
 

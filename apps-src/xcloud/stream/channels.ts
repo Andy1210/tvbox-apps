@@ -22,11 +22,25 @@ const HANDSHAKE_ID = "f9c5f412-0e69-4ede-8e62-92c7f5358c56";
 const MESSAGE_ID = "41f93d5a-900f-4d33-b7a1-2d4ca6747072";
 const CLIENT_APP_INSTALL_ID = "c11ddb2e-c7e3-4f02-a62b-fd5448e0b851";
 
-// Which of the server's own overlays this client accepts. xCloud's web player
-// sends this set; the Xbox app on Windows sends [33] instead, which disables the
-// nexus menu. 10 = virtual keyboard, 19 = message dialog, 31 = show application,
-// 27 = purchase, 32 = timer extensions.
-const SYSTEM_UIS = [10, 19, 31, 27, 32, -41];
+// Which of the server's own overlays this client accepts - and it accepts only
+// the ONE it can actually draw.
+//
+// This list is a promise. Declaring a UI and then rendering nothing is exactly
+// what left a dimmed screen over a running game waiting for an answer nobody
+// could give: the server handed over its "quit the game?" confirmation because
+// `19` said we would show it. xCloud's web player sends
+// `[10, 19, 31, 27, 32, -41]` - a virtual keyboard, a message dialog, show
+// application, a PURCHASE, timer extensions - and we have a renderer for exactly
+// one of those.
+//
+// 27 is the one worth naming: a purchase confirmation handed to a client with a
+// generic dialog renderer would be a spend confirmable with a D-pad. Not
+// declaring it means the server keeps that flow to itself or refuses it, which is
+// the right answer on a television.
+//
+// The cost is that a feature behind an undeclared UI is simply unavailable -
+// text entry inside a game, for one. Unavailable beats frozen.
+const SYSTEM_UIS = [19];
 const SYSTEM_UI_VERSION = [0, 1, 0];
 
 export const handshake = (): string =>
@@ -127,6 +141,16 @@ export interface ServerDialog {
   cancelIndex: number;
 }
 
+// The text comes from the stream server and is drawn on a television. Nothing
+// bounds it at the source: a 200,000-character title pushes the buttons off the
+// screen of a panel that has no scroll, and the same string went into
+// `~/.tvbox/shell.log`, which is never rotated.
+const MAX_TITLE = 200;
+const MAX_BODY = 600;
+const MAX_LABEL = 60;
+const MAX_ID = 100;
+const cut = (s: string, n: number) => (s.length > n ? s.slice(0, n) + "…" : s);
+
 export function parseDialog(raw: unknown): ServerDialog | null {
   let outer: { type?: string; id?: string; content?: string; target?: string };
   try {
@@ -150,23 +174,28 @@ export function parseDialog(raw: unknown): ServerDialog | null {
   if (!c || typeof c.TitleText !== "string" || typeof c.CommandLabel1 !== "string") return null;
   // Without an id there is nothing to answer, and a dialog that cannot be
   // answered is worse than none: it would take the screen and never give it back.
-  if (!outer.id) {
+  // The id is echoed back to the server and used as a React key; a non-string
+  // here is typed away rather than checked.
+  if (typeof outer.id !== "string" || !outer.id) {
     console.warn("[xcloud] a dialog arrived with no id to answer:", String(raw).slice(0, 600));
     return null;
   }
 
   const buttons = [c.CommandLabel1, c.CommandLabel2, c.CommandLabel3]
-    .map((b) => (typeof b === "string" ? b.trim() : ""))
+    .map((b) => (typeof b === "string" ? cut(b.trim(), MAX_LABEL) : ""))
     .filter(Boolean);
   if (!buttons.length) return null;
 
+  // An INTEGER in range. `0.5` passes a range check and then focuses `dlg-0.5`,
+  // which does not exist - spatial navigation gives up silently and the D-pad has
+  // no origin, so the dialog cannot be answered at all.
   const clamp = (n: unknown, fallback: number) =>
-    typeof n === "number" && n >= 0 && n < buttons.length ? n : fallback;
+    typeof n === "number" && Number.isInteger(n) && n >= 0 && n < buttons.length ? n : fallback;
 
   return {
-    id: outer.id,
-    title: c.TitleText,
-    body: typeof c.ContentText === "string" ? c.ContentText : "",
+    id: cut(outer.id, MAX_ID),
+    title: cut(c.TitleText, MAX_TITLE),
+    body: typeof c.ContentText === "string" ? cut(c.ContentText, MAX_BODY) : "",
     buttons,
     // The server's own default, and it points at the SAFE option for a
     // destructive question - "Never mind" rather than "Quit game".

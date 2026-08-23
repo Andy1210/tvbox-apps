@@ -71,13 +71,24 @@ async function fetchTitles(opts) {
   return results.map(shapeTitle).filter((t) => t.titleId && t.productId);
 }
 
+// What was played last changes between two launches, not between two screens, so
+// a short cache is enough to stop an ungated GET turning into one authenticated
+// request to Microsoft per HTTP request.
+const RECENT_TTL_MS = 30000;
+const WAIT_TTL_MS = 30000;
+const recentCache = { at: 0, rows: null };
+const waitCache = new Map();
+
 // Most-recently-used, i.e. the "continue playing" row. `mr` is a count.
 async function fetchRecentTitles(limit, opts) {
   const n = Math.min(50, Math.max(1, Number(limit) || 25));
+  if (recentCache.rows && Date.now() - recentCache.at < RECENT_TTL_MS) return recentCache.rows;
   const res = await gssv("GET", "/v2/titles/mru?mr=" + n, null, opts);
   const body = res.json() || {};
   const results = Array.isArray(body.results) ? body.results : [];
-  return results.map(shapeTitle).filter((t) => t.titleId && t.productId);
+  recentCache.rows = results.map(shapeTitle).filter((t) => t.titleId && t.productId);
+  recentCache.at = Date.now();
+  return recentCache.rows;
 }
 
 function shapeTitle(row) {
@@ -97,10 +108,22 @@ function shapeTitle(row) {
 // How long the queue is for a title, in seconds. Ultimate accounts are usually
 // zero, so this is only worth showing when it is not.
 async function fetchWaitTime(titleId, opts) {
-  if (!titleId) throw new ApiError("bad_request", "waitTime needs a titleId");
+  // Held to the same shape as a title id everywhere else. `encodeURIComponent`
+  // already stops path injection, but an unbounded string is still an
+  // authenticated request to Microsoft with someone else's text in it.
+  if (!/^[A-Za-z0-9._-]{1,120}$/.test(String(titleId || ""))) {
+    throw new ApiError("bad_request", "waitTime needs a titleId");
+  }
+  const hit = waitCache.get(titleId);
+  if (hit && Date.now() - hit.at < WAIT_TTL_MS) return hit.seconds;
   const res = await gssv("GET", "/v1/waittime/" + encodeURIComponent(titleId), null, opts);
   const body = res.json() || {};
-  return Number(body.estimatedTotalWaitTimeInSeconds) || 0;
+  const seconds = Number(body.estimatedTotalWaitTimeInSeconds) || 0;
+  // Bounded, because the key is a caller's string: the queue is asked about one
+  // title at a time and a handful is all a screen ever needs.
+  if (waitCache.size > 32) waitCache.clear();
+  waitCache.set(titleId, { at: Date.now(), seconds });
+  return seconds;
 }
 
 // The names and the art. Unauthenticated, and `market` is NOT hardcoded: it comes
@@ -205,9 +228,14 @@ function joinCatalogue(titles, products) {
 // from our own origin cannot fetch as-is.
 function imageUrl(img) {
   if (!img) return "";
-  const raw = typeof img === "string" ? img : img.URL || img.Uri || img.url || "";
+  const raw = String(typeof img === "string" ? img : img.URL || img.Uri || img.url || "");
   if (!raw) return "";
-  return raw.startsWith("//") ? "https:" + raw : raw;
+  const url = raw.startsWith("//") ? "https:" + raw : raw;
+  // Only http(s). Nothing else is a picture: the catalogue is Microsoft's, but it
+  // is remote data reaching an `src`, and the shell ships no CSP to catch a
+  // `javascript:`/`data:`/`file:` one behind us. A plain `http:` is allowed
+  // because the catalogue does serve some, and refusing it would blank real art.
+  return /^https?:\/\//i.test(url) ? url : "";
 }
 
 // A "sigl" is one of Game Pass's own curated lists, addressed by a fixed id, and

@@ -94,7 +94,11 @@ export function Stream({
         }
         if (s.state === "Failed") {
           stopPolling();
-          setError(s.error ? s.error : message(s.code));
+          // The code, not the sentence. `s.error` can be Microsoft's own prose,
+          // unbounded and in whatever language it likes, and the plugin sends a
+          // stable code precisely so the screen can choose its own words.
+          if (s.error) console.warn("[xcloud] session failed:", String(s.error).slice(0, 300));
+          setError(message(s.code));
           return;
         }
         // The server ended it - somebody quit from the Xbox guide. A normal way

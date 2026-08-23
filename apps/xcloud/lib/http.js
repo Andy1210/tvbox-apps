@@ -10,6 +10,11 @@
 const https = require("https");
 
 const DEFAULT_TIMEOUT = 15000;
+// The largest response worth reading. The catalogue's own batches are tens of
+// kilobytes and the biggest single answer measured here is the 1.25 MB library;
+// past this something has gone wrong upstream, and only the deadline bounded it
+// before - which a slow trickle satisfies while it fills the shell's heap.
+const MAX_BODY = 8 * 1024 * 1024;
 
 // Keep-alive: the token chain is five requests to four hosts, and the catalogue
 // hydration is many small batches to the same one. maxSockets is deliberately
@@ -44,7 +49,15 @@ function request(method, host, path, headers, body, opts) {
 
     const req = https.request({ method, hostname: host, path, port: 443, headers: h, agent }, (res) => {
       const chunks = [];
-      res.on("data", (c) => chunks.push(c));
+      let size = 0;
+      res.on("data", (c) => {
+        size += c.length;
+        if (size > MAX_BODY) {
+          req.destroy(new Error("response over " + MAX_BODY + " bytes: " + host + path));
+          return;
+        }
+        chunks.push(c);
+      });
       res.on("error", fail);
       res.on("end", () => {
         const text = Buffer.concat(chunks).toString("utf8");
@@ -88,11 +101,22 @@ const postForm = (host, path, headers, fields, opts) =>
 const get = (host, path, headers, opts) => request("GET", host, path, headers, null, opts);
 
 // A one-line description of a failed response for a log or an error message. The
-// body is truncated because an Xbox error page is HTML and a token response is a
-// credential we must not spill into a log in full.
+// body is truncated because an Xbox error page is HTML.
+//
+// Truncation is NOT what makes a token response safe to print, and this used to be
+// applied to one: a 200 that merely lacks the expected field is a SUCCESSFUL token
+// response, and 155 characters of an access token survive a 300-character cut -
+// 241 on the shorter transfer-token shape. Those go to `~/.tvbox/shell.log`, which
+// is not redacted and which diagnostics collect. Use `describeStatus` for anything
+// whose body could be a credential.
 function describe(res, limit = 300) {
   const body = (res.text || "").replace(/\s+/g, " ").slice(0, limit);
   return "HTTP " + res.status + (body ? " " + body : "");
 }
 
-module.exports = { request, get, postJson, postForm, describe };
+/** The status and nothing else, for a response whose body may be a credential. */
+function describeStatus(res) {
+  return "HTTP " + res.status;
+}
+
+module.exports = { request, get, postJson, postForm, describe, describeStatus };
