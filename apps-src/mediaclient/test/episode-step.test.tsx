@@ -266,6 +266,7 @@ describe("stepping to the next episode", () => {
       gates[0]?.(); // the abandoned request lands at last
       await vi.advanceTimersByTimeAsync(50);
       expect(usePlayer.getState().moving, "and the claim is still the second step's").toBe(live);
+      expect(started, "nor does the abandoned episode reach the box").toEqual(["http://server/e2.mkv"]);
       gates[1]?.();
       await vi.advanceTimersByTimeAsync(50);
     } finally {
@@ -303,6 +304,98 @@ describe("stepping to the next episode", () => {
     await settle();
     expect(usePlayer.getState().current, "and nothing arrives after it").toBeNull();
     expect(started, "the box was never told to play it").toEqual(["http://server/e2.mkv"]);
+  });
+
+  it("gives the buttons back if the box never says it started", async () => {
+    // `buffering` is cleared by an event from the box, and a refused play sends
+    // none - measured 2 attempts in 5 when the app is not the foreground one. So
+    // a guard on the flag alone was permanent: the prev/next buttons died on a
+    // box showing nothing, and the assistant answered "the box is already
+    // changing episode" about it.
+    vi.useFakeTimers();
+    try {
+      await usePlayer.getState().play(fakeBackend(), KIDS[1]);
+      // No `onScreen()`: this is the box saying nothing at all.
+      expect(await usePlayer.getState().playSibling("next"), "not while it may still be coming").toBeUndefined();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(usePlayer.getState().buffering, "the flag is still stuck on").toBe(true);
+      expect(await usePlayer.getState().playSibling("next"), "and the button works again").toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not refuse a step because the film rebuffered an hour in", async () => {
+    // The shell reports a stall on a transcoded stream as an ordinary event, so
+    // the flag alone would refuse a legitimate step - silently, and with the
+    // assistant claiming the box was changing episode when nothing was.
+    vi.useFakeTimers();
+    try {
+      await usePlayer.getState().play(fakeBackend(), KIDS[1]);
+      onScreen();
+      await vi.advanceTimersByTimeAsync(3_600_000);
+      usePlayer.setState({ buffering: true }); // a stall, far from the start
+      expect(await usePlayer.getState().playSibling("next")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops a step that was given up while the last episode was being closed off", async () => {
+    // The last word for the previous episode is two server round trips, which on
+    // a slow server is most of the step - and the token used to be taken AFTER
+    // them, so a Back arriving in that window was eaten and the episode landed
+    // anyway. Back looked like it had worked and then the film started on top of
+    // the screen it had returned to.
+    // `end()` awaits the final progress report and then the session; holding the
+    // session is holding the teardown.
+    const gates: (() => void)[] = [];
+    const slowStop = {
+      ...fakeBackend(),
+      endSession: () => new Promise<void>((r) => gates.push(() => r())),
+    } as unknown as MediaBackend;
+
+    await usePlayer.getState().play(slowStop, KIDS[1]);
+    onScreen();
+    const step = usePlayer.getState().playSibling("next");
+    await settle();
+    expect(usePlayer.getState().moving?.id, "the step is inside the teardown").toBe("e3");
+
+    usePlayer.getState().cancelMove();
+    gates[0]?.();
+    await step;
+    await settle();
+    expect(usePlayer.getState().current, "nothing arrives after it").toBeNull();
+    expect(started, "and the box was never told to play it").toEqual(["http://server/e2.mkv"]);
+  });
+
+  it("does not let a sign-out leave an episode arriving behind it", async () => {
+    // `resetPlayer` is what a sign-out and a profile switch call, and `play` holds
+    // its backend as an argument - so clearing the module's own reference does not
+    // reach it. Measured: the film started anyway, and its first progress report
+    // went out with the NEW profile's token.
+    const gates: (() => void)[] = [];
+    let asked = 0;
+    const one = fakeBackend() as unknown as { resolveStream(i: string): Promise<unknown> };
+    const gated = {
+      ...fakeBackend(),
+      resolveStream: (id: string) =>
+        (asked += 1) === 1
+          ? one.resolveStream(id)
+          : new Promise<void>((r) => gates.push(() => r())).then(() => one.resolveStream(id)),
+    } as unknown as MediaBackend;
+
+    await usePlayer.getState().play(gated, KIDS[1]);
+    onScreen();
+    const step = usePlayer.getState().playSibling("next");
+    await settle();
+
+    resetPlayer();
+    gates[0]?.();
+    await step;
+    await settle();
+    expect(usePlayer.getState().current).toBeNull();
+    expect(started).toEqual(["http://server/e2.mkv"]);
   });
 
   it("says on screen which episode is starting", async () => {

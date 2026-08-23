@@ -10,7 +10,7 @@ import { FocusButton, useBackspace, useFocusableItem, useI18n } from "@sdk";
 import { useApp } from "./state";
 import { TrackMenu, type Choice } from "./TrackMenu";
 import type { MediaItem, Track } from "./backends/types";
-import { usePlayer } from "./playback/player";
+import { stillSettling, usePlayer } from "./playback/player";
 import { ScrubPreview } from "./ScrubPreview";
 import { ChapterStrip } from "./ChapterStrip";
 import { NextIcon, PauseIcon, PlayIcon, PreviousIcon } from "./icons";
@@ -135,6 +135,31 @@ export function Player(): React.JSX.Element | null {
     };
   }, [current, state, positionMs === 0]);
 
+  /**
+   * The overlay stays up until the box has really shown the film.
+   *
+   * `state` is set to "playing" before the box is told anything, so the
+   * four-second countdown was armed against a screen that was still black:
+   * measured 4.2 s after a step, the overlay was gone with `buffering` still
+   * true - so the longest part of the wait had NOTHING on it, which is the
+   * impression the move screen exists to remove, moved a few seconds later.
+   *
+   * Only at a start (`stillSettling`), not on a mid-film rebuffer: a stall on a
+   * transcoded stream is common, and popping the overlay over the picture every
+   * time one happens is worse than the stall.
+   */
+  useEffect(() => {
+    if (!current) return;
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    if (buffering && stillSettling()) {
+      usePlayer.getState().showOverlay(true);
+      return;
+    }
+    if (usePlayer.getState().state === "playing" && usePlayer.getState().scrubMs === null && !chaptersRef.current) {
+      hideTimer.current = setTimeout(() => usePlayer.getState().showOverlay(false), IDLE_HIDE_MS);
+    }
+  }, [current, buffering]);
+
   useEffect(() => {
     // The menu owns the D-pad while it is open. This handler is capture-phase on
     // window, ahead of spatial navigation's own - so leaving it running would
@@ -169,12 +194,12 @@ export function Player(): React.JSX.Element | null {
       // and the next one has not arrived. Swallowed rather than passed on, for
       // the reason the effect is armed at all.
       //
-      // `stopImmediatePropagation` as well, and that is not belt and braces: a
-      // phone's D-pad arrives as an event dispatched AT window, where spatial
-      // navigation's own listener sits on the same node - so plain
-      // `stopPropagation` does not stop it, and its `select` would press
-      // something on the screen behind. A real remote's press has an element for
-      // a target and would have been stopped either way.
+      // `stopImmediatePropagation` as well, which covers the earlier-registered
+      // capture listeners on window that plain `stopPropagation` cannot. What it
+      // does NOT reach is a press a phone sends: those are dispatched AT window,
+      // where - measured in Chromium - listeners run in registration order with
+      // the capture flag ignored, and spatial navigation registers before this
+      // component exists. That door is guarded in `navigate` instead.
       //
       // The D-pad only. A media key means the same thing either way and the
       // music store answers it for itself - see the note in `mediakeys.ts` on

@@ -276,6 +276,14 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   useEffect(() => {
     const off = tvbox().onCommand?.((c) => {
       const cmd = (c || {}) as { action?: string; state?: string };
+      // Not while the box is asking who is watching. This is the other door a
+      // spoken request arrives through - the Companion path refuses the same
+      // three screens for itself - and without it a command reached the PREVIOUS
+      // person's queue from behind the picker: measured, pause, shuffle and
+      // repeat were all accepted and applied. Read live rather than closed over,
+      // because this is subscribed once.
+      const at = useApp.getState().screen.name;
+      if (at === "profiles" || at === "login" || at === "boot") return;
       // The queue decides FIRST, and the screen only follows a command it really
       // took. `handleMusicCommand` stands down when a film owns the player or
       // when this app is not the one playing - and navigating anyway walked the

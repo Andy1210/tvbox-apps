@@ -8,7 +8,7 @@
 // Answering OK for something that did not happen is how a house ends up saying
 // a film is playing while the television shows the launcher.
 
-import { usePlayer } from "./player";
+import { stillSettling, usePlayer } from "./player";
 import { useMusic } from "./music";
 import { useApp, type Screen } from "../state";
 import { isVisible } from "../lifecycle";
@@ -53,22 +53,6 @@ function queueId(containerKey: string | undefined): string | undefined {
  * have started. Measured before this existed: a film played and reported
  * progress under the previous profile's token with the picker on screen.
  */
-/**
- * Nobody has said who is watching yet, so nothing may act on this box.
- *
- * `playMedia` and the navigation paths each refuse this for themselves; the
- * TRANSPORT paths had no check at all, and a skip accepted there takes a claim on
- * the screen - which HIDES the PIN pad the digits are being typed into, for as
- * long as the step lasts. The poll loop is already stopped while the picker is
- * up, so nothing legitimate is turned away: this closes the window a command
- * already in flight arrives through.
- */
-function nobodyChosen(): CommandResult | null {
-  const at = useApp.getState().screen.name;
-  if (at !== "profiles" && at !== "login" && at !== "boot") return null;
-  return no("this box is asking who is watching; choose a profile on it first");
-}
-
 function personChanged(who: { backend: unknown }): CommandResult | null {
   const now = useApp.getState();
   if (now.backend !== who.backend) return no("the person on this box changed");
@@ -79,6 +63,35 @@ function personChanged(who: { backend: unknown }): CommandResult | null {
   // answer before anything can be sent here.
   if (choosing) return no("this box is asking who is watching; choose a profile on it first");
   return null;
+}
+
+/**
+ * Nobody has said who is watching yet, so nothing may act on this box.
+ *
+ * `playMedia` and the navigation paths each refuse this for themselves; the
+ * TRANSPORT paths had no check at all, and a skip accepted there takes a claim on
+ * the screen - which HIDES the PIN pad the digits are being typed into, for as
+ * long as the step lasts. The poll loop is already stopped while the picker is
+ * up, so nothing legitimate is turned away: this closes the window a command
+ * already in flight arrives through.
+ *
+ * Three states, not one screen name. A sign-out is a network round trip before
+ * the screen moves, so `backend` is the honest test for it; and a rejected
+ * credential puts up a failure screen without touching the screen name at all -
+ * measured, a `navigation/select` there pressed the only button on it, which is
+ * "sign in again", so a LAN caller could sign the household out with one command.
+ *
+ * The two timeline paths are exempt: they change nothing, and this file's own
+ * note records that a refused `subscribe` is answered 400 by the server and the
+ * phone gives up rather than trying again once somebody has picked.
+ */
+function nobodyChosen(path: string): CommandResult | null {
+  if (path.startsWith("/player/timeline/")) return null;
+  const now = useApp.getState();
+  const at = now.screen.name;
+  const waiting = at === "profiles" || at === "login" || at === "boot";
+  if (!waiting && now.backend && now.failure?.kind !== "signed-out") return null;
+  return no("this box is asking who is watching; choose a profile on it first");
 }
 
 /**
@@ -333,13 +346,26 @@ function music(): boolean {
   return !filmHasPlayer() && m.queue.length > 0 && m.state !== "stopped";
 }
 
+/** Said out loud, so the two reasons a step is refused are two sentences. */
+const STEPPING = "the box is already changing episode";
+const STARTING = "the box has not shown this one yet";
+
 /**
- * Why a step was refused: one is already going, or the box has not shown the
- * last one yet. Either way the answer is not "it did not start".
+ * Why a step was refused, in the words for it - never "it did not start".
+ *
+ * Two states and they are not the same claim: one says another step is running,
+ * the other says the box has not put the LAST one on screen. Answering the first
+ * about the second was measured to tell the room the box was changing episode
+ * three seconds after a film had been asked for by voice, when nothing was
+ * changing at all.
  */
+function stepRefusal(): string | null {
+  if (usePlayer.getState().moving) return STEPPING;
+  return stillSettling() ? STARTING : null;
+}
+
 function stepInFlight(): boolean {
-  const p = usePlayer.getState();
-  return p.moving !== null || p.buffering;
+  return stepRefusal() !== null;
 }
 
 /** The film player holds the box, a step between two episodes included. */
@@ -410,6 +436,21 @@ async function navigate(what: string): Promise<CommandResult> {
   if (!NAV_KEYS[what] && what !== "back" && what !== "home" && what !== "music") {
     return no("this player does not support that command");
   }
+  // A step between two episodes has nothing on screen to navigate, and the keys
+  // below are DISPATCHED AT WINDOW - where spatial navigation's own listener sits
+  // on the same node and, measured in Chromium, runs first whatever the capture
+  // flag says. So the overlay's swallow cannot stop them and this is the guard
+  // that has to: a phone's `select` would otherwise press whatever is focused on
+  // the hidden browsing screen, and its `back` navigated away and left the
+  // arriving episode to land on the screen it had chosen.
+  //
+  // The two that mean "get me out of this" give the step up first and then do
+  // what they were asked; the D-pad is refused, in the words for it.
+  if (usePlayer.getState().moving) {
+    if (what === "back" || what === "home" || what === "music") usePlayer.getState().cancelMove();
+    else return no(STEPPING);
+  }
+
   // On screen: a D-pad press means "move what I am looking at", and a hidden
   // window would answer ok while nothing moved.
   if (!(await bringToFront())) return no("the media app could not come to the screen");
@@ -435,6 +476,15 @@ async function navigate(what: string): Promise<CommandResult> {
   app.go({ name: "nowPlaying" });
   return ok;
 }
+
+/**
+ * The screen a cast last put up, by identity.
+ *
+ * What tells "the page this feature opened" from "the page the household opened",
+ * which the screen's own shape cannot: both are item pages. A person who
+ * navigates away and back gets a different object, so their page is theirs again.
+ */
+let castScreen: Screen | null = null;
 
 /**
  * Put the film's own browse screen behind the player.
@@ -469,12 +519,18 @@ function showBrowseScreenFor(item: MediaItem): void {
   if (!itemId) return;
   const screen: Screen =
     episode && item.parentId ? { name: "item", itemId, focusChildId: item.id } : { name: "item", itemId };
-  if (app.screen.name === "item") app.replace(screen);
+  // Only the page a cast put there is replaced, and it is recognised by identity
+  // rather than by being an item page at all. Keyed on the KIND, one cast erased
+  // the page somebody in the room was reading: they were on a season, another
+  // room asked for a film, and `replace` dropped their page out of the history
+  // instead of leaving it behind the film.
+  if (app.screen === castScreen) app.replace(screen);
   else app.go(screen);
+  castScreen = screen;
 }
 
 export async function runCompanionCommand(cmd: CompanionCommand): Promise<CommandResult> {
-  const waiting = nobodyChosen();
+  const waiting = nobodyChosen(cmd.path);
   if (waiting) return waiting;
   const p = usePlayer.getState();
   switch (cmd.path) {
@@ -550,14 +606,19 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       // depends on it - and only once the film really started, so a refused cast
       // does not walk the person to a page they never asked for.
       //
-      // Asked one more time who is here. This is the only step after the longest
-      // await in the function, and navigating is the one thing that takes the
-      // screen away from somebody: measured, a cast whose stream resolved while
-      // the household was choosing a profile walked the box off its own PIN pad,
-      // and one that resolved after a sign-out replaced the sign-in screen with a
-      // blank page. Not a refusal of the command - the film did start - so the
-      // screen underneath is simply left where the person put it.
-      if (!personChanged(asked)) showBrowseScreenFor(item);
+      // Asked one more time who is here, and this one is a REFUSAL: the same shape
+      // as the visibility check above, because the same thing is wrong. Measured,
+      // a cast whose stream resolved while the household was choosing a profile
+      // walked the box off its own PIN pad; leaving the film running instead would
+      // hide the pad behind it, which is the same screen taken by a different
+      // means. Stopped rather than left playing, for the reason the line above
+      // gives: the controller is being told this failed.
+      const later = personChanged(asked);
+      if (later) {
+        await p.stop();
+        return later;
+      }
+      showBrowseScreenFor(item);
       return ok;
     }
     case "/player/playback/play":
@@ -569,8 +630,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         else if (m.state === "stopped") await m.playAt(m.index);
         return ok;
       }
-      if (usePlayer.getState().moving) return no("the box is still starting the next episode");
-      if (!p.current) return no("nothing is playing");
+      if (!p.current) return no(stepInFlight() ? STARTING : "nothing is playing");
       if (p.state === "paused") p.togglePause();
       return ok;
     case "/player/playback/pause":
@@ -578,8 +638,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         if (useMusic.getState().state === "playing") useMusic.getState().toggle();
         return ok;
       }
-      if (usePlayer.getState().moving) return no("the box is still starting the next episode");
-      if (!p.current) return no("nothing is playing");
+      if (!p.current) return no(stepInFlight() ? STARTING : "nothing is playing");
       if (p.state === "playing") p.togglePause();
       return ok;
     case "/player/playback/playPause":
@@ -589,8 +648,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         useMusic.getState().toggle();
         return ok;
       }
-      if (usePlayer.getState().moving) return no("the box is still starting the next episode");
-      if (!p.current) return no("nothing is playing");
+      if (!p.current) return no(stepInFlight() ? STARTING : "nothing is playing");
       p.togglePause();
       return ok;
     case "/player/playback/stop":
@@ -598,15 +656,14 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         await useMusic.getState().stop();
         return ok;
       }
-      // A step in flight is stopped by giving up the step: answering "already what
-      // was asked for" was measured to return ok and then start the next episode
-      // a second later, because nothing about the request had been cancelled.
-      if (usePlayer.getState().moving) {
-        usePlayer.getState().cancelMove();
-        return ok;
-      }
-      if (!p.current) return ok; // already what was asked for
-      await p.stop();
+      // A step in flight is given up as well as stopped, and BOTH can be true at
+      // once: a cast landing during a step sets `current` while the step's own
+      // claim is still held. Treating the claim as "nothing is playing" answered
+      // ok without calling stop at all - the film played on and the house was
+      // told it had stopped, which is the one thing this file's header forbids.
+      if (usePlayer.getState().moving) usePlayer.getState().cancelMove();
+      if (!usePlayer.getState().current) return ok; // already what was asked for
+      await usePlayer.getState().stop();
       return ok;
     // Awaited and then checked, for the same reason playMedia is: `playSibling`
     // starts the next episode through the same call that swallows its failures,
@@ -625,26 +682,27 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         await useMusic.getState().next();
         return ok;
       }
+      // BEFORE the siblings guard, because a step clears `siblings` and re-fetches
+      // the neighbours: measured mid-step, "next episode" was answered "nothing
+      // follows this" - a claim about the LIBRARY, read out in the room as "that
+      // was the last one", about a series that has more.
+      const busyNext = stepRefusal();
+      if (busyNext) return no(busyNext);
       if (!p.siblings.next) return no("nothing follows this");
       // The item the player says it started, not the one this snapshot held:
       // `siblings` is replaced as the previous film is torn down, so the two
       // can be different episodes by the time the answer is written.
-      const next = await p.playSibling("next");
-      // A step that was REFUSED is not a step that failed. The box is already
-      // changing episode - answering "the film did not start" sends the assistant
-      // to say so out loud about a television doing exactly what was asked.
-      if (!next && stepInFlight()) return no("the box is already changing episode");
-      return started(next?.id);
+      return started((await p.playSibling("next"))?.id);
     }
     case "/player/playback/skipPrevious": {
       if (music()) {
         await useMusic.getState().previous();
         return ok;
       }
+      const busyPrev = stepRefusal();
+      if (busyPrev) return no(busyPrev);
       if (!p.siblings.prev) return no("nothing comes before this");
-      const prev = await p.playSibling("prev");
-      if (!prev && stepInFlight()) return no("the box is already changing episode");
-      return started(prev?.id);
+      return started((await p.playSibling("prev"))?.id);
     }
     case "/player/playback/seekTo": {
       if (music()) {

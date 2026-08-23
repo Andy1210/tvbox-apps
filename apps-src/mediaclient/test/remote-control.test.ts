@@ -545,13 +545,13 @@ describe("a command from a controller", () => {
     expect(useApp.getState().history).toEqual([{ name: "library", libraryId: "2", title: "Series" }]);
   });
 
-  it("does not navigate if somebody else is at the box by the time it started", async () => {
-    // The only step after the longest await in the function, and navigating is
-    // what takes the screen away from somebody: measured, a cast whose stream
-    // resolved while the household was choosing a profile walked the box off its
-    // own PIN pad, and one that resolved after a sign-out replaced the sign-in
-    // screen with a blank page. The film still started - that is not what is
-    // being refused - so the screen is simply left where the person put it.
+  it("gives the box back if somebody else is at it by the time the film resolved", async () => {
+    // The step after the longest await in the function, and taking the screen is
+    // what a cast does to somebody standing at the box: measured, a cast whose
+    // stream resolved while the household was choosing a profile walked the box
+    // off its own PIN pad. Leaving the film running instead only hides the pad
+    // behind it, which is the same screen taken by another means - so this is a
+    // refusal, and the film is stopped.
     useApp.setState({
       backend: backend({
         resolveStream: async () => {
@@ -560,12 +560,104 @@ describe("a command from a controller", () => {
         },
       }) as never,
     });
+    const res = await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "1" },
+    });
+    expect(res).toMatchObject({ ok: false });
+    expect(usePlayer.getState().current, "nothing is left playing").toBeNull();
+    expect(useApp.getState().screen, "and the picker still has the screen").toEqual({ name: "profiles" });
+  });
+
+  it("really stops, when a cast landed while a step was still in flight", async () => {
+    // Both can be true at once: a cast sets `current` while the step's own claim
+    // is still held. Measured before this, `stop` took the claim to mean nothing
+    // was playing, answered ok, and never called stop at all - the film played on
+    // and the assistant told the room it had stopped.
+    usePlayer.setState({ current: { item: { id: "900" } } as never, moving: { id: "e3" } as never });
+    const res = await runCompanionCommand({ path: "/player/playback/stop", params: {} });
+    expect(res).toEqual({ ok: true });
+    expect(usePlayer.getState().current, "and it really is stopped").toBeNull();
+    expect(usePlayer.getState().moving, "the step is given up too").toBeNull();
+  });
+
+  it("does not claim a film is starting when one is playing", async () => {
+    // The same window from the other side: pause and play were refusing a film
+    // that really was playing, because the step's claim was still held.
+    usePlayer.setState({
+      current: { item: { id: "900" }, decision: {}, markers: [], choice: { version: 0 } } as never,
+      state: "playing",
+      moving: { id: "e3" } as never,
+    });
+    expect(await runCompanionCommand({ path: "/player/playback/pause", params: {} })).toEqual({ ok: true });
+    expect(usePlayer.getState().state).toBe("paused");
+  });
+
+  it("says which of the two it is when a step is refused", async () => {
+    // Two states, two sentences: the assistant reads these out. Saying "already
+    // changing episode" about a box that is merely opening the film somebody
+    // asked for is a claim about something that is not happening.
+    usePlayer.setState({ current: null, moving: { id: "e3" } as never, buffering: false });
+    expect(await runCompanionCommand({ path: "/player/playback/skipNext", params: {} })).toEqual({
+      ok: false,
+      reason: "the box is already changing episode",
+    });
+
+    // Nothing stepping, but the box has not put the last one on screen yet. The
+    // siblings are deliberately empty, which is what a step leaves behind - and
+    // what used to make this answer "nothing follows this", i.e. "that was the
+    // last episode", about a series that has more.
     await runCompanionCommand({
       path: "/player/playback/playMedia",
       params: { queryKey: "/library/metadata/27467", commandID: "1" },
     });
-    expect(usePlayer.getState().current?.item.id, "the film did start").toBe("27467");
-    expect(useApp.getState().screen, "but the picker is still up").toEqual({ name: "profiles" });
+    usePlayer.setState({ moving: null, siblings: {}, buffering: true });
+    expect(await runCompanionCommand({ path: "/player/playback/skipNext", params: {} })).toEqual({
+      ok: false,
+      reason: "the box has not shown this one yet",
+    });
+  });
+
+  it("keeps the page the household was reading when a cast arrives", async () => {
+    // The one history step is for consecutive CASTS. Keyed on "the screen is an
+    // item page" it also erased a page somebody in the room had opened: they were
+    // on a season, another room asked for a film, and it was dropped out of the
+    // history instead of left behind the film.
+    useApp.setState({ screen: { name: "item", itemId: "their-season" }, history: [{ name: "home" }] });
+    await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/1001", commandID: "1" },
+    });
+    expect(useApp.getState().history.at(-1), "their page is still behind it").toEqual({
+      name: "item",
+      itemId: "their-season",
+    });
+
+    // And the cast's OWN page is still replaced by the next cast.
+    await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/1002", commandID: "1" },
+    });
+    expect(useApp.getState().screen).toEqual({ name: "item", itemId: "1002" });
+    expect(useApp.getState().history.at(-1)).toEqual({ name: "item", itemId: "their-season" });
+  });
+
+  it("does not let a phone navigate out from under an arriving episode", async () => {
+    // The D-pad paths are dispatched at window, where spatial navigation's own
+    // listener runs first whatever the capture flag says - so the overlay's
+    // swallow cannot reach them. Measured: a phone's `back` during a step
+    // navigated away and left the episode to land on the screen it had chosen.
+    useApp.setState({ screen: { name: "item", itemId: "s1" }, history: [{ name: "home" }] });
+    usePlayer.setState({ current: null, moving: { id: "e3" } as never });
+
+    expect(await runCompanionCommand({ path: "/player/navigation/select", params: {} })).toEqual({
+      ok: false,
+      reason: "the box is already changing episode",
+    });
+    expect(usePlayer.getState().moving, "a D-pad press is refused, not acted on").not.toBeNull();
+
+    expect(await runCompanionCommand({ path: "/player/navigation/back", params: {} })).toEqual({ ok: true });
+    expect(usePlayer.getState().moving, "and Back gives the step up first").toBeNull();
   });
 
   it("refuses a transport command while the box is asking who is watching", async () => {
@@ -584,9 +676,34 @@ describe("a command from a controller", () => {
       "/player/playback/stepForward",
       "/player/playback/stepBack",
     ]) {
-      expect(await runCompanionCommand({ path, params: {} }), path).toMatchObject({ ok: false });
+      // The REASON, not merely a refusal: eight of these nine paths already answer
+      // ok:false on an idle box ("nothing is playing"), so without the sentence
+      // this test would pass with the guard deleted.
+      expect(await runCompanionCommand({ path, params: {} }), path).toEqual({
+        ok: false,
+        reason: "this box is asking who is watching; choose a profile on it first",
+      });
     }
     expect(usePlayer.getState().moving, "and nothing took the screen").toBeNull();
+  });
+
+  it("refuses one after a rejected credential too, where the screen has not moved", async () => {
+    // What `onUnauthorized` does on a 401 leaves the screen alone, so the name
+    // said nothing was wrong - and `navigation/select` there pressed the only
+    // button on the failure screen, which is "sign in again". A LAN caller could
+    // sign the household out with one command.
+    useApp.setState({ screen: { name: "home" }, failure: { kind: "signed-out" }, history: [] });
+    expect(await runCompanionCommand({ path: "/player/navigation/select", params: {} })).toMatchObject({ ok: false });
+    useApp.setState({ failure: null });
+  });
+
+  it("still lets a phone subscribe while the picker is up", async () => {
+    // A refused subscribe is answered 400 by the server and the phone gives up
+    // rather than trying again once somebody has picked - and these two paths
+    // change nothing on the box.
+    useApp.setState({ screen: { name: "profiles" }, history: [] });
+    expect(await runCompanionCommand({ path: "/player/timeline/subscribe", params: {} })).toEqual({ ok: true });
+    expect(await runCompanionCommand({ path: "/player/timeline/unsubscribe", params: {} })).toEqual({ ok: true });
   });
 
   it("leaves the screen alone when the film could not start", async () => {

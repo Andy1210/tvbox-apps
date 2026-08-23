@@ -202,6 +202,20 @@ const UP_NEXT_MS = 5_000;
  * somebody who has waited long enough to mean it.
  */
 const MOVE_GIVE_UP_MS = 12_000;
+/**
+ * How long after a start `buffering` still means "it is coming".
+ *
+ * `buffering` is cleared by an event from the box, and the box does not always
+ * send one: `tvbox.play()` confirms nothing, and a refused play produces no
+ * events at all - measured 2 attempts in 5 when the app is not the foreground
+ * one. So the flag can stay true for ever, and anything that refuses on it
+ * refuses for ever with it. This is what keeps the prev/next buttons from dying
+ * on a box that is showing nothing, and it is generous: the shell's own note
+ * puts a Plex film at well over five seconds to appear.
+ */
+const SETTLE_MAX_MS = 10_000;
+/** When the box was last asked to show something. See `stillSettling`. */
+let startedAt = 0;
 let unsubscribePlayer: (() => void) | null = null;
 let currentBackend: MediaBackend | null = null;
 let lifecycleWired = false;
@@ -249,10 +263,8 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // Nor while the box has not shown the LAST one yet. `play` sets `current`
     // before the file has started - the box is told after it - so the overlay
     // comes back over a black screen with the buttons focusable again, and a
-    // press there stepped another episode. Measured on this hardware, a film can
-    // take well over five seconds to appear, which is most of the window this
-    // guard exists for.
-    if (get().buffering) return undefined;
+    // press there stepped another episode.
+    if (stillSettling()) return undefined;
     set({ moving: item });
     const giveUp = setTimeout(() => {
       if (get().moving === item) set({ moving: null });
@@ -284,16 +296,25 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       return;
     }
 
+    // This call's own number, taken BEFORE anything is awaited. Everything below
+    // is on the far side of five round trips, and by then a later play - or a
+    // Back out of a step - may have moved it on; what lands then is an answer to
+    // a question nobody is asking any more.
+    //
+    // Before the teardown, not after it, and that is the whole point: the last
+    // word for the previous episode is two server round trips, which on a slow
+    // server is most of the step. Taken afterwards, this bump OVERWROTE a cancel
+    // that arrived during them - so Back was eaten, the screens came back, and
+    // the episode landed on top of them anyway.
+    playToken += 1;
+    const forThis = playToken;
+
     // Whatever was playing gets its last word before anything else starts.
     await get().stop();
 
     currentBackend = backend;
-    playToken += 1;
-    // This call's own number. Everything below is on the far side of five round
-    // trips, and by then a later play - or a Back out of a step - may have moved
-    // it on; what lands then is an answer to a question nobody is asking any
-    // more.
-    const forThis = playToken;
+    // Somebody gave this up while the previous episode was being closed off.
+    if (forThis !== playToken) return;
     // The episodes either side, worked out HERE rather than by whoever pressed
     // play. A film can be started from a season screen, a carry-on-watching
     // row, a search result or a person's credits, and only one of those knew
@@ -386,6 +407,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
           ? Math.floor(resumeFrom / 1000)
           : 0;
 
+    startedAt = Date.now();
     set({
       current: { item, decision, markers, detail, choice },
       state: "playing",
@@ -646,6 +668,22 @@ export const usePlayer = create<PlayerState>((set, get) => ({
  * for a hole of its own - what keeps a theme out of the gap is that playback
  * already silenced it.
  */
+/**
+ * The box has not shown what it was last asked to play, and it still might.
+ *
+ * Two halves and both are needed. `buffering` alone is what the box says, and it
+ * says it for ever when a play was refused with no event - which would kill the
+ * prev/next buttons on a screen showing nothing, and have the assistant answer
+ * "the box is already changing episode" about it. The elapsed time alone would
+ * refuse a step for ten seconds after every start, buffered or not.
+ *
+ * A rebuffer in the middle of a film is therefore not "settling": it sets the
+ * flag, but the start is minutes old.
+ */
+export function stillSettling(): boolean {
+  return usePlayer.getState().buffering && Date.now() - startedAt < SETTLE_MAX_MS;
+}
+
 export function useShowingPlayer(): boolean {
   return usePlayer((s) => s.current !== null || s.moving !== null);
 }
@@ -871,5 +909,13 @@ export function resetPlayer(): void {
   usePlayer.getState().cancelUpNext();
   void usePlayer.getState().stop();
   currentBackend = null;
+  // The token, so a play still in flight does not land. This is called on a
+  // sign-out and on a profile switch, and `play` holds its backend as an
+  // argument - so clearing `currentBackend` does not reach it. Measured: a cast
+  // whose stream resolved after a PIN'd switch started the film anyway and wrote
+  // its first progress report with the NEW profile's token, because
+  // `switchProfile` rewrites the session in place. After a sign-out it played on
+  // over the sign-in screen with a revoked credential.
+  playToken += 1;
   usePlayer.setState({ siblings: {}, moving: null, queue: undefined, upNext: null, subDelaySec: 0 });
 }
