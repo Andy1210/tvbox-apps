@@ -16,8 +16,24 @@ const STATE_POLL_MS = 1500;
 // Once it is playing, the only thing left to watch for is the session ending.
 const WATCH_POLL_MS = 3000;
 
-export function Stream({ title, onLeave }: { title: api.Title; onLeave: () => void }) {
-  const { t } = useI18n();
+export function Stream({
+  title,
+  onLeave,
+  onUiNeedsPad,
+}: {
+  title: api.Title;
+  onLeave: () => void;
+  /**
+   * True while something of OURS is on screen over the game.
+   *
+   * The pad belongs to the game while it is playing, which is why the app stops
+   * spatial navigation for the duration - but a dialog or a failure is our own
+   * screen, and a remote is not the only thing in the room. So the pad comes back
+   * for exactly as long as one is up, and the game stops hearing it.
+   */
+  onUiNeedsPad: (needed: boolean) => void;
+}) {
+  const { t, tag } = useI18n();
   const video = useRef<HTMLVideoElement | null>(null);
   // The audio arrives as its OWN track, and assuming otherwise is why there was
   // no sound: `ontrack` fires once per kind, and the video element only carries
@@ -58,7 +74,7 @@ export function Stream({ title, onLeave }: { title: api.Title; onLeave: () => vo
 
     void (async () => {
       try {
-        await api.startSession(title.titleId, window.innerWidth || 1920, window.innerHeight || 1080);
+        await api.startSession(title.titleId, window.innerWidth || 1920, window.innerHeight || 1080, tag);
       } catch (e) {
         if (alive) setError(message((e as api.ApiError).code));
         return;
@@ -158,7 +174,7 @@ export function Stream({ title, onLeave }: { title: api.Title; onLeave: () => vo
       handle.current?.close();
       handle.current = null;
     };
-  }, [title.titleId, message, leave, t]);
+  }, [title.titleId, message, leave, t, tag]);
 
   const answer = useCallback(
     (index: number) => {
@@ -195,6 +211,14 @@ export function Stream({ title, onLeave }: { title: api.Title; onLeave: () => vo
   }, [leave, dialog, answer]);
 
   const playing = phase === "playing";
+  // Ours on screen: a dialog the server asked for, a failure, or the waiting
+  // screen before anything is playing.
+  const uiOnTop = !!dialog || !!error || !playing;
+  useEffect(() => {
+    onUiNeedsPad(uiOnTop);
+    handle.current?.setInputEnabled(!uiOnTop);
+  }, [uiOnTop, onUiNeedsPad]);
+  useEffect(() => () => onUiNeedsPad(false), [onUiNeedsPad]);
 
   // One second, from when this screen opened. It is the only honest number here -
   // the server's own estimate said 10 s for a wait measured at 224 - and a value

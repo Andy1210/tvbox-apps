@@ -8,7 +8,7 @@
 // direction (audio sendrecv for the microphone, video recvonly) because the
 // server answers the m-lines it was offered, in the order it was offered them.
 import * as api from "../api";
-import { buttonMask, clientMetadataPacket, inputPacket } from "./inputPacket";
+import { buttonMask, clientMetadataPacket, emptyGamepadFrame, inputPacket } from "./inputPacket";
 import { readGamepads } from "./gamepad";
 import {
   authorizationRequest,
@@ -68,6 +68,13 @@ export interface StreamHandle {
   close(): void;
   /** Which button was pressed, by index. */
   answerDialog(id: string, index: number): void;
+  /**
+   * Stop or resume sending the pad to the game.
+   *
+   * Off while a dialog of ours is on screen: the pad has to drive that, and a pad
+   * that drives both moves a menu and the game with the same press.
+   */
+  setInputEnabled(on: boolean): void;
   readonly pc: RTCPeerConnection;
 }
 
@@ -104,6 +111,7 @@ export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<S
   let frameTimer: number | null = null;
   let sequence = 0;
   let closed = false;
+  let inputEnabled = true;
 
   // A send on a channel that has closed throws an InvalidStateError, and it did -
   // the teardown races the last few messages. Every send goes through here.
@@ -211,7 +219,11 @@ export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<S
         cb.onDialog?.(dialog);
         return;
       }
-      console.log("[xcloud] message:", raw.slice(0, 300));
+      // A payload that LOOKS like a dialog and was not recognised is logged
+      // whole: the last time this was wrong, the log had been truncated before
+      // the fields the parser needed, and the fix was built on a guess about what
+      // came after the cut.
+      console.log("[xcloud] message:", raw.slice(0, raw.includes("TitleText") ? 900 : 300));
     }
     if (!isHandshakeAck(raw) || started) return;
     started = true;
@@ -246,7 +258,7 @@ export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<S
     announcePads(readGamepads().length);
 
     inputTimer = window.setInterval(() => {
-      if (input.readyState !== "open") return;
+      if (input.readyState !== "open" || !inputEnabled) return;
       const frames = readGamepads();
       if (frames.length !== knownPads) announcePads(frames.length);
 
@@ -313,6 +325,18 @@ export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<S
     answerDialog: (id, index) => {
       console.log("[xcloud] dialog answered:", index);
       send(message, transactionComplete(id, index));
+    },
+    setInputEnabled: (on) => {
+      inputEnabled = on;
+      if (on) return;
+      // Release everything on the way out, or the game keeps whatever was held
+      // when the dialog opened - a stick pushed, a trigger down - for as long as
+      // it is up.
+      const idle = readGamepads().map((f) => ({ ...emptyGamepadFrame(f.index) }));
+      if (idle.length) {
+        const packet = inputPacket(sequence++, { gamepads: idle });
+        if (packet) send(input, packet);
+      }
     },
     pc,
   };

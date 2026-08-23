@@ -104,6 +104,13 @@ function reduce(joined) {
 // refused to refetch.
 let firstScreen = null;
 let inFlightLanguage = null;
+// Bumped by `invalidate`. A pass started before it belongs to a library that no
+// longer exists: without this, forgetting the catalogue while one was running
+// handed the next reader that stale promise, which was already past its publish
+// and only had its `saveCache()` left to run - so it wrote the EMPTY state to
+// disk and answered with nothing. Measured on the box: "no games available", and
+// an app restart did not clear it because the plugin keeps running.
+let generation = 0;
 
 function refresh(opts) {
   const language = (opts && opts.language) || "en-US";
@@ -117,8 +124,9 @@ function refresh(opts) {
     ready = r;
   });
   inFlightLanguage = language;
+  const era = generation;
   inFlight = after
-    .then(() => doRefresh({ ...opts, _ready: ready }))
+    .then(() => doRefresh({ ...opts, _ready: ready, _era: era }))
     .finally(() => {
       // Only clear what is still ours: a later pass may already have replaced it.
       if (inFlightLanguage === language) {
@@ -157,12 +165,16 @@ async function doRefresh(opts) {
     publish(titles, products, partial, o, language);
   }
 
+  // A pass whose library was forgotten while it ran must not write anything: its
+  // state object is gone and saving would put an empty one on disk.
+  if (o._era !== generation) return state;
   state.filling = false;
   saveCache();
   return state;
 }
 
 function publish(titles, products, partial, o, language) {
+  if (o._era !== undefined && o._era !== generation) return;
   const next = reduce(api.joinCatalogue(titles, products));
   // A refresh must never make what is on screen WORSE. The head-only publish is
   // for a cold start; over a library that already has its names it would replace
@@ -207,9 +219,18 @@ async function get(opts) {
   // measured at 40 s on the box, and a grid that draws in a second and fills in
   // behind is the point of hydrating the head first at all.
   const pass = refresh(opts);
-  pass.catch(() => {});
+  pass.catch(() => {}); // the failure is surfaced below, not as an unhandled one
   if (firstScreen) await firstScreen;
-  else await pass;
+
+  // Nothing published means the pass either died or is still going, and the two
+  // have to be told apart - awaiting it does that and throws if it failed. Not
+  // decided by which promise settles first: an earlier cut read a flag set by a
+  // `catch` whose ordering against the first-screen resolution is not defined,
+  // and it reported a failure only some of the time.
+  //
+  // A pass that DID publish is not waited for: answering after the first screen
+  // is the whole point.
+  if (!state.titles.length) await pass;
   return answer({ cached: false });
 }
 
@@ -285,6 +306,11 @@ async function collection(name, opts) {
 
 function invalidate() {
   collections.clear();
+  // Anything running now belongs to the library being forgotten.
+  generation++;
+  inFlight = null;
+  inFlightLanguage = null;
+  firstScreen = null;
   state = { titles: [], fetchedAt: 0, market: "", language: "", partial: false, filling: false, version: CACHE_VERSION };
   loaded = true;
   try {

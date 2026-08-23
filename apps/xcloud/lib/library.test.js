@@ -427,6 +427,52 @@ test("an unknown collection is refused rather than silently empty", async () => 
   await assert.rejects(() => library.collection("nope", {}), /no such collection/);
 });
 
+
+test("forgetting the catalogue while a pass runs does not hand the next reader that pass", async () => {
+  fresh();
+  stub(400);
+  let releaseTail;
+  const realHydrate = api.hydrate;
+  api.hydrate = async (ids) => {
+    calls.hydrate.push(ids.length);
+    if (ids.length > library.FIRST_SCREEN) await new Promise((r) => (releaseTail = r));
+    return realHydrate(ids);
+  };
+
+  const first = library.refresh({});
+  await new Promise((r) => setTimeout(r, 30));
+  // Measured on the box: the running pass was already past its publish, so all it
+  // had left was saveCache() - which wrote the EMPTY state to disk and answered
+  // with nothing. "No games available", and an app restart did not clear it
+  // because the plugin keeps running.
+  library.invalidate();
+  api.hydrate = realHydrate;
+
+  const got = await library.get({});
+  assert.equal(got.titles.length, 400, "the reader gets a NEW pass, not the disowned one");
+  releaseTail?.();
+  await first.catch(() => {});
+  assert.equal(library._state().titles.length, 400, "and the disowned pass writes nothing over it");
+});
+
+test("a cold read whose fetch fails is an error, not an empty catalogue", async () => {
+  fresh();
+  stub(60, { titlesFail: true });
+  // Answering with an empty list said "no games available" on a screen that then
+  // had no way back to anything - the two states are not the same and must not
+  // look the same.
+  await assert.rejects(() => library.get({}), /titles down/);
+});
+
+test("a cold read that fails does not poison the next one", async () => {
+  fresh();
+  stub(60, { titlesFail: true });
+  await assert.rejects(() => library.get({}));
+  stub(60);
+  const got = await library.get({});
+  assert.equal(got.titles.length, 60);
+});
+
 test.after(() => {
   api.fetchTitles = REAL.fetchTitles;
   api.hydrate = REAL.hydrate;

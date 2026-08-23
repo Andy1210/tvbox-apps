@@ -105,19 +105,29 @@ export const putSettings = (patch: Partial<SettingsValues>) =>
   post<{ settings: SettingsValues }>("/settings", patch);
 export const refreshLibrary = () => post("/library/refresh");
 
-export const getLibrary = () =>
+// The language goes with every read: the catalogue's categories are localised by
+// the server, and the plugin cannot see what language this UI is in.
+export const getLibrary = (lang: string) =>
   // `filling` means the first screen is here and the rest is still arriving, so
   // the grid draws now and re-reads - rather than treating fifty titles as the
   // whole library.
-  call<{ titles: Title[]; cached: boolean; stale?: boolean; partial: boolean; filling?: boolean }>("/library");
+  call<{ titles: Title[]; cached: boolean; stale?: boolean; partial: boolean; filling?: boolean }>(
+    "/library?lang=" + encodeURIComponent(lang),
+  );
 export const getRecent = () => call<{ titles: Title[] }>("/recent");
 // Game Pass's own curated lists (what was just added, what is about to leave), as
 // titles rather than product ids.
-export const getCollections = () => call<{ collections: Record<string, Title[]> }>("/collections");
+export const getCollections = (lang: string) =>
+  call<{ collections: Record<string, Title[]> }>("/collections?lang=" + encodeURIComponent(lang));
 export const search = (q: string) => call<{ results: Title[] }>("/search?q=" + encodeURIComponent(q));
 
-export const startSession = (titleId: string, width: number, height: number) =>
-  post<{ id: string; type: string }>("/session/start", { titleId, width, height });
+// The locale travels from the PAGE, because that is the only side that knows it:
+// the box's own `config.locale` is unset (measured), and the language the whole
+// UI is in lives in a localStorage key the launcher and every local app share -
+// which a host-side plugin cannot read. Without it the session, the game and the
+// server's own dialogs all came back in English on a Hungarian box.
+export const startSession = (titleId: string, width: number, height: number, locale: string) =>
+  post<{ id: string; type: string }>("/session/start", { titleId, width, height, locale });
 export const sessionState = () => call<SessionState>("/session/state");
 export const stopSession = () => post("/session/stop");
 

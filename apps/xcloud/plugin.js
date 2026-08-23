@@ -217,7 +217,7 @@ module.exports = (host) => {
     // UI can draw now and re-read later rather than showing a spinner.
     "GET /library": (req, res) => {
       library
-        .get({ language: locale() })
+        .get({ language: locale(req) })
         .then((r) => host.json(res, { ok: true, ...r }))
         .catch((e) => host.json(res, errorPayload(e)));
     },
@@ -264,7 +264,7 @@ module.exports = (host) => {
     // A list that fails does not fail the others: these are extra rows, and a row
     // that cannot be drawn is better than a screen that cannot.
     "GET /collections": (req, res) => {
-      const language = locale();
+      const language = locale(req);
       const wanted = ["recentlyAdded", "leavingSoon"];
       Promise.all(
         wanted.map((name) =>
@@ -311,6 +311,10 @@ module.exports = (host) => {
           await endSession();
 
           const chosen = settings.get();
+          // The page's own language, which is the only honest source: the box's
+          // `config.locale` is unset and the UI language lives in a localStorage
+          // key no plugin can read. An explicit setting still wins.
+          const pageLocale = /^[a-z]{2}(-[A-Z]{2})?$/.test(String(data.locale || "")) ? String(data.locale) : "";
           // A game's language is fixed when the session starts; there is no
           // changing it once it runs.
           const width = Number(data.width) || 1920;
@@ -319,7 +323,7 @@ module.exports = (host) => {
           const scale = Math.min(1, cap / height);
           const controller = new AbortController();
           const session = await sessions.start(titleId, {
-            locale: chosen.gameLocale || locale(),
+            locale: chosen.gameLocale || pageLocale || locale(),
             width: Math.round(width * scale),
             height: Math.round(height * scale),
             timezoneOffsetMinutes: -new Date().getTimezoneOffset(),
@@ -425,12 +429,28 @@ module.exports = (host) => {
 
   host.registerRoutes("/tvbox/api/xcloud", routes);
 
-  // The catalogue language follows the box, the market does not: the market comes
+  // The catalogue language follows the PAGE, the market does not: the market comes
   // from the streaming token because it is the account's, not the box's.
-  function locale() {
+  //
+  // The page is asked because it is the only side that knows. The box's own
+  // `config.locale` is unset (measured on this box), and the language the whole UI
+  // is in lives in a localStorage key the launcher and every local app share -
+  // which a host-side plugin cannot read. Without this the catalogue's categories,
+  // which the server localises, came back in English on a Hungarian box.
+  const LOCALE = /^[a-z]{2}(-[A-Z]{2})?$/;
+
+  function locale(req) {
+    if (req) {
+      try {
+        const asked = new URL(req.url, host.base).searchParams.get("lang") || "";
+        if (LOCALE.test(asked)) return asked;
+      } catch {
+        /* a url we cannot parse is not a language */
+      }
+    }
     try {
       const l = host.config && host.config.get ? host.config.get("locale") : null;
-      return l && /^[a-z]{2}(-[A-Z]{2})?$/.test(l) ? l : "en-US";
+      return l && LOCALE.test(l) ? l : "en-US";
     } catch {
       return "en-US";
     }

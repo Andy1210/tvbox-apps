@@ -72,6 +72,24 @@ describe("what is not a dialog", () => {
   });
 });
 
+describe("the envelope", () => {
+  const content = JSON.stringify({ TitleText: "T", CommandLabel1: "A", CommandLabel2: "B" });
+
+  it("is recognised by its CONTENT, with or without a type field", () => {
+    // An earlier cut required `type === "Message"`, inferred from a log line that
+    // had been truncated before that field. The dialog then went unrecognised on
+    // the box while this test, built on the same guess, passed.
+    expect(parseDialog(JSON.stringify({ id: "{x}", content }))!.title).toBe("T");
+    expect(parseDialog(JSON.stringify({ type: "Message", id: "{x}", content }))!.title).toBe("T");
+  });
+
+  it("is refused without an id, because there would be nothing to answer", () => {
+    // A dialog that cannot be answered is worse than none: it takes the screen
+    // and never gives it back.
+    expect(parseDialog(JSON.stringify({ type: "Message", content }))).toBeNull();
+  });
+});
+
 describe("out-of-range indices", () => {
   it("fall back to the last button rather than to nothing", () => {
     const d = parseDialog(

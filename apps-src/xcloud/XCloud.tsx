@@ -18,15 +18,21 @@ export function XCloud({ onExit }: { onExit: () => void }) {
   // library it is about to play from; without the stop, every press moves the
   // focus behind the video as well as reaching the game.
   const stopPadNav = useRef<null | (() => void)>(null);
-  const streaming = view.name === "stream";
+  const [padForUi, setPadForUi] = useState(false);
+  // The pad drives the UI everywhere except a game that is actually playing. Both
+  // halves are needed: without the start, a controller cannot browse the library
+  // it is about to play from; without the stop, every press moves the focus behind
+  // the video as well as reaching the game. And a dialog over a running game is
+  // OUR screen, so the pad comes back for it - `padForUi`.
+  const padToGame = view.name === "stream" && !padForUi;
   useEffect(() => {
-    if (streaming) {
+    if (padToGame) {
       stopPadNav.current?.();
       stopPadNav.current = null;
       return;
     }
     if (!stopPadNav.current) stopPadNav.current = startGamepadNav();
-  }, [streaming]);
+  }, [padToGame]);
   useEffect(() => () => stopPadNav.current?.(), []);
 
   const refresh = useCallback(async () => {
@@ -57,7 +63,7 @@ export function XCloud({ onExit }: { onExit: () => void }) {
     return <SignIn status={status} onSignedIn={refresh} onExit={onExit} />;
   }
   if (view.name === "stream") {
-    return <Stream title={view.title} onLeave={leaveStream} />;
+    return <Stream title={view.title} onLeave={leaveStream} onUiNeedsPad={setPadForUi} />;
   }
   return (
     <Library status={status} onPlay={(title) => setView({ name: "stream", title })} onSignedOut={refresh} />

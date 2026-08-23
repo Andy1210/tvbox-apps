@@ -2,7 +2,7 @@
   "id": "xcloud",
   "manifestVersion": 1,
   "name": "Xbox Cloud Gaming",
-  "version": "2.5.0",
+  "version": "2.6.1",
   "type": "webclient",
   "status": "ready",
   "accent": "#107c10",
@@ -16,6 +16,22 @@
     "hu": "Xbox Game Pass Ultimate jatekok streamelese egyenesen a TV-re - konzol nelkul. Jelentkezz be a kepernyon megjeleno koddal, aztan parosits egy Bluetooth- vagy USB-kontrollert. Gyors internet kell hozza; a kep elo H.264 videofolyam."
   },
   "changelog": [
+    {
+      "version": "2.6.1",
+      "notes": "Refreshing the catalogue no longer empties it, and a screen with no games still has its menu so there is a way back."
+    },
+    {
+      "version": "2.6.0",
+      "notes": "The controller can answer the dialogs over a running game. Games and the catalogue now come in the language the box is set to, instead of always English."
+    },
+    {
+      "version": "2.5.2",
+      "notes": "The controller can answer the dialogs over a running game, and stops reaching the game while one is up."
+    },
+    {
+      "version": "2.5.1",
+      "notes": "The quit confirmation actually appears."
+    },
     {
       "version": "2.5.0",
       "notes": "Quitting from the Xbox guide now shows its confirmation instead of leaving a dark overlay over a game that is still running."

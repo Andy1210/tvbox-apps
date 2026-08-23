@@ -4,7 +4,6 @@ import { getCurrentFocusKey, setFocus } from "@noriginmedia/norigin-spatial-navi
 import * as api from "./api";
 import { Grid } from "./Grid";
 import { Row } from "./Row";
-import { Splash } from "./XCloud";
 import { SearchIcon, CloseIcon, SettingsIcon } from "./icons";
 import { Settings } from "./Settings";
 import { createMover, nearest, pinScroll } from "./moveTo";
@@ -38,7 +37,7 @@ export function Library({
   onPlay: (title: api.Title) => void;
   onSignedOut: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, tag } = useI18n();
   const [all, setAll] = useState<api.Title[] | null>(null);
   const [recent, setRecent] = useState<api.Title[]>([]);
   const [collections, setCollections] = useState<Record<string, api.Title[]>>({});
@@ -119,14 +118,14 @@ export function Library({
       // hydrated, so this re-reads until the rest lands rather than either
       // waiting for it or treating fifty titles as the whole catalogue.
       const read = async (): Promise<void> => {
-        const lib = await api.getLibrary();
+        const lib = await api.getLibrary(tag);
         if (!alive) return;
         setAll(lib.titles);
         setPartial(lib.partial);
         // The curated rows are resolved against the catalogue, so while it is
         // still filling they come back short - re-read them with it rather than
         // leaving the first, emptiest answer on screen.
-        const c = await api.getCollections().catch(() => null);
+        const c = await api.getCollections(tag).catch(() => null);
         if (alive && c) setCollections(c.collections);
         if (lib.filling || lib.stale) {
           again = setTimeout(() => void read().catch(() => {}), lib.filling ? FILLING_POLL_MS : STALE_REREAD_MS);
@@ -146,7 +145,7 @@ export function Library({
       alive = false;
       if (again) clearTimeout(again);
     };
-  }, [t]);
+  }, [t, tag]);
 
   const playable = useMemo(() => (all || []).filter((x) => x.name), [all]);
   // The grid shows what the subscription covers, and search reaches the rest. Not
@@ -205,7 +204,13 @@ export function Library({
   const listId = results ? "search:" + query : "library:" + genre;
   const placed = useRef({ list: "", key: "" });
   useEffect(() => {
-    if (!all || typing || !firstKey) return;
+    // Nothing in the body to focus: the header is what the remote gets, or the
+    // screen is one nobody can leave.
+    if (typing) return;
+    if (!firstKey || !all || !playable.length) {
+      const id = setTimeout(() => setFocus("lib-settings"), 0);
+      return () => clearTimeout(id);
+    }
     const p = placed.current;
     if (p.list === listId) {
       // The screen assembles in pieces: the grid is here before the rows are, so
@@ -234,10 +239,6 @@ export function Library({
     setTyping(false);
   }, []);
 
-  if (error) return <Splash>{error}</Splash>;
-  if (!all) return <Splash>{t("library.loading")}</Splash>;
-  if (!playable.length) return <Splash>{t("library.empty")}</Splash>;
-
   if (typing) {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-bg-0 p-[4vw]">
@@ -247,6 +248,12 @@ export function Library({
   }
 
   const hidden = playable.length - owned.length;
+  // Loading, empty and failed all keep the header. An early return took it with
+  // them, and the "no games available" screen then had no way to reach the
+  // settings that could refresh the catalogue or sign out - measured after a
+  // refresh went wrong, and an app restart did not help because the screen itself
+  // was the dead end.
+  const message = error || (!all ? t("library.loading") : !playable.length ? t("library.empty") : null);
 
   if (settingsOpen) {
     return (
@@ -311,9 +318,21 @@ export function Library({
         </div>
       </header>
 
-      {/* The window. It clips, which is why the column below pads. */}
-      {/* Horizontal room for the reach too: a row's first tile sits at this edge. */}
+      {/* Loading, empty and failed all keep the header above. Returning a bare
+          message instead took it with them, and the "no games available" screen
+          then had no way to reach the settings that could refresh the catalogue or
+          sign out - measured after a refresh went wrong, with an app restart no
+          help because the screen itself was the dead end. */}
+      {message && (
+        <div className="flex flex-1 items-center justify-center px-[4vw]">
+          <p className={"text-center text-3xl " + (error ? "text-warn" : "text-fg-dim")}>{message}</p>
+        </div>
+      )}
+
+      {/* The window. It clips, which is why the column below pads. Horizontal room
+          for the focus reach too: a row's first tile sits at this edge. */}
       <div
+        hidden={!!message}
         ref={attachViewport}
         className="min-h-0 flex-1 overflow-hidden"
         style={{ paddingLeft: "calc(4vw - var(--focus-reach))", paddingRight: "calc(4vw - var(--focus-reach))" }}

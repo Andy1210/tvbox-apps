@@ -134,7 +134,7 @@ export function parseDialog(raw: unknown): ServerDialog | null {
   } catch {
     return null;
   }
-  if (!outer || outer.type !== "Message" || !outer.id || typeof outer.content !== "string") return null;
+  if (!outer || typeof outer.content !== "string") return null;
 
   let c: Record<string, unknown>;
   try {
@@ -142,7 +142,18 @@ export function parseDialog(raw: unknown): ServerDialog | null {
   } catch {
     return null;
   }
+  // The CONTENT is what identifies it. An earlier cut of this also required
+  // `type === "Message"` and an id, both of which were inferred from a log line
+  // truncated before those fields - the dialog then went unrecognised on the box
+  // while the test, built on the same assumption, passed. Recognise by what is
+  // actually being looked at; the envelope is checked below, where it matters.
   if (!c || typeof c.TitleText !== "string" || typeof c.CommandLabel1 !== "string") return null;
+  // Without an id there is nothing to answer, and a dialog that cannot be
+  // answered is worse than none: it would take the screen and never give it back.
+  if (!outer.id) {
+    console.warn("[xcloud] a dialog arrived with no id to answer:", String(raw).slice(0, 600));
+    return null;
+  }
 
   const buttons = [c.CommandLabel1, c.CommandLabel2, c.CommandLabel3]
     .map((b) => (typeof b === "string" ? b.trim() : ""))
