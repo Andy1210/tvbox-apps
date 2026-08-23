@@ -356,6 +356,30 @@ function expandIpv6(text) {
 const keepalive = (session) =>
   api.gssv("POST", path(session.type, session.id, "keepalive"), {}, { timeout: 15000 }).then((r) => r.json() || {});
 
+/**
+ * Is the session still there?
+ *
+ * Nothing tells us when the person quits from the Xbox guide - the server simply
+ * ends the session, and the only thing that eventually notices is WebRTC's own
+ * ICE timeout, about thirty seconds later. So the state is asked for.
+ *
+ * A 404 is the answer, not an error: the session is gone, which is exactly what
+ * the question was.
+ */
+async function alive(session) {
+  try {
+    const res = await api.gssv("GET", path(session.type, session.id, "state"), null, { timeout: 15000 });
+    const state = String((res.json() || {}).state || "");
+    return { alive: state !== "Failed", state };
+  } catch (e) {
+    const status = e && e.detail && e.detail.status;
+    if (status === 404) return { alive: false, state: "Gone" };
+    // Anything else is a question we could not ask - a blip on the way to
+    // Microsoft is not a reason to take a running game off the screen.
+    return { alive: true, state: "", error: String(e.message || e) };
+  }
+}
+
 // Stopping matters more than it looks: an abandoned session holds the account's
 // slot, so the next launch is refused for a stream nobody is watching.
 async function stop(session) {
@@ -381,6 +405,7 @@ module.exports = {
   sendChatSdp,
   sendIce,
   keepalive,
+  alive,
   stop,
   // Test seams for the pieces that are pure logic.
   idFromPath,

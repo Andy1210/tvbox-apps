@@ -99,41 +99,8 @@
    transform instead of scrolling. A glow, a blur or an animated gradient here
    would cost more GPU than the video that is about to arrive. */
 
-/* Rings leaving the cover, staggered so there is always one in flight. */
-@keyframes xc-ring {
-  0% {
-    transform: scale(1);
-    opacity: 0.55;
-  }
-  100% {
-    transform: scale(1.9);
-    opacity: 0;
-  }
-}
-.xc-ring {
-  animation: xc-ring 2.4s cubic-bezier(0.2, 0.6, 0.35, 1) infinite;
-  will-change: transform, opacity;
-}
-.xc-ring-2 {
-  animation-delay: 0.8s;
-}
-.xc-ring-3 {
-  animation-delay: 1.6s;
-}
-
-/* One arc going round. Rotation is a transform, so this is free. */
-@keyframes xc-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-.xc-spin {
-  animation: xc-spin 3.6s linear infinite;
-  will-change: transform;
-}
-
-/* The cover breathing, which is what makes the whole thing read as alive rather
-   than as a spinner parked on top of a picture. */
+/* The cover breathing. One moving thing: it says "working" without three
+   animations competing on a screen whose whole job is to say that. */
 @keyframes xc-breathe {
   0%,
   100% {
@@ -151,12 +118,7 @@
 /* Someone who has asked for less movement gets the picture and no motion; the
    elapsed counter still ticks, so the screen has not stopped saying anything. */
 @media (prefers-reduced-motion: reduce) {
-  .xc-ring,
-  .xc-spin,
   .xc-breathe {
     animation: none;
-  }
-  .xc-ring {
-    opacity: 0;
   }
 }

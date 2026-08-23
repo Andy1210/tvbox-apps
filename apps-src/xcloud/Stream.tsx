@@ -3,6 +3,7 @@ import { FocusButton, useI18n } from "@sdk";
 import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import * as api from "./api";
 import { connect, type Phase, type StreamHandle } from "./stream/connection";
+import type { ServerDialog } from "./stream/channels";
 
 // The stream. Two waits happen here and they are different things: the SERVER
 // getting ready (a queue, measured at 224 s on this account, so it needs a screen
@@ -12,6 +13,8 @@ import { connect, type Phase, type StreamHandle } from "./stream/connection";
 // said 10 seconds for a wait that took 224, and a timer that expires while you are
 // still waiting is worse than no timer at all.
 const STATE_POLL_MS = 1500;
+// Once it is playing, the only thing left to watch for is the session ending.
+const WATCH_POLL_MS = 3000;
 
 export function Stream({ title, onLeave }: { title: api.Title; onLeave: () => void }) {
   const { t } = useI18n();
@@ -28,6 +31,10 @@ export function Stream({ title, onLeave }: { title: api.Title; onLeave: () => vo
   // at most every 30 s, and a number that only moves twice a minute is exactly
   // what "it has frozen" looks like.
   const [elapsed, setElapsed] = useState(0);
+  // A question the SERVER asked and expects us to draw. Until this existed, the
+  // Xbox guide's "quit the game?" left a dark overlay over a game that was still
+  // running and still making sound, waiting for an answer nothing could give.
+  const [dialog, setDialog] = useState<ServerDialog | null>(null);
 
   const message = useCallback(
     (code: string | undefined) => t("errors." + (code || "generic")) || t("errors.generic"),
@@ -74,8 +81,30 @@ export function Stream({ title, onLeave }: { title: api.Title; onLeave: () => vo
           setError(s.error ? s.error : message(s.code));
           return;
         }
-        if (s.state === "Provisioned" && s.config) {
+        // The server ended it - somebody quit from the Xbox guide. A normal way
+        // out, so it leaves rather than reporting a failure.
+        if (s.ended) {
           stopPolling();
+          console.log("[xcloud] session ended:", s.ended);
+          leave();
+          return;
+        }
+        if (s.state === "Provisioned" && s.config) {
+          // Slower from here, but NOT stopped: this poll is the only way the page
+          // hears that the server ended the session, and stopping it left a frozen
+          // picture until WebRTC's ICE timeout gave up half a minute later.
+          stopPolling();
+          poll = setInterval(() => {
+            if (!alive) return;
+            void api.sessionState().then((now) => {
+              if (!alive || (!now.ended && now.active !== false)) return;
+              stopPolling();
+              console.log("[xcloud] session ended:", now.ended || "no longer active");
+              leave();
+            }).catch(() => {
+              /* a blip on the loopback API is not a session ending */
+            });
+          }, WATCH_POLL_MS);
           try {
             handle.current = await connect(
               {
@@ -90,6 +119,14 @@ export function Stream({ title, onLeave }: { title: api.Title; onLeave: () => vo
                   setError(t("stream.failed"));
                 }
               },
+                onDialog: (d) => {
+                  if (alive) setDialog(d);
+                },
+                onEnded: (why) => {
+                  if (!alive) return;
+                  console.log("[xcloud] stream ended:", why);
+                  leave();
+                },
                 onStream: (stream, kind) => {
                   const el = kind === "video" ? video.current : audio.current;
                   if (!el) return;
@@ -123,18 +160,39 @@ export function Stream({ title, onLeave }: { title: api.Title; onLeave: () => vo
     };
   }, [title.titleId, message, leave, t]);
 
+  const answer = useCallback(
+    (index: number) => {
+      if (!dialog) return;
+      handle.current?.answerDialog(dialog.id, index);
+      setDialog(null);
+    },
+    [dialog],
+  );
+
+  // The server's own default is the safe one for a destructive question - it
+  // points at "Never mind", not "Quit game".
+  useEffect(() => {
+    if (!dialog) return;
+    const id = setTimeout(() => setFocus("dlg-" + dialog.defaultIndex), 0);
+    return () => clearTimeout(id);
+  }, [dialog]);
+
   // Any Back or Escape leaves. The shell's own Back handling is for navigating
   // between screens; a running stream has to be able to end from the remote.
+  //
+  // While the server is asking something, Back answers ITS cancel option instead:
+  // leaving the stream with the question unanswered is how the session was left
+  // dimmed in the first place.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" || e.key === "Backspace" || e.key === "BrowserBack") {
-        e.preventDefault();
-        leave();
-      }
+      if (e.key !== "Escape" && e.key !== "Backspace" && e.key !== "BrowserBack") return;
+      e.preventDefault();
+      if (dialog) answer(dialog.cancelIndex);
+      else leave();
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [leave]);
+  }, [leave, dialog, answer]);
 
   const playing = phase === "playing";
 
@@ -184,6 +242,29 @@ export function Stream({ title, onLeave }: { title: api.Title; onLeave: () => vo
           to be in the document to play. */}
       <audio ref={audio} autoPlay />
 
+      {/* Over the running game, because that is what it is: the guide dimmed the
+          picture and handed the question over. */}
+      {dialog && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/70 p-[6vw]">
+          <div className="w-[54vw] rounded-2xl bg-bg-1 p-[3vw] text-fg">
+            <h2 className="mb-[1.5vh] text-3xl font-semibold">{dialog.title}</h2>
+            {dialog.body && <p className="mb-[3vh] text-2xl text-fg-dim">{dialog.body}</p>}
+            <div className="flex flex-wrap gap-4">
+              {dialog.buttons.map((label, i) => (
+                <FocusButton
+                  key={label + i}
+                  focusKey={"dlg-" + i}
+                  className="rounded-xl bg-bg-0 px-8 py-4 text-2xl"
+                  onEnter={() => answer(i)}
+                >
+                  {label}
+                </FocusButton>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {!playing && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-[3vh] px-16 text-center">
           <Waiting tile={title.tile} still={!!error} />
@@ -225,49 +306,23 @@ export function Stream({ title, onLeave }: { title: api.Title; onLeave: () => vo
 }
 
 /**
- * The waiting animation: the game's own cover, breathing, with rings leaving it
- * and an arc going round.
+ * The waiting animation: the game's own cover, breathing.
  *
- * Every moving part is a `transform` or an `opacity` and nothing else, because
- * those two are the only composited properties on this box - a glow or an
- * animated gradient here would cost more GPU than the video about to arrive.
+ * One moving thing rather than three. It is a `transform`, which with `opacity`
+ * is the only composited property on this box - a glow or an animated gradient
+ * here would cost more GPU than the video about to arrive.
  *
  * It stops on a failure: motion that carries on after something has gone wrong
  * reads as "still trying", which is the opposite of what the screen then says.
  */
 function Waiting({ tile, still }: { tile: string; still: boolean }) {
-  const ring = "absolute inset-0 rounded-[1.6vh] border-2 border-focus";
+  const shape = "h-full w-full rounded-[1.6vh] ";
   return (
-    <div className="relative h-[22vh] w-[22vh]">
-      {!still && (
-        <>
-          <span className={ring + " xc-ring"} aria-hidden="true" />
-          <span className={ring + " xc-ring xc-ring-2"} aria-hidden="true" />
-          <span className={ring + " xc-ring xc-ring-3"} aria-hidden="true" />
-          {/* The arc: a dashed circle, rotated. The dash is static - only the
-              rotation moves - so nothing is re-rasterised per frame. */}
-          <svg className="xc-spin absolute -inset-[2vh]" viewBox="0 0 100 100" aria-hidden="true">
-            <circle
-              cx="50"
-              cy="50"
-              r="47"
-              fill="none"
-              stroke="var(--color-accent)"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeDasharray="52 243"
-            />
-          </svg>
-        </>
-      )}
+    <div className="relative h-[24vh] w-[24vh]">
       {tile ? (
-        <img
-          src={tile}
-          alt=""
-          className={"h-full w-full rounded-[1.6vh] object-cover " + (still ? "opacity-50" : "xc-breathe")}
-        />
+        <img src={tile} alt="" className={shape + "object-cover " + (still ? "opacity-50" : "xc-breathe")} />
       ) : (
-        <div className={"h-full w-full rounded-[1.6vh] bg-bg-1 " + (still ? "" : "xc-breathe")} />
+        <div className={shape + "bg-bg-1 " + (still ? "" : "xc-breathe")} />
       )}
     </div>
   );

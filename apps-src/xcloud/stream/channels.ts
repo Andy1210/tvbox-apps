@@ -100,3 +100,73 @@ export const gamepadChanged = (index: number, added: boolean): string =>
 
 export const keyframeRequest = (): string =>
   JSON.stringify({ message: "videoKeyframeRequested", ifrRequested: true });
+
+
+/**
+ * A dialog the SERVER asks this client to draw.
+ *
+ * The handshake declares `19` (ShowMessageDialog) among the system UIs this
+ * client can show, so xCloud hands over its own confirmations rather than drawing
+ * them into the video - and a client that shows nothing leaves the session
+ * dimmed, waiting for an answer that never comes. Measured on the box: pressing
+ * Quit in the Xbox guide left a dark overlay over a game that was still running
+ * and still making sound.
+ *
+ * Recognised by its CONTENT rather than by its target string: the shape is
+ * unmistakable, and it is the part that decides what has to be drawn.
+ */
+export interface ServerDialog {
+  id: string;
+  title: string;
+  body: string;
+  /** In order. The index of the pressed one is what goes back. */
+  buttons: string[];
+  /** Which to focus. The server points at the safe one for a destructive ask. */
+  defaultIndex: number;
+  /** What Back means here. */
+  cancelIndex: number;
+}
+
+export function parseDialog(raw: unknown): ServerDialog | null {
+  let outer: { type?: string; id?: string; content?: string; target?: string };
+  try {
+    outer = JSON.parse(String(raw));
+  } catch {
+    return null;
+  }
+  if (!outer || outer.type !== "Message" || !outer.id || typeof outer.content !== "string") return null;
+
+  let c: Record<string, unknown>;
+  try {
+    c = JSON.parse(outer.content);
+  } catch {
+    return null;
+  }
+  if (!c || typeof c.TitleText !== "string" || typeof c.CommandLabel1 !== "string") return null;
+
+  const buttons = [c.CommandLabel1, c.CommandLabel2, c.CommandLabel3]
+    .map((b) => (typeof b === "string" ? b.trim() : ""))
+    .filter(Boolean);
+  if (!buttons.length) return null;
+
+  const clamp = (n: unknown, fallback: number) =>
+    typeof n === "number" && n >= 0 && n < buttons.length ? n : fallback;
+
+  return {
+    id: outer.id,
+    title: c.TitleText,
+    body: typeof c.ContentText === "string" ? c.ContentText : "",
+    buttons,
+    // The server's own default, and it points at the SAFE option for a
+    // destructive question - "Never mind" rather than "Quit game".
+    defaultIndex: clamp(c.DefaultIndex, buttons.length - 1),
+    cancelIndex: clamp(c.CancelIndex, buttons.length - 1),
+  };
+}
+
+/**
+ * The answer. Carries the message's own id, which is how the server matches it to
+ * the question it asked.
+ */
+export const transactionComplete = (id: string, result: number): string =>
+  JSON.stringify({ type: "TransactionComplete", content: JSON.stringify({ Result: result }), id, cv: "" });

@@ -50,6 +50,8 @@ export interface SessionState {
   state?: string;
   queueSeconds?: number | null;
   queuedFor?: number;
+  /** Set when the server ended the session - a quit from the Xbox guide, or a timeout. */
+  ended?: string | null;
   code?: string;
   error?: string;
   config?: {

@@ -10,7 +10,16 @@
 import * as api from "../api";
 import { buttonMask, clientMetadataPacket, inputPacket } from "./inputPacket";
 import { readGamepads } from "./gamepad";
-import { authorizationRequest, gamepadChanged, handshake, isHandshakeAck, sessionConfig } from "./channels";
+import {
+  authorizationRequest,
+  gamepadChanged,
+  handshake,
+  isHandshakeAck,
+  parseDialog,
+  sessionConfig,
+  transactionComplete,
+  type ServerDialog,
+} from "./channels";
 import { setBitrate, setStereo } from "./sdp";
 
 const ICE_SERVERS: RTCIceServer[] = [
@@ -34,16 +43,51 @@ const INPUT_HZ = 60;
 // address comes from the answer rather than from candidate pairing.
 const ICE_GATHER_TIMEOUT_MS = 3000;
 
+// How often to ask the connection whether frames are still arriving, and how long
+// a gap has to be before the stream counts as over.
+//
+// This is the only signal that actually fires when someone quits from the Xbox
+// guide. Measured: the session stays `Provisioned` on the server, no data channel
+// closes, and the control channel says nothing - the media simply stops, and the
+// next thing to notice is WebRTC's own ICE timeout half a minute later.
+//
+// A static game screen still sends frames, so a gap of seconds is not a quiet
+// picture; it is no picture.
+//
+// Eight seconds rather than four, and the difference is who pays for being wrong:
+// too short takes a game away from somebody over a wifi hiccup, too long is the
+// frozen picture this exists to shorten. Eight is well inside the ~30 s it used
+// to take and long enough that a glitch has recovered - and a recovery is logged,
+// so whether that ever happens here is a measurement rather than a guess.
+const FRAME_WATCH_MS = 1000;
+const FRAME_GAP_MS = 8000;
+
 export type Phase = "offering" | "answered" | "connecting" | "playing" | "closed" | "failed";
 
 export interface StreamHandle {
   close(): void;
+  /** Which button was pressed, by index. */
+  answerDialog(id: string, index: number): void;
   readonly pc: RTCPeerConnection;
 }
 
 export interface StreamCallbacks {
   onPhase(phase: Phase, detail?: string): void;
   onStream(stream: MediaStream, kind: "video" | "audio"): void;
+  /**
+   * The server is asking a question and expects THIS client to draw it - the
+   * "quit the game?" confirmation from the Xbox guide is one. Answer it through
+   * the handle's `answerDialog`.
+   */
+  onDialog?(dialog: ServerDialog): void;
+  /**
+   * The session is over - normally, because somebody quit from the Xbox guide.
+   *
+   * The channels closing is the FAST signal: WebRTC's own connection state does
+   * get there, but only after its ICE timeout, which is the half minute of frozen
+   * picture this exists to avoid.
+   */
+  onEnded?(why: string): void;
 }
 
 export interface Quality {
@@ -57,14 +101,30 @@ export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<S
   const channels = new Map<string, RTCDataChannel>();
   const candidates: RTCIceCandidate[] = [];
   let inputTimer: number | null = null;
+  let frameTimer: number | null = null;
   let sequence = 0;
   let closed = false;
+
+  // A send on a channel that has closed throws an InvalidStateError, and it did -
+  // the teardown races the last few messages. Every send goes through here.
+  const send = (ch: RTCDataChannel, data: string | ArrayBuffer): boolean => {
+    if (closed || ch.readyState !== "open") return false;
+    try {
+      ch.send(data as string);
+      return true;
+    } catch (e) {
+      console.warn("[xcloud] send on", ch.label, "failed:", String(e));
+      return false;
+    }
+  };
 
   const close = () => {
     if (closed) return;
     closed = true;
     if (inputTimer !== null) clearInterval(inputTimer);
     inputTimer = null;
+    if (frameTimer !== null) clearInterval(frameTimer);
+    frameTimer = null;
     for (const ch of channels.values()) {
       try {
         ch.close();
@@ -117,34 +177,58 @@ export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<S
   let started = false;
   let knownPads = 0;
   for (const [name, ch] of channels) {
-    ch.addEventListener("close", () => console.log("[xcloud] channel closed:", name));
+    ch.addEventListener("close", () => {
+      console.log("[xcloud] channel closed:", name);
+      // The input channel closing means the session is gone. The chat channel
+      // closes by itself on a session with no microphone, so it says nothing.
+      if (!closed && (name === "input" || name === "control")) cb.onEnded?.("channel " + name + " closed");
+    });
     ch.addEventListener("error", (e) => console.warn("[xcloud] channel error:", name, String(e)));
   }
 
+  // What the server says on the control channel. Logged rather than acted on:
+  // there may be a cleaner "session ending" message in here than a closing
+  // channel, and this is how it gets found.
+  control.addEventListener("message", (ev) =>
+    console.log("[xcloud] control:", String((ev as MessageEvent).data).slice(0, 200)),
+  );
+
   // The handshake gates everything. Sending input before the acknowledgement is
   // what a correct-looking 60 Hz stream that the game ignores is made of.
-  message.addEventListener("open", () => message.send(handshake()));
+  message.addEventListener("open", () => send(message, handshake()));
   message.addEventListener("message", (ev) => {
-    if (!isHandshakeAck((ev as MessageEvent).data) || started) return;
+    const raw = String((ev as MessageEvent).data);
+    // Everything the server sends here, because one of these is the dialog it
+    // expects US to draw. `systemUis` in the handshake declares that this client
+    // can show a message dialog (19 = ShowMessageDialog), so a "quit the game?"
+    // confirmation is handed over rather than drawn by the server - and a client
+    // that shows nothing leaves the session waiting for an answer that never
+    // comes. That is the freeze after a quit from the guide.
+    if (!isHandshakeAck(raw)) {
+      const dialog = parseDialog(raw);
+      if (dialog) {
+        console.log("[xcloud] dialog:", dialog.title, "|", dialog.buttons.join(" / "));
+        cb.onDialog?.(dialog);
+        return;
+      }
+      console.log("[xcloud] message:", raw.slice(0, 300));
+    }
+    if (!isHandshakeAck(raw) || started) return;
     started = true;
     console.log("[xcloud] handshake acknowledged");
 
     for (const m of sessionConfig({ width: window.innerWidth || 1920, height: window.innerHeight || 1080 })) {
-      message.send(m);
+      send(message, m);
     }
-    if (control.readyState === "open") control.send(authorizationRequest());
+    send(control, authorizationRequest());
     startInput();
   });
 
   function announcePads(count: number): void {
     // The server acts on input for a pad it has been told about, and on nothing
     // else. Announced by INDEX, so a second pad appearing later gets its own.
-    for (let i = knownPads; i < count; i++) {
-      if (control.readyState === "open") control.send(gamepadChanged(i, true));
-    }
-    for (let i = count; i < knownPads; i++) {
-      if (control.readyState === "open") control.send(gamepadChanged(i, false));
-    }
+    for (let i = knownPads; i < count; i++) send(control, gamepadChanged(i, true));
+    for (let i = count; i < knownPads; i++) send(control, gamepadChanged(i, false));
     if (count !== knownPads) console.log("[xcloud] pads announced:", count);
     knownPads = count;
   }
@@ -158,7 +242,7 @@ export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<S
     // so it is the first thing on the channel rather than part of the loop. The
     // touch-point count is the reference client's; there is no way to see it being
     // refused, so it is not a number to improvise on.
-    input.send(clientMetadataPacket(sequence++, 2));
+    send(input, clientMetadataPacket(sequence++, 2));
     announcePads(readGamepads().length);
 
     inputTimer = window.setInterval(() => {
@@ -175,8 +259,7 @@ export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<S
       // nothing to interpolate from.
       if (!frames.length) return;
       const packet = inputPacket(sequence++, { gamepads: frames });
-      if (!packet) return;
-      input.send(packet);
+      if (!packet || !send(input, packet)) return;
       sent++;
 
       // The log reports PRESSES rather than packets: at 60 Hz a packet count says
@@ -224,7 +307,54 @@ export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<S
     }
   }
 
-  return { close, pc };
+  watchFrames();
+  return {
+    close,
+    answerDialog: (id, index) => {
+      console.log("[xcloud] dialog answered:", index);
+      send(message, transactionComplete(id, index));
+    },
+    pc,
+  };
+
+  function watchFrames(): void {
+    let lastFrames = -1;
+    let lastMoved = 0;
+    frameTimer = window.setInterval(async () => {
+      if (closed) return;
+      let frames = -1;
+      try {
+        const stats = await pc.getStats();
+        stats.forEach((r) => {
+          const s = r as RTCInboundRtpStreamStats & { framesDecoded?: number };
+          if (s.type === "inbound-rtp" && s.kind === "video" && typeof s.framesDecoded === "number") {
+            frames = s.framesDecoded;
+          }
+        });
+      } catch {
+        return; // a stats read that failed says nothing about the stream
+      }
+      if (frames < 0) return; // nothing decoding yet: the stream has not started
+
+      const now = Date.now();
+      if (frames !== lastFrames) {
+        if (lastMoved && now - lastMoved > 2000) {
+          console.log("[xcloud] frames resumed after", Math.round((now - lastMoved) / 1000) + "s");
+        }
+        lastFrames = frames;
+        lastMoved = now;
+        return;
+      }
+      // Only once frames HAVE been arriving: a gap before the first one is the
+      // stream starting, which the waiting screen is already showing.
+      if (lastMoved && now - lastMoved > FRAME_GAP_MS) {
+        console.log("[xcloud] no frames for", Math.round((now - lastMoved) / 1000) + "s - the stream has stopped");
+        if (frameTimer !== null) clearInterval(frameTimer);
+        frameTimer = null;
+        cb.onEnded?.("no frames");
+      }
+    }, FRAME_WATCH_MS);
+  }
 }
 
 // The server returns its candidates with the SDP attribute prefix still attached

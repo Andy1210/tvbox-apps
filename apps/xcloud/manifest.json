@@ -2,7 +2,7 @@
   "id": "xcloud",
   "manifestVersion": 1,
   "name": "Xbox Cloud Gaming",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "type": "webclient",
   "status": "ready",
   "accent": "#107c10",
@@ -16,6 +16,22 @@
     "hu": "Xbox Game Pass Ultimate jatekok streamelese egyenesen a TV-re - konzol nelkul. Jelentkezz be a kepernyon megjeleno koddal, aztan parosits egy Bluetooth- vagy USB-kontrollert. Gyors internet kell hozza; a kep elo H.264 videofolyam."
   },
   "changelog": [
+    {
+      "version": "2.5.0",
+      "notes": "Quitting from the Xbox guide now shows its confirmation instead of leaving a dark overlay over a game that is still running."
+    },
+    {
+      "version": "2.4.3",
+      "notes": "Diagnostics for the dialog the server expects the client to draw."
+    },
+    {
+      "version": "2.4.2",
+      "notes": "Quitting a game from the Xbox guide returns to the library instead of leaving a frozen picture."
+    },
+    {
+      "version": "2.4.1",
+      "notes": "Quitting a game from the Xbox guide returns to the library at once instead of freezing for half a minute. The waiting screen is calmer."
+    },
     {
       "version": "2.4.0",
       "notes": "A settings screen: picture quality, resolution, sound and the game language, plus a way to refresh the catalogue. The button that only went back to the launcher is gone - the remote Home key already does that."

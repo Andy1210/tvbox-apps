@@ -33,6 +33,12 @@ let signin = null;
 // never does.
 let live = null;
 
+// How often to ask the server whether the session is still there. Nothing tells
+// us when someone quits from the Xbox guide, and the only thing that eventually
+// notices is WebRTC's own ICE timeout - about thirty seconds of a frozen picture
+// before anything is said.
+const ALIVE_POLL_MS = 5000;
+
 // The server states how often it wants a pulse (measured: 60 s) and how long it
 // waits without a connection (300 s), so the timer is set from its answer rather
 // than from a number of ours. It runs HERE because a page that reloads mid-stream
@@ -42,16 +48,47 @@ function startKeepalive(cfg) {
   if (!live) return;
   live.keepaliveTimer = setInterval(() => {
     if (!live) return stopKeepalive();
-    sessions.keepalive(live.session).catch(() => {
-      /* one missed pulse is not a dropped session; the state route is the truth */
-    });
+    sessions
+      .keepalive(live.session)
+      .then((r) => {
+        // The pulse answers with a reason, and "None" is the healthy one. Anything
+        // else is the server saying why it is about to stop.
+        if (r && r.reason && r.reason !== "None") {
+          log("keepalive says the session is ending:", r.reason);
+          if (live) live.ended = String(r.reason);
+        }
+      })
+      .catch(() => {
+        /* one missed pulse is not a dropped session; the state poll is the truth */
+      });
   }, (cfg && cfg.keepAliveMs) || 60000);
   if (live.keepaliveTimer.unref) live.keepaliveTimer.unref();
+
+  live.aliveTimer = setInterval(() => {
+    if (!live) return;
+    sessions.alive(live.session).then((r) => {
+      if (!live) return;
+      // Logged on CHANGE only. Measured after a quit from the Xbox guide: the
+      // state stays `Provisioned` and nothing here ever fires, which is why the
+      // page watches its own frame counter instead.
+      if (r.state && r.state !== live.serverState) {
+        live.serverState = r.state;
+        log("server session state:", r.state);
+      }
+      if (r.alive) return;
+      log("session ended on the server:", r.state);
+      live.ended = r.state || "Gone";
+    });
+  }, ALIVE_POLL_MS);
+  if (live.aliveTimer.unref) live.aliveTimer.unref();
 }
 
 function stopKeepalive() {
-  if (live && live.keepaliveTimer) clearInterval(live.keepaliveTimer);
-  if (live) live.keepaliveTimer = null;
+  if (!live) return;
+  if (live.keepaliveTimer) clearInterval(live.keepaliveTimer);
+  if (live.aliveTimer) clearInterval(live.aliveTimer);
+  live.keepaliveTimer = null;
+  live.aliveTimer = null;
 }
 
 // Always through here, so a session can never be left behind by a code path that
@@ -64,6 +101,7 @@ async function endSession() {
   live = null;
   if (!l) return;
   if (l.keepaliveTimer) clearInterval(l.keepaliveTimer);
+  if (l.aliveTimer) clearInterval(l.aliveTimer);
   if (l.controller) l.controller.abort();
   await sessions.stop(l.session).catch(() => {
     /* a stop that failed leaves a session the next /play will reattach to */
@@ -286,7 +324,7 @@ module.exports = (host) => {
             height: Math.round(height * scale),
             timezoneOffsetMinutes: -new Date().getTimezoneOffset(),
           });
-          live = { session, controller, state: "Provisioning", queueSeconds: null, queuedFor: 0, error: null, config: null };
+          live = { session, controller, state: "Provisioning", queueSeconds: null, queuedFor: 0, error: null, config: null, ended: null };
           host.json(res, { ok: true, id: session.id, type: session.type, titleId });
 
           sessions
@@ -322,6 +360,10 @@ module.exports = (host) => {
         active: true,
         id: live.session.id,
         state: live.state,
+        // The server ended it - somebody quit from the Xbox guide, or the session
+        // timed out. Said plainly, because the alternative is a frozen picture
+        // until WebRTC's own ICE timeout gives up half a minute later.
+        ended: live.ended || null,
         // Deliberately not a countdown: the server's estimate said 10 s for a wait
         // that took 224, so it is an order of magnitude and nothing more.
         queueSeconds: live.queueSeconds,
