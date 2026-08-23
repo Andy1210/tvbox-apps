@@ -344,6 +344,38 @@ describe("stepping to the next episode", () => {
     }
   });
 
+  it("gives the step up on a Back pressed during the teardown", async () => {
+    // The press, not the store call: `stop()` clears `current` only after the
+    // previous episode's last word, so for the whole teardown the player is still
+    // mounted and its own Back handler is the top one on the stack - it paused a
+    // film that was being torn down, and the step went on to start the episode
+    // the press had asked to abandon.
+    const gates: (() => void)[] = [];
+    const slowStop = {
+      ...fakeBackend(),
+      endSession: () => new Promise<void>((r) => gates.push(() => r())),
+    } as unknown as MediaBackend;
+
+    render(<Player />);
+    await act(async () => {
+      await usePlayer.getState().play(slowStop, KIDS[1]);
+      onScreen();
+    });
+    await settle();
+    const step = usePlayer.getState().playSibling("next");
+    await settle();
+    expect(usePlayer.getState().current?.item.id, "still tearing the last one down").toBe("e2");
+    expect(usePlayer.getState().moving?.id).toBe("e3");
+
+    await remote.back();
+    expect(usePlayer.getState().moving, "the press gave the step up").toBeNull();
+
+    gates[0]?.();
+    await step;
+    await settle();
+    expect(started, "and the episode never reached the box").toEqual(["http://server/e2.mkv"]);
+  });
+
   it("leaves nothing to step through when the step is given up mid-resolve either", async () => {
     // The longer of the two windows - three parallel round trips against the one
     // the teardown costs - and by then the queue and the neighbours have been set

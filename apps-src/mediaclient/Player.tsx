@@ -471,6 +471,17 @@ export function Player(): React.JSX.Element | null {
       return;
     }
     const p = usePlayer.getState();
+    // A step in flight comes before all of it. `stop()` clears `current` only
+    // AFTER the previous episode's last word - two server round trips - so for
+    // the whole of the teardown both are set, this handler is the top one on the
+    // stack, and it took Back for itself: the press paused a film that was being
+    // torn down and the step went on to start the episode it had asked to
+    // abandon. The other half of this is in `MediaClient`, for the rest of the
+    // step, where there is no `current` and no player mounted at all.
+    if (p.moving) {
+      p.cancelMove();
+      return;
+    }
     // Then the scrub cursor: it is a question that has not been answered yet,
     // and Back is how a question is withdrawn. Pausing here instead would leave
     // the cursor on screen pointing at a place the film never went.
