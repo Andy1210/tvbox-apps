@@ -233,8 +233,12 @@ module.exports = (host) => {
     // session EXISTS rather than when it is ready, because the wait is the part
     // that needs a screen: a queue was measured at 224 s on this account, and the
     // page has to be able to draw it.
-    "POST /session/start": (req, res) => {
-      readBody(req)
+    // The shell reads a POST body itself and hands it over as the third argument -
+    // it does NOT put it on the request. Reading the stream here waits on a
+    // request that has already ended, so the route never answers and the screen
+    // sits on "starting" for ever. That is what it did.
+    "POST /session/start": (req, res, ctx) => {
+      Promise.resolve((ctx && ctx.body) || {})
         .then(async (data) => {
           const titleId = String((data && data.titleId) || "");
           if (!/^[A-Za-z0-9._-]{1,120}$/.test(titleId)) {
@@ -304,9 +308,9 @@ module.exports = (host) => {
 
     // The offer/answer and the candidates. POST for the same-origin gate, and
     // because both change server-side state.
-    "POST /session/sdp": (req, res) => {
+    "POST /session/sdp": (req, res, ctx) => {
       if (!live) return host.json(res, { ok: false, code: "no_session", error: "no session" });
-      readBody(req)
+      Promise.resolve((ctx && ctx.body) || {})
         .then((data) => {
           const sdp = String((data && data.sdp) || "");
           if (!sdp) throw new sessions.SessionError("bad_request", "no sdp");
@@ -317,9 +321,9 @@ module.exports = (host) => {
         .catch((e) => host.json(res, errorPayload(e)));
     },
 
-    "POST /session/ice": (req, res) => {
+    "POST /session/ice": (req, res, ctx) => {
       if (!live) return host.json(res, { ok: false, code: "no_session", error: "no session" });
-      readBody(req)
+      Promise.resolve((ctx && ctx.body) || {})
         .then((data) => sessions.sendIce(live.session, data && data.candidate, { signal: live.controller.signal }))
         .then((candidates) => host.json(res, { ok: true, candidates }))
         .catch((e) => host.json(res, errorPayload(e)));
@@ -343,37 +347,6 @@ module.exports = (host) => {
   };
 
   host.registerRoutes("/tvbox/api/xcloud", routes);
-
-  // The shell parses a POST body for its own routes but a plugin route gets the
-  // raw request, so read it here. Capped: this is an unauthenticated loopback API
-  // and an SDP offer is a few kilobytes, not a stream.
-  const MAX_BODY = 256 * 1024;
-  function readBody(req) {
-    if (req.body !== undefined) return Promise.resolve(req.body); // already parsed by the shell
-    return new Promise((resolve, reject) => {
-      let n = 0;
-      const chunks = [];
-      req.on("data", (c) => {
-        // A chunk is a Buffer unless something upstream set an encoding, in which
-        // case it is a string - and `.length` on a string counts characters, so
-        // the cap would be wrong by the multibyte difference.
-        const buf = Buffer.isBuffer(c) ? c : Buffer.from(String(c), "utf8");
-        n += buf.length;
-        if (n > MAX_BODY) return reject(new Error("request body too large"));
-        chunks.push(buf);
-      });
-      req.on("end", () => {
-        const text = Buffer.concat(chunks).toString("utf8");
-        if (!text) return resolve({});
-        try {
-          resolve(JSON.parse(text));
-        } catch {
-          reject(new Error("request body is not JSON"));
-        }
-      });
-      req.on("error", reject);
-    });
-  }
 
   // The catalogue language follows the box, the market does not: the market comes
   // from the streaming token because it is the account's, not the box's.
