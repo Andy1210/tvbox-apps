@@ -728,6 +728,11 @@ module.exports = (host) => {
         .catch(() => host.json(res, { configured: false, connected: false, user: "" }));
     },
     "GET /auth/start": (req, res) => host.json(res, startSpotifyAuth()),
+    // NOT a route to put in `registerRoutes`' `guard` list, however much it looks
+    // like one. Spotify's own page navigates down to this URL after the consent
+    // screen, and a page-initiated navigation carries `Sec-Fetch-Site:
+    // cross-site` - measured - so the same-origin gate would answer 403 and the
+    // sign-in window would just sit there with nothing said.
     "GET /auth/callback": (req, res) => handleSpotifyCallback(req, res),
     // { tracks, total, truncated }: `truncated` so a library past the paging
     // bound can say so on screen. A list that simply ends cannot be told from a
