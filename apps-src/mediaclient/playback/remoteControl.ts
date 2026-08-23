@@ -75,11 +75,18 @@ function personChanged(who: { backend: unknown }): CommandResult | null {
  * up, so nothing legitimate is turned away: this closes the window a command
  * already in flight arrives through.
  *
- * Three states, not one screen name. A sign-out is a network round trip before
- * the screen moves, so `backend` is the honest test for it; and a rejected
- * credential puts up a failure screen without touching the screen name at all -
- * measured, a `navigation/select` there pressed the only button on it, which is
- * "sign in again", so a LAN caller could sign the household out with one command.
+ * The screen name is not the whole test: a sign-out is a network round trip
+ * before the screen moves, so `backend` is what says nobody is signed in during
+ * it. It is deliberately NOT keyed on the app-wide `failure` - that is written by
+ * `classify` on any 401 OR 403 from any screen's fetch, including the detail page
+ * a cast mounts behind the film it just started, and nothing clears it while a
+ * film plays. Measured: one 403 there and every command was refused, "stop"
+ * included, with the film still playing. The narrower thing that needed guarding
+ * - a controller pressing the "sign in again" button on a failure screen - is
+ * guarded in `navigate`, where the press happens.
+ *
+ * Two sentences, because they are two states and the assistant reads them out:
+ * only the picker offers a profile to choose.
  *
  * The two timeline paths are exempt: they change nothing, and this file's own
  * note records that a refused `subscribe` is answered 400 by the server and the
@@ -89,9 +96,9 @@ function nobodyChosen(path: string): CommandResult | null {
   if (path.startsWith("/player/timeline/")) return null;
   const now = useApp.getState();
   const at = now.screen.name;
-  const waiting = at === "profiles" || at === "login" || at === "boot";
-  if (!waiting && now.backend && now.failure?.kind !== "signed-out") return null;
-  return no("this box is asking who is watching; choose a profile on it first");
+  if (at === "profiles") return no("this box is asking who is watching; choose a profile on it first");
+  if (at === "login" || at === "boot" || !now.backend) return no("nobody is signed in on this box");
+  return null;
 }
 
 /**
@@ -364,9 +371,6 @@ function stepRefusal(): string | null {
   return stillSettling() ? STARTING : null;
 }
 
-function stepInFlight(): boolean {
-  return stepRefusal() !== null;
-}
 
 /** The film player holds the box, a step between two episodes included. */
 function filmHasPlayer(): boolean {
@@ -436,20 +440,20 @@ async function navigate(what: string): Promise<CommandResult> {
   if (!NAV_KEYS[what] && what !== "back" && what !== "home" && what !== "music") {
     return no("this player does not support that command");
   }
-  // A step between two episodes has nothing on screen to navigate, and the keys
-  // below are DISPATCHED AT WINDOW - where spatial navigation's own listener sits
-  // on the same node and, measured in Chromium, runs first whatever the capture
-  // flag says. So the overlay's swallow cannot stop them and this is the guard
-  // that has to: a phone's `select` would otherwise press whatever is focused on
-  // the hidden browsing screen, and its `back` navigated away and left the
-  // arriving episode to land on the screen it had chosen.
-  //
-  // The two that mean "get me out of this" give the step up first and then do
-  // what they were asked; the D-pad is refused, in the words for it.
-  if (usePlayer.getState().moving) {
-    if (what === "back" || what === "home" || what === "music") usePlayer.getState().cancelMove();
-    else return no(STEPPING);
-  }
+  // A step between two episodes has nothing on screen to navigate, and these keys
+  // are DISPATCHED AT WINDOW - where spatial navigation's own listener sits on
+  // the same node and, measured in Chromium, runs first whatever the capture flag
+  // says. So the overlay's swallow cannot stop them and this is the guard that
+  // has to: a phone's `select` would otherwise press whatever is focused on the
+  // hidden browsing screen. Refused here, before the screen, like every other
+  // refusal in this function.
+  if (usePlayer.getState().moving && NAV_KEYS[what]) return no(STEPPING);
+  // Nor may a controller press the one button on a failure screen, which is
+  // "sign in again": measured, a `select` there signed the household out with a
+  // single command. Only the D-pad, and only for that screen - the app-wide
+  // failure flag is set by any 401 or 403 and outlives them, so refusing
+  // everything on it stopped "stop" working on a film that was playing.
+  if (NAV_KEYS[what] && useApp.getState().failure) return no("there is a message on this box waiting to be read");
 
   // On screen: a D-pad press means "move what I am looking at", and a hidden
   // window would answer ok while nothing moved.
@@ -463,7 +467,16 @@ async function navigate(what: string): Promise<CommandResult> {
     return ok;
   }
   const app = useApp.getState();
+  // Past every refusal, so nothing is given up on the way to one: `bringToFront`
+  // and the check above can both still turn this down, and abandoning the step
+  // first meant a command reported as failed had already thrown the episode away.
+  const step = usePlayer.getState().moving;
+  if (step) usePlayer.getState().cancelMove();
   if (what === "back") {
+    // The same as the remote's Back during a step: give the step up and stay put.
+    // Navigating as well would take the page the person was on as well as the
+    // episode, off one press.
+    if (step) return ok;
     app.back();
     return ok;
   }
@@ -630,7 +643,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         else if (m.state === "stopped") await m.playAt(m.index);
         return ok;
       }
-      if (!p.current) return no(stepInFlight() ? STARTING : "nothing is playing");
+      if (!p.current) return no(stepRefusal() ?? "nothing is playing");
       if (p.state === "paused") p.togglePause();
       return ok;
     case "/player/playback/pause":
@@ -638,7 +651,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         if (useMusic.getState().state === "playing") useMusic.getState().toggle();
         return ok;
       }
-      if (!p.current) return no(stepInFlight() ? STARTING : "nothing is playing");
+      if (!p.current) return no(stepRefusal() ?? "nothing is playing");
       if (p.state === "playing") p.togglePause();
       return ok;
     case "/player/playback/playPause":
@@ -648,7 +661,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         useMusic.getState().toggle();
         return ok;
       }
-      if (!p.current) return no(stepInFlight() ? STARTING : "nothing is playing");
+      if (!p.current) return no(stepRefusal() ?? "nothing is playing");
       p.togglePause();
       return ok;
     case "/player/playback/stop":
@@ -711,7 +724,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         useMusic.getState().seek(Math.max(0, to));
         return ok;
       }
-      if (!p.current) return no("nothing is playing");
+      if (!p.current) return no(stepRefusal() ?? "nothing is playing");
       const to = Number(arg(cmd, "offset"));
       if (!Number.isFinite(to)) return no("no offset in the command");
       p.seekTo(Math.max(0, to));
@@ -722,7 +735,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         useMusic.getState().seek(useMusic.getState().positionMs + 30_000);
         return ok;
       }
-      if (!p.current) return no("nothing is playing");
+      if (!p.current) return no(stepRefusal() ?? "nothing is playing");
       p.seekBy(30_000);
       return ok;
     case "/player/playback/stepBack":
@@ -730,7 +743,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         useMusic.getState().seek(Math.max(0, useMusic.getState().positionMs - 30_000));
         return ok;
       }
-      if (!p.current) return no("nothing is playing");
+      if (!p.current) return no(stepRefusal() ?? "nothing is playing");
       p.seekBy(-30_000);
       return ok;
     // The controller asking to be kept informed about this player. Measured on

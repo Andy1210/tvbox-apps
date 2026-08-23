@@ -325,20 +325,48 @@ describe("stepping to the next episode", () => {
     }
   });
 
-  it("does not refuse a step because the film rebuffered an hour in", async () => {
+  it("does not refuse a step because the film stalled after it started", async () => {
     // The shell reports a stall on a transcoded stream as an ordinary event, so
     // the flag alone would refuse a legitimate step - silently, and with the
-    // assistant claiming the box was changing episode when nothing was.
+    // assistant claiming the box was changing episode when nothing was. The test
+    // is the box's own first-frame event, not the clock: a stall EIGHT seconds in
+    // is still after the start, and reading it as one is the case every caller
+    // says it excludes.
     vi.useFakeTimers();
     try {
       await usePlayer.getState().play(fakeBackend(), KIDS[1]);
       onScreen();
-      await vi.advanceTimersByTimeAsync(3_600_000);
-      usePlayer.setState({ buffering: true }); // a stall, far from the start
+      await vi.advanceTimersByTimeAsync(8_000);
+      usePlayer.setState({ buffering: true }); // a stall, inside the old bound
       expect(await usePlayer.getState().playSibling("next")).toBeTruthy();
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("leaves nothing to step through after a step is given up", async () => {
+    // The teardown has already run by then, and `stop` does not clear the
+    // neighbours - so they survived a cancelled step and the next `skipNext`
+    // answered ok and started an episode on a box that was showing nothing.
+    const gates: (() => void)[] = [];
+    const slowStop = {
+      ...fakeBackend(),
+      endSession: () => new Promise<void>((r) => gates.push(() => r())),
+    } as unknown as MediaBackend;
+
+    await usePlayer.getState().play(slowStop, KIDS[1]);
+    onScreen();
+    const step = usePlayer.getState().playSibling("next");
+    await settle();
+    usePlayer.getState().cancelMove();
+    gates[0]?.();
+    await step;
+    await settle();
+
+    expect(usePlayer.getState().current).toBeNull();
+    expect(usePlayer.getState().siblings, "nothing to step to").toEqual({});
+    expect(await usePlayer.getState().playSibling("next"), "and nothing steps").toBeUndefined();
+    expect(started).toEqual(["http://server/e2.mkv"]);
   });
 
   it("drops a step that was given up while the last episode was being closed off", async () => {
@@ -396,6 +424,27 @@ describe("stepping to the next episode", () => {
     await settle();
     expect(usePlayer.getState().current).toBeNull();
     expect(started).toEqual(["http://server/e2.mkv"]);
+  });
+
+  it("does not leave the overlay up for ever when the box never reports", async () => {
+    // The pin was a branch that armed no timer, and nothing else re-runs on the
+    // bound running out - so on a box that reports no first frame the overlay
+    // never hid again. Most reachable on a RESUME, where the position report that
+    // accidentally rescued a fresh start never arrives at zero.
+    vi.useFakeTimers();
+    try {
+      render(<Player />);
+      await act(async () => {
+        await usePlayer.getState().play(fakeBackend(), { ...KIDS[1], viewOffsetMs: 600_000 });
+      });
+      await act(async () => await vi.advanceTimersByTimeAsync(0));
+      expect(usePlayer.getState().overlay, "held up while it may still be coming").toBe(true);
+
+      await act(async () => await vi.advanceTimersByTimeAsync(30_000));
+      expect(usePlayer.getState().overlay, "and gone once it plainly is not").toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("says on screen which episode is starting", async () => {

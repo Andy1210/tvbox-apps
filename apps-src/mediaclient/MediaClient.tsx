@@ -276,14 +276,15 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   useEffect(() => {
     const off = tvbox().onCommand?.((c) => {
       const cmd = (c || {}) as { action?: string; state?: string };
-      // Not while the box is asking who is watching. This is the other door a
-      // spoken request arrives through - the Companion path refuses the same
-      // three screens for itself - and without it a command reached the PREVIOUS
-      // person's queue from behind the picker: measured, pause, shuffle and
-      // repeat were all accepted and applied. Read live rather than closed over,
-      // because this is subscribed once.
-      const at = useApp.getState().screen.name;
-      if (at === "profiles" || at === "login" || at === "boot") return;
+      // NOT gated on the profile picker, unlike the Companion door, and that is
+      // deliberate. This one is fire-and-forget - the shell's publish succeeds
+      // whatever happens here, so the assistant says out loud that it did what it
+      // was asked - and half of these are the app's own half of something the
+      // shell has ALREADY done to mpv. Dropping them silently left the room quiet
+      // with the screen saying "playing", and a shuffle nobody performed reported
+      // as performed. The queue is the previous person's for as long as the
+      // picker is up, but `chooseProfile` erases it, and music that is audibly
+      // playing is not something the room should be unable to pause.
       // The queue decides FIRST, and the screen only follows a command it really
       // took. `handleMusicCommand` stands down when a film owns the player or
       // when this app is not the one playing - and navigating anyway walked the

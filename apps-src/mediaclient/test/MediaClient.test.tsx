@@ -3,6 +3,7 @@ import { render, act } from "@testing-library/react";
 import { configureI18n } from "@sdk";
 import { MediaClient } from "../MediaClient";
 import { useApp } from "../state";
+import { useMusic } from "../playback/music";
 import { __resetIdentity } from "../identity";
 import { setupRemote, remote } from "./remote";
 import en from "../locales/en.json";
@@ -20,6 +21,36 @@ beforeEach(() => {
 });
 
 describe("MediaClient", () => {
+  it("hands a spoken command to the queue even while the picker is up", async () => {
+    // The Companion door refuses that screen and answers a refusal for it. This
+    // one cannot: it is fire-and-forget, so the shell's publish succeeds whatever
+    // happens here and the assistant says out loud that it did what it was asked.
+    // Half of these are also this app's own half of something the shell has
+    // ALREADY done to mpv, so dropping them leaves the room quiet with the screen
+    // still saying "playing". Gating it was measured to do both.
+    let deliver: ((c: unknown) => void) | undefined;
+    (globalThis as unknown as { tvbox: unknown }).tvbox = {
+      onCommand: (fn: (c: unknown) => void) => {
+        deliver = fn;
+        return () => {};
+      },
+    };
+    useMusic.setState({
+      queue: [{ id: "t1", kind: "track", title: "A Song" }] as never,
+      index: 0,
+      state: "playing",
+      shuffle: false,
+    });
+    useApp.setState({ screen: { name: "profiles" }, history: [] });
+    render(<MediaClient onExit={vi.fn()} />);
+
+    await act(async () => deliver?.({ action: "shuffle", state: "on" }));
+    expect(useMusic.getState().shuffle, "the command reached the queue").toBe(true);
+
+    useMusic.setState({ queue: [], index: 0, state: "stopped", shuffle: false });
+    delete (globalThis as unknown as { tvbox?: unknown }).tvbox;
+  });
+
   it("renders the player stage, because the shell reveals mpv through it", () => {
     render(<MediaClient onExit={vi.fn()} />);
 

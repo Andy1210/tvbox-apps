@@ -657,7 +657,10 @@ describe("a command from a controller", () => {
     expect(usePlayer.getState().moving, "a D-pad press is refused, not acted on").not.toBeNull();
 
     expect(await runCompanionCommand({ path: "/player/navigation/back", params: {} })).toEqual({ ok: true });
-    expect(usePlayer.getState().moving, "and Back gives the step up first").toBeNull();
+    expect(usePlayer.getState().moving, "and Back gives the step up").toBeNull();
+    // And nothing else: the remote's Back during a step stays put, and one press
+    // must not cost the page the person was on as well as the episode.
+    expect(useApp.getState().screen).toEqual({ name: "item", itemId: "s1" });
   });
 
   it("refuses a transport command while the box is asking who is watching", async () => {
@@ -687,14 +690,69 @@ describe("a command from a controller", () => {
     expect(usePlayer.getState().moving, "and nothing took the screen").toBeNull();
   });
 
-  it("refuses one after a rejected credential too, where the screen has not moved", async () => {
-    // What `onUnauthorized` does on a 401 leaves the screen alone, so the name
-    // said nothing was wrong - and `navigation/select` there pressed the only
-    // button on the failure screen, which is "sign in again". A LAN caller could
-    // sign the household out with one command.
+  it("will not press the one button on a failure screen", async () => {
+    // `navigation/select` there presses "sign in again", so a LAN caller could
+    // sign the household out with one command. Only the D-pad, and only for that
+    // screen: the flag is app-wide and outlives the message.
     useApp.setState({ screen: { name: "home" }, failure: { kind: "signed-out" }, history: [] });
-    expect(await runCompanionCommand({ path: "/player/navigation/select", params: {} })).toMatchObject({ ok: false });
+    expect(await runCompanionCommand({ path: "/player/navigation/select", params: {} })).toEqual({
+      ok: false,
+      reason: "there is a message on this box waiting to be read",
+    });
     useApp.setState({ failure: null });
+  });
+
+  it("still stops a film when a screen behind it has failed", async () => {
+    // `failure` is written by any 401 OR 403 from any screen's fetch - including
+    // the detail page a cast mounts behind the film it just started - and nothing
+    // clears it while a film plays. Refusing every command on it meant one 403
+    // left "stop" answering a refusal with the film still going.
+    await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "1" },
+    });
+    useApp.setState({ failure: { kind: "signed-out" } });
+    expect(await runCompanionCommand({ path: "/player/playback/stop", params: {} })).toEqual({ ok: true });
+    expect(usePlayer.getState().current).toBeNull();
+    useApp.setState({ failure: null });
+  });
+
+  it("says nobody is signed in where there is no profile to choose", async () => {
+    // Two states, two sentences: only the picker offers a choice. The assistant
+    // reads these out, and "choose a profile on it" is not something a person
+    // standing at a sign-in screen can do.
+    useApp.setState({ screen: { name: "login" }, history: [] });
+    expect(await runCompanionCommand({ path: "/player/playback/pause", params: {} })).toEqual({
+      ok: false,
+      reason: "nobody is signed in on this box",
+    });
+    useApp.setState({ screen: { name: "home" }, backend: null, history: [] });
+    expect(await runCompanionCommand({ path: "/player/playback/pause", params: {} })).toEqual({
+      ok: false,
+      reason: "nobody is signed in on this box",
+    });
+  });
+
+  it("does not give a step up on the way to refusing a command", async () => {
+    // `bringToFront` can still turn a navigation down, and abandoning the step
+    // first meant a command reported as failed had already thrown the episode
+    // away. This file says so twice about its other paths.
+    launchRefused = true;
+    __lifecycle.release("hidden");
+    usePlayer.setState({ current: null, moving: { id: "e3" } as never });
+    const res = await runCompanionCommand({ path: "/player/navigation/home", params: {} });
+    expect(res).toMatchObject({ ok: false });
+    expect(usePlayer.getState().moving, "the step is still going").not.toBeNull();
+  });
+
+  it("answers the transport paths that were left out with the same two sentences", async () => {
+    usePlayer.setState({ current: null, moving: { id: "e3" } as never });
+    for (const path of ["/player/playback/pause", "/player/playback/seekTo", "/player/playback/stepForward"]) {
+      expect(await runCompanionCommand({ path, params: { queryOffset: "1000" } }), path).toEqual({
+        ok: false,
+        reason: "the box is already changing episode",
+      });
+    }
   });
 
   it("still lets a phone subscribe while the picker is up", async () => {

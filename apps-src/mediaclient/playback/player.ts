@@ -216,6 +216,8 @@ const MOVE_GIVE_UP_MS = 12_000;
 const SETTLE_MAX_MS = 10_000;
 /** When the box was last asked to show something. See `stillSettling`. */
 let startedAt = 0;
+/** Whether it has said it did. Set by the box's own event, never by asking it. */
+let shownYet = false;
 let unsubscribePlayer: (() => void) | null = null;
 let currentBackend: MediaBackend | null = null;
 let lifecycleWired = false;
@@ -312,9 +314,18 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // Whatever was playing gets its last word before anything else starts.
     await get().stop();
 
+    // Somebody gave this up while the previous episode was being closed off. The
+    // store has to say what is true afterwards: `stop` does not clear the
+    // neighbours, and leaving them made the next `skipNext` answer ok and start
+    // an episode on a box that was showing nothing. `currentBackend` is assigned
+    // below rather than above, so a sign-out that landed during the teardown is
+    // not quietly undone by this call.
+    if (forThis !== playToken) {
+      set({ siblings: {}, queue: undefined, subDelaySec: 0 });
+      get().cancelUpNext();
+      return;
+    }
     currentBackend = backend;
-    // Somebody gave this up while the previous episode was being closed off.
-    if (forThis !== playToken) return;
     // The episodes either side, worked out HERE rather than by whoever pressed
     // play. A film can be started from a season screen, a carry-on-watching
     // row, a search result or a person's credits, and only one of those knew
@@ -408,6 +419,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
           : 0;
 
     startedAt = Date.now();
+    shownYet = false;
     set({
       current: { item, decision, markers, detail, choice },
       state: "playing",
@@ -603,6 +615,9 @@ export const usePlayer = create<PlayerState>((set, get) => ({
 
   async stop() {
     if (!get().current) return;
+    // Nothing was asked for, so nothing is settling. Without this a film that
+    // never appeared left the window open with the box showing nothing.
+    startedAt = 0;
     // Before the bridge call, so an event racing the stop is already ignored.
     releasePlayer("video");
     bridge()?.stop?.();
@@ -668,24 +683,31 @@ export const usePlayer = create<PlayerState>((set, get) => ({
  * for a hole of its own - what keeps a theme out of the gap is that playback
  * already silenced it.
  */
+export function useShowingPlayer(): boolean {
+  return usePlayer((s) => s.current !== null || s.moving !== null);
+}
+
 /**
  * The box has not shown what it was last asked to play, and it still might.
  *
- * Two halves and both are needed. `buffering` alone is what the box says, and it
- * says it for ever when a play was refused with no event - which would kill the
- * prev/next buttons on a screen showing nothing, and have the assistant answer
- * "the box is already changing episode" about it. The elapsed time alone would
- * refuse a step for ten seconds after every start, buffered or not.
+ * Keyed on the box's own first-frame event rather than on `buffering`, which is
+ * the same question asked worse: the flag is also set by an ordinary stall on a
+ * transcoded stream, so a rebuffer eight seconds into a film was treated as a
+ * start - the one case the callers all say they exclude.
  *
- * A rebuffer in the middle of a film is therefore not "settling": it sets the
- * flag, but the start is minutes old.
+ * Bounded in time as well, because the event may never come: `tvbox.play()`
+ * confirms nothing and a refused play produces no events at all - measured 2
+ * attempts in 5 when the app is not the foreground one. Anything that refuses on
+ * this would otherwise refuse for ever, which killed the prev/next buttons on a
+ * box showing nothing and had the assistant answer for it.
  */
 export function stillSettling(): boolean {
-  return usePlayer.getState().buffering && Date.now() - startedAt < SETTLE_MAX_MS;
+  return !shownYet && Date.now() - startedAt < SETTLE_MAX_MS;
 }
 
-export function useShowingPlayer(): boolean {
-  return usePlayer((s) => s.current !== null || s.moving !== null);
+/** How much of that window is left, for a caller that has to wait it out. */
+export function settleRemainingMs(): number {
+  return stillSettling() ? Math.max(0, SETTLE_MAX_MS - (Date.now() - startedAt)) : 0;
 }
 
 function randomSession(): string {
@@ -794,6 +816,10 @@ function wirePlayerEvents(set: Setter, get: () => PlayerState): void {
         if (ev.ms) set({ durationMs: ev.ms });
         break;
       case "playing":
+        // The box's own first-frame reveal, which is the only honest answer to
+        // "has it shown this yet". Everything that waits for a start waits for
+        // this rather than for time to pass.
+        shownYet = true;
         set({ state: "playing", buffering: false });
         break;
       case "buffering":

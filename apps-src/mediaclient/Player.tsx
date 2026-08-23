@@ -10,7 +10,7 @@ import { FocusButton, useBackspace, useFocusableItem, useI18n } from "@sdk";
 import { useApp } from "./state";
 import { TrackMenu, type Choice } from "./TrackMenu";
 import type { MediaItem, Track } from "./backends/types";
-import { stillSettling, usePlayer } from "./playback/player";
+import { settleRemainingMs, stillSettling, usePlayer } from "./playback/player";
 import { ScrubPreview } from "./ScrubPreview";
 import { ChapterStrip } from "./ChapterStrip";
 import { NextIcon, PauseIcon, PlayIcon, PreviousIcon } from "./icons";
@@ -151,12 +151,17 @@ export function Player(): React.JSX.Element | null {
   useEffect(() => {
     if (!current) return;
     if (hideTimer.current) clearTimeout(hideTimer.current);
-    if (buffering && stillSettling()) {
-      usePlayer.getState().showOverlay(true);
-      return;
-    }
+    const settling = buffering && stillSettling();
+    if (settling) usePlayer.getState().showOverlay(true);
     if (usePlayer.getState().state === "playing" && usePlayer.getState().scrubMs === null && !chaptersRef.current) {
-      hideTimer.current = setTimeout(() => usePlayer.getState().showOverlay(false), IDLE_HIDE_MS);
+      // One timer either way, and the wait is ADDED rather than replaced by a
+      // branch that returns. A branch that pinned the overlay and armed nothing
+      // never hid it again on a box that reports no first frame: `buffering`
+      // cannot end that, and nothing else re-runs this effect.
+      hideTimer.current = setTimeout(
+        () => usePlayer.getState().showOverlay(false),
+        IDLE_HIDE_MS + settleRemainingMs(),
+      );
     }
   }, [current, buffering]);
 
