@@ -69,8 +69,9 @@ function createCredGuard(deps) {
   const backup = () => path.join(cacheDir, "credentials.json.rejected");
 
   let strikes = 0;
-  let heals = 0;
+  let heals = 0; // completed resets, and nothing else - see gaveUpLogged
   let saidMissing = false;
+  let gaveUpLogged = false;
 
   // Feed every line of the daemon's output through here. `withToken` says whether
   // the instance that produced it was started with --access-token.
@@ -88,8 +89,12 @@ function createCredGuard(deps) {
     if (strikes < threshold) return false;
     strikes = 0;
     if (heals >= maxHeals) {
-      if (heals === maxHeals) {
-        heals++; // once, so a stuck box logs a reason instead of a line per start
+      // A latch of its own rather than one more heal: a stuck box has to log the
+      // reason once instead of a line per start, and counting that as a reset
+      // would make the number this reports a different thing from the number of
+      // times credentials were actually cleared.
+      if (!gaveUpLogged) {
+        gaveUpLogged = true;
         log("saved login refused again after " + maxHeals + " resets - leaving it alone");
       }
       return false;

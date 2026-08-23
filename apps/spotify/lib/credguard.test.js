@@ -106,12 +106,20 @@ test("the number of resets is bounded, and the last word is a reason", () => {
   const b = box({ maxHeals: 1 });
   assert.equal(b.guard.note(DENIED, {}), false);
   assert.equal(b.guard.note(DENIED, {}), true);
+  assert.equal(b.guard.stats().heals, 1);
   // A fresh login arrives (a cast) and is refused too: the guard is out of resets.
   fs.writeFileSync(b.cred, '{"auth_data":"second-blob"}');
   assert.equal(b.guard.note(DENIED, {}), false);
   assert.equal(b.guard.note(DENIED, {}), false, "no second reset");
   assert.equal(fs.existsSync(b.cred), true);
   assert.equal(b.logs.filter((m) => /leaving it alone/.test(m)).length, 1);
+  // What it reports is the number of times credentials were CLEARED - the
+  // give-up message must not be counted as one of them, and the count must not
+  // run past the bound. (CodeRabbit, PR #50.)
+  assert.equal(b.guard.stats().heals, 1, "the give-up log is not a reset");
+  for (let i = 0; i < 8; i++) b.guard.note(DENIED, {});
+  assert.equal(b.guard.stats().heals, 1);
+  assert.ok(b.guard.stats().heals <= 1, "never past maxHeals");
 });
 
 test("a rename that fails is reported, not thrown", () => {
