@@ -10,7 +10,7 @@
 
 import { usePlayer } from "./player";
 import { useMusic } from "./music";
-import { useApp } from "../state";
+import { useApp, type Screen } from "../state";
 import { isVisible } from "../lifecycle";
 import { rememberedVersion } from "../chosenVersion";
 import type { CommandResult, CompanionCommand } from "../backends/plex/companion";
@@ -396,6 +396,37 @@ async function navigate(what: string): Promise<CommandResult> {
   return ok;
 }
 
+/**
+ * Put the film's own browse screen behind the player.
+ *
+ * A cast leaves whatever screen was up, which is usually the home page - the
+ * box answers Plex with the app closed, so most casts open it. That screen is
+ * not decoration: the countdown to the next episode is drawn on the SEASON page
+ * (see `Detail`), on the episode it is about to play, so a voice-started episode
+ * ran out over the home page and stepped to the next one with nothing to show
+ * for it. It is also what Back reaches, and what is on screen when the film ends.
+ *
+ * An episode has no page of its own - its season is the list it belongs to - so
+ * that is what opens, pointing at the episode. Anything else opens on itself. An
+ * episode whose season the server did not name leaves the screen alone: its own
+ * id would open a page with neither the list nor the countdown on it.
+ *
+ * `go` rather than `replace`, so Back still returns wherever the household was.
+ */
+function showBrowseScreenFor(item: MediaItem): void {
+  const app = useApp.getState();
+  const itemId = item.kind === "episode" ? item.parentId : item.id;
+  if (!itemId) return;
+  const screen: Screen =
+    item.kind === "episode" ? { name: "item", itemId, focusChildId: item.id } : { name: "item", itemId };
+  // Already on that page - a second cast from the same season - so the episode
+  // it points at is replaced rather than pushed. Pushing stacked a step onto the
+  // history for every episode; skipping it altogether left the page pointing at
+  // the episode BEFORE the one that is playing.
+  if (app.screen.name === "item" && app.screen.itemId === itemId) app.replace(screen);
+  else app.go(screen);
+}
+
 export async function runCompanionCommand(cmd: CompanionCommand): Promise<CommandResult> {
   const p = usePlayer.getState();
   switch (cmd.path) {
@@ -467,6 +498,10 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         await p.stop();
         return no("the media app went off screen");
       }
+      // Last, because it is about the screen UNDER the film and nothing above
+      // depends on it - and only once the film really started, so a refused cast
+      // does not walk the person to a page they never asked for.
+      showBrowseScreenFor(item);
       return ok;
     }
     case "/player/playback/play":

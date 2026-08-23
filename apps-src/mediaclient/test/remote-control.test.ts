@@ -445,4 +445,88 @@ describe("a command from a controller", () => {
     expect(res).toMatchObject({ ok: false });
     expect(launched, "nothing was asked to come forward").toEqual([]);
   });
+
+  /**
+   * What is UNDER the film a controller started.
+   *
+   * A cast leaves whatever screen was up, and the usual case is the home page:
+   * the box answers Plex with the app closed, so most casts open it. That screen
+   * is not decoration - the countdown to the next episode is drawn on the season
+   * page, on the episode it is about to play - so a voice-started episode ran out
+   * over the home page and stepped to the next one with nothing to show for it,
+   * and Back at the end of a film went to the home page rather than to the film.
+   */
+  const episodeBackend = (over: Record<string, unknown> = {}): unknown =>
+    backend({
+      item: async (id: string) => ({
+        id,
+        kind: "episode",
+        title: `Episode ${id}`,
+        grandparentTitle: "A Series",
+        parentId: "season-9",
+        versions: [{ mediaIndex: 0, label: "1080p", partId: "1", audio: [], subtitles: [] }],
+        roles: [],
+        extras: [],
+        ...over,
+      }),
+    });
+
+  it("puts the film's own page behind it", async () => {
+    await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "1" },
+    });
+    expect(useApp.getState().screen).toEqual({ name: "item", itemId: "27467" });
+    // And Back still reaches where the household was, so the cast did not erase
+    // it.
+    expect(useApp.getState().history.at(-1)).toEqual({ name: "home" });
+  });
+
+  it("puts an episode's SEASON behind it, pointing at the episode", async () => {
+    useApp.setState({ backend: episodeBackend() as never });
+    await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/555", commandID: "1" },
+    });
+    // The season, because an episode has no page of its own - that is the screen
+    // the countdown is drawn on.
+    expect(useApp.getState().screen).toEqual({ name: "item", itemId: "season-9", focusChildId: "555" });
+  });
+
+  it("does not stack a second cast from the same season onto the history", async () => {
+    useApp.setState({ backend: episodeBackend() as never });
+    for (const id of ["555", "556"]) {
+      await runCompanionCommand({
+        path: "/player/playback/playMedia",
+        params: { queryKey: `/library/metadata/${id}`, commandID: "1" },
+      });
+    }
+    expect(useApp.getState().screen).toEqual({ name: "item", itemId: "season-9", focusChildId: "556" });
+    expect(useApp.getState().history, "one step back, not one per episode").toEqual([{ name: "home" }]);
+  });
+
+  it("leaves the screen alone when there is no page to open", async () => {
+    // A season the server did not name. The episode's own id would open a page
+    // with neither the list nor the countdown on it, which is worse than the home
+    // page it replaced.
+    useApp.setState({ backend: episodeBackend({ parentId: undefined }) as never });
+    await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/555", commandID: "1" },
+    });
+    expect(useApp.getState().screen).toEqual({ name: "home" });
+  });
+
+  it("leaves the screen alone when the film could not start", async () => {
+    // Refused on its way in: a cast that never played must not walk the person to
+    // a page they did not ask for.
+    launchRefused = true;
+    __lifecycle.release("hidden");
+    const res = await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "1" },
+    });
+    expect(res).toMatchObject({ ok: false });
+    expect(useApp.getState().screen).toEqual({ name: "home" });
+  });
 });

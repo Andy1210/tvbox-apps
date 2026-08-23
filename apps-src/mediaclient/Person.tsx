@@ -5,7 +5,7 @@ import { Row } from "./Row";
 import { Message } from "./Message";
 import { artworkScale } from "./posters";
 import { useFocusFallback, useInitialFocus, useScrollToTopOnFirst } from "./focus";
-import { usePlayer } from "./playback/player";
+import { useShowingPlayer } from "./playback/player";
 import { classify, useApp } from "./state";
 import type { CreditSet, MediaItem } from "./backends/types";
 import { log } from "./redact";
@@ -29,7 +29,7 @@ export function Person({ personId, personName }: { personId: string; personName:
   const go = useApp((s) => s.go);
   const fail = useApp((s) => s.fail);
   const failure = useApp((s) => s.failure);
-  const playing = usePlayer((s) => s.current !== null);
+  const playing = useShowingPlayer();
   const [reload, setReload] = useState(0);
   const [credits, setCredits] = useState<CreditSet | null>(null);
 

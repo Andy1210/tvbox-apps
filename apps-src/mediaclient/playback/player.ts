@@ -148,6 +148,16 @@ interface PlayerState {
    */
   playSibling(which: "prev" | "next"): Promise<MediaItem | undefined>;
   /**
+   * The episode a prev/next press is moving to, while the move is in flight.
+   *
+   * A move is a stop and a start - five round trips - and `current` is null for
+   * all of them, so without this the overlay came down, the browsing screen
+   * behind it stopped being hidden, and the press had nothing left to act on:
+   * pressing again in that window started ANOTHER episode, so one button could
+   * step several at once.
+   */
+  moving: MediaItem | null;
+  /**
    * The episode that will start by itself, and when.
    *
    * Set when one runs out with another behind it. The screen underneath shows a
@@ -173,6 +183,18 @@ let upNextTimer: ReturnType<typeof setTimeout> | null = null;
 let playToken = 0;
 /** Long enough to read the title, short enough not to be a wait. */
 const UP_NEXT_MS = 5_000;
+/**
+ * How long a prev/next step may hold the screen before it gives up the claim.
+ *
+ * Not a cancel - nothing here can take back a request already in flight - it
+ * only stops the CLAIM outliving the move. The Plex request layer has no timeout
+ * of its own, so a server that accepts the connection and never answers would
+ * otherwise leave this set for good: one line on screen, the browsing screen
+ * hidden behind it and Back swallowed, which is a worse remote than the one this
+ * fixes. Past it the screen does what it did before, and a second press is
+ * somebody who has waited long enough to mean it.
+ */
+const MOVE_GIVE_UP_MS = 12_000;
 let unsubscribePlayer: (() => void) | null = null;
 let currentBackend: MediaBackend | null = null;
 let lifecycleWired = false;
@@ -187,6 +209,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   seekFromMs: null,
   scrubMs: null,
   siblings: {},
+  moving: null,
   upNext: null,
   subDelaySec: 0,
   overlay: false,
@@ -201,9 +224,26 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   async playSibling(which) {
     const item = get().siblings[which];
     if (!item || !currentBackend) return undefined;
-    // The queue travels with the move, or stepping once through a playlist
-    // would land on an item that no longer knows it is in one.
-    await get().play(currentBackend, item, { resume: false, queue: get().queue });
+    // One move at a time, and the flag is set before the first await so a second
+    // press cannot get past this line. Each press used to start its own episode
+    // from whatever `siblings` held by then, which is how pressing the button
+    // three times stepped three episodes.
+    if (get().moving) return undefined;
+    set({ moving: item });
+    const giveUp = setTimeout(() => {
+      if (get().moving === item) set({ moving: null });
+    }, MOVE_GIVE_UP_MS);
+    try {
+      // The queue travels with the move, or stepping once through a playlist
+      // would land on an item that no longer knows it is in one.
+      await get().play(currentBackend, item, { resume: false, queue: get().queue });
+    } finally {
+      // In a finally, because a stream that cannot be resolved leaves `current`
+      // null - and a flag stuck on would leave the player showing a move that
+      // is not happening, with the browsing screen hidden behind it.
+      clearTimeout(giveUp);
+      set({ moving: null });
+    }
     return item;
   },
 
@@ -543,6 +583,27 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   },
 }));
 
+/**
+ * Whether the box is showing a film - a step between two episodes included.
+ *
+ * What the browsing screens key on, rather than `current`: for the length of a
+ * prev/next step the player holds nothing at all, and a screen that reads that
+ * as "playback is over" wakes up behind the transition. Measured consequences,
+ * one per screen that does it: the season page refetches its episodes and arms
+ * the focus fallback, so a press lands on a tile nobody can see; the series'
+ * theme starts over the gap; and the home screen's backdrop - which is portalled
+ * OUT of the hidden page, so nothing the page does to itself reaches it - paints
+ * four full-screen layers over the picture.
+ *
+ * One expression in one place because those two have to agree: the screens are
+ * hidden on this and the portalled backdrop is dropped on this, and a backdrop
+ * that outlives the hiding is the bug, while one that goes early leaves the rows
+ * on a black page.
+ */
+export function useShowingPlayer(): boolean {
+  return usePlayer((s) => s.current !== null || s.moving !== null);
+}
+
 function randomSession(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
   return `s${Math.floor(Math.random() * 1e12).toString(36)}`;
@@ -764,5 +825,5 @@ export function resetPlayer(): void {
   usePlayer.getState().cancelUpNext();
   void usePlayer.getState().stop();
   currentBackend = null;
-  usePlayer.setState({ siblings: {}, queue: undefined, upNext: null, subDelaySec: 0 });
+  usePlayer.setState({ siblings: {}, moving: null, queue: undefined, upNext: null, subDelaySec: 0 });
 }

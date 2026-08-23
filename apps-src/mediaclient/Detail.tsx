@@ -13,7 +13,7 @@ import { LanguagePicker } from "./LanguagePicker";
 import { Backdrop } from "./Backdrop";
 import { useTheme } from "./theme";
 import { useFocusFallback, useInitialFocus, useScrollToTopOnFirst } from "./focus";
-import { usePlayer } from "./playback/player";
+import { usePlayer, useShowingPlayer } from "./playback/player";
 import { rememberedVersion, useChosenVersion } from "./chosenVersion";
 import { classify, useApp } from "./state";
 import type { ItemDetail, MediaItem, MediaVersion } from "./backends/types";
@@ -52,7 +52,7 @@ export function Detail({
   const back = useApp((s) => s.back);
   const fail = useApp((s) => s.fail);
   const failure = useApp((s) => s.failure);
-  const playing = usePlayer((s) => s.current !== null);
+  const playing = useShowingPlayer();
   const [reload, setReload] = useState(0);
   const [version, setVersion] = useState(0);
   /**

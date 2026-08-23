@@ -9,7 +9,7 @@ import {
 import { FocusButton, useBackspace, useFocusableItem, useI18n } from "@sdk";
 import { useApp } from "./state";
 import { TrackMenu, type Choice } from "./TrackMenu";
-import type { Track } from "./backends/types";
+import type { MediaItem, Track } from "./backends/types";
 import { usePlayer } from "./playback/player";
 import { ScrubPreview } from "./ScrubPreview";
 import { ChapterStrip } from "./ChapterStrip";
@@ -29,6 +29,15 @@ import { clock } from "./time";
  * button on a hidden page.
  */
 const IDLE_KEY = "player-idle";
+
+/**
+ * The keys a move swallows.
+ *
+ * The D-pad and OK only: those are the ones spatial navigation would resolve
+ * against the hidden screen behind. A media key means the same thing either
+ * way, and the store's own guards already ignore it with nothing playing.
+ */
+const MOVE_SWALLOWS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter"]);
 
 /** Nudge sizes as a press is held. Held longer means further per press. */
 const STEPS_MS = [10_000, 30_000, 60_000];
@@ -63,6 +72,7 @@ export function Player(): React.JSX.Element | null {
   const overlay = usePlayer((s) => s.overlay);
   const scrubMs = usePlayer((s) => s.scrubMs);
   const siblings = usePlayer((s) => s.siblings);
+  const moving = usePlayer((s) => s.moving);
   const subDelaySec = usePlayer((s) => s.subDelaySec);
 
   const [menu, setMenu] = useState<null | "version" | "audio" | "subtitles" | "quality" | "search">(null);
@@ -131,7 +141,11 @@ export function Player(): React.JSX.Element | null {
     // window, ahead of spatial navigation's own - so leaving it running would
     // scrub the film on Left/Right instead of moving between the menu's columns,
     // and OK would both press the focused button and toggle pause.
-    if (!current || menu) return;
+    //
+    // Armed through a move as well, when there is no `current` at all: the
+    // browsing screen behind is hidden but its focusables are still registered,
+    // so a press that got past here reached a screen nobody can see.
+    if ((!current && !moving) || menu) return;
 
     // Re-armed from FRESH state, and after the key has been acted on. Reading
     // the snapshot taken at the top of the handler meant the first arrow press
@@ -152,6 +166,17 @@ export function Player(): React.JSX.Element | null {
 
     const onKey = (e: KeyboardEvent): void => {
       const p = usePlayer.getState();
+      // Nothing to act on between two episodes: the one that was playing is gone
+      // and the next one has not arrived. Swallowed rather than passed on, for
+      // the reason the effect is armed at all - and swallowed for the D-pad only,
+      // so a phone's own transport keys still reach the guards that ignore them.
+      if (!p.current) {
+        if (MOVE_SWALLOWS.has(e.key)) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        return;
+      }
       // Three states, and which one it is decides what every key means.
       //
       // Nothing focused is the DEFAULT and the common case: the arrows jump ten
@@ -296,7 +321,7 @@ export function Player(): React.JSX.Element | null {
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("keyup", onKeyUp, true);
     };
-  }, [current, menu]);
+  }, [current, moving, menu]);
 
   const hasChapters = (current?.detail?.chapters?.length ?? 0) > 0;
   useEffect(() => {
@@ -493,7 +518,11 @@ export function Player(): React.JSX.Element | null {
       setFocus("skip");
   }, [announcing, skippable, menu]);
 
-  if (!current) return null;
+  // Between two episodes. The old one has stopped and the new one is still
+  // being resolved, so there is nothing to draw an overlay over - but something
+  // has to be on screen, or the press that asked for this looks like it was
+  // never taken, and the next blind press asks for it again.
+  if (!current) return moving ? <Moving item={moving} /> : null;
 
   if (menu && current.detail) {
     const searchSubtitles = async (): Promise<void> => {
@@ -707,6 +736,37 @@ export function Player(): React.JSX.Element | null {
 function IdleAnchor(): React.JSX.Element {
   const { ref } = useFocusableItem({ focusKey: IDLE_KEY, focusable: false });
   return <div ref={ref} className="pointer-events-none absolute h-0 w-0" aria-hidden="true" />;
+}
+
+/**
+ * What is on screen between two episodes.
+ *
+ * The same bottom gradient the overlay uses, naming the episode being moved to.
+ * Nothing focusable and no buttons: the move cannot be steered, and the point of
+ * drawing anything here is that the press which asked for it is visibly taken -
+ * a blank screen is what had people pressing again, and again.
+ */
+function Moving({ item }: { item: MediaItem }): React.JSX.Element {
+  const { t } = useI18n();
+  return (
+    <div className="absolute inset-0 flex flex-col justify-end">
+      <div className="bg-gradient-to-t from-black/90 via-black/65 to-transparent px-[4vw] pt-[10vh] pb-[4vh]">
+        <div className="flex items-baseline gap-[1.2vw]">
+          <h2 className="text-[2.8vh] font-semibold tracking-tight [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]">
+            {item.grandparentTitle ?? item.title}
+          </h2>
+          {item.grandparentTitle && (
+            <span className="text-[2.1vh] text-white/80 [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]">
+              {[episodeNumber(item), item.title].filter(Boolean).join(" · ")}
+            </span>
+          )}
+        </div>
+        <p className="mt-[1vh] text-[2.2vh] text-white/85 [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]">
+          {t("player.starting")}
+        </p>
+      </div>
+    </div>
+  );
 }
 
 /**

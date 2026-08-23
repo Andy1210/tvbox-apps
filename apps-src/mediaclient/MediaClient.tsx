@@ -17,7 +17,7 @@ import { Profiles } from "./Profiles";
 import { Search } from "./Search";
 import { Settings } from "./Settings";
 import { useMusic } from "./playback/music";
-import { usePlayer } from "./playback/player";
+import { usePlayer, useShowingPlayer } from "./playback/player";
 import { handleMusicCommand, useMusicMediaKeys } from "./playback/mediakeys";
 import { useApp } from "./state";
 import { deviceName } from "./identity";
@@ -60,7 +60,10 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   const screen = useApp((s) => s.screen);
   const boot = useApp((s) => s.boot);
   const back = useApp((s) => s.back);
-  const playing = usePlayer((s) => s.current !== null);
+  // A step between two episodes counts as playing: the player holds nothing for
+  // the length of the move, so without it the browsing screens came back for a
+  // second - drawn over the transition, and taking the presses meant for it.
+  const playing = useShowingPlayer();
 
   // The same navigation ticks the launcher uses, honouring the same box-wide
   // setting - a household that turned them off there does not expect them back
@@ -248,6 +251,10 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   // pause the film AND navigate away from it.
   useBackspace(() => {
     if (usePlayer.getState().current) return;
+    // Nor between two episodes: there is nothing to pause and nothing to go back
+    // to yet, and navigating would leave the episode that is starting playing
+    // behind a screen nobody asked for.
+    if (usePlayer.getState().moving) return;
     if (!back()) onExit();
   });
 

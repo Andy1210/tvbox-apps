@@ -5,7 +5,7 @@ import { Row } from "./Row";
 import { Message } from "./Message";
 import { artworkScale } from "./posters";
 import { useFocusFallback, useInitialFocus, useScrollToTopOnFirst } from "./focus";
-import { usePlayer } from "./playback/player";
+import { useShowingPlayer } from "./playback/player";
 import { usePrefs } from "./prefs";
 import { Hero } from "./Hero";
 import { classify, useApp } from "./state";
@@ -35,7 +35,7 @@ export function Home(): React.JSX.Element {
   const hiddenRows = usePrefs((s) => s.hiddenRows);
   const fail = useApp((s) => s.fail);
   const failure = useApp((s) => s.failure);
-  const playing = usePlayer((s) => s.current !== null);
+  const playing = useShowingPlayer();
   const [reload, setReload] = useState(0);
   const [under, setUnder] = useState<MediaItem | null>(null);
   const scroller = useRef<HTMLDivElement | null>(null);

@@ -5,7 +5,7 @@ import { accentFrom } from "./accent";
 import { loadImage } from "./posters";
 import { TitleArt } from "./TitleArt";
 import { useApp } from "./state";
-import { usePlayer } from "./playback/player";
+import { useShowingPlayer } from "./playback/player";
 import type { ItemDetail, MediaItem } from "./backends/types";
 import { log } from "./redact";
 
@@ -46,7 +46,7 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
    * it has to stay that way: a backdrop that outlives them is exactly the bug,
    * and one that goes early leaves the rows on a black page.
    */
-  const playing = usePlayer((s) => s.current !== null);
+  const playing = useShowingPlayer();
 
   // The series, when the cursor is on an episode: its art, its name and its
   // cast are what someone is choosing between, not one episode's.
