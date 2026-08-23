@@ -80,10 +80,10 @@ const SETTLED_VW = 64;
 /**
  * How long after a press the panel comes back.
  *
- * The column's width animation is 500 ms on an ease-out curve, so by this point
- * it has covered about 85% of the distance and the space is already there.
- * Waiting for all of it reads as slow; not waiting at all is what put the panel
- * at full width beside a column that had not moved yet.
+ * The column's width animation is 500 ms on the default ease-in-out curve, and
+ * measured in Chrome it has covered 87.5% of the distance by this point, so the
+ * space is already there. Waiting for all of it reads as slow; not waiting at all
+ * is what put the panel at full width beside a column that had not moved yet.
  */
 const PANEL_OPEN_MS = 320;
 
@@ -361,7 +361,11 @@ export function NowPlaying(): React.JSX.Element {
           most, and a queue behind a button is a queue nobody looks at - until
           the screen settles, when the song has the middle to itself. */}
       <div
-        className={`flex min-w-0 flex-col justify-center transition-all duration-500 ${settled ? "text-center" : ""}`}
+        // `shrink-0`, because the panel mounts while this is still moving: at that
+        // moment the two ask for about 94vw of a 90vw row, and flexbox answers by
+        // shrinking both - a used-value change no transition covers. Measured as a
+        // 27 px snap of this column's right edge in the mount frame.
+        className={`flex min-w-0 shrink-0 flex-col justify-center transition-all duration-500 ${settled ? "text-center" : ""}`}
         // A length in both states, and the margin written out rather than
         // `mx-auto`. Measured in Chrome: `width: auto` cannot be interpolated, so
         // coming back out of the settled state the column started 26 px wide
@@ -444,7 +448,7 @@ export function NowPlaying(): React.JSX.Element {
       {panelUp && (
         <div
           className={[
-            "flex min-w-0 flex-col transition-opacity duration-200",
+            "flex min-w-0 shrink-0 flex-col transition-opacity duration-200",
             panelOpen ? "opacity-100" : "opacity-0",
           ].join(" ")}
           style={{ width: `${PANEL_VW}vw` }}

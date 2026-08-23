@@ -53,6 +53,22 @@ function queueId(containerKey: string | undefined): string | undefined {
  * have started. Measured before this existed: a film played and reported
  * progress under the previous profile's token with the picker on screen.
  */
+/**
+ * Nobody has said who is watching yet, so nothing may act on this box.
+ *
+ * `playMedia` and the navigation paths each refuse this for themselves; the
+ * TRANSPORT paths had no check at all, and a skip accepted there takes a claim on
+ * the screen - which HIDES the PIN pad the digits are being typed into, for as
+ * long as the step lasts. The poll loop is already stopped while the picker is
+ * up, so nothing legitimate is turned away: this closes the window a command
+ * already in flight arrives through.
+ */
+function nobodyChosen(): CommandResult | null {
+  const at = useApp.getState().screen.name;
+  if (at !== "profiles" && at !== "login" && at !== "boot") return null;
+  return no("this box is asking who is watching; choose a profile on it first");
+}
+
 function personChanged(who: { backend: unknown }): CommandResult | null {
   const now = useApp.getState();
   if (now.backend !== who.backend) return no("the person on this box changed");
@@ -214,7 +230,12 @@ async function startMusic(
   // it was the home page, with a song coming out of it and no way to tell which
   // one. Every in-app route to a track does this (MusicItem, MusicList,
   // MusicHome); the cast path was the one that did not.
-  useApp.getState().go({ name: "nowPlaying" });
+  //
+  // Unless somebody else is at the box by now: `playQueue` is several round trips
+  // and this is the step after them, so the same check the film path makes here
+  // applies - navigating is what takes the screen away from a profile picker or a
+  // sign-in that has come up in the meantime.
+  if (!personChanged(who)) useApp.getState().go({ name: "nowPlaying" });
   // Remembered for the report that follows: a phone matches what the box says
   // it is playing against the queue IT built, and a report with no queue on it
   // reads as the box playing one loose track.
@@ -305,7 +326,26 @@ function started(id: string | undefined): CommandResult {
  */
 function music(): boolean {
   const m = useMusic.getState();
-  return usePlayer.getState().current === null && m.queue.length > 0 && m.state !== "stopped";
+  // A step between two episodes is the film holding the player too: `current` is
+  // null for the whole of it, so a spoken "pause" during one reached the music
+  // queue instead - and a "stop" was answered ok while the next episode started
+  // a second later.
+  return !filmHasPlayer() && m.queue.length > 0 && m.state !== "stopped";
+}
+
+/**
+ * Why a step was refused: one is already going, or the box has not shown the
+ * last one yet. Either way the answer is not "it did not start".
+ */
+function stepInFlight(): boolean {
+  const p = usePlayer.getState();
+  return p.moving !== null || p.buffering;
+}
+
+/** The film player holds the box, a step between two episodes included. */
+function filmHasPlayer(): boolean {
+  const p = usePlayer.getState();
+  return p.current !== null || p.moving !== null;
 }
 
 /**
@@ -318,7 +358,7 @@ function music(): boolean {
  * cursor is, which is what pressing play on the television does.
  */
 function musicToResume(): boolean {
-  return usePlayer.getState().current === null && useMusic.getState().queue.length > 0;
+  return !filmHasPlayer() && useMusic.getState().queue.length > 0;
 }
 
 /**
@@ -407,27 +447,35 @@ async function navigate(what: string): Promise<CommandResult> {
  * for it. It is also what Back reaches, and what is on screen when the film ends.
  *
  * An episode has no page of its own - its season is the list it belongs to - so
- * that is what opens, pointing at the episode. Anything else opens on itself. An
- * episode whose season the server did not name leaves the screen alone: its own
- * id would open a page with neither the list nor the countdown on it.
+ * that is what opens, pointing at the episode. Anything else opens on itself.
  *
- * `go` rather than `replace`, so Back still returns wherever the household was.
+ * A season the server did not name falls back to the SERIES, without pointing at
+ * anything: 508 of this library's 8234 episodes carry no `parentRatingKey`, and
+ * the same field is what the prev/next lookup uses - so those have no next
+ * episode and no countdown either way, and all the screen can honestly be is the
+ * thing they belong to. No `focusChildId` there, because an episode is not a
+ * child of a series, and naming a key that will never mount is how a page ends
+ * up with a dead remote.
+ *
+ * One step in the history at most: the first cast pushes, so Back returns
+ * wherever the household was browsing, and every cast after it replaces. Pushing
+ * each time meant an evening of spoken requests had to be pressed back through
+ * one film at a time.
  */
 function showBrowseScreenFor(item: MediaItem): void {
   const app = useApp.getState();
-  const itemId = item.kind === "episode" ? item.parentId : item.id;
+  const episode = item.kind === "episode";
+  const itemId = episode ? (item.parentId ?? item.grandparentId) : item.id;
   if (!itemId) return;
   const screen: Screen =
-    item.kind === "episode" ? { name: "item", itemId, focusChildId: item.id } : { name: "item", itemId };
-  // Already on that page - a second cast from the same season - so the episode
-  // it points at is replaced rather than pushed. Pushing stacked a step onto the
-  // history for every episode; skipping it altogether left the page pointing at
-  // the episode BEFORE the one that is playing.
-  if (app.screen.name === "item" && app.screen.itemId === itemId) app.replace(screen);
+    episode && item.parentId ? { name: "item", itemId, focusChildId: item.id } : { name: "item", itemId };
+  if (app.screen.name === "item") app.replace(screen);
   else app.go(screen);
 }
 
 export async function runCompanionCommand(cmd: CompanionCommand): Promise<CommandResult> {
+  const waiting = nobodyChosen();
+  if (waiting) return waiting;
   const p = usePlayer.getState();
   switch (cmd.path) {
     case "/player/playback/playMedia": {
@@ -501,7 +549,15 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       // Last, because it is about the screen UNDER the film and nothing above
       // depends on it - and only once the film really started, so a refused cast
       // does not walk the person to a page they never asked for.
-      showBrowseScreenFor(item);
+      //
+      // Asked one more time who is here. This is the only step after the longest
+      // await in the function, and navigating is the one thing that takes the
+      // screen away from somebody: measured, a cast whose stream resolved while
+      // the household was choosing a profile walked the box off its own PIN pad,
+      // and one that resolved after a sign-out replaced the sign-in screen with a
+      // blank page. Not a refusal of the command - the film did start - so the
+      // screen underneath is simply left where the person put it.
+      if (!personChanged(asked)) showBrowseScreenFor(item);
       return ok;
     }
     case "/player/playback/play":
@@ -513,6 +569,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         else if (m.state === "stopped") await m.playAt(m.index);
         return ok;
       }
+      if (usePlayer.getState().moving) return no("the box is still starting the next episode");
       if (!p.current) return no("nothing is playing");
       if (p.state === "paused") p.togglePause();
       return ok;
@@ -521,6 +578,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         if (useMusic.getState().state === "playing") useMusic.getState().toggle();
         return ok;
       }
+      if (usePlayer.getState().moving) return no("the box is still starting the next episode");
       if (!p.current) return no("nothing is playing");
       if (p.state === "playing") p.togglePause();
       return ok;
@@ -531,12 +589,20 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         useMusic.getState().toggle();
         return ok;
       }
+      if (usePlayer.getState().moving) return no("the box is still starting the next episode");
       if (!p.current) return no("nothing is playing");
       p.togglePause();
       return ok;
     case "/player/playback/stop":
       if (music()) {
         await useMusic.getState().stop();
+        return ok;
+      }
+      // A step in flight is stopped by giving up the step: answering "already what
+      // was asked for" was measured to return ok and then start the next episode
+      // a second later, because nothing about the request had been cancelled.
+      if (usePlayer.getState().moving) {
+        usePlayer.getState().cancelMove();
         return ok;
       }
       if (!p.current) return ok; // already what was asked for
@@ -563,7 +629,12 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       // The item the player says it started, not the one this snapshot held:
       // `siblings` is replaced as the previous film is torn down, so the two
       // can be different episodes by the time the answer is written.
-      return started((await p.playSibling("next"))?.id);
+      const next = await p.playSibling("next");
+      // A step that was REFUSED is not a step that failed. The box is already
+      // changing episode - answering "the film did not start" sends the assistant
+      // to say so out loud about a television doing exactly what was asked.
+      if (!next && stepInFlight()) return no("the box is already changing episode");
+      return started(next?.id);
     }
     case "/player/playback/skipPrevious": {
       if (music()) {
@@ -571,7 +642,9 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         return ok;
       }
       if (!p.siblings.prev) return no("nothing comes before this");
-      return started((await p.playSibling("prev"))?.id);
+      const prev = await p.playSibling("prev");
+      if (!prev && stepInFlight()) return no("the box is already changing episode");
+      return started(prev?.id);
     }
     case "/player/playback/seekTo": {
       if (music()) {

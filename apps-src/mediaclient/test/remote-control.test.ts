@@ -505,16 +505,88 @@ describe("a command from a controller", () => {
     expect(useApp.getState().history, "one step back, not one per episode").toEqual([{ name: "home" }]);
   });
 
-  it("leaves the screen alone when there is no page to open", async () => {
-    // A season the server did not name. The episode's own id would open a page
-    // with neither the list nor the countdown on it, which is worse than the home
-    // page it replaced.
-    useApp.setState({ backend: episodeBackend({ parentId: undefined }) as never });
+  it("falls back to the series when the server named no season", async () => {
+    // 508 of this library's 8234 episodes carry no `parentRatingKey`, and the
+    // prev/next lookup reads the same field - so those have no next episode and
+    // no countdown either way. The series is then the most the screen can
+    // honestly be, and it points at nothing: an episode is not a child of a
+    // series, and naming a key that never mounts is how a page gets a dead
+    // remote.
+    useApp.setState({ backend: episodeBackend({ parentId: undefined, grandparentId: "show-3" }) as never });
+    await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/555", commandID: "1" },
+    });
+    expect(useApp.getState().screen).toEqual({ name: "item", itemId: "show-3" });
+  });
+
+  it("leaves the screen alone when there is no page to open at all", async () => {
+    useApp.setState({
+      backend: episodeBackend({ parentId: undefined, grandparentId: undefined }) as never,
+    });
     await runCompanionCommand({
       path: "/player/playback/playMedia",
       params: { queryKey: "/library/metadata/555", commandID: "1" },
     });
     expect(useApp.getState().screen).toEqual({ name: "home" });
+  });
+
+  it("never stacks more than one step onto the history, whatever is cast", async () => {
+    // An evening of spoken requests used to have to be pressed back through one
+    // film at a time.
+    useApp.setState({ screen: { name: "library", libraryId: "2", title: "Series" }, history: [] });
+    for (const id of ["1001", "1002", "1003"]) {
+      await runCompanionCommand({
+        path: "/player/playback/playMedia",
+        params: { queryKey: `/library/metadata/${id}`, commandID: "1" },
+      });
+    }
+    expect(useApp.getState().screen).toEqual({ name: "item", itemId: "1003" });
+    expect(useApp.getState().history).toEqual([{ name: "library", libraryId: "2", title: "Series" }]);
+  });
+
+  it("does not navigate if somebody else is at the box by the time it started", async () => {
+    // The only step after the longest await in the function, and navigating is
+    // what takes the screen away from somebody: measured, a cast whose stream
+    // resolved while the household was choosing a profile walked the box off its
+    // own PIN pad, and one that resolved after a sign-out replaced the sign-in
+    // screen with a blank page. The film still started - that is not what is
+    // being refused - so the screen is simply left where the person put it.
+    useApp.setState({
+      backend: backend({
+        resolveStream: async () => {
+          useApp.setState({ screen: { name: "profiles" }, history: [] });
+          return { url: "http://s/f.mkv", audio: "auto", sub: "no", session: "s", transcoded: false, version: 0 };
+        },
+      }) as never,
+    });
+    await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "1" },
+    });
+    expect(usePlayer.getState().current?.item.id, "the film did start").toBe("27467");
+    expect(useApp.getState().screen, "but the picker is still up").toEqual({ name: "profiles" });
+  });
+
+  it("refuses a transport command while the box is asking who is watching", async () => {
+    // The playback and navigation paths each refused this for themselves; the
+    // transport ones had no check at all, and a skip accepted there takes a claim
+    // on the screen - which hides the PIN pad the digits are being typed into.
+    useApp.setState({ screen: { name: "profiles" }, history: [] });
+    for (const path of [
+      "/player/playback/skipNext",
+      "/player/playback/skipPrevious",
+      "/player/playback/pause",
+      "/player/playback/play",
+      "/player/playback/playPause",
+      "/player/playback/stop",
+      "/player/playback/seekTo",
+      "/player/playback/stepForward",
+      "/player/playback/stepBack",
+    ]) {
+      expect(await runCompanionCommand({ path, params: {} }), path).toMatchObject({ ok: false });
+    }
+    expect(usePlayer.getState().moving, "and nothing took the screen").toBeNull();
   });
 
   it("leaves the screen alone when the film could not start", async () => {

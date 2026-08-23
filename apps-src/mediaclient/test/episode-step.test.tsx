@@ -47,6 +47,17 @@ let resolveMs = 0;
 let started: string[] = [];
 let listeners: ((ev: { type: string; reason?: string }) => void)[] = [];
 
+/**
+ * The shell reporting that the box has the picture up.
+ *
+ * `play()` sets `current` before the box is told anything, so until this arrives
+ * the store is still buffering - and a step is refused for that whole window,
+ * which is the point. Every test that wants a settled film has to say so.
+ */
+function onScreen(): void {
+  listeners.forEach((l) => l({ type: "playing" }));
+}
+
 function fakeBackend(): MediaBackend {
   return {
     kind: "plex",
@@ -109,6 +120,7 @@ describe("stepping to the next episode", () => {
     render(<Player />);
     await act(async () => {
       await usePlayer.getState().play(fakeBackend(), KIDS[1]);
+      onScreen();
     });
     await settle();
     expect(usePlayer.getState().siblings.next?.id).toBe("e3");
@@ -146,6 +158,7 @@ describe("stepping to the next episode", () => {
     const { container } = render(<Showing />);
     await act(async () => {
       await usePlayer.getState().play(fakeBackend(), KIDS[1]);
+      onScreen();
     });
     expect(container.textContent).toBe("showing");
 
@@ -179,6 +192,7 @@ describe("stepping to the next episode", () => {
             : (fakeBackend() as unknown as { resolveStream(i: string): Promise<unknown> }).resolveStream(id),
       } as unknown as MediaBackend;
       await usePlayer.getState().play(stalls, KIDS[1]);
+      onScreen();
       expect(usePlayer.getState().current?.item.id, "the first one has to start").toBe("e2");
 
       void usePlayer.getState().playSibling("next");
@@ -192,10 +206,110 @@ describe("stepping to the next episode", () => {
     }
   });
 
+  it("refuses another step until the box has shown the last one", async () => {
+    // `play()` sets `current` before the box is told anything, so the overlay
+    // comes back with the buttons focusable while the screen is still black -
+    // and a press there stepped another episode. Measured on this hardware a film
+    // can take well over five seconds to appear, so this is most of the window
+    // the guard exists for.
+    await usePlayer.getState().play(fakeBackend(), KIDS[1]);
+    onScreen();
+    expect(await usePlayer.getState().playSibling("next")).toBeTruthy();
+    expect(usePlayer.getState().current?.item.id).toBe("e3");
+    expect(usePlayer.getState().buffering, "the box has not shown it yet").toBe(true);
+
+    expect(await usePlayer.getState().playSibling("next"), "not until it has").toBeUndefined();
+    expect(started).toEqual(["http://server/e2.mkv", "http://server/e3.mkv"]);
+
+    onScreen();
+    expect(await usePlayer.getState().playSibling("next"), "and then it may").toBeTruthy();
+    expect(usePlayer.getState().current?.item.id).toBe("e4");
+  });
+
+  it("does not let a step it gave up on cancel the next one", async () => {
+    // The give-up hands the screen back with the request still in flight, and
+    // that request comes back eventually. Measured: its own cleanup cleared the
+    // claim of the step somebody had started in the meantime, so the browsing
+    // screens un-hid over a stopped player and that episode arrived underneath
+    // them.
+    vi.useFakeTimers();
+    try {
+      // The first film starts; both steps after it are held open, so two are in
+      // flight at once - which is the only state this can be seen in.
+      const gates: (() => void)[] = [];
+      let asked = 0;
+      const one = fakeBackend() as unknown as { resolveStream(i: string): Promise<unknown> };
+      const gated = {
+        ...fakeBackend(),
+        resolveStream: (id: string) =>
+          (asked += 1) === 1
+            ? one.resolveStream(id)
+            : new Promise<void>((r) => gates.push(() => r())).then(() => one.resolveStream(id)),
+      } as unknown as MediaBackend;
+
+      await usePlayer.getState().play(gated, KIDS[1]);
+      onScreen();
+      void usePlayer.getState().playSibling("next"); // held open
+      await vi.advanceTimersByTimeAsync(0);
+      const abandoned = usePlayer.getState().moving;
+      expect(abandoned?.id).toBe("e3");
+
+      await vi.advanceTimersByTimeAsync(12_000); // given up on
+      expect(usePlayer.getState().moving).toBeNull();
+
+      void usePlayer.getState().playSibling("next"); // a second step, also held
+      await vi.advanceTimersByTimeAsync(0);
+      const live = usePlayer.getState().moving;
+      expect(live, "the second step holds the claim").toBeTruthy();
+      expect(live).not.toBe(abandoned);
+
+      gates[0]?.(); // the abandoned request lands at last
+      await vi.advanceTimersByTimeAsync(50);
+      expect(usePlayer.getState().moving, "and the claim is still the second step's").toBe(live);
+      gates[1]?.();
+      await vi.advanceTimersByTimeAsync(50);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("hands the screen back when Back gives up a step, and drops what lands later", async () => {
+    // Back is the only key left during a step, and eating it for as long as the
+    // server takes is a dead remote. It cannot unsend the request, so what it
+    // cancels is the claim - and the film that was on its way must not appear
+    // over whatever the person went to instead.
+    const gates: (() => void)[] = [];
+    let asked = 0;
+    const one = fakeBackend() as unknown as { resolveStream(i: string): Promise<unknown> };
+    const gated = {
+      ...fakeBackend(),
+      resolveStream: (id: string) =>
+        (asked += 1) === 2
+          ? new Promise<void>((r) => gates.push(() => r())).then(() => one.resolveStream(id))
+          : one.resolveStream(id),
+    } as unknown as MediaBackend;
+
+    await usePlayer.getState().play(gated, KIDS[1]);
+    onScreen();
+    const step = usePlayer.getState().playSibling("next");
+    await settle();
+    expect(usePlayer.getState().moving?.id).toBe("e3");
+
+    usePlayer.getState().cancelMove();
+    expect(usePlayer.getState().moving, "the screens come back at once").toBeNull();
+
+    gates[0]?.();
+    await step;
+    await settle();
+    expect(usePlayer.getState().current, "and nothing arrives after it").toBeNull();
+    expect(started, "the box was never told to play it").toEqual(["http://server/e2.mkv"]);
+  });
+
   it("says on screen which episode is starting", async () => {
     const { container } = render(<Player />);
     await act(async () => {
       await usePlayer.getState().play(fakeBackend(), KIDS[1]);
+      onScreen();
     });
     await settle();
     await setFocus("pb-next");

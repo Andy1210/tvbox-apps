@@ -158,6 +158,13 @@ interface PlayerState {
    */
   moving: MediaItem | null;
   /**
+   * Give up a move in flight.
+   *
+   * For Back, which is the only key left during one: the step holds the screen
+   * for as long as the server takes, and eating that press is a dead remote.
+   */
+  cancelMove(): void;
+  /**
    * The episode that will start by itself, and when.
    *
    * Set when one runs out with another behind it. The screen underneath shows a
@@ -221,6 +228,16 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     set({ upNext: null });
   },
 
+  cancelMove() {
+    if (!get().moving) return;
+    // The request cannot be unsent, so what is cancelled is the CLAIM: the token
+    // moves, and `play` checks it before it tells the box anything. Without that
+    // the episode somebody had just pressed out of arrived on screen seconds
+    // later, over whatever they had gone to instead.
+    playToken += 1;
+    set({ moving: null });
+  },
+
   async playSibling(which) {
     const item = get().siblings[which];
     if (!item || !currentBackend) return undefined;
@@ -229,6 +246,13 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // from whatever `siblings` held by then, which is how pressing the button
     // three times stepped three episodes.
     if (get().moving) return undefined;
+    // Nor while the box has not shown the LAST one yet. `play` sets `current`
+    // before the file has started - the box is told after it - so the overlay
+    // comes back over a black screen with the buttons focusable again, and a
+    // press there stepped another episode. Measured on this hardware, a film can
+    // take well over five seconds to appear, which is most of the window this
+    // guard exists for.
+    if (get().buffering) return undefined;
     set({ moving: item });
     const giveUp = setTimeout(() => {
       if (get().moving === item) set({ moving: null });
@@ -241,8 +265,14 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       // In a finally, because a stream that cannot be resolved leaves `current`
       // null - and a flag stuck on would leave the player showing a move that
       // is not happening, with the browsing screen hidden behind it.
+      //
+      // Only its OWN claim, on the same test the timer uses. A request the timer
+      // gave up on can still land, minutes later: unguarded, its `finally`
+      // cleared the claim of the move somebody had started in the meantime, so
+      // the screens came back over a stopped player and that episode arrived
+      // underneath them.
       clearTimeout(giveUp);
-      set({ moving: null });
+      if (get().moving === item) set({ moving: null });
     }
     return item;
   },
@@ -259,6 +289,11 @@ export const usePlayer = create<PlayerState>((set, get) => ({
 
     currentBackend = backend;
     playToken += 1;
+    // This call's own number. Everything below is on the far side of five round
+    // trips, and by then a later play - or a Back out of a step - may have moved
+    // it on; what lands then is an answer to a question nobody is asking any
+    // more.
+    const forThis = playToken;
     // The episodes either side, worked out HERE rather than by whoever pressed
     // play. A film can be started from a season screen, a carry-on-watching
     // row, a search result or a person's credits, and only one of those knew
@@ -321,6 +356,16 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     } catch (e) {
       log.warn("could not resolve a stream", e);
       set({ error: "unplayable" });
+      return;
+    }
+
+    // Nobody is waiting for this any more, so the box is not told and the screen
+    // is not taken. Checked here rather than after the state is set, because the
+    // one thing that must not happen is a film appearing over what somebody went
+    // to instead - and the session that was just opened is closed, or it sits on
+    // the server as a transcode nothing will ever stop.
+    if (forThis !== playToken) {
+      if (decision.session) void backend.endSession(decision.session).catch(() => {});
       return;
     }
 
@@ -588,17 +633,18 @@ export const usePlayer = create<PlayerState>((set, get) => ({
  *
  * What the browsing screens key on, rather than `current`: for the length of a
  * prev/next step the player holds nothing at all, and a screen that reads that
- * as "playback is over" wakes up behind the transition. Measured consequences,
- * one per screen that does it: the season page refetches its episodes and arms
- * the focus fallback, so a press lands on a tile nobody can see; the series'
- * theme starts over the gap; and the home screen's backdrop - which is portalled
- * OUT of the hidden page, so nothing the page does to itself reaches it - paints
- * four full-screen layers over the picture.
+ * as "playback is over" wakes up behind the transition. Two measured
+ * consequences: the season page refetches its episodes and arms its focus
+ * fallback, so a press lands on a tile nobody can see; and the home screen's
+ * backdrop - which is portalled OUT of the hidden page, so nothing the page does
+ * to itself reaches it - paints four full-screen layers over the picture.
  *
  * One expression in one place because those two have to agree: the screens are
  * hidden on this and the portalled backdrop is dropped on this, and a backdrop
  * that outlives the hiding is the bug, while one that goes early leaves the rows
- * on a black page.
+ * on a black page. `useTheme` asks the same question for consistency rather than
+ * for a hole of its own - what keeps a theme out of the gap is that playback
+ * already silenced it.
  */
 export function useShowingPlayer(): boolean {
   return usePlayer((s) => s.current !== null || s.moving !== null);

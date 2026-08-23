@@ -251,10 +251,16 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   // pause the film AND navigate away from it.
   useBackspace(() => {
     if (usePlayer.getState().current) return;
-    // Nor between two episodes: there is nothing to pause and nothing to go back
-    // to yet, and navigating would leave the episode that is starting playing
-    // behind a screen nobody asked for.
-    if (usePlayer.getState().moving) return;
+    // Between two episodes Back gives up the STEP rather than being eaten. There
+    // is nothing to pause and nothing to go back to yet, and the step can hold
+    // the screen for as long as the server takes - so a press that did nothing
+    // at all was a remote that had died. Navigating instead would leave the
+    // episode arriving behind a screen nobody asked for, which is why this
+    // cancels the claim (the arriving film is dropped too) and stays put.
+    if (usePlayer.getState().moving) {
+      usePlayer.getState().cancelMove();
+      return;
+    }
     if (!back()) onExit();
   });
 

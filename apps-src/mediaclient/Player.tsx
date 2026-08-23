@@ -34,8 +34,7 @@ const IDLE_KEY = "player-idle";
  * The keys a move swallows.
  *
  * The D-pad and OK only: those are the ones spatial navigation would resolve
- * against the hidden screen behind. A media key means the same thing either
- * way, and the store's own guards already ignore it with nothing playing.
+ * against the hidden screen behind.
  */
 const MOVE_SWALLOWS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter"]);
 
@@ -168,12 +167,23 @@ export function Player(): React.JSX.Element | null {
       const p = usePlayer.getState();
       // Nothing to act on between two episodes: the one that was playing is gone
       // and the next one has not arrived. Swallowed rather than passed on, for
-      // the reason the effect is armed at all - and swallowed for the D-pad only,
-      // so a phone's own transport keys still reach the guards that ignore them.
+      // the reason the effect is armed at all.
+      //
+      // `stopImmediatePropagation` as well, and that is not belt and braces: a
+      // phone's D-pad arrives as an event dispatched AT window, where spatial
+      // navigation's own listener sits on the same node - so plain
+      // `stopPropagation` does not stop it, and its `select` would press
+      // something on the screen behind. A real remote's press has an element for
+      // a target and would have been stopped either way.
+      //
+      // The D-pad only. A media key means the same thing either way and the
+      // music store answers it for itself - see the note in `mediakeys.ts` on
+      // why that guard had to learn about a move.
       if (!p.current) {
         if (MOVE_SWALLOWS.has(e.key)) {
           e.preventDefault();
           e.stopPropagation();
+          e.stopImmediatePropagation();
         }
         return;
       }
@@ -741,30 +751,36 @@ function IdleAnchor(): React.JSX.Element {
 /**
  * What is on screen between two episodes.
  *
- * The same bottom gradient the overlay uses, naming the episode being moved to.
- * Nothing focusable and no buttons: the move cannot be steered, and the point of
- * drawing anything here is that the press which asked for it is visibly taken -
- * a blank screen is what had people pressing again, and again.
+ * Centred, with the spinner `Message` uses, rather than the overlay's own bottom
+ * gradient: an overlay is drawn over a PICTURE, and there is none here - the film
+ * has been stopped and the page is opaque, so photographed on a television the
+ * gradient was black on black and three lines sat in the corner of an empty
+ * screen, which reads as a box that has crashed. This is the shape the app
+ * already uses everywhere else for "working on it".
+ *
+ * Nothing focusable and no buttons: the move cannot be steered. What it is for is
+ * that the press which asked for it is visibly taken - a blank screen is what had
+ * people pressing again, and again.
  */
 function Moving({ item }: { item: MediaItem }): React.JSX.Element {
   const { t } = useI18n();
   return (
-    <div className="absolute inset-0 flex flex-col justify-end">
-      <div className="bg-gradient-to-t from-black/90 via-black/65 to-transparent px-[4vw] pt-[10vh] pb-[4vh]">
-        <div className="flex items-baseline gap-[1.2vw]">
-          <h2 className="text-[2.8vh] font-semibold tracking-tight [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]">
-            {item.grandparentTitle ?? item.title}
-          </h2>
-          {item.grandparentTitle && (
-            <span className="text-[2.1vh] text-white/80 [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]">
-              {[episodeNumber(item), item.title].filter(Boolean).join(" · ")}
-            </span>
-          )}
-        </div>
-        <p className="mt-[1vh] text-[2.2vh] text-white/85 [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]">
-          {t("player.starting")}
-        </p>
-      </div>
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-[1.6vh] px-[10vw] text-center">
+      <svg
+        viewBox="0 0 24 24"
+        className="h-[4vh] w-[4vh] animate-spin"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        aria-hidden="true"
+      >
+        <path d="M12 3a9 9 0 1 0 9 9" strokeLinecap="round" />
+      </svg>
+      <h2 className="text-[2.8vh] font-semibold tracking-tight">{item.grandparentTitle ?? item.title}</h2>
+      {item.grandparentTitle && (
+        <p className="text-[2.4vh] text-fg-dim">{[episodeNumber(item), item.title].filter(Boolean).join(" · ")}</p>
+      )}
+      <p className="text-[2.2vh] text-fg-dim">{t("player.starting")}</p>
     </div>
   );
 }
