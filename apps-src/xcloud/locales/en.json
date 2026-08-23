@@ -1,0 +1,57 @@
+{
+  "_meta": {
+    "name": "English",
+    "tag": "en-US"
+  },
+  "title": "Xbox Cloud Gaming",
+  "signin": {
+    "heading": "Sign in to your Xbox account",
+    "instruction": "Open this page on your phone and enter the code:",
+    "waiting": "Waiting for you to sign in…",
+    "start": "Sign in",
+    "cancel": "Cancel",
+    "retry": "Try again",
+    "expiresIn": "The code is valid for {{minutes}} minutes.",
+    "keepOpen": "Leave this screen open until you have finished on the phone."
+  },
+  "errors": {
+    "code_expired": "The code expired. Start again.",
+    "declined": "Sign-in was declined on the phone.",
+    "cancelled": "Sign-in was cancelled.",
+    "no_xbox_account": "This Microsoft account has no Xbox profile yet. Create one at xbox.com, then sign in again.",
+    "child_account": "This is a child account. An adult has to add it to a family first.",
+    "region_unsupported": "Xbox Live is not available in this account's country.",
+    "account_banned": "This Xbox account has been suspended.",
+    "reauth_required": "The Xbox sign-in expired. Sign in again.",
+    "not_signed_in": "No Xbox account is signed in.",
+    "offering_unavailable": "Game Pass Ultimate is not available in this country.",
+    "catalog_unavailable": "The Game Pass catalogue cannot be read right now.",
+    "session_failed": "The game could not be started.",
+    "provision_timeout": "The server did not become ready in time.",
+    "generic": "Something went wrong."
+  },
+  "library": {
+    "recent": "Continue",
+    "all": "All games",
+    "owned": "In your subscription",
+    "empty": "No games available.",
+    "loading": "Loading the catalogue…",
+    "partial": "Some game names are still missing.",
+    "search": "Search",
+    "noResults": "Nothing found for {{query}}",
+    "signedInAs": "Signed in as {{gamertag}}",
+    "signOut": "Sign out"
+  },
+  "stream": {
+    "starting": "Starting…",
+    "queued": "You are in a queue. This can take a few minutes.",
+    "queuedFor": "{{seconds}} seconds so far.",
+    "connecting": "Connecting…",
+    "negotiating": "Negotiating with the server…",
+    "play": "Play",
+    "stop": "Leave",
+    "trial": "This game can be played for {{minutes}} minutes.",
+    "failed": "The stream stopped.",
+    "noPad": "Connect a controller."
+  }
+}

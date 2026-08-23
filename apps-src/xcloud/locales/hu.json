@@ -1,0 +1,54 @@
+{
+  "_meta": { "name": "Magyar", "tag": "hu-HU" },
+  "title": "Xbox Cloud Gaming",
+  "signin": {
+    "heading": "Jelentkezz be az Xbox-fiókodba",
+    "instruction": "Nyisd meg a telefonodon ezt az oldalt, és írd be a kódot:",
+    "waiting": "Várom a bejelentkezést…",
+    "start": "Bejelentkezés",
+    "cancel": "Mégsem",
+    "retry": "Újra",
+    "expiresIn": "A kód {{minutes}} percig érvényes.",
+    "keepOpen": "Ez a képernyő maradjon nyitva, amíg be nem fejezted a telefonon."
+  },
+  "errors": {
+    "code_expired": "A kód lejárt. Kezdd újra.",
+    "declined": "A bejelentkezést elutasítottad a telefonon.",
+    "cancelled": "A bejelentkezés megszakadt.",
+    "no_xbox_account": "Ehhez a Microsoft-fiókhoz még nincs Xbox-profil. Készíts egyet az xbox.com-on, aztán jelentkezz be újra.",
+    "child_account": "Ez gyerekfiók. Egy felnőttnek fel kell vennie egy családba.",
+    "region_unsupported": "Az Xbox Live nem elérhető ennek a fióknak az országában.",
+    "account_banned": "Ezt az Xbox-fiókot felfüggesztették.",
+    "reauth_required": "Az Xbox-bejelentkezés lejárt. Jelentkezz be újra.",
+    "not_signed_in": "Nincs bejelentkezve Xbox-fiók.",
+    "offering_unavailable": "A Game Pass Ultimate nem elérhető ebben az országban.",
+    "catalog_unavailable": "A Game Pass katalógus most nem olvasható.",
+    "session_failed": "A játék indítása nem sikerült.",
+    "provision_timeout": "A szerver nem lett kész időben.",
+    "generic": "Valami hiba történt."
+  },
+  "library": {
+    "recent": "Folytatás",
+    "all": "Minden játék",
+    "owned": "Az előfizetésben",
+    "empty": "Nincs elérhető játék.",
+    "loading": "Katalógus betöltése…",
+    "partial": "Néhány játék neve még hiányzik.",
+    "search": "Keresés",
+    "noResults": "Nincs találat erre: {{query}}",
+    "signedInAs": "Bejelentkezve: {{gamertag}}",
+    "signOut": "Kijelentkezés"
+  },
+  "stream": {
+    "starting": "Indítás…",
+    "queued": "Sorban állsz. Ez néhány percig is eltarthat.",
+    "queuedFor": "Már {{seconds}} másodperc.",
+    "connecting": "Kapcsolódás…",
+    "negotiating": "Egyeztetés a szerverrel…",
+    "play": "Játék",
+    "stop": "Kilépés",
+    "trial": "Ez a játék {{minutes}} percig játszható.",
+    "failed": "A stream megszakadt.",
+    "noPad": "Csatlakoztass egy kontrollert."
+  }
+}

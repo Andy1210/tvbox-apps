@@ -2,7 +2,7 @@
   "id": "xcloud",
   "manifestVersion": 1,
   "name": "Xbox Cloud Gaming",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "type": "webclient",
   "status": "ready",
   "accent": "#107c10",
@@ -12,10 +12,14 @@
     "hu": "Felhő-gaming"
   },
   "description": {
-    "en": "Stream Xbox Game Pass Ultimate games straight to the TV — no console needed. Sign in with your Microsoft account and pair a Bluetooth or USB controller. Needs a fast connection; the picture is a live H.264 video stream.",
-    "hu": "Xbox Game Pass Ultimate játékok streamelése egyenesen a TV-re — konzol nélkül. Jelentkezz be a Microsoft-fiókoddal, és párosíts egy Bluetooth- vagy USB-kontrollert. Gyors internet kell hozzá; a kép élő H.264 videofolyam."
+    "en": "Stream Xbox Game Pass Ultimate games straight to the TV - no console needed. Sign in with the code shown on screen, then pair a Bluetooth or USB controller. Needs a fast connection; the picture is a live H.264 video stream.",
+    "hu": "Xbox Game Pass Ultimate jatekok streamelese egyenesen a TV-re - konzol nelkul. Jelentkezz be a kepernyon megjeleno koddal, aztan parosits egy Bluetooth- vagy USB-kontrollert. Gyors internet kell hozza; a kep elo H.264 videofolyam."
   },
   "changelog": [
+    {
+      "version": "2.0.0",
+      "notes": "The app is now ours rather than Microsoft's web page: a ten-foot library, sign-in with a code on your phone, and the stream rendered here. The queue is shown honestly, and the Xbox button leaves the game."
+    },
     {
       "version": "1.1.0",
       "notes": "Groundwork for a built-in Xbox client: the app can now sign in to a Microsoft account by itself and read the Game Pass library. Nothing on screen has changed yet."
@@ -23,24 +27,8 @@
   ],
   "service": "xcloud",
   "runtime": {
-    "serve": "remote",
-    "url": "https://www.xbox.com/play",
-    "userAgent": "Mozilla/5.0 (SMART-TV; LINUX; Tizen 7.0) AppleWebKit/537.36 (KHTML, like Gecko) 94.0.4606.31/7.0 TV Safari/537.36",
-    "origins": [
-      "xbox.com",
-      "microsoft.com",
-      "live.com",
-      "microsoftonline.com",
-      "xboxlive.com"
-    ],
-    "cookies": [
-      {
-        "url": "https://www.xbox.com/",
-        "name": "aka_locale",
-        "value": "{locale_lower}",
-        "domain": ".www.xbox.com"
-      }
-    ],
+    "serve": "local",
+    "entry": "index.html",
     "capabilities": [
       "nav"
     ]
