@@ -7,7 +7,7 @@ import { Row } from "./Row";
 import { SearchIcon, CloseIcon, SettingsIcon } from "./icons";
 import { errorText } from "./errors";
 import { Settings } from "./Settings";
-import { createMover, nearest, pinScroll } from "./moveTo";
+import { createMover, nearest, pinScroll } from "@sdk/moveTo";
 
 // The library. Short curated rows, then everything the subscription covers, with a
 // search over the whole catalogue and a genre filter over what is shown.

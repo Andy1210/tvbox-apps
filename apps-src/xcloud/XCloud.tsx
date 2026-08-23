@@ -33,36 +33,14 @@ export function XCloud({ onExit }: { onExit: () => void }) {
       return;
     }
     if (stopPadNav.current) return;
-
-    // Wait for every button to be UP before handing the pad back to the UI.
-    //
-    // The SDK's navigation forgets which buttons were at rest when it is torn
-    // down, so a button still held when it starts again reads as a fresh press.
-    // That is not theoretical: the A press that launches a game is still down
-    // when the stream screen appears and asks for the pad back, so it was
-    // replayed as Enter onto the freshly focused Leave button - the game flashed
-    // up and vanished, and the press carried on into the library behind it.
-    let cancelled = false;
-    const held = () => {
-      const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-      for (const pad of pads) {
-        if (pad && pad.connected && pad.buttons.some((b) => b.pressed)) return true;
-      }
-      return false;
-    };
-    const arm = () => {
-      if (cancelled || stopPadNav.current) return;
-      if (held()) {
-        timer = window.setTimeout(arm, 50);
-        return;
-      }
-      stopPadNav.current = startGamepadNav();
-    };
-    let timer = window.setTimeout(arm, 0);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
+    // A button still held when this starts fires nothing until it is released -
+    // the SDK adopts what is down at `start()` rather than reading it as a fresh
+    // press. This app is why: the A press that launches a game is still down when
+    // the stream screen asks for the pad back, and it was replayed as Enter onto
+    // the freshly focused Leave button, so the game started and quit in the same
+    // instant. The app used to poll for a quiet pad before arming; the SDK does
+    // it for everyone now.
+    stopPadNav.current = startGamepadNav();
   }, [padToGame]);
   useEffect(() => () => stopPadNav.current?.(), []);
 

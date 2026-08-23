@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect, beforeEach } from "vitest";
-import { createMover, nearest } from "../moveTo";
+import { createMover, nearest } from "@sdk/moveTo";
 
 /**
  * Moving a long list without repainting it.

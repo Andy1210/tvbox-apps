@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef } from "react";
 import type { Title } from "./api";
 import { Tile } from "./Tile";
-import { createMover, nearest, pinScroll } from "./moveTo";
+import { createMover, nearest, pinScroll } from "@sdk/moveTo";
 
 // A horizontal row, moved by a transform rather than scrolled.
 //

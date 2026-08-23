@@ -2,7 +2,7 @@
   "id": "xcloud",
   "manifestVersion": 1,
   "name": "Xbox Cloud Gaming",
-  "version": "2.9.0",
+  "version": "2.9.1",
   "type": "webclient",
   "status": "ready",
   "accent": "#107c10",
@@ -16,6 +16,10 @@
     "hu": "Xbox Game Pass Ultimate játékok streamelése egyenesen a TV-re - konzol nélkül. Jelentkezz be a képernyőn megjelenő kóddal, aztán párosíts egy Bluetooth- vagy USB-kontrollert. Gyors internet kell hozzá; a kép élő H.264 videófolyam."
   },
   "changelog": [
+    {
+      "version": "2.9.1",
+      "notes": "Scrolling and the controller now come from the shared toolkit the box ships, so every app moves the same way."
+    },
     {
       "version": "2.9.0",
       "notes": "The second review round, and it found real breakage: the library opened with its top row cut off and the header out of reach, opening the on-screen keyboard and changing your mind left the screen with nothing to press, and a game whose picture never arrived dropped back to the grid without a word. Settings now walks row by row instead of skipping whole settings, the chosen option no longer looks like the cursor, Back works on the sign-in screens, search says which titles are outside the subscription, and the catalogue is read in the box's own language again."
