@@ -14,7 +14,7 @@
     "isolatedModules": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "types": ["node"],
+    "types": ["node", "vitest/globals", "@testing-library/jest-dom"],
     "paths": {
       "@sdk": ["../../../app-sdk/src/index.ts"],
       "@sdk/*": ["../../../app-sdk/src/*"],

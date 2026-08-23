@@ -1,7 +1,8 @@
-// Where the Microsoft account lives on the box. Only the REFRESH token is
-// persisted: everything downstream of it (the XSTS tokens, the streaming token
-// and its gsToken) is re-derived in three requests and expires within hours, so
-// writing it to disk would put a live streaming credential in a file for no gain.
+// Where the Microsoft account lives on the box: the Microsoft refresh token and
+// the short-lived access token that came with it. What is deliberately NOT here is
+// everything downstream - the XSTS tokens, the streaming token and its gsToken -
+// which is re-derived in three requests and expires within hours, so writing it to
+// disk would put a live streaming credential in a file for no gain.
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -40,7 +41,10 @@ function save() {
     }
     fs.chmodSync(tmp, 0o600); // enforce regardless of umask - this is a refresh token
     fs.renameSync(tmp, FILE);
-    fs.chmodSync(dir, 0o700);
+    // The FILE, and not its directory. `dir` is `~/.tvbox` - the shell's whole
+    // data directory, every app package and config.json inside it - so chmodding
+    // it 0700 from here was an undeclared change to shared state on every token
+    // refresh. 0600 on the file is what actually protects the token.
     return true;
   } catch (e) {
     try {

@@ -29,8 +29,13 @@ function mount() {
     base: "http://127.0.0.1:8097",
     log: () => {},
     json: (res, body) => res._resolve(body),
-    registerRoutes: (prefix, t) => (table = { prefix, t }),
-    config: { get: () => "hu-HU" },
+    registerRoutes: (prefix, t, opts) => (table = { prefix, t, guard: (opts && opts.guard) || [] }),
+    // `uiLocale`, and a SHORT id, because that is what the shell's config really
+    // exposes and really returns. The stub used to offer a `get(...)` returning a
+    // full tag - an API the shell has never had - so the plugin's own call threw on
+    // the box and fell back to en-US for every catalogue read, with this suite
+    // green throughout.
+    config: { uiLocale: () => "hu" },
     idle: () => false,
   };
   const instance = plugin(host);
@@ -45,6 +50,11 @@ function callRoute(t, key, opts) {
   assert.ok(handler, "no route " + key);
   const req = Readable.from([]);
   req.url = o.url || "/";
+  // A real request always carries headers, and a route that reads one must be
+  // exercised against something shaped like the shell's. The last time this
+  // harness differed from the shell - it passed the raw stream where the shell
+  // passes a parsed body - the bug it hid could not reproduce locally at all.
+  req.headers = o.headers || {};
   // Ended before the handler ever sees it, exactly as in the shell.
   req.resume();
   return new Promise((resolve, reject) => {
@@ -178,3 +188,112 @@ test("the keepalive and alive timers run without throwing", async (t) => {
 });
 
 test.after(() => fs.rmSync(DIR, { recursive: true, force: true }));
+
+test("the catalogue is read in the box's own language, from the API the shell really has", async () => {
+  // Two bugs in one line, and each hid the other: the plugin asked
+  // `host.config.get("locale")`, which does not exist (so the branch threw), and
+  // `settings.language()` took full tags only while the shell answers with "hu".
+  // Every read on a Hungarian box therefore asked Microsoft for en-US, and the
+  // background refresh then cached that over the Hungarian catalogue every
+  // fifteen minutes.
+  const settings = require("./lib/settings");
+  assert.equal(settings.language("hu"), "hu-HU");
+  assert.equal(settings.language("hu-HU"), "hu-HU");
+  assert.equal(settings.language("en"), "en-US");
+  assert.equal(settings.language("HU"), "hu-HU");
+  // Nothing we ship a catalogue for still falls back rather than guessing.
+  assert.equal(settings.language("sv"), "en-US");
+  assert.equal(settings.language(""), "en-US");
+  assert.equal(settings.language(undefined), "en-US");
+
+  const { table, instance } = mount();
+  try {
+    const seen = [];
+    const library = require("./lib/library");
+    const realGet = library.get;
+    library.get = async (o) => {
+      seen.push(o && o.language);
+      return { titles: [], partial: false, filling: false, stale: false };
+    };
+    try {
+      await callRoute(table.t, "GET /library", { url: "/library" });
+    } finally {
+      library.get = realGet;
+    }
+    assert.deepEqual(seen, ["hu-HU"]);
+  } finally {
+    instance.stop();
+  }
+});
+
+test("the reads that spend something upstream ask for the same-origin gate", () => {
+  // An open GET is the policy for a side-effect-free read. `/library` is ~101
+  // authenticated requests to Microsoft on a cold cache and rewrites the cached
+  // language; `/waittime` is one authenticated request per DISTINCT id, so its
+  // 30 s cache de-duplicates repeats and bounds nothing else. Both are reachable
+  // from an <img src> on any page the box loads.
+  const { table, instance } = mount();
+  try {
+    assert.deepEqual([...table.guard].sort(), ["GET /library", "GET /waittime"]);
+    // Everything named has to BE a route, or the declaration silently covers
+    // nothing at all.
+    for (const key of table.guard) assert.ok(table.t[key], "guarded a route that does not exist: " + key);
+  } finally {
+    instance.stop();
+  }
+});
+
+test("only a page of OURS keeps the session alive", async (t) => {
+  // The reaper ends a session nobody has asked about for a minute, because a page
+  // signals its departure best-effort and the account is charged a slot for the
+  // machine. `GET /session/state` is what says "somebody is watching" - and it is
+  // an open read that needs no credential and carries no Origin, so an <img src>
+  // on any page the box loads could hold a session open indefinitely.
+  //
+  // `Sec-Fetch-Dest` is what tells them apart: a fetch from our page sends
+  // `empty`, an image sends `image`. An absent header is a non-browser (curl, a
+  // test) and counts, like everywhere else in this stack.
+  const real = { start: sessions.start, waitReady: sessions.waitReady, configuration: sessions.configuration, keepalive: sessions.keepalive, alive: sessions.alive, stop: sessions.stop };
+  let stopped = 0;
+  sessions.start = async () => ({ id: "S9", type: "cloud", target: "GAME" });
+  sessions.waitReady = async () => ({ state: "Provisioned" });
+  sessions.configuration = async () => ({ keepAliveMs: 60000, noConnectionTimeoutMs: 300000, overrides: {} });
+  sessions.keepalive = async () => ({ reason: "None" });
+  sessions.alive = async () => ({ alive: true, state: "Provisioned" });
+  sessions.stop = async () => {
+    stopped++;
+  };
+
+  // `Date` as well as the timers: the reaper compares wall clock against
+  // `lastAsked`, so ticking the intervals alone leaves it measuring zero elapsed
+  // and it never fires.
+  t.mock.timers.enable({ apis: ["setInterval", "setTimeout", "Date"] });
+  const { table, instance } = mount();
+  try {
+    await callRoute(table.t, "POST /session/start", { body: { titleId: "GAME" } });
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+
+    // An IMAGE asking, every 20 s, for a minute and a half. It must not count.
+    for (let i = 0; i < 5; i++) {
+      t.mock.timers.tick(20000);
+      for (let j = 0; j < 3; j++) await Promise.resolve();
+      await callRoute(table.t, "GET /session/state", { headers: { "sec-fetch-dest": "image" } });
+    }
+    assert.equal(stopped, 1, "an unwatched session has to be ended");
+
+    // …and our own page's fetch does keep one.
+    stopped = 0;
+    await callRoute(table.t, "POST /session/start", { body: { titleId: "GAME" } });
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    for (let i = 0; i < 5; i++) {
+      t.mock.timers.tick(20000);
+      for (let j = 0; j < 3; j++) await Promise.resolve();
+      await callRoute(table.t, "GET /session/state", { headers: { "sec-fetch-dest": "empty" } });
+    }
+    assert.equal(stopped, 0, "a watched session must not be reaped");
+  } finally {
+    t.mock.timers.reset();
+    Object.assign(sessions, real);
+    instance.stop();
+  }
+});

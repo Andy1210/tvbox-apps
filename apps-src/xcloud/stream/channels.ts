@@ -133,8 +133,15 @@ export interface ServerDialog {
   id: string;
   title: string;
   body: string;
-  /** In order. The index of the pressed one is what goes back. */
-  buttons: string[];
+  /**
+   * What to draw, each with the index the SERVER gave it.
+   *
+   * Not a compacted list: `filter(Boolean)` on an empty middle label renumbered
+   * everything after it, so pressing the third button reported the second, and
+   * `DefaultIndex`/`CancelIndex` - which are in the server's numbering - pointed
+   * at the wrong one.
+   */
+  buttons: Array<{ index: number; label: string }>;
   /** Which to focus. The server points at the safe one for a destructive ask. */
   defaultIndex: number;
   /** What Back means here. */
@@ -182,15 +189,20 @@ export function parseDialog(raw: unknown): ServerDialog | null {
   }
 
   const buttons = [c.CommandLabel1, c.CommandLabel2, c.CommandLabel3]
-    .map((b) => (typeof b === "string" ? cut(b.trim(), MAX_LABEL) : ""))
-    .filter(Boolean);
+    .map((b, index) => ({ index, label: typeof b === "string" ? cut(b.trim(), MAX_LABEL) : "" }))
+    .filter((b) => b.label);
   if (!buttons.length) return null;
+  const answerable = new Set(buttons.map((b) => b.index));
 
   // An INTEGER in range. `0.5` passes a range check and then focuses `dlg-0.5`,
   // which does not exist - spatial navigation gives up silently and the D-pad has
   // no origin, so the dialog cannot be answered at all.
+  // Against the server's own numbering, and only onto a button that exists: a
+  // default pointing at a dropped label would focus nothing, and a screen with
+  // nothing focused is one a remote cannot answer.
+  const last = buttons[buttons.length - 1].index;
   const clamp = (n: unknown, fallback: number) =>
-    typeof n === "number" && Number.isInteger(n) && n >= 0 && n < buttons.length ? n : fallback;
+    typeof n === "number" && Number.isInteger(n) && answerable.has(n) ? n : fallback;
 
   return {
     id: cut(outer.id, MAX_ID),
@@ -199,8 +211,8 @@ export function parseDialog(raw: unknown): ServerDialog | null {
     buttons,
     // The server's own default, and it points at the SAFE option for a
     // destructive question - "Never mind" rather than "Quit game".
-    defaultIndex: clamp(c.DefaultIndex, buttons.length - 1),
-    cancelIndex: clamp(c.CancelIndex, buttons.length - 1),
+    defaultIndex: clamp(c.DefaultIndex, last),
+    cancelIndex: clamp(c.CancelIndex, last),
   };
 }
 

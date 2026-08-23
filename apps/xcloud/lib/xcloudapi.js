@@ -76,19 +76,24 @@ async function fetchTitles(opts) {
 // request to Microsoft per HTTP request.
 const RECENT_TTL_MS = 30000;
 const WAIT_TTL_MS = 30000;
-const recentCache = { at: 0, rows: null };
+// Keyed by the count asked for: a cached 5-row answer served a later request for
+// 25 and the Continue row silently lost twenty games for the next 30 seconds.
+const recentCache = { at: 0, n: 0, rows: null };
 const waitCache = new Map();
 
 // Most-recently-used, i.e. the "continue playing" row. `mr` is a count.
 async function fetchRecentTitles(limit, opts) {
   const n = Math.min(50, Math.max(1, Number(limit) || 25));
-  if (recentCache.rows && Date.now() - recentCache.at < RECENT_TTL_MS) return recentCache.rows;
+  if (recentCache.rows && recentCache.n >= n && Date.now() - recentCache.at < RECENT_TTL_MS) {
+    return recentCache.rows.slice(0, n);
+  }
   const res = await gssv("GET", "/v2/titles/mru?mr=" + n, null, opts);
   const body = res.json() || {};
   const results = Array.isArray(body.results) ? body.results : [];
   recentCache.rows = results.map(shapeTitle).filter((t) => t.titleId && t.productId);
+  recentCache.n = n;
   recentCache.at = Date.now();
-  return recentCache.rows;
+  return recentCache.rows.slice(0, n);
 }
 
 function shapeTitle(row) {

@@ -46,6 +46,16 @@ let log = (...a) => console.log("[xcloud]", ...a);
 // before anything is said.
 const ALIVE_POLL_MS = 5000;
 
+// How long a session may go unasked-about before the plugin ends it.
+//
+// A page signals its own departure best-effort, and best-effort is not good
+// enough for something the account is charged a slot for: measured, quitting the
+// app left a Provisioned session running, and the keepalive pulse this plugin
+// sends kept the server from reaping it either - it was still there fifty seconds
+// later. The screen polls every 3 s while it is up, so nobody asking for a minute
+// means nobody is watching.
+const ABANDONED_MS = 60000;
+
 // The server states how often it wants a pulse (measured: 60 s) and how long it
 // waits without a connection (300 s), so the timer is set from its answer rather
 // than from a number of ours. It runs HERE because a page that reloads mid-stream
@@ -53,16 +63,24 @@ const ALIVE_POLL_MS = 5000;
 function startKeepalive(cfg) {
   stopKeepalive();
   if (!live) return;
+  // Captured, because both callbacks re-read module scope after an await: a tick
+  // that fired before a replacement was adopted can still be waiting on a 15 s
+  // request when `live` changes, and its answer would then be written onto the
+  // NEW session - which the screen reads as `ended` and tears down.
+  const own = live.session;
+  const mine = () => live && live.session.id === own.id;
+
   live.keepaliveTimer = setInterval(() => {
-    if (!live) return stopKeepalive();
+    if (!mine()) return stopKeepalive();
     sessions
-      .keepalive(live.session)
+      .keepalive(own)
       .then((r) => {
+        if (!mine()) return;
         // The pulse answers with a reason, and "None" is the healthy one. Anything
         // else is the server saying why it is about to stop.
         if (r && r.reason && r.reason !== "None") {
           log("keepalive says the session is ending:", r.reason);
-          if (live) live.ended = String(r.reason);
+          live.ended = String(r.reason);
         }
       })
       .catch(() => {
@@ -72,9 +90,14 @@ function startKeepalive(cfg) {
   if (live.keepaliveTimer.unref) live.keepaliveTimer.unref();
 
   live.aliveTimer = setInterval(() => {
-    if (!live) return;
-    sessions.alive(live.session).then((r) => {
-      if (!live) return;
+    if (!mine()) return;
+    if (Date.now() - live.lastAsked > ABANDONED_MS) {
+      log("no screen has asked about this session for a minute - ending it");
+      endSession().catch(() => {});
+      return;
+    }
+    sessions.alive(own).then((r) => {
+      if (!mine()) return;
       // Logged on CHANGE only. Measured after a quit from the Xbox guide: the
       // state stays `Provisioned` and nothing here ever fires, which is why the
       // page watches its own frame counter instead.
@@ -85,6 +108,8 @@ function startKeepalive(cfg) {
       if (r.alive) return;
       log("session ended on the server:", r.state);
       live.ended = r.state || "Gone";
+    }).catch(() => {
+      /* alive() swallows its own failures; this is the belt for a future change */
     });
   }, ALIVE_POLL_MS);
   if (live.aliveTimer.unref) live.aliveTimer.unref();
@@ -170,7 +195,15 @@ module.exports = (host) => {
         .then((dc) => {
           const controller = new AbortController();
           signin = {
-            public: { userCode: dc.userCode, verificationUri: dc.verificationUri, expiresIn: dc.expiresIn },
+            // `expiresAt` as well as the lifetime: this sign-in outlives the page (a
+            // reload picks it back up), so a screen that counts from when IT opened
+            // reports a code as fresh minutes after it died.
+            public: {
+              userCode: dc.userCode,
+              verificationUri: dc.verificationUri,
+              expiresIn: dc.expiresIn,
+              expiresAt: Date.now() + dc.expiresIn * 1000,
+            },
             controller,
             state: "waiting",
             error: null,
@@ -184,7 +217,9 @@ module.exports = (host) => {
               log("signed in");
               // Warm the library while the person is still looking at the
               // "signed in" screen, so the grid is not the next wait.
-              library.refresh({ language: locale() }).catch((e) => log("library warm-up failed:", e.message));
+              library
+                .refresh({ language: library.askedLanguage() || locale() })
+                .catch((e) => log("library warm-up failed:", e.message));
             })
             .catch((e) => {
               // Kept, not cleared: the screen has to be able to say WHY, and a
@@ -213,14 +248,19 @@ module.exports = (host) => {
     "POST /signout": (req, res) => {
       if (signin) signin.controller.abort();
       signin = null;
-      auth.signOut();
-      // A stream belongs to the account that started it, and its token is about to
-      // stop working anyway.
-      endSession().catch(() => {});
-      // The library is what this account may stream, so it goes with the account.
-      library.invalidate();
-      log("signed out");
-      host.json(res, { ok: true });
+      // The session goes FIRST. `signOut()` clears the refresh token and every
+      // cached one, and the DELETE needs a streaming token it can no longer mint -
+      // measured, the request was simply never made and the account kept holding
+      // the session.
+      endSession()
+        .catch(() => {})
+        .then(() => {
+          auth.signOut();
+          // The library is what this account may stream, so it goes with it.
+          library.invalidate();
+          log("signed out");
+          host.json(res, { ok: true });
+        });
     },
 
     // The whole playable library, from cache when it is fresh. `stale` means the
@@ -340,31 +380,48 @@ module.exports = (host) => {
             height: Math.round(height * scale),
             timezoneOffsetMinutes: -new Date().getTimezoneOffset(),
           });
-          // One screen, one stream: whatever was running goes now that its
-          // replacement is real.
-          await endSession();
-          live = { session, controller, state: "Provisioning", queueSeconds: null, queuedFor: 0, error: null, config: null, ended: null };
+          // One screen, one stream - but only if it is a DIFFERENT one. A second
+          // /play for the same title returns the same session id (the server
+          // reattaches), so ending "the old one" here would delete the very
+          // session just adopted and leave the page negotiating against a dead id.
+          if (live && live.session.id !== session.id) await endSession();
+          // The timers hang off the object `live` POINTS AT, and `stopKeepalive`
+          // finds them through `live` - so replacing it without stopping them
+          // first orphans a keepalive and an alive poll that nothing can reach
+          // again. That is the same-id path above: it deliberately does not end
+          // the session, so nothing else clears them, and a second play of one
+          // title left two pairs of intervals pulsing the server.
+          stopKeepalive();
+          live = { session, controller, state: "Provisioning", queueSeconds: null, queuedFor: 0, error: null, config: null, ended: null, lastAsked: Date.now() };
           host.json(res, { ok: true, id: session.id, type: session.type, titleId });
 
+          // Every callback below asks whether it is still THIS session's. A
+          // ladder that was abandoned answers late - its state GET is already in
+          // flight when the abort lands, so up to a request timeout later - and
+          // "is there a live session" is not the same question as "is it mine".
+          // Measured: an abandoned pass's `cancelled` was written onto a healthy
+          // new session, which then showed an error over a running game.
+          const mine = () => live && live.session.id === session.id;
           sessions
             .waitReady(session, {
               signal: controller.signal,
-              onState: (st) => { if (live) live.state = st; },
-              onQueue: (secs, elapsed) => { if (live) { live.queueSeconds = secs; live.queuedFor = elapsed; } },
+              onState: (st) => { if (mine()) live.state = st; },
+              onQueue: (secs, elapsed) => { if (mine()) { live.queueSeconds = secs; live.queuedFor = elapsed; } },
             })
             .then(async () => {
               const cfg = await sessions.configuration(session);
-              if (!live) return;
+              if (!mine()) return;
               live.config = cfg;
               live.state = "Provisioned";
               startKeepalive(cfg);
             })
             .catch((e) => {
-              if (live) {
-                live.state = "Failed";
-                live.error = { code: e.code || "error", error: String(e.message || e) };
-              }
               log("session failed:", e.code || "", e.message);
+              if (!mine()) return;
+              live.state = "Failed";
+              live.error = { code: e.code || "error", error: String(e.message || e) };
+              // A session that failed is still a session the account is holding.
+              endSession().catch(() => {});
             });
         })
         .catch((e) => host.json(res, errorPayload(e)));
@@ -374,6 +431,16 @@ module.exports = (host) => {
     // null until the session is Provisioned - that is the signal to offer.
     "GET /session/state": (req, res) => {
       if (!live) return host.json(res, { ok: true, active: false });
+      // Someone is watching. See ABANDONED_MS.
+      //
+      // This is a liveness signal, so it has to come from a page of OURS: the read
+      // is open (an `<img src>` needs no credential and carries no Origin), and a
+      // clock anything on the box can refresh does not keep the promise the reaper
+      // exists for - a session the account is charged a slot for, running with
+      // nobody watching. A fetch from our own page sends `Sec-Fetch-Dest: empty`;
+      // an image, a frame or a stylesheet does not, and neither does a navigation.
+      const dest = String(((req && req.headers) || {})["sec-fetch-dest"] || "");
+      if (dest === "" || dest === "empty") live.lastAsked = Date.now();
       host.json(res, {
         ok: true,
         active: true,
@@ -391,9 +458,12 @@ module.exports = (host) => {
         // The renderer applies these to its own offer, so they travel with the
         // session rather than being fetched separately at the moment it matters.
         quality: { maxVideoKbps: settings.get().maxVideoKbps, stereo: settings.get().stereo },
+        // No `serverDetails`: nothing in the page reads it, and it is the one field
+        // here that is an unmodelled object straight from Microsoft - so handing it
+        // through made the guard the shape of THEIR response rather than a list of
+        // ours. Anything new it carries would reach the renderer unexamined.
         config: live.config
           ? {
-              serverDetails: live.config.serverDetails,
               overrides: live.config.overrides,
               keepAliveMs: live.config.keepAliveMs,
               noConnectionTimeoutMs: live.config.noConnectionTimeoutMs,
@@ -442,7 +512,12 @@ module.exports = (host) => {
     },
   };
 
-  host.registerRoutes("/tvbox/api/xcloud", routes);
+  // Two of these reads SPEND something upstream, so they get the same-origin gate
+  // that every non-GET has (shell 3.10+; an older shell ignores the argument).
+  // `/library` is ~101 authenticated requests to Microsoft on a cold cache and it
+  // rewrites the cached language; `/waittime` is one authenticated request per
+  // distinct id, and an <img src> can fire either from any page the box loads.
+  host.registerRoutes("/tvbox/api/xcloud", routes, { guard: ["GET /library", "GET /waittime"] });
 
   // The catalogue language follows the PAGE, the market does not: the market comes
   // from the streaming token because it is the account's, not the box's.
@@ -464,7 +539,10 @@ module.exports = (host) => {
       }
     }
     try {
-      const l = host.config && host.config.get ? host.config.get("locale") : null;
+      // `uiLocale`, which is what the shell's config actually exposes - there is no
+      // `get`, so this branch threw and every caller fell back to en-US. It answers
+      // with a short id ("hu"), which `language()` maps to the tag we ship.
+      const l = host.config && host.config.uiLocale ? host.config.uiLocale() : "";
       return settings.language(l);
     } catch {
       return settings.DEFAULT_LANGUAGE;
@@ -481,7 +559,13 @@ module.exports = (host) => {
   function maybeRefresh() {
     if (!auth.isSignedIn()) return;
     if (host.idle && !host.idle()) return;
-    library.get({ language: locale() }).catch((e) => log("background library refresh failed:", e.message));
+    // The language the SCREEN last asked for, not the box's own - which is unset
+    // here, so this asked for en-US every fifteen minutes and threw away the
+    // Hungarian catalogue each time.
+    const language = library.askedLanguage() || locale();
+    library
+      .get({ language, remember: false })
+      .catch((e) => log("background library refresh failed:", e.message));
   }
 
   return {

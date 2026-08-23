@@ -36,7 +36,40 @@ describe("the quit confirmation", () => {
   });
 
   it("drops the empty third label rather than drawing a blank button", () => {
-    expect(parseDialog(REAL)!.buttons).toEqual(["Quit game", "Never mind"]);
+    expect(parseDialog(REAL)!.buttons).toEqual([
+      { index: 0, label: "Quit game" },
+      { index: 1, label: "Never mind" },
+    ]);
+  });
+
+  it("keeps the SERVER's numbering when a middle label is empty", () => {
+    // Compacting the list renumbered everything after the gap: pressing the third
+    // button reported the second, and DefaultIndex/CancelIndex - which are in the
+    // server's numbering - pointed at the wrong one.
+    const d = parseDialog(
+      JSON.stringify({
+        type: "Message",
+        id: "{x}",
+        content: JSON.stringify({ TitleText: "T", CommandLabel1: "A", CommandLabel2: "", CommandLabel3: "C", DefaultIndex: 2, CancelIndex: 2 }),
+      }),
+    )!;
+    expect(d.buttons).toEqual([
+      { index: 0, label: "A" },
+      { index: 2, label: "C" },
+    ]);
+    expect(d.defaultIndex).toBe(2);
+    expect(d.cancelIndex).toBe(2);
+  });
+
+  it("never points its default at a button that was dropped", () => {
+    const d = parseDialog(
+      JSON.stringify({
+        type: "Message",
+        id: "{x}",
+        content: JSON.stringify({ TitleText: "T", CommandLabel1: "A", CommandLabel2: "", CommandLabel3: "C", DefaultIndex: 1 }),
+      }),
+    )!;
+    expect(d.buttons.some((b) => b.index === d.defaultIndex)).toBe(true);
   });
 
   it("keeps the server's own default, which is the SAFE option", () => {
@@ -44,7 +77,7 @@ describe("the quit confirmation", () => {
     // a confirmation becomes a formality.
     const d = parseDialog(REAL)!;
     expect(d.defaultIndex).toBe(1);
-    expect(d.buttons[d.defaultIndex]).toBe("Never mind");
+    expect(d.buttons.find((b) => b.index === d.defaultIndex)!.label).toBe("Never mind");
     expect(d.cancelIndex).toBe(1);
   });
 });
@@ -91,8 +124,8 @@ describe("what the server sends is bounded before it is drawn", () => {
     const d = parseDialog(big)!;
     expect(d.title.length).toBeLessThan(220);
     expect(d.body.length).toBeLessThan(620);
-    expect(d.buttons[0].length).toBeLessThan(80);
-    expect(d.buttons[1]).toBe("B");
+    expect(d.buttons[0].label.length).toBeLessThan(80);
+    expect(d.buttons[1].label).toBe("B");
   });
 
   it("caps the id it will echo back", () => {

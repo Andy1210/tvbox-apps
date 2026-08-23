@@ -312,6 +312,38 @@ test("nothing is attempted without an account", async () => {
   assert.equal(seen.length, 0);
 });
 
+test("concurrent callers mint ONE streaming token, not one each", async () => {
+  reset();
+  signedIn();
+  handler = (c) => {
+    if (c.path.includes("authenticate") || c.path.includes("authorize")) return { status: 200, body: xstsOk };
+    // A different token per call, so a caller that minted its own is visible.
+    return { status: 200, body: { ...streamBody("weu.core.gssv-play-prod.xboxlive.com"), gsToken: "gs-" + seen.length } };
+  };
+
+  // A session belongs to the client instance that created it, so a second token
+  // is not merely wasteful - the next call carrying it is refused with
+  // `SessionOwnedByAnotherInstance`. Measured on the box: a launch died on a 403
+  // one second after /play, because opening the library mints from four routes at
+  // once.
+  const tokens = await Promise.all(Array.from({ length: 5 }, () => auth.getStreamingToken("xgpuweb")));
+  assert.equal(new Set(tokens.map((t) => t.gsToken)).size, 1, "five callers, one token");
+  assert.equal(at("/user/authenticate").length, 1);
+  assert.equal(at("/xsts/authorize").length, 1);
+  assert.equal(at("/v2/login/user").length, 1);
+});
+
+test("a mint that fails does not wedge the next attempt", async () => {
+  reset();
+  signedIn();
+  handler = () => ({ status: 503, body: "down" });
+  await assert.rejects(() => auth.getXstsUserToken());
+
+  handler = () => ({ status: 200, body: xstsOk });
+  const ok = await auth.getXstsUserToken();
+  assert.equal(ok.token, "xsts-user");
+});
+
 test.after(() => {
   https.request = REAL_REQUEST;
   fs.rmSync(DIR, { recursive: true, force: true });

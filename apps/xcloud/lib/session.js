@@ -142,7 +142,7 @@ async function waitReady(session, opts) {
   const startedAt = Date.now();
 
   for (;;) {
-    if (o.signal && o.signal.aborted) throw new SessionError("cancelled", "Cancelled.");
+    cancelled(o.signal);
     if (Date.now() > deadlineAt) throw new SessionError("provision_timeout", "The session never became ready.", { last });
 
     const res = await api.gssv("GET", path(session.type, session.id, "state"), null, { timeout: 20000 });
@@ -229,6 +229,10 @@ async function configuration(session) {
   };
 }
 
+function cancelled(signal) {
+  if (signal && signal.aborted) throw new SessionError("cancelled", "Cancelled.");
+}
+
 function positive(v, fallback) {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : fallback;
@@ -240,10 +244,15 @@ function positive(v, fallback) {
 // empty answer - reading it as one is how an offer ends up with no answer.
 async function exchange(session, kind, payload, opts) {
   const o = opts || {};
+  cancelled(o.signal);
   await api.gssv("POST", path(session.type, session.id, kind), payload, { timeout: 20000 });
 
   const deadlineAt = Date.now() + (o.timeoutMs || 30000);
   for (;;) {
+    // An aborted sleep RESOLVES rather than throwing, so without this the loop
+    // simply polled on with no delay until its own deadline - a stopped session
+    // still exchanging SDP against a session id it is about to delete.
+    cancelled(o.signal);
     const res = await api.gssv("GET", path(session.type, session.id, kind), null, { timeout: 20000 });
     if (res.status !== 204) {
       const body = res.json() || {};
@@ -258,6 +267,7 @@ async function exchange(session, kind, payload, opts) {
     }
     if (Date.now() > deadlineAt) throw new SessionError("exchange_timeout", "The " + kind + " exchange got no reply.");
     await sleep(750, o.signal);
+    cancelled(o.signal);
   }
 }
 
@@ -386,10 +396,26 @@ async function stop(session) {
   await api.gssv("DELETE", path(session.type, session.id), null, { timeout: 20000 });
 }
 
+// The listener is REMOVED on the ordinary path too. `{ once: true }` only covers
+// the abort that fires; a signal that lives as long as the session (it does - one
+// controller per session) collects one listener per poll otherwise, and these
+// loops poll every 750 ms for as long as the exchange takes.
 function sleep(ms, signal) {
   return new Promise((resolve) => {
-    const t = setTimeout(resolve, ms);
-    if (signal) signal.addEventListener("abort", () => { clearTimeout(t); resolve(); }, { once: true });
+    if (signal && signal.aborted) return resolve();
+    let onAbort = null;
+    const done = () => {
+      if (onAbort && signal) signal.removeEventListener("abort", onAbort);
+      resolve();
+    };
+    const t = setTimeout(done, ms);
+    if (signal) {
+      onAbort = () => {
+        clearTimeout(t);
+        done();
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
   });
 }
 

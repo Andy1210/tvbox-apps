@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FocusButton, Osk, useI18n } from "@sdk";
-import { getCurrentFocusKey, setFocus } from "@noriginmedia/norigin-spatial-navigation";
+import { FocusButton, Osk, useBackspace, useI18n } from "@sdk";
+import { doesFocusableExist, getCurrentFocusKey, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import * as api from "./api";
 import { Grid } from "./Grid";
 import { Row } from "./Row";
 import { SearchIcon, CloseIcon, SettingsIcon } from "./icons";
+import { errorText } from "./errors";
 import { Settings } from "./Settings";
 import { createMover, nearest, pinScroll } from "./moveTo";
 
@@ -25,23 +26,30 @@ const FILLING_POLL_MS = 3000;
 const STALE_REREAD_MS = 20000;
 const ALL_GENRES = "*";
 
-// No "leave the app" button: the remote's Home already does that, and a second
+// No "leave the app" BUTTON: the remote's Home already does that, and a second
 // way to do it took a slot in a header where every button costs a press to get
-// past.
+// past. Back still leaves, which is the convention every other app on this box
+// follows - walk the screens first, and only leave from the top.
 export function Library({
   status,
   onPlay,
   onSignedOut,
+  onExit,
 }: {
   status: api.Status | null;
   onPlay: (title: api.Title) => void;
   onSignedOut: () => void;
+  onExit: () => void;
 }) {
   const { t, tag } = useI18n();
   const [all, setAll] = useState<api.Title[] | null>(null);
   const [recent, setRecent] = useState<api.Title[]>([]);
   const [collections, setCollections] = useState<Record<string, api.Title[]>>({});
   const [partial, setPartial] = useState(false);
+  // The catalogue arrives over about half a minute, and a count printed off the
+  // first screen of it read "42" for a library of 2530 - a number wrong by sixty
+  // times, stated with no hedge, next to a row that was one tile wide.
+  const [filling, setFilling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [typing, setTyping] = useState(false);
@@ -78,6 +86,18 @@ export function Library({
       if (!box || !col) return;
       const item = el.getBoundingClientRect();
       const view = box.getBoundingClientRect();
+      // Measured against the COLUMN, not against the window. Both rects carry the
+      // same transform, so their difference is where the element sits in the
+      // un-moved column - which is what `mover.to` wants.
+      //
+      // The old form added `mover.at` to a window-relative top, mixing the
+      // transform's CURRENT position (the rect, mid-animation) with its
+      // DESTINATION (`at`, set synchronously). The library assembles in three
+      // commits - catalogue, collections, recent - so three `setFocus` calls land
+      // inside the 180 ms move, and 7 cold launches in 8 came to rest 191 px down:
+      // the first row clipped, and the header above it unreachable, because
+      // norigin only looks up at what is fully above the focused rect.
+      const colBox = col.getBoundingClientRect();
       // A row's heading belongs to the tile under it. Bringing the TILE into view
       // left "Continue" cut off at the top, because the label was not part of what
       // was being shown - so for a tile in the first line of its section, the band
@@ -89,9 +109,7 @@ export function Library({
         const sec = section.getBoundingClientRect();
         if (item.top - sec.top < item.height) top = sec.top;
       }
-      // The column is translated by -at, so its rect already carries the shift;
-      // adding `at` back gives the position in the un-moved column.
-      const start = top - view.top + mover.at;
+      const start = top - colBox.top;
       mover.to(
         nearest({
           at: mover.at,
@@ -110,6 +128,9 @@ export function Library({
     [mover],
   );
 
+  // Bumped by the settings panel's refresh, which is what makes the grid behind it
+  // re-read - it said "refreshed" over the catalogue it had just replaced.
+  const [reload, setReload] = useState(0);
   useEffect(() => {
     let alive = true;
     let again: ReturnType<typeof setTimeout> | null = null;
@@ -120,8 +141,14 @@ export function Library({
       const read = async (): Promise<void> => {
         const lib = await api.getLibrary(tag);
         if (!alive) return;
+        // A read that WORKED clears the last one's message. Without this the
+        // refresh wired up in Settings changed nothing on screen: the catalogue
+        // loaded behind an error sentence that nothing could ever remove, and
+        // leaving the app was the only way past it.
+        setError(null);
         setAll(lib.titles);
         setPartial(lib.partial);
+        setFilling(!!lib.filling);
         // The curated rows are resolved against the catalogue, so while it is
         // still filling they come back short - re-read them with it rather than
         // leaving the first, emptiest answer on screen.
@@ -134,7 +161,7 @@ export function Library({
       try {
         await read();
       } catch (e) {
-        if (alive) setError(t("errors." + ((e as api.ApiError).code || "generic")) || t("errors.generic"));
+        if (alive) setError(errorText(t, (e as api.ApiError).code));
       }
       // Asked separately because it is the one thing that changes between two
       // launches, so it is never served from the cache.
@@ -145,7 +172,7 @@ export function Library({
       alive = false;
       if (again) clearTimeout(again);
     };
-  }, [t, tag]);
+  }, [t, tag, reload]);
 
   const playable = useMemo(() => (all || []).filter((x) => x.name), [all]);
   // The grid shows what the subscription covers, and search reaches the rest. Not
@@ -206,7 +233,11 @@ export function Library({
   useEffect(() => {
     // Nothing in the body to focus: the header is what the remote gets, or the
     // screen is one nobody can leave.
-    if (typing) return;
+    // Not while another screen owns the focus. The settings panel replaces the
+    // whole library body, so placing a grid tile from here targets something that
+    // is not mounted: measured, pressing "Refresh the catalogue" left the panel
+    // with nothing focused and only Back to get out.
+    if (typing || settingsOpen) return;
     if (!firstKey || !all || !playable.length) {
       const id = setTimeout(() => setFocus("lib-settings"), 0);
       return () => clearTimeout(id);
@@ -225,13 +256,49 @@ export function Library({
     // effect of the same commit can run first and find nothing there.
     const id = setTimeout(() => setFocus(firstKey), 0);
     return () => clearTimeout(id);
-  }, [all, firstKey, typing, listId]);
+  }, [all, firstKey, typing, settingsOpen, listId]);
+
+  // And a safety net under all of it: whenever a press arrives with nothing
+  // focused, put the cursor back.
+  //
+  // The placement above only fires when the LIST changes, and the ways to end up
+  // with nothing focused do not change it - closing the on-screen keyboard,
+  // confirming it empty, clearing the query with the X. Each unmounts the element
+  // that held focus and leaves the screen inert: measured, six presses in every
+  // direction recovered nothing and only Home escaped.
+  useEffect(() => {
+    const onKey = () => {
+      // `doesFocusableExist`, not just "is a key set": norigin's own
+      // `removeFocusable` deletes the component and leaves `focusKey` pointing at
+      // it, so after the element unmounts the getter still answers with the dead
+      // key - and this guard returned early every single time. Measured: closing
+      // the on-screen keyboard, confirming it empty, or clearing the query with
+      // the X each left the screen inert, and ten presses in every direction
+      // recovered nothing.
+      const at = getCurrentFocusKey();
+      if (at && doesFocusableExist(at)) return;
+      setFocus(firstKey && doesFocusableExist(firstKey) ? firstKey : "lib-settings");
+    };
+    // Capture, ahead of the library's own handler, which would otherwise act on
+    // the dead focus first.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [firstKey]);
 
   // A different list is not a move within one: there is nothing to follow from the
   // old position to the new.
   useEffect(() => {
     mover.to(0, false);
   }, [mover, query, genre]);
+
+  // Back walks the screens: the keyboard, then a search, then the app. It did
+  // nothing at all before - every other app on the box registers one, and a
+  // remote's Back key reaching a page that ignores it is a dead key.
+  useBackspace(() => {
+    if (typing) setTyping(false);
+    else if (query) setQuery("");
+    else onExit();
+  });
 
   const onSearchDone = useCallback((value: string) => {
     setQuery(value.trim());
@@ -260,6 +327,7 @@ export function Library({
       <Settings
         status={status}
         onSignedOut={onSignedOut}
+        onRefreshed={() => setReload((n) => n + 1)}
         onClose={() => {
           setSettingsOpen(false);
           // Back to the button it was opened from, or the remote is left with
@@ -274,15 +342,15 @@ export function Library({
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg-0 text-fg">
       {/* Outside the moving column, so it stays put. */}
       <header className="flex shrink-0 items-center justify-between gap-6 px-[4vw] pb-[2vh] pt-[3vh]">
-        <h1 className="text-4xl font-semibold">{t("title")}</h1>
+        <h1 className="text-[3.3vh] font-semibold">{t("title")}</h1>
         <div className="flex items-center gap-4">
-          {partial && <span className="text-lg text-warn">{t("library.partial")}</span>}
+          {partial && <span className="text-[1.7vh] text-warn">{t("library.partial")}</span>}
           {status?.gamertag && (
-            <span className="text-lg text-fg-dim">{t("library.signedInAs", { gamertag: status.gamertag })}</span>
+            <span className="text-[1.7vh] text-fg-dim">{t("library.signedInAs", { gamertag: status.gamertag })}</span>
           )}
           <FocusButton
             focusKey="lib-search"
-            className="flex items-center gap-3 rounded-lg bg-bg-1 px-6 py-3 text-xl"
+            className="flex items-center gap-3 rounded-lg bg-bg-1 px-6 py-3 text-[1.9vh]"
             onEnter={() => setTyping(true)}
             label={t("library.search")}
           >
@@ -292,7 +360,7 @@ export function Library({
           {query && (
             <FocusButton
               focusKey="lib-clear"
-              className="flex items-center rounded-lg bg-bg-1 px-5 py-3 text-xl"
+              className="flex items-center rounded-lg bg-bg-1 px-5 py-3 text-[1.9vh]"
               onEnter={() => setQuery("")}
               label={t("library.clear")}
             >
@@ -301,19 +369,12 @@ export function Library({
           )}
           <FocusButton
             focusKey="lib-settings"
-            className="flex items-center gap-3 rounded-lg bg-bg-1 px-6 py-3 text-xl"
+            className="flex items-center gap-3 rounded-lg bg-bg-1 px-6 py-3 text-[1.9vh]"
             onEnter={() => setSettingsOpen(true)}
             label={t("settings.title")}
           >
             <SettingsIcon className="h-[1.1em] w-[1.1em]" />
             <span>{t("settings.title")}</span>
-          </FocusButton>
-          <FocusButton
-            focusKey="lib-signout"
-            className="rounded-lg bg-bg-1 px-5 py-3 text-xl"
-            onEnter={() => void api.signOut().then(onSignedOut)}
-          >
-            {t("library.signOut")}
           </FocusButton>
         </div>
       </header>
@@ -325,14 +386,19 @@ export function Library({
           help because the screen itself was the dead end. */}
       {message && (
         <div className="flex flex-1 items-center justify-center px-[4vw]">
-          <p className={"text-center text-3xl " + (error ? "text-warn" : "text-fg-dim")}>{message}</p>
+          <p className={"text-center text-[2.8vh] " + (error ? "text-warn" : "text-fg-dim")}>{message}</p>
         </div>
       )}
 
       {/* The window. It clips, which is why the column below pads. Horizontal room
-          for the focus reach too: a row's first tile sits at this edge. */}
+          for the focus reach too: a row's first tile sits at this edge.
+          UNMOUNTED rather than hidden when there is a message: `display: none`
+          leaves every tile registered with spatial navigation at a 0x0 rect on the
+          origin, which reads as "far left" - measured, two Lefts from the settings
+          button landed on an undrawn tile and Enter there STARTED A GAME nobody
+          could see. */}
+      {!message && (
       <div
-        hidden={!!message}
         ref={attachViewport}
         className="min-h-0 flex-1 overflow-hidden"
         style={{ paddingLeft: "calc(4vw - var(--focus-reach))", paddingRight: "calc(4vw - var(--focus-reach))" }}
@@ -349,7 +415,7 @@ export function Library({
               <Row key={r.id} id={r.id} label={r.label} titles={r.titles} onPlay={onPlay} onFocused={show} />
             ))}
 
-          {genres.length > 1 && (
+          {genres.length > 1 && !(results && !gridTitles.length) && (
             <section className="mb-[2vh]">
               <div className="flex flex-wrap gap-3 px-[0.5vw]">
                 <Chip
@@ -374,14 +440,16 @@ export function Library({
           )}
 
           <section>
-            <h2 className="mb-[1vh] flex items-baseline gap-4 px-[0.5vw] text-2xl text-fg-dim">
+            <h2 className="mb-[1vh] flex items-baseline gap-4 px-[0.5vw] text-[2.2vh] text-fg-dim">
               <span>
-                {results ? t("library.search") : t("library.owned")} — {gridTitles.length}
+                {results ? t("library.search") : t("library.owned")}
+                {filling && !results ? "" : " — " + gridTitles.length}
               </span>
+              {filling && !results && <span className="text-[1.7vh] text-warn">{t("library.filling")}</span>}
               {/* Say what is NOT on screen, rather than letting the grid look like
                   the whole catalogue. */}
-              {!results && genre === ALL_GENRES && hidden > 0 && (
-                <span className="text-lg">{t("library.searchRest", { count: hidden })}</span>
+              {!results && !filling && genre === ALL_GENRES && hidden > 0 && (
+                <span className="text-[1.7vh]">{t("library.searchRest", { count: hidden })}</span>
               )}
             </h2>
             {gridTitles.length ? (
@@ -392,13 +460,14 @@ export function Library({
                 onFocused={show}
               />
             ) : (
-              <p className="px-[0.5vw] py-[6vh] text-3xl text-fg-dim">
+              <p className="px-[0.5vw] py-[6vh] text-[2.8vh] text-fg-dim">
                 {results ? t("library.noResults", { query }) : t("library.empty")}
               </p>
             )}
           </section>
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -422,7 +491,7 @@ function Chip({
       // The chosen filter has to stay legible when it is NOT the focused thing,
       // so it is marked by its fill rather than by the focus ring.
       className={
-        "rounded-full px-5 py-2 text-lg " + (active ? "bg-accent text-fg" : "bg-bg-1 text-fg-dim")
+        "rounded-full px-5 py-2 text-[1.7vh] " + (active ? "bg-accent text-fg" : "bg-bg-1 text-fg-dim")
       }
       onEnter={onEnter}
       onFocused={() => {

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { FocusButton, useI18n } from "@sdk";
+import { FocusButton, useBackspace, useI18n } from "@sdk";
 import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import * as api from "./api";
+import { errorText } from "./errors";
 
 // The device-code screen. Nothing is typed on the television: the code goes on
 // the phone, which is why this flow was chosen over a redirect.
@@ -30,10 +31,12 @@ const codeUrl = (uri: string, code: string) => {
 export function SignIn({
   status,
   onSignedIn,
+  onSignedOut,
   onExit,
 }: {
   status: api.Status | null;
   onSignedIn: () => void;
+  onSignedOut: () => void;
   onExit: () => void;
 }) {
   const { t } = useI18n();
@@ -41,12 +44,16 @@ export function SignIn({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [qr, setQr] = useState("");
+  // Seconds left on the code, ticked here. The plugin answers with the ORIGINAL
+  // lifetime, so a screen resumed after a reload - which this flow is built to
+  // survive - said "valid for 15 minutes" about a code with two left, and then
+  // simply failed.
+  const [left, setLeft] = useState(0);
+  const secondsLeft = (dc: api.DeviceCode) =>
+    Math.max(0, Math.round(((dc.expiresAt || Date.now() + dc.expiresIn * 1000) - Date.now()) / 1000));
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const message = useCallback(
-    (codeName: string | undefined) => t("errors." + (codeName || "generic")) || t("errors.generic"),
-    [t],
-  );
+  const message = useCallback((code: string | undefined) => errorText(t, code), [t]);
 
   const stopPolling = useCallback(() => {
     if (timer.current) clearInterval(timer.current);
@@ -78,6 +85,9 @@ export function SignIn({
     setError(null);
     try {
       const dc = await api.startSignIn();
+      // Seeded with the code, not left at 0: the ticker runs in an effect, so the
+      // first painted frame otherwise read "the code expires in 0 seconds".
+      setLeft(secondsLeft(dc));
       setCode(dc);
       poll();
     } catch (e) {
@@ -98,11 +108,22 @@ export function SignIn({
     // pick the code back up rather than asking Microsoft for a second one and
     // making the person retype.
     if (status && status.signingIn && status.pending) {
+      setLeft(secondsLeft(status.pending));
       setCode(status.pending);
       poll();
     }
     return stopPolling;
   }, [status, poll, stopPolling]);
+
+  useEffect(() => {
+    if (!code) return;
+    // `expiresAt` is what the plugin says, so a resumed sign-in counts from the
+    // real deadline rather than from when this page happened to open.
+    const tick = () => setLeft(secondsLeft(code));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [code]);
 
   useEffect(() => {
     if (!code) return setQr("");
@@ -121,12 +142,23 @@ export function SignIn({
     return () => clearTimeout(id);
   }, [code]);
 
+  // Back walks back, as it does on every other screen of this app and every other
+  // app on the box. It did nothing at all here, on all three states - and on the
+  // code screen the only focusable is Cancel, so there was no way out of the app
+  // without cancelling a sign-in somebody might be halfway through on their phone.
+  useBackspace(() => {
+    if (!code) return onExit();
+    stopPolling();
+    void api.cancelSignIn().catch(() => {});
+    setCode(null);
+  });
+
   return (
     <div className="flex h-screen w-screen flex-col items-center justify-center gap-8 bg-bg-0 px-16 text-fg">
-      <h1 className="text-4xl font-semibold">{t("signin.heading")}</h1>
+      <h1 className="text-[3.3vh] font-semibold">{t("signin.heading")}</h1>
 
-      {unusable && <p className="max-w-3xl text-center text-2xl text-warn">{unusable}</p>}
-      {error && <p className="max-w-3xl text-center text-2xl text-warn">{error}</p>}
+      {unusable && <p className="max-w-3xl text-center text-[2.2vh] text-warn">{unusable}</p>}
+      {error && <p className="max-w-3xl text-center text-[2.2vh] text-warn">{error}</p>}
 
       {code ? (
         <>
@@ -137,25 +169,29 @@ export function SignIn({
             {qr && (
               <div className="flex flex-col items-center gap-3">
                 <img src={qr} alt="" className="h-[34vh] w-[34vh] rounded-xl bg-white p-3" />
-                <span className="text-lg text-fg-dim">{t("signin.scan")}</span>
+                <span className="text-[1.7vh] text-fg-dim">{t("signin.scan")}</span>
               </div>
             )}
             <div className="flex flex-col items-start gap-4">
-              <p className="text-2xl text-fg-dim">{t("signin.instruction")}</p>
-              <p className="text-3xl text-fg-dim">{code.verificationUri}</p>
+              <p className="text-[2.2vh] text-fg-dim">{t("signin.instruction")}</p>
+              <p className="text-[2.8vh] text-fg-dim">{code.verificationUri}</p>
               {/* The code is the point of this screen, so it is the biggest thing
                   on it and spaced out to be read from a sofa - and WHITE rather
                   than the accent green, which measured as poor contrast on this
                   near-black ground when read off the television. */}
-              <p className="text-8xl font-bold tracking-[0.2em] text-fg">{code.userCode}</p>
+              <p className="text-[8.9vh] font-bold tracking-[0.2em] text-fg">{code.userCode}</p>
             </div>
           </div>
-          <p className="text-xl text-fg-dim">{t("signin.expiresIn", { minutes: Math.round(code.expiresIn / 60) })}</p>
-          <p className="text-xl text-fg-dim">{t("signin.keepOpen")}</p>
-          <p className="text-xl text-fg-dim">{t("signin.waiting")}</p>
+          <p className="text-[1.9vh] text-fg-dim">
+            {left > 60
+              ? t("signin.expiresIn", { minutes: Math.ceil(left / 60) })
+              : t("signin.expiresSoon", { seconds: left })}
+          </p>
+          <p className="text-[1.9vh] text-fg-dim">{t("signin.keepOpen")}</p>
+          <p className="text-[1.9vh] text-fg-dim">{t("signin.waiting")}</p>
           <FocusButton
             focusKey="signin-cancel"
-            className="rounded-xl bg-bg-1 px-10 py-4 text-2xl"
+            className="rounded-xl bg-bg-1 px-10 py-4 text-[2.2vh]"
             onEnter={() => {
               stopPolling();
               void api.cancelSignIn().catch(() => {});
@@ -167,15 +203,28 @@ export function SignIn({
         </>
       ) : (
         <div className="flex gap-6">
-          <FocusButton
-            focusKey="signin-start"
-            className="rounded-xl bg-accent px-12 py-5 text-3xl font-semibold"
-            onEnter={() => void start()}
-          >
-            {busy ? "…" : error ? t("signin.retry") : t("signin.start")}
-          </FocusButton>
-          <FocusButton focusKey="signin-exit" className="rounded-xl bg-bg-1 px-10 py-5 text-2xl" onEnter={onExit}>
-            {t("stream.stop")}
+          {unusable ? (
+            // The only thing that helps is a DIFFERENT account, so that is the
+            // button - "sign in" here starts the same account's sign-in again and
+            // lands back on this screen.
+            <FocusButton
+              focusKey="signin-start"
+              className="rounded-xl bg-accent px-12 py-5 text-[2.8vh] font-semibold"
+              onEnter={() => void api.signOut().then(onSignedOut).catch(() => setError(t("errors.generic")))}
+            >
+              {t("signin.otherAccount")}
+            </FocusButton>
+          ) : (
+            <FocusButton
+              focusKey="signin-start"
+              className="rounded-xl bg-accent px-12 py-5 text-[2.8vh] font-semibold"
+              onEnter={() => void start()}
+            >
+              {busy ? "…" : error ? t("signin.retry") : t("signin.start")}
+            </FocusButton>
+          )}
+          <FocusButton focusKey="signin-exit" className="rounded-xl bg-bg-1 px-10 py-5 text-[2.2vh]" onEnter={onExit}>
+            {t("signin.exit")}
           </FocusButton>
         </div>
       )}

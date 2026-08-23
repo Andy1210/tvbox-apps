@@ -48,6 +48,11 @@ function saveCache() {
   try {
     fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
     fs.writeFileSync(tmp, JSON.stringify(state));
+    // 0600 regardless of umask, like the settings and the tokens beside it. Not a
+    // credential, but it is the whole Game Pass catalogue WITH this account's
+    // entitlement flag per title - what this household subscribes to - and it was
+    // the one of the three written at the umask (664 as measured on the box).
+    fs.chmodSync(tmp, 0o600);
     fs.renameSync(tmp, CACHE_FILE);
   } catch (e) {
     // A cache that cannot be written costs 17 s on the next launch and nothing
@@ -104,6 +109,11 @@ function reduce(joined) {
 // refused to refetch.
 let firstScreen = null;
 let inFlightLanguage = null;
+// The identity of the pass that owns `inFlight`. Comparing the LANGUAGE instead
+// meant a pass disowned by `invalidate()` matched the replacement that had taken
+// the same key, and cleared ITS slot - so the dedupe stopped working and three
+// full catalogue passes ran at once against an endpoint that 504s under load.
+let inFlightToken = null;
 // Bumped by `invalidate`. A pass started before it belongs to a library that no
 // longer exists: without this, forgetting the catalogue while one was running
 // handed the next reader that stale promise, which was already past its publish
@@ -125,13 +135,16 @@ function refresh(opts) {
   });
   inFlightLanguage = language;
   const era = generation;
+  const token = {};
+  inFlightToken = token;
   inFlight = after
     .then(() => doRefresh({ ...opts, _ready: ready, _era: era }))
     .finally(() => {
       // Only clear what is still ours: a later pass may already have replaced it.
-      if (inFlightLanguage === language) {
+      if (inFlightToken === token) {
         inFlight = null;
         inFlightLanguage = null;
+        inFlightToken = null;
         firstScreen = null;
       }
       // A pass that failed before the first screen must not leave a promise
@@ -216,9 +229,18 @@ const named = (rows) => (rows || []).reduce((n, t) => n + (t.name ? 1 : 0), 0);
 const LANGUAGE_SWITCH_MS = 60000;
 let lastSwitch = 0;
 
+// What the screen last asked for. The idle refresh has no request to read a
+// language from, so it fell back to the box's own `config.locale` - unset here -
+// and asked for en-US every fifteen minutes. One state holds one language, so
+// that threw away the Hungarian catalogue, wrote an English one to disk, and made
+// the next app open pay the full cold pass. Measured on the box.
+let lastAsked = "";
+const askedLanguage = () => lastAsked;
+
 async function get(opts) {
   loadCache();
   let language = (opts && opts.language) || "en-US";
+  if (opts && opts.remember !== false) lastAsked = language;
   if (state.titles.length && state.language && state.language !== language) {
     if (Date.now() - lastSwitch < LANGUAGE_SWITCH_MS) language = state.language;
     else lastSwitch = Date.now();
@@ -327,6 +349,7 @@ function invalidate() {
   lastSwitch = 0;
   inFlight = null;
   inFlightLanguage = null;
+  inFlightToken = null;
   firstScreen = null;
   state = { titles: [], fetchedAt: 0, market: "", language: "", partial: false, filling: false, version: CACHE_VERSION };
   loaded = true;
@@ -343,6 +366,7 @@ module.exports = {
   FIRST_SCREEN,
   CACHE_VERSION,
   COLLECTION_TTL_MS,
+  askedLanguage,
   get,
   find,
   search,

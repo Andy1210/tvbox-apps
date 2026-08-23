@@ -21,6 +21,8 @@ export interface DeviceCode {
   userCode: string;
   verificationUri: string;
   expiresIn: number;
+  /** Wall clock, from the plugin - the code outlives this page. */
+  expiresAt?: number;
 }
 
 export interface Status {

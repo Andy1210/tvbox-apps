@@ -57,18 +57,25 @@ test("an expired access token still leaves a usable account", () => {
   assert.equal(store.hasAccount(), true);
 });
 
-test("only the refresh token side is persisted, at mode 600 in a 700 dir", () => {
+test("only the account side is persisted, at mode 600, and the shared dir is left alone", () => {
   reset();
+  // The directory is `~/.tvbox` on a real box - the shell's whole data directory.
+  // This used to chmod it 0700 on every token refresh, which is an undeclared
+  // change to state this plugin does not own; 0600 on the file is the protection.
+  const dir = path.dirname(FILE);
+  fs.chmodSync(dir, 0o755);
   store.setUserToken({ access_token: "a", refresh_token: "r", expires_in: 3600, scope: "xboxlive.signin" });
   assert.equal(fs.statSync(FILE).mode & 0o777, 0o600);
-  assert.equal(fs.statSync(path.dirname(FILE)).mode & 0o777, 0o700);
+  assert.equal(fs.statSync(dir).mode & 0o777, 0o755);
 
   const raw = JSON.parse(fs.readFileSync(FILE, "utf8"));
   assert.deepEqual(Object.keys(raw), ["user"]);
   // No gsToken, no XSTS token: those are re-derived in three requests and expire
   // within hours, so writing them down is a live streaming credential on disk for
-  // no benefit.
+  // no benefit. The access token IS here, beside the refresh token that can mint
+  // another one - the file's comment used to claim otherwise.
   assert.equal(JSON.stringify(raw).includes("gsToken"), false);
+  assert.equal(JSON.stringify(raw).includes("XSTS"), false);
 });
 
 test("no temp file is left behind", () => {

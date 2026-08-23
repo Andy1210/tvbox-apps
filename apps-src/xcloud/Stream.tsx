@@ -4,6 +4,7 @@ import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import * as api from "./api";
 import { connect, type Phase, type StreamHandle } from "./stream/connection";
 import type { ServerDialog } from "./stream/channels";
+import { errorText } from "./errors";
 
 // The stream. Two waits happen here and they are different things: the SERVER
 // getting ready (a queue, measured at 224 s on this account, so it needs a screen
@@ -12,6 +13,13 @@ import type { ServerDialog } from "./stream/channels";
 // The queue estimate the server offers is shown as prose, never as a countdown: it
 // said 10 seconds for a wait that took 224, and a timer that expires while you are
 // still waiting is worse than no timer at all.
+// Why the stream stopped, as a code the person can be told. Anything not here
+// leaves quietly - a channel closing during teardown is the app's own doing.
+const ENDED_CODES: Record<string, string> = {
+  no_frames: "no_frames",
+  no_first_frame: "no_first_frame",
+};
+
 const STATE_POLL_MS = 1500;
 // Once it is playing, the only thing left to watch for is the session ending.
 const WATCH_POLL_MS = 3000;
@@ -40,6 +48,7 @@ export function Stream({
   // what is in the stream handed to IT.
   const audio = useRef<HTMLAudioElement | null>(null);
   const handle = useRef<StreamHandle | null>(null);
+  const connecting = useRef(false);
   const [phase, setPhase] = useState<Phase | "provisioning" | "queued">("provisioning");
   const [queueSeconds, setQueueSeconds] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -52,10 +61,7 @@ export function Stream({
   // running and still making sound, waiting for an answer nothing could give.
   const [dialog, setDialog] = useState<ServerDialog | null>(null);
 
-  const message = useCallback(
-    (code: string | undefined) => t("errors." + (code || "generic")) || t("errors.generic"),
-    [t],
-  );
+  const message = useCallback((code: string | undefined) => errorText(t, code), [t]);
 
   const leave = useCallback(() => {
     handle.current?.close();
@@ -109,7 +115,14 @@ export function Stream({
           leave();
           return;
         }
-        if (s.state === "Provisioned" && s.config) {
+        // One connection per session. The tick is async and `setInterval` does
+        // not serialise: a slow `/session/state` let a second tick start while the
+        // first was still awaiting, and both saw `Provisioned` - two peer
+        // connections negotiating against one session, with `handle.current`
+        // keeping only the last. `stopPolling()` cancels future ticks, not a tick
+        // already in flight.
+        if (s.state === "Provisioned" && s.config && !connecting.current) {
+          connecting.current = true;
           // Slower from here, but NOT stopped: this poll is the only way the page
           // hears that the server ended the session, and stopping it left a frozen
           // picture until WebRTC's ICE timeout gave up half a minute later.
@@ -145,7 +158,15 @@ export function Stream({
                 onEnded: (why) => {
                   if (!alive) return;
                   console.log("[xcloud] stream ended:", why);
-                  leave();
+                  // A picture that stops has to SAY so. Measured on the box: the
+                  // session negotiated, the channels opened, no frame ever
+                  // decoded, and sixteen seconds later the app was back at the
+                  // grid with nothing said - which from the sofa is a press that
+                  // did nothing. `errors.no_frames` had been written for exactly
+                  // this and was reachable from no code at all.
+                  const code = ENDED_CODES[why];
+                  if (code) setError(errorText(t, code));
+                  else leave();
                 },
                 onStream: (stream, kind) => {
                   const el = kind === "video" ? video.current : audio.current;
@@ -166,7 +187,15 @@ export function Stream({
               s.quality,
             );
           } catch (e) {
-            if (alive) setError((e as Error).message || t("stream.failed"));
+            // Through the code table like everywhere else: the raw message is the
+            // upstream failure text, and `exchange_failed` carries Microsoft's own
+            // `errorDetails.message` - measured at 5,004 characters, onto a screen
+            // that does not scroll.
+            if (alive) {
+              const err = e as api.ApiError;
+              if (err.code) console.warn("[xcloud] connect failed:", err.code, String(err.message || "").slice(0, 300));
+              setError(errorText(t, err.code));
+            }
           }
         }
       }, STATE_POLL_MS);
@@ -177,6 +206,10 @@ export function Stream({
       stopPolling();
       handle.current?.close();
       handle.current = null;
+      // Cleared with the rest of the run's state. It is per-session, not
+      // per-mount: leaving it set means a re-run of this effect starts a session
+      // and then never connects to it, sitting on "Starting…" for good.
+      connecting.current = false;
     };
   }, [title.titleId, message, leave, t, tag]);
 
@@ -196,6 +229,23 @@ export function Stream({
     const id = setTimeout(() => setFocus("dlg-" + dialog.defaultIndex), 0);
     return () => clearTimeout(id);
   }, [dialog]);
+
+  // The session outlives this page unless something says otherwise, and a real
+  // Xbox slot is not a thing to leave running: measured, quitting the app left one
+  // Provisioned for as long as anyone watched.
+  //
+  // Its own unmount-only effect, not the main one's cleanup: that effect's deps
+  // include the translator, so a locale change would have stopped a running game.
+  // `sendBeacon` for the page going away, because a `fetch` started in `pagehide`
+  // is cancelled with the page.
+  useEffect(() => {
+    const beacon = () => navigator.sendBeacon?.("/tvbox/api/xcloud/session/stop");
+    window.addEventListener("pagehide", beacon);
+    return () => {
+      window.removeEventListener("pagehide", beacon);
+      void api.stopSession().catch(() => {});
+    };
+  }, []);
 
   // Any Back or Escape leaves. The shell's own Back handling is for navigating
   // between screens; a running stream has to be able to end from the remote.
@@ -275,17 +325,17 @@ export function Stream({
       {dialog && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/70 p-[6vw]">
           <div className="w-[54vw] rounded-2xl bg-bg-1 p-[3vw] text-fg">
-            <h2 className="mb-[1.5vh] text-3xl font-semibold">{dialog.title}</h2>
-            {dialog.body && <p className="mb-[3vh] text-2xl text-fg-dim">{dialog.body}</p>}
+            <h2 className="mb-[1.5vh] text-[2.8vh] font-semibold">{dialog.title}</h2>
+            {dialog.body && <p className="mb-[3vh] text-[2.2vh] text-fg-dim">{dialog.body}</p>}
             <div className="flex flex-wrap gap-4">
-              {dialog.buttons.map((label, i) => (
+              {dialog.buttons.map((b) => (
                 <FocusButton
-                  key={label + i}
-                  focusKey={"dlg-" + i}
-                  className="rounded-xl bg-bg-0 px-8 py-4 text-2xl"
-                  onEnter={() => answer(i)}
+                  key={b.index}
+                  focusKey={"dlg-" + b.index}
+                  className="rounded-xl bg-bg-0 px-8 py-4 text-[2.2vh]"
+                  onEnter={() => answer(b.index)}
                 >
-                  {label}
+                  {b.label}
                 </FocusButton>
               ))}
             </div>
@@ -296,33 +346,33 @@ export function Stream({
       {!playing && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-[3vh] px-16 text-center">
           <Waiting tile={title.tile} still={!!error} />
-          <h1 className="text-4xl font-semibold text-fg">{title.name || title.titleId}</h1>
+          <h1 className="text-[3.3vh] font-semibold text-fg">{title.name || title.titleId}</h1>
 
           {error ? (
-            <p className="max-w-3xl text-2xl text-warn">{error}</p>
+            <p className="max-w-3xl text-[2.2vh] text-warn">{error}</p>
           ) : (
             <>
-              <p className="text-2xl text-fg-dim">{waitLabel}</p>
+              <p className="text-[2.2vh] text-fg-dim">{waitLabel}</p>
               {/* The elapsed time is the truthful one and it ticks; the server's
                   estimate is labelled as the server's, because it was an order of
                   magnitude out when it was measured. Neither is a countdown - a
                   timer that expires while you are still waiting is worse than no
                   timer at all. */}
-              <p className="text-xl text-fg-dim">
+              <p className="text-[1.9vh] text-fg-dim">
                 {t("stream.elapsed", { time: clock(elapsed) })}
                 {phase === "queued" && queueSeconds ? " · " + t("stream.estimate", { minutes: Math.max(1, Math.round(queueSeconds / 60)) }) : ""}
               </p>
-              {phase === "queued" && <p className="text-xl text-fg-dim">{t("stream.queuedHint")}</p>}
+              {phase === "queued" && <p className="text-[1.9vh] text-fg-dim">{t("stream.queuedHint")}</p>}
             </>
           )}
 
           {title.maxPlaySeconds > 0 && (
-            <p className="text-xl text-warn">{t("stream.trial", { minutes: Math.round(title.maxPlaySeconds / 60) })}</p>
+            <p className="text-[1.9vh] text-warn">{t("stream.trial", { minutes: Math.round(title.maxPlaySeconds / 60) })}</p>
           )}
 
           <FocusButton
             focusKey="stream-leave"
-            className="mt-[2vh] rounded-xl bg-bg-1 px-10 py-4 text-2xl"
+            className="mt-[2vh] rounded-xl bg-bg-1 px-10 py-4 text-[2.2vh]"
             onEnter={leave}
           >
             {t("stream.stop")}
@@ -357,8 +407,10 @@ function Waiting({ tile, still }: { tile: string; still: boolean }) {
 }
 
 /** m:ss, because a bare second count past a minute is hard to read at a glance. */
+// Always m:ss, so nothing here is a word. The under-a-minute form used to append
+// a hardcoded "s" inside a sentence the rest of which is translated.
 function clock(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
-  return m > 0 ? m + ":" + String(s).padStart(2, "0") : String(s) + "s";
+  return m + ":" + String(s).padStart(2, "0");
 }

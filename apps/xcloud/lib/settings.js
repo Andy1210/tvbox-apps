@@ -48,7 +48,20 @@ const ALLOWED = {
 // not one to fetch.
 const LANGUAGES = ALLOWED.gameLocale.filter(Boolean);
 const DEFAULT_LANGUAGE = "en-US";
-const language = (asked) => (LANGUAGES.includes(String(asked)) ? String(asked) : DEFAULT_LANGUAGE);
+// A full tag if we ship it, otherwise the one we ship for that LANGUAGE, otherwise
+// the default. The second step matters because the box's own UI locale is a short
+// id ("hu"): held to full tags only, every catalogue read on a Hungarian box asked
+// for en-US and then cached the English answer over the Hungarian one.
+function language(asked) {
+  const want = String(asked || "");
+  if (LANGUAGES.includes(want)) return want;
+  const primary = want.split("-")[0].toLowerCase();
+  if (primary) {
+    const near = LANGUAGES.find((l) => l.split("-")[0].toLowerCase() === primary);
+    if (near) return near;
+  }
+  return DEFAULT_LANGUAGE;
+}
 
 let cache = null;
 

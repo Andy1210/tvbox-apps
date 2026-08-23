@@ -498,3 +498,19 @@ test.after(() => {
   api.hydrate = REAL.hydrate;
   fs.rmSync(DIR, { recursive: true, force: true });
 });
+
+test("the cache file is 0600, not whatever the umask says", async () => {
+  // Not a credential, but it is the whole Game Pass catalogue with this account's
+  // per-title entitlement flag - what this household subscribes to. Measured on
+  // the box before this: tokens 600, settings 600, and this one 664.
+  api.fetchTitles = async () => [fatProduct("m1", "Mode")];
+  api.hydrate = async (rows) => rows;
+  try {
+    library.invalidate();
+    await library.get({ language: "en-US" });
+    assert.equal(fs.existsSync(CACHE), true, "nothing was written");
+    assert.equal(fs.statSync(CACHE).mode & 0o777, 0o600);
+  } finally {
+    Object.assign(api, REAL);
+  }
+});

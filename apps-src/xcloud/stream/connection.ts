@@ -61,6 +61,14 @@ const ICE_GATHER_TIMEOUT_MS = 3000;
 // so whether that ever happens here is a measurement rather than a guess.
 const FRAME_WATCH_MS = 1000;
 const FRAME_GAP_MS = 8000;
+// How long the FIRST frame may take. A stream that has been running and stops is
+// a different thing from one that has not started: measured on the box, a session
+// negotiated, opened its channels and had the server talking on them, and no
+// frame was ever decoded - and because `framesDecoded` is 0 rather than absent
+// while that happens, the eight-second gap timer had already armed and killed it.
+// The server's own no-connection timeout is 300 s; this is the shortest wait that
+// is unambiguously a failure rather than a slow start.
+const FIRST_FRAME_MS = 45000;
 
 export type Phase = "offering" | "answered" | "connecting" | "playing" | "closed" | "failed";
 
@@ -163,8 +171,15 @@ export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<S
   pc.addEventListener("connectionstatechange", () => {
     if (closed) return;
     const s = pc.connectionState;
+    // `disconnected` is WebRTC saying its connectivity checks have stopped
+    // succeeding, and it returns to `connected` on its own - so it is not a
+    // failure to put on the screen. Nothing clears an error once shown, so a
+    // short hiccup used to replace a stream that recovers with a permanent error
+    // screen. That also contradicted the frame watchdog above, whose eight
+    // seconds exist precisely so a hiccup does not take a game away.
     if (s === "connected") cb.onPhase("playing");
-    else if (s === "failed" || s === "disconnected") cb.onPhase("failed", "connection " + s);
+    else if (s === "disconnected") console.warn("[xcloud] connection disconnected - waiting to see if it returns");
+    else if (s === "failed") cb.onPhase("failed", "connection failed");
   });
 
   for (const [name, init] of CHANNELS) {
@@ -220,7 +235,15 @@ export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<S
       if (dialog) {
         // Already capped by parseDialog, but the log line is capped everywhere
         // else on this channel and there is no reason for this one to differ.
-        console.log("[xcloud] dialog:", dialog.title.slice(0, 120), "|", dialog.buttons.join(" / ").slice(0, 120));
+        console.log(
+          "[xcloud] dialog:",
+          dialog.title.slice(0, 120),
+          "|",
+          dialog.buttons
+            .map((b) => b.index + ":" + b.label)
+            .join(" / ")
+            .slice(0, 120),
+        );
         cb.onDialog?.(dialog);
         return;
       }
@@ -295,6 +318,18 @@ export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<S
   pc.addTransceiver("audio", { direction: "sendrecv" });
   pc.addTransceiver("video", { direction: "recvonly" });
 
+  // Everything from here can reject, and until `connect` returns there is no
+  // handle for a caller to close - so the peer connection, four data channels and
+  // the 60 Hz input timer would be left running behind an error screen, with the
+  // video and audio elements still receiving tracks.
+  try {
+    return await negotiate();
+  } catch (e) {
+    close();
+    throw e;
+  }
+
+  async function negotiate(): Promise<StreamHandle> {
   cb.onPhase("offering");
   const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
   if (offer.sdp) {
@@ -364,10 +399,17 @@ export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<S
     },
     pc,
   };
+  }
 
   function watchFrames(): void {
     let lastFrames = -1;
     let lastMoved = 0;
+    // Not `lastMoved`: `framesDecoded` reads 0 before the first frame, so
+    // "something moved" and "something exists" are not the same question, and
+    // conflating them armed the running-stream timer against a stream that had
+    // never started.
+    let everMoved = false;
+    const startedAt = Date.now();
     frameTimer = window.setInterval(async () => {
       if (closed) return;
       let frames = -1;
@@ -382,26 +424,39 @@ export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<S
       } catch {
         return; // a stats read that failed says nothing about the stream
       }
-      if (frames < 0) return; // nothing decoding yet: the stream has not started
-
       const now = Date.now();
+      // Nothing has decoded yet - no stats row at all, or a row still reading 0.
+      if (frames <= 0) {
+        if (!everMoved && now - startedAt > FIRST_FRAME_MS) {
+          console.log("[xcloud] no first frame after", Math.round((now - startedAt) / 1000) + "s");
+          stopWatching();
+          cb.onEnded?.("no_first_frame");
+        }
+        return;
+      }
+
       if (frames !== lastFrames) {
-        if (lastMoved && now - lastMoved > 2000) {
+        if (everMoved && now - lastMoved > 2000) {
           console.log("[xcloud] frames resumed after", Math.round((now - lastMoved) / 1000) + "s");
         }
         lastFrames = frames;
         lastMoved = now;
+        everMoved = true;
         return;
       }
       // Only once frames HAVE been arriving: a gap before the first one is the
-      // stream starting, which the waiting screen is already showing.
-      if (lastMoved && now - lastMoved > FRAME_GAP_MS) {
+      // stream starting, and FIRST_FRAME_MS is what bounds that.
+      if (everMoved && now - lastMoved > FRAME_GAP_MS) {
         console.log("[xcloud] no frames for", Math.round((now - lastMoved) / 1000) + "s - the stream has stopped");
-        if (frameTimer !== null) clearInterval(frameTimer);
-        frameTimer = null;
-        cb.onEnded?.("no frames");
+        stopWatching();
+        cb.onEnded?.("no_frames");
       }
     }, FRAME_WATCH_MS);
+
+    function stopWatching() {
+      if (frameTimer !== null) clearInterval(frameTimer);
+      frameTimer = null;
+    }
   }
 }
 

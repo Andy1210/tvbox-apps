@@ -76,7 +76,7 @@ export function Row({
 
   return (
     <section className="mb-[3vh]">
-      <h2 className="mb-[1vh] px-[0.5vw] text-2xl text-fg-dim">{label}</h2>
+      <h2 className="mb-[1vh] px-[0.5vw] text-[2.2vh] text-fg-dim">{label}</h2>
       <div
         ref={(el) => {
           clip.current = el;

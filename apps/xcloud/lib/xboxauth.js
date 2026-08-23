@@ -185,16 +185,44 @@ async function refreshUserToken() {
 
 async function getAccessToken() {
   if (store.accessTokenIsFresh()) return store.getUserToken().access_token;
-  return (await refreshUserToken()).access_token;
+  // Also single-flight: Microsoft rotates the refresh token, so two concurrent
+  // refreshes race to store different ones and the loser's is dead.
+  return (await once("access", refreshUserToken)).access_token;
 }
 
 // Everything below is short-lived and stays in memory (see tokenstore.js).
 const cache = { xstsUser: null, rp: {}, streaming: {} };
 const expired = (t) => !t || !t.notAfter || t.notAfter - store.SKEW_SECONDS * 1000 <= Date.now();
 
-async function getXstsUserToken() {
-  if (!expired(cache.xstsUser)) return cache.xstsUser;
+// One mint at a time, per thing being minted.
+//
+// Each step below checks a cache, awaits an HTTP chain, then writes the cache -
+// so concurrent callers each ran the whole chain and each got a DIFFERENT
+// streaming token. That is not merely wasteful: a session belongs to the client
+// instance that created it, so the next call carrying a different token is
+// refused with `SessionOwnedByAnotherInstance`. Measured on the box - a launch
+// died on a 403 one second after `/play`, because opening the library fires
+// `/status`, `/library`, `/collections` and `/recent` at once and every one of
+// them mints.
+const inFlight = new Map();
 
+function once(key, make) {
+  const running = inFlight.get(key);
+  if (running) return running;
+  const p = make().finally(() => {
+    if (inFlight.get(key) === p) inFlight.delete(key);
+  });
+  inFlight.set(key, p);
+  return p;
+}
+
+function getXstsUserToken() {
+  if (!expired(cache.xstsUser)) return Promise.resolve(cache.xstsUser);
+  return once("xsts-user", mintXstsUserToken);
+}
+
+async function mintXstsUserToken() {
+  if (!expired(cache.xstsUser)) return cache.xstsUser;
   const accessToken = await getAccessToken();
   const res = await http.postJson("user.auth.xboxlive.com", "/user/authenticate", {
     "x-xbl-contract-version": "1",
@@ -213,9 +241,13 @@ async function getXstsUserToken() {
   return cache.xstsUser;
 }
 
-async function authorize(relyingParty) {
-  if (!expired(cache.rp[relyingParty])) return cache.rp[relyingParty];
+function authorize(relyingParty) {
+  if (!expired(cache.rp[relyingParty])) return Promise.resolve(cache.rp[relyingParty]);
+  return once("rp:" + relyingParty, () => mintRelyingParty(relyingParty));
+}
 
+async function mintRelyingParty(relyingParty) {
+  if (!expired(cache.rp[relyingParty])) return cache.rp[relyingParty];
   const user = await getXstsUserToken();
   const res = await http.postJson("xsts.auth.xboxlive.com", "/xsts/authorize", {
     "x-xbl-contract-version": "1",
@@ -244,10 +276,15 @@ async function authorize(relyingParty) {
 // The gssv token, i.e. the credential every streaming API call carries. Its
 // `offeringSettings.regions` also decides which host those calls go to, so this
 // response is configuration as much as it is a credential.
-async function getStreamingToken(offering) {
+function getStreamingToken(offering) {
+  const cached = cache.streaming[offering];
+  if (cached && cached.expiresAt - store.SKEW_SECONDS * 1000 > Date.now()) return Promise.resolve(cached);
+  return once("stream:" + offering, () => mintStreamingToken(offering));
+}
+
+async function mintStreamingToken(offering) {
   const cached = cache.streaming[offering];
   if (cached && cached.expiresAt - store.SKEW_SECONDS * 1000 > Date.now()) return cached;
-
   const gssv = await authorize(RP_GSSV);
   const res = await http.postJson(offering + ".gssv-play-prod.xboxlive.com", "/v2/login/user", {
     "x-gssv-client": "XboxComBrowser",
@@ -337,6 +374,7 @@ async function getWebToken() {
 }
 
 function signOut() {
+  inFlight.clear();
   store.clear();
   cache.xstsUser = null;
   cache.rp = {};

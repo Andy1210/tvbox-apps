@@ -76,15 +76,26 @@ export function Tile({
         {title.tile ? (
           <img src={title.tile} alt="" loading="lazy" className="h-full w-full object-cover" />
         ) : (
-          <span className="flex h-full w-full items-center justify-center p-3 text-center text-lg text-fg-dim">
+          <span className="flex h-full w-full items-center justify-center p-3 text-center text-[1.7vh] text-fg-dim">
             {title.name || title.titleId}
           </span>
         )}
       </div>
-      {/* A time-limited title has to say so before somebody settles in with it. */}
+      {/* A time-limited title has to say so before somebody settles in with it -
+          but as a BADGE, not as the sentence the stream screen uses. Measured, the
+          full sentence was 234 px wide on a 250 px tile, 94% of its width, laid
+          over art that has the game's own name burnt into it. */}
       {title.maxPlaySeconds > 0 && (
-        <span className="absolute left-0 top-0 m-2 rounded bg-warn px-2 py-1 text-sm font-semibold text-bg-0">
-          {t("stream.trial", { minutes: Math.round(title.maxPlaySeconds / 60) })}
+        <span className="absolute left-0 top-0 m-2 rounded bg-warn px-2 py-1 text-[1.6vh] font-semibold text-bg-0">
+          {t("library.trialBadge", { minutes: Math.round(title.maxPlaySeconds / 60) })}
+        </span>
+      )}
+      {/* Search is the only place a title outside the subscription appears - the
+          grid is `owned` only - and it looked exactly like one that is included,
+          so pressing it went to the waiting screen and then to a bare failure. */}
+      {!title.owned && (
+        <span className="absolute bottom-0 left-0 right-0 bg-bg-0/85 px-2 py-1 text-center text-[1.5vh] text-fg-dim">
+          {t("library.notIncluded")}
         </span>
       )}
     </button>
