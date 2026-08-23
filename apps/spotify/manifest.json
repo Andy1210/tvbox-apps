@@ -2,8 +2,12 @@
   "id": "spotify",
   "manifestVersion": 1,
   "name": "Spotify",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "changelog": [
+    {
+      "version": "1.5.3",
+      "notes": "If Spotify stops accepting the login saved on the box, the box now clears it by itself and comes back as a Connect speaker within seconds — instead of vanishing from every phone's device list until someone notices. Cast to it once and it is signed in again."
+    },
     {
       "version": "1.5.2",
       "notes": "A spoken lyrics request no longer opens this app's own track while something else is playing, and coming back from the library no longer re-opens the words."
