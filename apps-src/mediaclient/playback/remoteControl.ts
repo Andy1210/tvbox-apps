@@ -56,12 +56,15 @@ function queueId(containerKey: string | undefined): string | undefined {
 function personChanged(who: { backend: unknown }): CommandResult | null {
   const now = useApp.getState();
   if (now.backend !== who.backend) return no("the person on this box changed");
-  const choosing = now.screen.name === "profiles" || now.screen.name === "login" || now.screen.name === "boot";
   // A different sentence, because it is a different thing and the assistant
   // reads it out: with nobody chosen yet the backend has not CHANGED - the box
   // is sitting on its own picker, which is what somebody in the room has to
-  // answer before anything can be sent here.
-  if (choosing) return no("this box is asking who is watching; choose a profile on it first");
+  // answer before anything can be sent here. And only the PICKER offers a
+  // profile: telling somebody at a sign-in screen to choose one is an
+  // instruction they cannot follow.
+  if (now.screen.name === "profiles")
+    return no("this box is asking who is watching; choose a profile on it first");
+  if (now.screen.name === "login" || now.screen.name === "boot") return no("nobody is signed in on this box");
   return null;
 }
 
@@ -448,12 +451,17 @@ async function navigate(what: string): Promise<CommandResult> {
   // hidden browsing screen. Refused here, before the screen, like every other
   // refusal in this function.
   if (usePlayer.getState().moving && NAV_KEYS[what]) return no(STEPPING);
-  // Nor may a controller press the one button on a failure screen, which is
-  // "sign in again": measured, a `select` there signed the household out with a
-  // single command. Only the D-pad, and only for that screen - the app-wide
-  // failure flag is set by any 401 or 403 and outlives them, so refusing
-  // everything on it stopped "stop" working on a film that was playing.
-  if (NAV_KEYS[what] && useApp.getState().failure) return no("there is a message on this box waiting to be read");
+  // Nor may a controller press the one button on a SIGNED-OUT failure screen,
+  // which is "sign in again": measured, a `select` there signed the household out
+  // with a single command. Narrow on both axes, because the flag is not the
+  // screen: it is written by any 401 or 403 from any page's fetch - including the
+  // one a cast mounts behind the film it just started - and it outlives them, so
+  // refusing on it while a film plays took the arrows, OK and the overlay away
+  // from a phone for the length of the film, about a message nobody can see. And
+  // only this KIND: every other failure's one button is Retry, which the
+  // household may perfectly well want to press from a phone.
+  if (NAV_KEYS[what] && useApp.getState().failure?.kind === "signed-out" && !filmHasPlayer())
+    return no("there is a message on this box waiting to be read");
 
   // On screen: a D-pad press means "move what I am looking at", and a hidden
   // window would answer ok while nothing moved.
@@ -701,6 +709,10 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       // was the last one", about a series that has more.
       const busyNext = stepRefusal();
       if (busyNext) return no(busyNext);
+      // Nothing is playing at all - a step that was given up leaves no neighbours
+      // behind - and the guard below would answer with a claim about the LIBRARY,
+      // which is the sentence this file forbids four lines above it.
+      if (!p.current) return no("nothing is playing");
       if (!p.siblings.next) return no("nothing follows this");
       // The item the player says it started, not the one this snapshot held:
       // `siblings` is replaced as the previous film is torn down, so the two
@@ -714,6 +726,10 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       }
       const busyPrev = stepRefusal();
       if (busyPrev) return no(busyPrev);
+      // Nothing is playing at all - a step that was given up leaves no neighbours
+      // behind - and the guard below would answer with a claim about the LIBRARY,
+      // which is the sentence this file forbids four lines above it.
+      if (!p.current) return no("nothing is playing");
       if (!p.siblings.prev) return no("nothing comes before this");
       return started((await p.playSibling("prev"))?.id);
     }

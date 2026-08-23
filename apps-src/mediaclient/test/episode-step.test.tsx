@@ -344,6 +344,38 @@ describe("stepping to the next episode", () => {
     }
   });
 
+  it("leaves nothing to step through when the step is given up mid-resolve either", async () => {
+    // The longer of the two windows - three parallel round trips against the one
+    // the teardown costs - and by then the queue and the neighbours have been set
+    // for an item that never played. Measured before this: Back on the way to e3,
+    // then "next episode" started e4, skipping the one that had just been
+    // cancelled.
+    const gates: (() => void)[] = [];
+    let asked = 0;
+    const one = fakeBackend() as unknown as { resolveStream(i: string): Promise<unknown> };
+    const gated = {
+      ...fakeBackend(),
+      resolveStream: (id: string) =>
+        (asked += 1) === 1
+          ? one.resolveStream(id)
+          : new Promise<void>((r) => gates.push(() => r())).then(() => one.resolveStream(id)),
+    } as unknown as MediaBackend;
+
+    await usePlayer.getState().play(gated, KIDS[1], { queue: KIDS });
+    onScreen();
+    const step = usePlayer.getState().playSibling("next");
+    await settle();
+    usePlayer.getState().cancelMove();
+    gates[0]?.();
+    await step;
+    await settle();
+
+    expect(usePlayer.getState().current).toBeNull();
+    expect(usePlayer.getState().siblings, "no neighbours for an item that never played").toEqual({});
+    expect(usePlayer.getState().queue).toBeUndefined();
+    expect(started).toEqual(["http://server/e2.mkv"]);
+  });
+
   it("leaves nothing to step through after a step is given up", async () => {
     // The teardown has already run by then, and `stop` does not clear the
     // neighbours - so they survived a cancelled step and the next `skipNext`

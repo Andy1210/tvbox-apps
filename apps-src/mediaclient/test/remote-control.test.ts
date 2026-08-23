@@ -569,6 +569,21 @@ describe("a command from a controller", () => {
     expect(useApp.getState().screen, "and the picker still has the screen").toEqual({ name: "profiles" });
   });
 
+  it("says nothing is playing after a step was given up, not that the series ended", async () => {
+    // A cancelled step leaves no neighbours behind, and the guard for them would
+    // answer with a claim about the LIBRARY - the sentence this file forbids four
+    // lines above it - about a series that has more.
+    usePlayer.setState({ current: null, moving: null, buffering: false, siblings: {} });
+    expect(await runCompanionCommand({ path: "/player/playback/skipNext", params: {} })).toEqual({
+      ok: false,
+      reason: "nothing is playing",
+    });
+    expect(await runCompanionCommand({ path: "/player/playback/skipPrevious", params: {} })).toEqual({
+      ok: false,
+      reason: "nothing is playing",
+    });
+  });
+
   it("really stops, when a cast landed while a step was still in flight", async () => {
     // Both can be true at once: a cast sets `current` while the step's own claim
     // is still held. Measured before this, `stop` took the claim to mean nothing
@@ -688,6 +703,29 @@ describe("a command from a controller", () => {
       });
     }
     expect(usePlayer.getState().moving, "and nothing took the screen").toBeNull();
+  });
+
+  it("leaves a phone its D-pad while a film plays behind a failed screen", async () => {
+    // The flag is app-wide and outlives the page that set it, and the arrows and
+    // OK are the only controls a phone has over a playing film. Refusing on it
+    // took them away for the length of the film, about a message nobody can see:
+    // the failure screen is hidden behind the picture.
+    await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "1" },
+    });
+    useApp.setState({ failure: { kind: "signed-out" } });
+    expect(await runCompanionCommand({ path: "/player/navigation/moveRight", params: {} })).toEqual({ ok: true });
+    useApp.setState({ failure: null });
+  });
+
+  it("still lets a phone press Retry on a screen that is not a sign-out", async () => {
+    // Every other failure's one button is Retry, which the household may well
+    // want to press from a phone. Only the signed-out screen offers the button
+    // that must not be pressed for them.
+    useApp.setState({ screen: { name: "home" }, failure: { kind: "unreachable" }, history: [] });
+    expect(await runCompanionCommand({ path: "/player/navigation/select", params: {} })).toEqual({ ok: true });
+    useApp.setState({ failure: null });
   });
 
   it("will not press the one button on a failure screen", async () => {

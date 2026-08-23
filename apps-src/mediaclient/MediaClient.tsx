@@ -297,7 +297,15 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
       // keeps the history, so Back returns where the person was.
       if (took && String(cmd.action || "").toLowerCase() === "lyrics" && String(cmd.state || "on") !== "off") {
         const app = useApp.getState();
-        if (app.screen.name !== "nowPlaying") app.go({ name: "nowPlaying" });
+        // The COMMAND is not gated on the picker (see above) but the walk to a
+        // screen is, and that distinction is the whole of it: `lyrics` is the one
+        // action here that navigates, and taking the PIN pad off screen is what
+        // opens every other door - the Companion paths decide by the screen's
+        // name too, so once it has moved the next command arrives under the
+        // PREVIOUS person's library. Measured: one publish did it.
+        const at = app.screen.name;
+        if (at === "profiles" || at === "login" || at === "boot") return;
+        if (at !== "nowPlaying") app.go({ name: "nowPlaying" });
       }
     });
     return off;

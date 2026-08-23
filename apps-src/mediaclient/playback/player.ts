@@ -314,17 +314,10 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // Whatever was playing gets its last word before anything else starts.
     await get().stop();
 
-    // Somebody gave this up while the previous episode was being closed off. The
-    // store has to say what is true afterwards: `stop` does not clear the
-    // neighbours, and leaving them made the next `skipNext` answer ok and start
-    // an episode on a box that was showing nothing. `currentBackend` is assigned
-    // below rather than above, so a sign-out that landed during the teardown is
-    // not quietly undone by this call.
-    if (forThis !== playToken) {
-      set({ siblings: {}, queue: undefined, subDelaySec: 0 });
-      get().cancelUpNext();
-      return;
-    }
+    // Somebody gave this up while the previous episode was being closed off.
+    // `currentBackend` is assigned below rather than above, so a sign-out that
+    // landed during the teardown is not quietly undone by this call.
+    if (forThis !== playToken) return abandoned(set, get);
     currentBackend = backend;
     // The episodes either side, worked out HERE rather than by whoever pressed
     // play. A film can be started from a season screen, a carry-on-watching
@@ -398,7 +391,12 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // the server as a transcode nothing will ever stop.
     if (forThis !== playToken) {
       if (decision.session) void backend.endSession(decision.session).catch(() => {});
-      return;
+      // The state reset belongs on BOTH checks, and this is the longer window of
+      // the two - three parallel round trips against the one the teardown costs.
+      // By here the queue and the neighbours have been set for an item that never
+      // played, so leaving them made a "next episode" answer ok and start the one
+      // AFTER the episode somebody had just pressed Back out of.
+      return abandoned(set, get);
     }
 
     // An explicit start wins over both: a controller that names an offset has
@@ -747,6 +745,9 @@ whenPlayerLost("video", () => {
   const session = s.current.decision.session;
   if (session && currentBackend) void currentBackend.endSession(session).catch(() => {});
   postNowPlaying({ state: "idle" });
+  // Nothing was asked for any more, so nothing is settling - the same reason
+  // `stop` does this.
+  startedAt = 0;
   usePlayer.setState({
     current: null,
     state: "stopped",
@@ -835,6 +836,18 @@ function wirePlayerEvents(set: Setter, get: () => PlayerState): void {
         break;
     }
   });
+}
+
+/**
+ * Nothing is playing and nothing is coming: leave the store saying so.
+ *
+ * `stop()` does not clear the neighbours or the running order, and by the second
+ * check `play` has set them for an item that never reached the box - so anything
+ * that reads them afterwards is reading a plan that was abandoned.
+ */
+function abandoned(set: Setter, get: () => PlayerState): void {
+  set({ siblings: {}, queue: undefined, subDelaySec: 0 });
+  get().cancelUpNext();
 }
 
 /**

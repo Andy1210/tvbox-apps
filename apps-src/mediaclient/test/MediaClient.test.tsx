@@ -4,6 +4,7 @@ import { configureI18n } from "@sdk";
 import { MediaClient } from "../MediaClient";
 import { useApp } from "../state";
 import { useMusic } from "../playback/music";
+import { claimPlayer, resetPlayerOwner } from "../playback/owner";
 import { __resetIdentity } from "../identity";
 import { setupRemote, remote } from "./remote";
 import en from "../locales/en.json";
@@ -42,12 +43,30 @@ describe("MediaClient", () => {
       shuffle: false,
     });
     useApp.setState({ screen: { name: "profiles" }, history: [] });
+    // The lyrics action asks whether music OWNS the shared player, so without
+    // this the branch under test is never reached and the assertion below cannot
+    // fail. This is the state a spoken request arrives in: music playing, and the
+    // household handing the box over through Settings.
+    claimPlayer("music");
     render(<MediaClient onExit={vi.fn()} />);
 
     await act(async () => deliver?.({ action: "shuffle", state: "on" }));
     expect(useMusic.getState().shuffle, "the command reached the queue").toBe(true);
 
+    // But the one action here that NAVIGATES does not walk the box off the pad.
+    // Every other door decides by the screen's name, so once it has moved the
+    // next command arrives under the previous person's library - measured, one
+    // publish of this did it.
+    // boot() lands on sign-in here, which is the same class of screen; assert what
+    // is actually being protected rather than which of the three it settled on.
+    for (const name of ["profiles", "login", "boot"] as const) {
+      await act(async () => useApp.setState({ screen: { name }, history: [] }));
+      await act(async () => deliver?.({ action: "lyrics", state: "on" }));
+      expect(useApp.getState().screen.name, `${name} must keep the screen`).toBe(name);
+    }
+
     useMusic.setState({ queue: [], index: 0, state: "stopped", shuffle: false });
+    resetPlayerOwner();
     delete (globalThis as unknown as { tvbox?: unknown }).tvbox;
   });
 
