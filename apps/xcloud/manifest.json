@@ -2,7 +2,7 @@
   "id": "xcloud",
   "manifestVersion": 1,
   "name": "Xbox Cloud Gaming",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "webclient",
   "status": "ready",
   "accent": "#107c10",
@@ -15,6 +15,13 @@
     "en": "Stream Xbox Game Pass Ultimate games straight to the TV — no console needed. Sign in with your Microsoft account and pair a Bluetooth or USB controller. Needs a fast connection; the picture is a live H.264 video stream.",
     "hu": "Xbox Game Pass Ultimate játékok streamelése egyenesen a TV-re — konzol nélkül. Jelentkezz be a Microsoft-fiókoddal, és párosíts egy Bluetooth- vagy USB-kontrollert. Gyors internet kell hozzá; a kép élő H.264 videofolyam."
   },
+  "changelog": [
+    {
+      "version": "1.1.0",
+      "notes": "Groundwork for a built-in Xbox client: the app can now sign in to a Microsoft account by itself and read the Game Pass library. Nothing on screen has changed yet."
+    }
+  ],
+  "service": "xcloud",
   "runtime": {
     "serve": "remote",
     "url": "https://www.xbox.com/play",
