@@ -12,7 +12,8 @@
     "cancel": "Cancel",
     "retry": "Try again",
     "expiresIn": "The code is valid for {minutes} minutes.",
-    "keepOpen": "Leave this screen open until you have finished on the phone."
+    "keepOpen": "Leave this screen open until you have finished on the phone.",
+    "scan": "Or scan it with your phone"
   },
   "errors": {
     "code_expired": "The code expired. Start again.",
@@ -41,7 +42,11 @@
     "noResults": "Nothing found for {query}",
     "signedInAs": "Signed in as {gamertag}",
     "signOut": "Sign out",
-    "searchRest": "{count} more in search."
+    "searchRest": "{count} more in search.",
+    "recentlyAdded": "Recently added",
+    "leavingSoon": "Leaving soon",
+    "allGenres": "All",
+    "clear": "Clear"
   },
   "stream": {
     "starting": "Starting…",

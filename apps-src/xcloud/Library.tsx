@@ -1,23 +1,29 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FocusButton, Osk, useI18n } from "@sdk";
-import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
+import { getCurrentFocusKey, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import * as api from "./api";
 import { Grid } from "./Grid";
-import { Tile } from "./Tile";
+import { Row } from "./Row";
 import { Splash } from "./XCloud";
+import { SearchIcon, CloseIcon, ExitIcon } from "./icons";
+import { createMover, nearest } from "./moveTo";
 
-// The library: what you were in the middle of, then everything, then a search over
-// the lot.
+// The library. Short curated rows, then everything the subscription covers, with a
+// search over the whole catalogue and a genre filter over what is shown.
 //
-// The whole catalogue is held rather than paged in as the grid scrolls, and the
-// search is the reason: 2531 titles is unusable without one, and a search cannot
-// look at rows that were never fetched. The metadata for all of them is 1.45 MB.
-// The art stays lazy, which the browser does for us.
-//
-// One row and one grid rather than three rows: two rows both sorted
-// alphabetically - "in your subscription" and "everything" - showed the same first
-// screen, which is two rows for one content.
+// The page moves itself with a transform and never scrolls - see moveTo.ts for the
+// measurement behind that. Two consequences shape this file: the header sits
+// OUTSIDE the moving container so it stays put, and the moving container carries
+// padding because a tile's focus outline is drawn outside the tile and the
+// viewport clips.
 const RECENT_LIMIT = 12;
+// While the catalogue is still filling in behind the first screen. Frequent enough
+// that the grid grows visibly, rare enough that re-reading a 1.25 MB answer is not
+// what makes it slow.
+const FILLING_POLL_MS = 3000;
+// A stale cache is being refreshed behind the answer; one re-read is enough.
+const STALE_REREAD_MS = 20000;
+const ALL_GENRES = "*";
 
 export function Library({
   status,
@@ -33,32 +39,79 @@ export function Library({
   const { t } = useI18n();
   const [all, setAll] = useState<api.Title[] | null>(null);
   const [recent, setRecent] = useState<api.Title[]>([]);
+  const [collections, setCollections] = useState<Record<string, api.Title[]>>({});
   const [partial, setPartial] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [typing, setTyping] = useState(false);
+  const [genre, setGenre] = useState(ALL_GENRES);
+
+  const mover = useMemo(() => createMover("y"), []);
+  const viewport = useRef<HTMLDivElement | null>(null);
+  const content = useRef<HTMLDivElement | null>(null);
+
+  const attachContent = useCallback(
+    (el: HTMLDivElement | null) => {
+      content.current = el;
+      mover.attach(el);
+    },
+    [mover],
+  );
+
+  // Bring whatever just took focus into the window. `nearest` in the sense
+  // scrollIntoView means it: something already visible does not move the page,
+  // which is what keeps a sideways press from nudging it vertically.
+  const show = useCallback(
+    (el: HTMLElement) => {
+      const box = viewport.current;
+      const col = content.current;
+      if (!box || !col) return;
+      const item = el.getBoundingClientRect();
+      const view = box.getBoundingClientRect();
+      // The column is translated by -at, so its rect already carries the shift;
+      // adding `at` back gives the position in the un-moved column.
+      const start = item.top - view.top + mover.at;
+      mover.to(
+        nearest({
+          at: mover.at,
+          viewport: view.height,
+          start,
+          size: item.height,
+          // A row flush against the edge is inside the overscan of some sets, and
+          // the focus outline needs room beyond that.
+          padStart: Math.round(view.height * 0.06),
+          padEnd: Math.round(view.height * 0.06),
+          max: col.scrollHeight,
+        }),
+        true,
+      );
+    },
+    [mover],
+  );
 
   useEffect(() => {
     let alive = true;
     let again: ReturnType<typeof setTimeout> | null = null;
     void (async () => {
-      try {
+      // The plugin answers a cold library as soon as the first screen is
+      // hydrated, so this re-reads until the rest lands rather than either
+      // waiting for it or treating fifty titles as the whole catalogue.
+      const read = async (): Promise<void> => {
         const lib = await api.getLibrary();
         if (!alive) return;
         setAll(lib.titles);
         setPartial(lib.partial);
-        // A stale answer means the plugin is refreshing behind it: the rows are
-        // usable now and better in a moment, so re-read once rather than making
-        // anyone wait for a catalogue they can already see.
-        if (lib.stale) {
-          again = setTimeout(async () => {
-            const next = await api.getLibrary().catch(() => null);
-            if (alive && next) {
-              setAll(next.titles);
-              setPartial(next.partial);
-            }
-          }, 20000);
+        // The curated rows are resolved against the catalogue, so while it is
+        // still filling they come back short - re-read them with it rather than
+        // leaving the first, emptiest answer on screen.
+        const c = await api.getCollections().catch(() => null);
+        if (alive && c) setCollections(c.collections);
+        if (lib.filling || lib.stale) {
+          again = setTimeout(() => void read().catch(() => {}), lib.filling ? FILLING_POLL_MS : STALE_REREAD_MS);
         }
+      };
+      try {
+        await read();
       } catch (e) {
         if (alive) setError(t("errors." + ((e as api.ApiError).code || "generic")) || t("errors.generic"));
       }
@@ -74,37 +127,88 @@ export function Library({
   }, [t]);
 
   const playable = useMemo(() => (all || []).filter((x) => x.name), [all]);
-  // The grid shows what the subscription covers, and the search reaches the rest.
-  // Not a tidying-up: every tile is a DOM node and an <img>, and the full
-  // catalogue is 2530 of them - measured at 7650 nodes and 3.2 s to first paint on
-  // a desktop, which a Pi 5 has no headroom for. It is also the honest cut, since
-  // these are the games that can be started right now; the other 1900-odd would
-  // have to be bought, and nobody finds one of those by holding Down.
+  // The grid shows what the subscription covers, and search reaches the rest. Not
+  // a tidying-up: every tile is a DOM node and an <img>, and the full catalogue is
+  // 2530 of them - measured at 7650 nodes against 1874 for this.
   const owned = useMemo(() => playable.filter((x) => x.owned), [playable]);
 
-  // Searched locally over the cache the plugin already handed us - the route
-  // exists too, but a round trip per keystroke on a D-pad keyboard is a lot of
-  // requests for an answer we are holding.
+  // Genres, from the categories the catalogue already gave us. Only those with
+  // enough titles to be worth a chip: a filter that leads to two games is a dead
+  // end you have to press Back out of.
+  const genres = useMemo(() => {
+    const count = new Map<string, number>();
+    for (const tt of owned) for (const c of tt.categories || []) count.set(c, (count.get(c) || 0) + 1);
+    return [...count.entries()]
+      .filter(([, n]) => n >= 5)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([name, n]) => ({ name, n }));
+  }, [owned]);
+
   const results = useMemo(() => {
     const q = normalize(query);
     if (!q) return null;
     return playable.filter((x) => normalize(x.name).includes(q));
   }, [playable, query]);
 
-  const firstGridKey = results ? "g-search-0" : "g-all-0";
-  const firstKey = recent.length && !results ? "t-recent-0" : firstGridKey;
-  const hidden = playable.length - owned.length;
+  const gridTitles = useMemo(() => {
+    const base = results ?? owned;
+    return genre === ALL_GENRES ? base : base.filter((x) => (x.categories || []).includes(genre));
+  }, [results, owned, genre]);
 
+  const rows = useMemo(
+    () =>
+      [
+        { id: "r-continue", label: t("library.recent"), titles: recent },
+        { id: "r-new", label: t("library.recentlyAdded"), titles: collections.recentlyAdded || [] },
+        { id: "r-leaving", label: t("library.leavingSoon"), titles: collections.leavingSoon || [] },
+      ].filter((r) => r.titles.length > 0),
+    [t, recent, collections],
+  );
+
+  // The first thing to focus, named rather than assumed: a tile's key is its
+  // title id, so there is no "-0".
+  const firstOfGrid = gridTitles.length
+    ? [...gridTitles].sort((a, b) => Number(b.owned) - Number(a.owned) || a.name.localeCompare(b.name))[0]
+    : null;
+  const firstKey = results
+    ? firstOfGrid && `g-search-${firstOfGrid.titleId}`
+    : rows.length
+      ? `${rows[0].id}-${rows[0].titles[0].titleId}`
+      : firstOfGrid && `g-all-${firstOfGrid.titleId}`;
+  // Which LIST is on screen. The initial focus is placed once per list, not once
+  // per data change: the catalogue keeps arriving for half a minute, and
+  // re-focusing on every re-read walked the cursor back to the first tile
+  // whenever the grid grew - measured, sixteen presses down ended up back at the
+  // top.
+  const listId = results ? "search:" + query : "library:" + genre;
+  const placed = useRef({ list: "", key: "" });
   useEffect(() => {
-    if (!all || typing) return;
+    if (!all || typing || !firstKey) return;
+    const p = placed.current;
+    if (p.list === listId) {
+      // The screen assembles in pieces: the grid is here before the rows are, so
+      // the first key changes once the continue row arrives. Re-place only while
+      // nobody has moved - measured, without this the cursor opened on the grid,
+      // which sits below the rows and off the bottom of the screen.
+      if (p.key === firstKey) return;
+      if (getCurrentFocusKey() !== p.key) return;
+    }
+    placed.current = { list: listId, key: firstKey };
     // useFocusable registers during its own effect, so a setFocus in a sibling
     // effect of the same commit can run first and find nothing there.
     const id = setTimeout(() => setFocus(firstKey), 0);
     return () => clearTimeout(id);
-  }, [all, firstKey, typing]);
+  }, [all, firstKey, typing, listId]);
+
+  // A different list is not a move within one: there is nothing to follow from the
+  // old position to the new.
+  useEffect(() => {
+    mover.to(0, false);
+  }, [mover, query, genre]);
 
   const onSearchDone = useCallback((value: string) => {
     setQuery(value.trim());
+    setGenre(ALL_GENRES);
     setTyping(false);
   }, []);
 
@@ -114,15 +218,18 @@ export function Library({
 
   if (typing) {
     return (
-      <div className="flex min-h-screen w-screen items-center justify-center bg-bg-0 p-[4vw]">
+      <div className="flex h-screen w-screen items-center justify-center bg-bg-0 p-[4vw]">
         <Osk title={t("library.search")} initial={query} onDone={onSearchDone} onCancel={() => setTyping(false)} />
       </div>
     );
   }
 
+  const hidden = playable.length - owned.length;
+
   return (
-    <div className="min-h-screen w-screen bg-bg-0 px-[4vw] py-[3vh] text-fg">
-      <header className="mb-[3vh] flex items-center justify-between gap-6">
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg-0 text-fg">
+      {/* Outside the moving column, so it stays put. */}
+      <header className="flex shrink-0 items-center justify-between gap-6 px-[4vw] pb-[2vh] pt-[3vh]">
         <h1 className="text-4xl font-semibold">{t("title")}</h1>
         <div className="flex items-center gap-4">
           {partial && <span className="text-lg text-warn">{t("library.partial")}</span>}
@@ -131,18 +238,21 @@ export function Library({
           )}
           <FocusButton
             focusKey="lib-search"
-            className="rounded-lg bg-bg-1 px-6 py-3 text-xl"
+            className="flex items-center gap-3 rounded-lg bg-bg-1 px-6 py-3 text-xl"
             onEnter={() => setTyping(true)}
+            label={t("library.search")}
           >
-            {query ? "🔍 " + query : "🔍 " + t("library.search")}
+            <SearchIcon className="h-[1.1em] w-[1.1em]" />
+            <span>{query || t("library.search")}</span>
           </FocusButton>
           {query && (
             <FocusButton
               focusKey="lib-clear"
-              className="rounded-lg bg-bg-1 px-5 py-3 text-xl"
+              className="flex items-center rounded-lg bg-bg-1 px-5 py-3 text-xl"
               onEnter={() => setQuery("")}
+              label={t("library.clear")}
             >
-              ✕
+              <CloseIcon className="h-[1.1em] w-[1.1em]" />
             </FocusButton>
           )}
           <FocusButton
@@ -152,52 +262,108 @@ export function Library({
           >
             {t("library.signOut")}
           </FocusButton>
-          <FocusButton focusKey="lib-exit" className="rounded-lg bg-bg-1 px-5 py-3 text-xl" onEnter={onExit}>
-            {t("stream.stop")}
+          <FocusButton
+            focusKey="lib-exit"
+            className="flex items-center rounded-lg bg-bg-1 px-5 py-3 text-xl"
+            onEnter={onExit}
+            label={t("stream.stop")}
+          >
+            <ExitIcon className="h-[1.1em] w-[1.1em]" />
           </FocusButton>
         </div>
       </header>
 
-      {results ? (
-        results.length ? (
-          <section>
-            <h2 className="mb-[1.5vh] text-2xl text-fg-dim">
-              {t("library.search")} — {results.length}
-            </h2>
-            <Grid titles={results} idPrefix="g-search" onPlay={onPlay} />
-          </section>
-        ) : (
-          <p className="mt-[10vh] text-center text-3xl text-fg-dim">{t("library.noResults", { query })}</p>
-        )
-      ) : (
-        <>
-          {recent.length > 0 && (
-            <section className="mb-[4vh]">
-              <h2 className="mb-[1.5vh] text-2xl text-fg-dim">{t("library.recent")}</h2>
-              {/* The one thing a row is good for: a short list you were in the
-                  middle of. It scrolls inside itself; the page never scrolls
-                  sideways. */}
-              <div className="flex gap-[1.5vw] overflow-x-auto pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {recent.map((title, i) => (
-                  <Tile key={title.titleId} title={title} focusKey={`t-recent-${i}`} onEnter={() => onPlay(title)} />
+      {/* The window. It clips, which is why the column below pads. */}
+      <div ref={viewport} className="min-h-0 flex-1 overflow-hidden px-[4vw]">
+        <div ref={attachContent} className="pb-[8vh] pt-[1vh] will-change-transform">
+          {!results &&
+            rows.map((r) => (
+              <Row key={r.id} id={r.id} label={r.label} titles={r.titles} onPlay={onPlay} onFocused={show} />
+            ))}
+
+          {genres.length > 1 && (
+            <section className="mb-[2vh]">
+              <div className="flex flex-wrap gap-3 px-[0.5vw]">
+                <Chip
+                  focusKey="genre-all"
+                  active={genre === ALL_GENRES}
+                  label={t("library.allGenres")}
+                  onEnter={() => setGenre(ALL_GENRES)}
+                  onFocused={show}
+                />
+                {genres.map((g, i) => (
+                  <Chip
+                    key={g.name}
+                    focusKey={`genre-${i}`}
+                    active={genre === g.name}
+                    label={g.name}
+                    onEnter={() => setGenre(g.name)}
+                    onFocused={show}
+                  />
                 ))}
               </div>
             </section>
           )}
+
           <section>
-            <h2 className="mb-[1.5vh] flex items-baseline gap-4 text-2xl text-fg-dim">
+            <h2 className="mb-[1vh] flex items-baseline gap-4 px-[0.5vw] text-2xl text-fg-dim">
               <span>
-                {t("library.owned")} — {owned.length}
+                {results ? t("library.search") : t("library.owned")} — {gridTitles.length}
               </span>
               {/* Say what is NOT on screen, rather than letting the grid look like
                   the whole catalogue. */}
-              {hidden > 0 && <span className="text-lg">{t("library.searchRest", { count: hidden })}</span>}
+              {!results && genre === ALL_GENRES && hidden > 0 && (
+                <span className="text-lg">{t("library.searchRest", { count: hidden })}</span>
+              )}
             </h2>
-            <Grid titles={owned} idPrefix="g-all" onPlay={onPlay} />
+            {gridTitles.length ? (
+              <Grid
+                titles={gridTitles}
+                idPrefix={results ? "g-search" : "g-all"}
+                onPlay={onPlay}
+                onFocused={show}
+              />
+            ) : (
+              <p className="px-[0.5vw] py-[6vh] text-3xl text-fg-dim">
+                {results ? t("library.noResults", { query }) : t("library.empty")}
+              </p>
+            )}
           </section>
-        </>
-      )}
+        </div>
+      </div>
     </div>
+  );
+}
+
+function Chip({
+  focusKey,
+  active,
+  label,
+  onEnter,
+  onFocused,
+}: {
+  focusKey: string;
+  active: boolean;
+  label: string;
+  onEnter: () => void;
+  onFocused: (el: HTMLElement) => void;
+}) {
+  return (
+    <FocusButton
+      focusKey={focusKey}
+      // The chosen filter has to stay legible when it is NOT the focused thing,
+      // so it is marked by its fill rather than by the focus ring.
+      className={
+        "rounded-full px-5 py-2 text-lg " + (active ? "bg-accent text-fg" : "bg-bg-1 text-fg-dim")
+      }
+      onEnter={onEnter}
+      onFocused={() => {
+        const el = document.querySelector<HTMLElement>(`[data-sfocus="${focusKey}"]`);
+        if (el) onFocused(el);
+      }}
+    >
+      {label}
+    </FocusButton>
   );
 }
 

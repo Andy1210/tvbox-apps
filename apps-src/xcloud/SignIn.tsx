@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import QRCode from "qrcode";
 import { FocusButton, useI18n } from "@sdk";
 import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import * as api from "./api";
@@ -12,6 +13,20 @@ import * as api from "./api";
 // asks the plugin how it went.
 const POLL_MS = 2000;
 
+// Microsoft's device pages take the code as `otc`, so a scanned QR skips the
+// typing entirely rather than only saving the URL. If that parameter is ever
+// ignored the page still opens and the code is on screen to type, which is why it
+// is safe to include: the QR is a shortcut, never the only way in.
+const codeUrl = (uri: string, code: string) => {
+  try {
+    const u = new URL(uri);
+    u.searchParams.set("otc", code);
+    return u.toString();
+  } catch {
+    return uri;
+  }
+};
+
 export function SignIn({
   status,
   onSignedIn,
@@ -22,9 +37,10 @@ export function SignIn({
   onExit: () => void;
 }) {
   const { t } = useI18n();
-  const [code, setCode] = useState<{ userCode: string; verificationUri: string; expiresIn: number } | null>(null);
+  const [code, setCode] = useState<api.DeviceCode | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [qr, setQr] = useState("");
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const message = useCallback(
@@ -77,14 +93,28 @@ export function SignIn({
   const unusable = status && status.signedIn && status.usable === false ? message(status.code) : null;
 
   useEffect(() => {
-    // If the plugin is already mid-sign-in (this screen was reopened), pick the
-    // code back up rather than asking Microsoft for a second one.
-    if (status && status.signingIn && status.code) {
-      setCode(status.code as unknown as typeof code);
+    // A sign-in lives in the plugin, not in this page - it lasts up to fifteen
+    // minutes and the poll must survive a reload. So if one is already running,
+    // pick the code back up rather than asking Microsoft for a second one and
+    // making the person retype.
+    if (status && status.signingIn && status.pending) {
+      setCode(status.pending);
       poll();
     }
     return stopPolling;
   }, [status, poll, stopPolling]);
+
+  useEffect(() => {
+    if (!code) return setQr("");
+    let alive = true;
+    QRCode.toDataURL(codeUrl(code.verificationUri, code.userCode), { width: 420, margin: 1 })
+      .then((d) => alive && setQr(d))
+      // No QR is not a broken screen: the URL and the code are both on it.
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [code]);
 
   useEffect(() => {
     const id = setTimeout(() => setFocus(code ? "signin-cancel" : "signin-start"), 0);
@@ -100,11 +130,26 @@ export function SignIn({
 
       {code ? (
         <>
-          <p className="text-2xl text-fg-dim">{t("signin.instruction")}</p>
-          <p className="text-3xl text-fg-dim">{code.verificationUri}</p>
-          {/* The code is the whole point of this screen, so it is the biggest
-              thing on it and spaced out to be read from a sofa. */}
-          <p className="text-8xl font-bold tracking-[0.2em] text-accent">{code.userCode}</p>
+          <div className="flex items-center gap-[5vw]">
+            {/* Scanning is the short way; the URL and code beside it are the long
+                way, and both are always on screen. The QR is on a white plate
+                because a dark-on-dark code does not scan. */}
+            {qr && (
+              <div className="flex flex-col items-center gap-3">
+                <img src={qr} alt="" className="h-[34vh] w-[34vh] rounded-xl bg-white p-3" />
+                <span className="text-lg text-fg-dim">{t("signin.scan")}</span>
+              </div>
+            )}
+            <div className="flex flex-col items-start gap-4">
+              <p className="text-2xl text-fg-dim">{t("signin.instruction")}</p>
+              <p className="text-3xl text-fg-dim">{code.verificationUri}</p>
+              {/* The code is the point of this screen, so it is the biggest thing
+                  on it and spaced out to be read from a sofa - and WHITE rather
+                  than the accent green, which measured as poor contrast on this
+                  near-black ground when read off the television. */}
+              <p className="text-8xl font-bold tracking-[0.2em] text-fg">{code.userCode}</p>
+            </div>
+          </div>
           <p className="text-xl text-fg-dim">{t("signin.expiresIn", { minutes: Math.round(code.expiresIn / 60) })}</p>
           <p className="text-xl text-fg-dim">{t("signin.keepOpen")}</p>
           <p className="text-xl text-fg-dim">{t("signin.waiting")}</p>

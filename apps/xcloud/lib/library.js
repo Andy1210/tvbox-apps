@@ -23,9 +23,9 @@ const CACHE_FILE = process.env.TVBOX_XCLOUD_CACHE || path.join(os.homedir(), ".t
 const TTL_MS = 24 * 3600 * 1000;
 // What the first paint needs: the recent row plus the first grid rows.
 const FIRST_SCREEN = 50;
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2; // bumped when `reduce` gained `categories`
 
-let state = { titles: [], fetchedAt: 0, market: "", language: "", partial: false, version: CACHE_VERSION };
+let state = { titles: [], fetchedAt: 0, market: "", language: "", partial: false, filling: false, version: CACHE_VERSION };
 let loaded = false;
 let inFlight = null;
 
@@ -61,7 +61,14 @@ function saveCache() {
   }
 }
 
-const isFresh = () => state.titles.length > 0 && Date.now() - state.fetchedAt < TTL_MS && !state.partial;
+// Language matters, not only age: the categories come back localised, so a cache
+// fetched in Hungarian is the wrong answer for an English UI - and a stale-by-age
+// check would serve it for the rest of the TTL.
+const isFresh = (language) =>
+  state.titles.length > 0 &&
+  Date.now() - state.fetchedAt < TTL_MS &&
+  !state.partial &&
+  (!language || !state.language || state.language === language);
 
 // The reduced row. Everything the grid, the detail panel and the search read, and
 // nothing else - this is the 6% the size measurement above is about.
@@ -76,6 +83,10 @@ function reduce(joined) {
     owned: t.hasEntitlement,
     inputs: t.supportedInputTypes,
     maxPlaySeconds: t.maxPlaySeconds,
+    // The genres, for filtering. Localised by the catalogue, which is why the
+    // cache is keyed on language below - 68 bytes a title against the 581
+    // already kept.
+    categories: (t.categories || []).map(String),
     // Kept so a title with no catalogue row can be hidden rather than drawn as a
     // blank card, and so a later pass knows what is still worth asking about.
     hydrated: t.hydrated,
@@ -83,11 +94,42 @@ function reduce(joined) {
 }
 
 // One shared refresh: two screens opening at once must not start two 17 s passes.
+// `firstScreen` resolves as soon as there is something to draw, which is what a
+// cold `get()` waits for - the whole pass took 40 s on the box, and waiting for it
+// spent the head-first hydration on nobody.
+//
+// The language is part of what is in flight, not just the fact of it. Sharing a
+// pass with a caller that asked for a DIFFERENT language hands back a catalogue
+// whose categories are in the wrong one, and looks exactly like a cache that
+// refused to refetch.
+let firstScreen = null;
+let inFlightLanguage = null;
+
 function refresh(opts) {
-  if (inFlight) return inFlight;
-  inFlight = doRefresh(opts).finally(() => {
-    inFlight = null;
+  const language = (opts && opts.language) || "en-US";
+  if (inFlight && inFlightLanguage === language) return inFlight;
+
+  // A pass for another language is waited out rather than cancelled: it is about
+  // to publish, and two passes writing the same state interleave.
+  const after = inFlight ? inFlight.catch(() => {}) : Promise.resolve();
+  let ready;
+  firstScreen = new Promise((r) => {
+    ready = r;
   });
+  inFlightLanguage = language;
+  inFlight = after
+    .then(() => doRefresh({ ...opts, _ready: ready }))
+    .finally(() => {
+      // Only clear what is still ours: a later pass may already have replaced it.
+      if (inFlightLanguage === language) {
+        inFlight = null;
+        inFlightLanguage = null;
+        firstScreen = null;
+      }
+      // A pass that failed before the first screen must not leave a promise
+      // nothing will ever resolve.
+      if (ready) ready();
+    });
   return inFlight;
 }
 
@@ -104,6 +146,9 @@ async function doRefresh(opts) {
 
   publish(titles, products, partial, o, language);
   if (o.onFirstScreen) o.onFirstScreen(state);
+  if (o._ready) o._ready();
+
+  if (ids.length <= FIRST_SCREEN) state.filling = false;
 
   if (ids.length > FIRST_SCREEN) {
     const tail = await api.hydrate(ids.slice(FIRST_SCREEN), { language, market: o.market, signal: o.signal });
@@ -112,37 +157,72 @@ async function doRefresh(opts) {
     publish(titles, products, partial, o, language);
   }
 
+  state.filling = false;
   saveCache();
   return state;
 }
 
 function publish(titles, products, partial, o, language) {
+  const next = reduce(api.joinCatalogue(titles, products));
+  // A refresh must never make what is on screen WORSE. The head-only publish is
+  // for a cold start; over a library that already has its names it would replace
+  // 2530 named rows with 50 - measured on the box, where a background pass turned
+  // the grid into a screen of blanks until its tail landed.
+  //
+  // Only within the same LANGUAGE, though: a different one is a different list
+  // rather than a worse version of this one, and comparing them by count leaves
+  // the categories in the language nobody asked for.
+  if (state.language === language && named(next) < named(state.titles)) return;
   state = {
     version: CACHE_VERSION,
-    titles: reduce(api.joinCatalogue(titles, products)),
+    titles: next,
     fetchedAt: Date.now(),
     market: o.market || "",
     language,
     // A partial hydration is NOT cached as complete: it would keep the missing
     // names missing for the whole TTL.
     partial,
+    // Says the tail is still coming, so a caller can draw now and re-read rather
+    // than deciding this is all there is.
+    filling: true,
   };
 }
+
+const named = (rows) => (rows || []).reduce((n, t) => n + (t.name ? 1 : 0), 0);
 
 // What a UI request gets. Cached rows are served immediately and a stale cache is
 // refreshed BEHIND the answer, so the grid is never blank because of a slow
 // catalogue - only an empty cache waits.
 async function get(opts) {
   loadCache();
-  if (isFresh()) return { titles: state.titles, fetchedAt: state.fetchedAt, cached: true, partial: false };
+  const language = (opts && opts.language) || "en-US";
+  if (isFresh(language)) return answer({ cached: true });
 
-  if (state.titles.length > 0) {
+  if (state.titles.length > 0 && state.language === language) {
     refresh(opts).catch((e) => console.warn("[xcloud] background library refresh failed:", e.message));
-    return { titles: state.titles, fetchedAt: state.fetchedAt, cached: true, stale: true, partial: state.partial };
+    return answer({ cached: true, stale: true });
   }
 
-  await refresh(opts);
-  return { titles: state.titles, fetchedAt: state.fetchedAt, cached: false, partial: state.partial };
+  // Cold: wait only for the first screen. The whole pass is ~20 s here and was
+  // measured at 40 s on the box, and a grid that draws in a second and fills in
+  // behind is the point of hydrating the head first at all.
+  const pass = refresh(opts);
+  pass.catch(() => {});
+  if (firstScreen) await firstScreen;
+  else await pass;
+  return answer({ cached: false });
+}
+
+function answer(extra) {
+  return {
+    titles: state.titles,
+    fetchedAt: state.fetchedAt,
+    partial: state.partial,
+    // The caller re-reads while this is true rather than treating a first screen
+    // as the whole library.
+    filling: !!state.filling,
+    ...extra,
+  };
 }
 
 const find = (titleId) => loadCache().titles.find((t) => t.titleId === titleId) || null;
@@ -169,8 +249,43 @@ const normalize = (s) =>
     .toLowerCase()
     .trim();
 
+// Game Pass's own curated lists. Cached for an hour: "recently added" changes on
+// Microsoft's schedule, not ours, and the answer is one small request.
+//
+// What is cached is the PRODUCT IDS, and the resolution against the library
+// happens on every read. Caching resolved rows looked equivalent and was not: the
+// first screen asks for these while the catalogue is still filling in, so the rows
+// captured were the ones with no name and no art yet - and then those sat in the
+// cache for an hour, drawing a row of title ids on the television.
+const COLLECTION_TTL_MS = 3600 * 1000;
+const collections = new Map();
+
+async function collection(name, opts) {
+  const id = api.SIGL[name];
+  if (!id) throw new Error("no such collection: " + name);
+  const o = opts || {};
+  const language = o.language || "en-US";
+  const key = name + "|" + language;
+
+  const hit = collections.get(key);
+  let ids;
+  if (hit && Date.now() - hit.at < COLLECTION_TTL_MS) {
+    ids = hit.ids;
+  } else {
+    ids = await api.fetchSigl(id, { language, market: o.market });
+    collections.set(key, { at: Date.now(), ids });
+  }
+
+  // Resolved against the library, so a list entry that is not streamable on this
+  // account simply does not appear - the sigls cover console and PC too. A title
+  // the catalogue has not named yet is left out rather than drawn as its id.
+  const byProduct = new Map(loadCache().titles.map((t) => [t.productId, t]));
+  return ids.map((p) => byProduct.get(p)).filter((t) => t && t.name);
+}
+
 function invalidate() {
-  state = { titles: [], fetchedAt: 0, market: "", language: "", partial: false, version: CACHE_VERSION };
+  collections.clear();
+  state = { titles: [], fetchedAt: 0, market: "", language: "", partial: false, filling: false, version: CACHE_VERSION };
   loaded = true;
   try {
     fs.unlinkSync(CACHE_FILE);
@@ -179,4 +294,19 @@ function invalidate() {
   }
 }
 
-module.exports = { CACHE_FILE, TTL_MS, FIRST_SCREEN, CACHE_VERSION, get, find, search, refresh, invalidate, reduce, normalize, _state: () => state };
+module.exports = {
+  CACHE_FILE,
+  TTL_MS,
+  FIRST_SCREEN,
+  CACHE_VERSION,
+  COLLECTION_TTL_MS,
+  get,
+  find,
+  search,
+  collection,
+  refresh,
+  invalidate,
+  reduce,
+  normalize,
+  _state: () => state,
+};

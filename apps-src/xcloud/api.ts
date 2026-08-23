@@ -13,7 +13,14 @@ export interface Title {
   owned: boolean;
   inputs: string[];
   maxPlaySeconds: number;
+  categories: string[];
   hydrated: boolean;
+}
+
+export interface DeviceCode {
+  userCode: string;
+  verificationUri: string;
+  expiresIn: number;
 }
 
 export interface Status {
@@ -25,6 +32,10 @@ export interface Status {
   market?: string;
   offering?: string;
   region?: string;
+  // A sign-in already running in the plugin, so reopening this screen picks the
+  // code back up instead of asking Microsoft for a second one.
+  pending?: DeviceCode | null;
+  // Always an error code, never anything else.
   code?: string;
   error?: string;
 }
@@ -71,13 +82,20 @@ const post = <T>(path: string, body?: unknown) =>
   call<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
 
 export const getStatus = () => call<Status>("/status");
-export const startSignIn = () => post<{ userCode: string; verificationUri: string; expiresIn: number }>("/signin/start");
+export const startSignIn = () => post<DeviceCode>("/signin/start");
 export const signInState = () => call<{ state: string; userCode?: string; verificationUri?: string; code?: string; error?: string }>("/signin/state");
 export const cancelSignIn = () => post("/signin/cancel");
 export const signOut = () => post("/signout");
 
-export const getLibrary = () => call<{ titles: Title[]; cached: boolean; stale?: boolean; partial: boolean }>("/library");
+export const getLibrary = () =>
+  // `filling` means the first screen is here and the rest is still arriving, so
+  // the grid draws now and re-reads - rather than treating fifty titles as the
+  // whole library.
+  call<{ titles: Title[]; cached: boolean; stale?: boolean; partial: boolean; filling?: boolean }>("/library");
 export const getRecent = () => call<{ titles: Title[] }>("/recent");
+// Game Pass's own curated lists (what was just added, what is about to leave), as
+// titles rather than product ids.
+export const getCollections = () => call<{ collections: Record<string, Title[]> }>("/collections");
 export const search = (q: string) => call<{ results: Title[] }>("/search?q=" + encodeURIComponent(q));
 
 export const startSession = (titleId: string, width: number, height: number) =>

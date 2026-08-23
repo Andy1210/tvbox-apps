@@ -85,7 +85,10 @@ module.exports = (host) => {
   // The account, and what it can reach. Deliberately says nothing about tokens
   // beyond whether they work.
   async function status() {
-    if (!auth.isSignedIn()) return { ok: true, signedIn: false, signingIn: !!signin, code: signin ? signin.public : null };
+    // `pending` rather than `code`: everywhere else in this API `code` is a
+    // stable ERROR code, and a field whose type depends on which state you are in
+    // is how a caller ends up passing an object to a message lookup.
+    if (!auth.isSignedIn()) return { ok: true, signedIn: false, signingIn: !!signin, pending: signin ? signin.public : null };
     try {
       const [web, tok] = await Promise.all([auth.getWebToken(), auth.getCloudStreamingToken()]);
       return {
@@ -189,6 +192,28 @@ module.exports = (host) => {
       const id = new URL(req.url, host.base).searchParams.get("id") || "";
       const t = library.find(id);
       host.json(res, t ? { ok: true, title: t } : { ok: false, code: "not_found", error: "no such title" });
+    },
+
+    // Game Pass's own curated lists - what was just added, what is about to
+    // leave. Answered together because the screen wants them together and each is
+    // one small request behind an hour's cache.
+    //
+    // A list that fails does not fail the others: these are extra rows, and a row
+    // that cannot be drawn is better than a screen that cannot.
+    "GET /collections": (req, res) => {
+      const language = locale();
+      const wanted = ["recentlyAdded", "leavingSoon"];
+      Promise.all(
+        wanted.map((name) =>
+          library
+            .collection(name, { language })
+            .then((titles) => [name, titles])
+            .catch((e) => {
+              log("collection " + name + " failed:", e.message);
+              return [name, []];
+            }),
+        ),
+      ).then((pairs) => host.json(res, { ok: true, collections: Object.fromEntries(pairs) }));
     },
 
     // The continue-playing row. Straight from the API rather than the cache: what

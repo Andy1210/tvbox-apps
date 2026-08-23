@@ -210,8 +210,37 @@ function imageUrl(img) {
   return raw.startsWith("//") ? "https:" + raw : raw;
 }
 
+// A "sigl" is one of Game Pass's own curated lists, addressed by a fixed id, and
+// it answers with product ids only - the names and art come from the catalogue
+// like everything else. Unauthenticated, same host.
+//
+// The ids are Microsoft's and are not discoverable: these are the ones that
+// answered on this market, verified rather than copied. "Coming soon" 404s, so it
+// is not in the list.
+const SIGL = {
+  recentlyAdded: "f13cf6b4-57e6-4459-89df-6aec18cf0538",
+  leavingSoon: "393f05bf-e596-4ef6-9487-6d4fa0eab987",
+  mostPopular: "a884932a-f02b-40c8-a903-a008c23b1df1",
+};
+
+async function fetchSigl(id, opts) {
+  const o = opts || {};
+  const market = o.market || (await auth.getCloudStreamingToken()).market || "US";
+  const path =
+    "/sigls/v2?id=" + encodeURIComponent(id) +
+    "&market=" + encodeURIComponent(market) +
+    "&language=" + encodeURIComponent(o.language || "en-US");
+  const res = await http.get(CATALOG_HOST, path, catalogHeaders, { timeout: 20000 });
+  if (!res.ok) throw new ApiError("sigl_unavailable", "Could not read the list " + id + ": " + http.describe(res), { status: res.status });
+  const body = res.json();
+  // The array carries a metadata entry with no id alongside the products.
+  return (Array.isArray(body) ? body : []).map((r) => r && r.id).filter(Boolean).map(String);
+}
+
 module.exports = {
   ApiError,
+  SIGL,
+  fetchSigl,
   gssv,
   fetchTitles,
   fetchRecentTitles,

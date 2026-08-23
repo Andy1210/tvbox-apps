@@ -12,7 +12,8 @@
     "cancel": "Mégsem",
     "retry": "Újra",
     "expiresIn": "A kód {minutes} percig érvényes.",
-    "keepOpen": "Ez a képernyő maradjon nyitva, amíg be nem fejezted a telefonon."
+    "keepOpen": "Ez a képernyő maradjon nyitva, amíg be nem fejezted a telefonon.",
+    "scan": "Vagy olvasd be a telefonoddal"
   },
   "errors": {
     "code_expired": "A kód lejárt. Kezdd újra.",
@@ -41,7 +42,11 @@
     "noResults": "Nincs találat erre: {query}",
     "signedInAs": "Bejelentkezve: {gamertag}",
     "signOut": "Kijelentkezés",
-    "searchRest": "További {count} játék a keresőben."
+    "searchRest": "További {count} játék a keresőben.",
+    "recentlyAdded": "Nemrég került be",
+    "leavingSoon": "Hamarosan lekerül",
+    "allGenres": "Mind",
+    "clear": "Törlés"
   },
   "stream": {
     "starting": "Indítás…",

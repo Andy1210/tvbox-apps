@@ -2,7 +2,7 @@
   "id": "xcloud",
   "manifestVersion": 1,
   "name": "Xbox Cloud Gaming",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "webclient",
   "status": "ready",
   "accent": "#107c10",
@@ -16,6 +16,14 @@
     "hu": "Xbox Game Pass Ultimate jatekok streamelese egyenesen a TV-re - konzol nelkul. Jelentkezz be a kepernyon megjeleno koddal, aztan parosits egy Bluetooth- vagy USB-kontrollert. Gyors internet kell hozza; a kep elo H.264 videofolyam."
   },
   "changelog": [
+    {
+      "version": "2.1.0",
+      "notes": "Two new rows - what was just added to Game Pass and what is about to leave - a genre filter, and search behind an icon rather than an emoji. The library now draws as soon as the first titles arrive instead of waiting for all of them, and moving through it is smooth."
+    },
+    {
+      "version": "2.0.1",
+      "notes": "The sign-in screen shows a QR code, so the phone opens the page with the code already filled in, and the code itself is easier to read from the sofa."
+    },
     {
       "version": "2.0.0",
       "notes": "The app is now ours rather than Microsoft's web page: a ten-foot library, sign-in with a code on your phone, and the stream rendered here. The queue is shown honestly, and the Xbox button leaves the game."

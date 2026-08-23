@@ -37,6 +37,8 @@ const fatProduct = (id, name) => ({
   Screenshots: Array.from({ length: 8 }, (_, i) => ({ Uri: "https://shot/" + id + "/" + i })),
   ProductDescription: "d".repeat(1100),
   LanguageSupport: { en: ["audio", "text"], de: ["text"], hu: ["text"] },
+  LocalizedCategories: ["Akció és kaland", "Szerepjáték"],
+  Categories: ["Action & adventure", "Role playing"],
 });
 
 let calls = { titles: 0, hydrate: [] };
@@ -108,7 +110,9 @@ test("the cached row is the reduced one - the heavy catalogue fields are gone", 
   }
   const row = library._state().titles[0];
   assert.deepEqual(Object.keys(row).sort(), [
-    "hydrated", "inputs", "maxPlaySeconds", "name", "owned", "poster", "productId", "publisher", "tile", "titleId",
+    // `categories` is what a genre filter is made of - 68 bytes a title against
+    // the 581 already kept.
+    "categories", "hydrated", "inputs", "maxPlaySeconds", "name", "owned", "poster", "productId", "publisher", "tile", "titleId",
   ]);
   assert.equal(row.tile, "https://img/P0-tile.png");
 });
@@ -245,6 +249,182 @@ test("a cache that cannot be written does not fail the request", async () => {
   } finally {
     fs.renameSync = real;
   }
+});
+
+
+test("a cold get answers after the FIRST screen, not the whole pass", async () => {
+  fresh();
+  stub(400);
+  // The tail is held open, so a get() that waits for the whole pass never
+  // returns here. The whole pass measured 40 s on the box, which is what the
+  // person was looking at while the grid said "loading".
+  let releaseTail;
+  const realHydrate = api.hydrate;
+  api.hydrate = async (ids) => {
+    calls.hydrate.push(ids.length);
+    if (ids.length > library.FIRST_SCREEN) {
+      await new Promise((r) => (releaseTail = r));
+    }
+    return realHydrate(ids);
+  };
+
+  const got = await library.get({});
+  assert.equal(got.titles.length, 400);
+  assert.equal(got.filling, true, "the caller has to know the tail is still coming");
+  assert.equal(got.titles.filter((t) => t.name).length, library.FIRST_SCREEN);
+
+  releaseTail();
+  await new Promise((r) => setTimeout(r, 30));
+  const after = await library.get({});
+  assert.equal(after.titles.filter((t) => t.name).length, 400);
+  assert.equal(after.filling, false, "and when it lands, that it is done");
+});
+
+test("a small library is never reported as still filling", async () => {
+  fresh();
+  stub(20);
+  const got = await library.get({});
+  assert.equal(got.filling, false);
+});
+
+test("a background refresh never makes what is served WORSE", async () => {
+  fresh();
+  stub(400);
+  await library.refresh({});
+  assert.equal(library._state().titles.filter((t) => t.name).length, 400);
+
+  // Now a second pass, with its tail held: its head-only publish must not replace
+  // 400 named rows with 50. Measured on the box, that turned a full grid into a
+  // screen of blanks until the tail landed.
+  let releaseTail;
+  const realHydrate = api.hydrate;
+  stub(400);
+  api.hydrate = async (ids) => {
+    calls.hydrate.push(ids.length);
+    if (ids.length > library.FIRST_SCREEN) await new Promise((r) => (releaseTail = r));
+    return realHydrate(ids);
+  };
+  const pass = library.refresh({});
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(
+    library._state().titles.filter((t) => t.name).length,
+    400,
+    "the head-only publish has to be ignored while a complete library is being served",
+  );
+  releaseTail();
+  await pass;
+  assert.equal(library._state().titles.filter((t) => t.name).length, 400);
+});
+
+test("a refresh that fails before its first screen releases the cold get instead of hanging", async () => {
+  fresh();
+  stub(60, { titlesFail: true });
+  // The cold path waits on the first-screen promise. A pass that dies before
+  // publishing anything must still resolve it, or the screen says "loading" for
+  // ever with nothing left to wait for.
+  const settled = await Promise.race([
+    library.get({}).then(
+      (r) => ({ kind: "resolved", titles: r.titles.length }),
+      (e) => ({ kind: "rejected", code: e.message }),
+    ),
+    new Promise((r) => setTimeout(() => r({ kind: "hung" }), 2000)),
+  ]);
+  assert.notEqual(settled.kind, "hung", "get must not wait on a promise nothing will resolve");
+});
+
+
+test("the cache is keyed on LANGUAGE, not only on age", async () => {
+  fresh();
+  stub(60);
+  await library.get({ language: "hu-HU" });
+  assert.equal(calls.titles, 1);
+
+  // The catalogue returns its categories localised, so a Hungarian cache is the
+  // WRONG answer for an English UI - and an age-only freshness check would serve
+  // it for the rest of the day.
+  stub(60, { name: (i) => "English " + i });
+  const en = await library.get({ language: "en-US" });
+  assert.equal(calls.titles, 1, "a different language has to refetch");
+  // Refetching is not enough: the rows have to actually BE the new language. The
+  // no-downgrade guard compares named counts, and a head-only publish of 50 over
+  // 60 named rows would be skipped - leaving the categories in the language
+  // nobody asked for.
+  assert.equal(library._state().language, "en-US");
+  assert.match(en.titles[0].name, /^English /);
+
+  stub(60);
+  await library.get({ language: "en-US" });
+  assert.equal(calls.titles, 0, "and the same one must not");
+});
+
+test("the localised categories reach the reduced row", async () => {
+  fresh();
+  stub(20);
+  await library.refresh({ language: "hu-HU" });
+  assert.deepEqual(library._state().titles[0].categories, ["Akció és kaland", "Szerepjáték"]);
+});
+
+test("a collection resolves against the library on every read, not at fetch time", async () => {
+  fresh();
+  stub(400);
+  // The first screen asks for a collection while the catalogue is still filling.
+  // A collection that captured rows THEN would hold the unnamed ones for an hour
+  // - measured on the television as a row of title ids.
+  let releaseTail;
+  const realHydrate = api.hydrate;
+  api.hydrate = async (ids) => {
+    calls.hydrate.push(ids.length);
+    if (ids.length > library.FIRST_SCREEN) await new Promise((r) => (releaseTail = r));
+    return realHydrate(ids);
+  };
+  const pass = library.refresh({});
+  await new Promise((r) => setTimeout(r, 30));
+
+  const realSigl = api.fetchSigl;
+  // A product from the TAIL, which has no name yet.
+  api.fetchSigl = async () => ["P300"];
+  try {
+    assert.deepEqual(await library.collection("recentlyAdded", {}), [], "an unnamed title is left out, not drawn as its id");
+    releaseTail();
+    await pass;
+    const after = await library.collection("recentlyAdded", {});
+    assert.equal(after.length, 1);
+    assert.ok(after[0].name, "and it appears with its name once the catalogue has it");
+  } finally {
+    api.fetchSigl = realSigl;
+  }
+});
+
+test("a collection is fetched once an hour and resolved against the library", async () => {
+  fresh();
+  stub(60);
+  await library.refresh({});
+  const rows = library._state().titles;
+
+  const realSigl = api.fetchSigl;
+  let siglCalls = 0;
+  // Two ids the library has and one it does not: a sigl covers console and PC
+  // titles too, and one that is not streamable here must simply not appear rather
+  // than becoming a tile that cannot be played.
+  api.fetchSigl = async () => {
+    siglCalls++;
+    return [rows[3].productId, "NOT-STREAMABLE-HERE", rows[7].productId];
+  };
+  try {
+    const got = await library.collection("recentlyAdded", { language: "en-US" });
+    assert.deepEqual(got.map((x) => x.titleId), [rows[3].titleId, rows[7].titleId]);
+    await library.collection("recentlyAdded", { language: "en-US" });
+    assert.equal(siglCalls, 1, "an hour's cache, not a request per screen");
+    // A different language is a different list, because the names are localised.
+    await library.collection("recentlyAdded", { language: "hu-HU" });
+    assert.equal(siglCalls, 2);
+  } finally {
+    api.fetchSigl = realSigl;
+  }
+});
+
+test("an unknown collection is refused rather than silently empty", async () => {
+  await assert.rejects(() => library.collection("nope", {}), /no such collection/);
 });
 
 test.after(() => {
