@@ -26,8 +26,11 @@ const { execFile } = require("child_process");
 const spotify = require("./lib/spotify"); // cast-only bridge: librespot events -> SSE state
 const spotifyApi = require("./lib/spotify_api"); // OPTIONAL Spotify Web API (account features)
 const { createAutoplay } = require("./lib/autoplay"); // what plays when a playlist runs out
+const { createCredGuard } = require("./lib/credguard"); // a saved login Spotify no longer accepts
 
 const SPOTIFY_HOOK = path.join(__dirname, "spotify_event_hook.sh"); // librespot --onevent target
+// Where librespot keeps the saved session credentials (and the Connect volume).
+const LIBRESPOT_CACHE = path.join(os.homedir(), ".tvbox", "librespot-cache");
 // The hook arrives over HTTP as plain bytes (installPackage writes 0644), but
 // librespot must be able to exec it — ensure it's executable. (installPackage
 // also +x's *.sh now; this is defensive so an older install self-heals on boot.)
@@ -232,6 +235,18 @@ module.exports = (host) => {
   // credentials, so this sticks across restarts; zeroconf stays on, so any phone
   // can still cast and take the box over as usual.
   let adoptToken = "";
+  // Whether the live librespot instance was started with that token (set by
+  // librespotArgv, read by the credential guard below).
+  let startUsedToken = false;
+  // Reads the daemon's own output and clears a saved login Spotify has started
+  // refusing — the one failure that never recovers on its own, not even across a
+  // reboot. Its module header has the incident and the bounds.
+  const credGuard = createCredGuard({
+    fs,
+    path,
+    cacheDir: LIBRESPOT_CACHE,
+    log: (m) => host.log("librespot " + m),
+  });
   // What makes an event's `user_name` trustworthy. The rest of an event draws a
   // screen, and /tvbox/api/spotify/event has always been reachable by anything
   // served from this box's own origin. The owner is different in kind: it decides
@@ -276,7 +291,7 @@ module.exports = (host) => {
       "--volume-ctrl",
       "linear",
       "--cache",
-      path.join(os.homedir(), ".tvbox", "librespot-cache"),
+      LIBRESPOT_CACHE,
       "--disable-audio-cache", // cache credentials/metadata, not audio
       "--onevent",
       SPOTIFY_HOOK,
@@ -288,6 +303,12 @@ module.exports = (host) => {
     const sink = host.audioSink();
     if (sink) args.push("--device", sink);
     if (adoptToken) args.push("--access-token", adoptToken);
+    // Recorded HERE rather than read off adoptToken when a log line arrives: the
+    // token is one-shot and cleared as soon as the adoption stops polling, while
+    // the output of the instance it started keeps coming. The credential guard
+    // must know which kind of start it is watching. argv() is called once per
+    // (re)start, so this tracks the LIVE instance.
+    startUsedToken = !!adoptToken;
     return args;
   }
   // Spotify Connect is opt-in (config.spotify.enabled): this gate — not the
@@ -307,14 +328,58 @@ module.exports = (host) => {
       }
     }
     const out = librespotLog === "ignore" ? "ignore" : librespotLog;
+    // librespot writes its ENTIRE log to stderr, so the supervisor's pipe is the
+    // only place that log can be read — and reading it is the point. Pointing
+    // stderr straight at the file (what this did until 1.5.3) left shell.log with
+    // `exited code 1` and nothing else, which reads exactly like a missing binary
+    // while the real reason sat in a file nobody thought to open. Everything still
+    // reaches ~/.tvbox/librespot.log verbatim; shell.log gets the supervisor's own
+    // lines and the daemon's ERRORs, never the per-track INFO chatter.
+    const logLine = (m) => {
+      // Redact FIRST, for every sink: the supervisor's spawn line carries the
+      // whole argv, and that includes the one-shot --access-token. It used to
+      // reach only the shell log (redacted there); it now reaches a file too.
+      const line = String(m).replace(/(--access-token)\s+\S+/, "$1 ***");
+      if (out !== "ignore") {
+        try {
+          fs.writeSync(librespotLog, line + "\n");
+        } catch (e) {
+          /* the log file is a convenience; losing a line must not kill the daemon */
+        }
+      }
+      // A line starting with "[" is the daemon's own (env_logger prints
+      // "[<ts> LEVEL  target] …"); anything else is the supervisor talking about
+      // it. Both matter in shell.log, but only the daemon's errors do.
+      if (!line.startsWith("[") || line.includes(" ERROR ")) host.log("librespot " + line);
+      // Wrapped because this runs inside the supervisor's stderr handler, which
+      // does not guard it: anything thrown here would surface as an unhandled
+      // exception in the shell's main process rather than as a log line.
+      try {
+        if (credGuard.note(line, { withToken: startUsedToken })) {
+          // The box has just been signed out, so the same two things a deliberate
+          // teardown does have to happen: the now-playing claim is no longer true
+          // (it feeds the HOME sound card and the box's media_player, both of
+          // which would keep showing a track from an account that no longer holds
+          // the box), and the cached Connect device id belongs to an instance that
+          // is gone. Before the guard existed, the supervisor's give-up ceiling
+          // did the first of these - five failures in, not two - so leaving it out
+          // would have made the recovery quieter AND less correct than the
+          // failure it replaces.
+          spotify.clear();
+          spotifyApi.forgetBoxDevice();
+        }
+      } catch (e) {
+        host.log("librespot credential guard failed: " + e.message);
+      }
+    };
     host.spawnService("librespot", {
       argv: librespotArgv, // recomputed each (re)start -> picks up rename + sink
       env: { ...host.childEnv(), TVBOX_SPOTIFY_EVENT_KEY: eventKey },
-      stdio: ["ignore", out, out],
+      stdio: ["ignore", out, "pipe"],
       minUptimeMs: 5000,
       ceiling: 5,
       onGiveUp: () => spotify.clear(), // give up -> reset now-playing to idle
-      log: (m) => host.log("librespot " + String(m).replace(/(--access-token)\s+\S+/, "$1 ***")), // never log the token
+      log: logLine,
     });
   }
   // Killing the process emits no disconnect event, so reset now-playing to idle
