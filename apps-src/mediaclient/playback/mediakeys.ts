@@ -68,7 +68,13 @@ const ACTIONS = {
  * that is a decision, not a listener.
  */
 export function handleMusicKey(key: string): boolean {
-  if (usePlayer.getState().current) return false;
+  // A step between two episodes counts as the film holding the player. `current`
+  // is null for the whole of it, so a single press of the play button during one
+  // started house music over the episode that was arriving - and the film took
+  // the player straight back, leaving the queue claiming to play a song nobody
+  // could hear, in the mini-player, on the now-playing screen and in the report
+  // the shell publishes.
+  if (usePlayer.getState().current || usePlayer.getState().moving) return false;
   const m = useMusic.getState();
   // Nothing queued: the press is left alone rather than swallowed, so a remote
   // whose play button doubles as something else still does that.
@@ -162,8 +168,8 @@ export function useMusicMediaKeys(): void {
 export function handleMusicCommand(cmd: { action?: string; state?: string; sounding?: string } | null): boolean {
   // A film owns the player: its own pause is the shell's business and the queue
   // underneath must not step. Same question the key handler asks, for the same
-  // reason.
-  if (usePlayer.getState().current) return false;
+  // reason - a step between two episodes included, see the note there.
+  if (usePlayer.getState().current || usePlayer.getState().moving) return false;
   const m = useMusic.getState();
   if (!m.queue.length) return false;
   // Who the SHELL believes is making the sound. A forwarded command goes to the

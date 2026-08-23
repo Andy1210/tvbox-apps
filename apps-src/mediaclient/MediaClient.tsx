@@ -17,7 +17,7 @@ import { Profiles } from "./Profiles";
 import { Search } from "./Search";
 import { Settings } from "./Settings";
 import { useMusic } from "./playback/music";
-import { usePlayer } from "./playback/player";
+import { usePlayer, useShowingPlayer } from "./playback/player";
 import { handleMusicCommand, useMusicMediaKeys } from "./playback/mediakeys";
 import { useApp } from "./state";
 import { deviceName } from "./identity";
@@ -60,7 +60,10 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   const screen = useApp((s) => s.screen);
   const boot = useApp((s) => s.boot);
   const back = useApp((s) => s.back);
-  const playing = usePlayer((s) => s.current !== null);
+  // A step between two episodes counts as playing: the player holds nothing for
+  // the length of the move, so without it the browsing screens came back for a
+  // second - drawn over the transition, and taking the presses meant for it.
+  const playing = useShowingPlayer();
 
   // The same navigation ticks the launcher uses, honouring the same box-wide
   // setting - a household that turned them off there does not expect them back
@@ -248,6 +251,16 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   // pause the film AND navigate away from it.
   useBackspace(() => {
     if (usePlayer.getState().current) return;
+    // Between two episodes Back gives up the STEP rather than being eaten. There
+    // is nothing to pause and nothing to go back to yet, and the step can hold
+    // the screen for as long as the server takes - so a press that did nothing
+    // at all was a remote that had died. Navigating instead would leave the
+    // episode arriving behind a screen nobody asked for, which is why this
+    // cancels the claim (the arriving film is dropped too) and stays put.
+    if (usePlayer.getState().moving) {
+      usePlayer.getState().cancelMove();
+      return;
+    }
     if (!back()) onExit();
   });
 
@@ -263,6 +276,15 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   useEffect(() => {
     const off = tvbox().onCommand?.((c) => {
       const cmd = (c || {}) as { action?: string; state?: string };
+      // NOT gated on the profile picker, unlike the Companion door, and that is
+      // deliberate. This one is fire-and-forget - the shell's publish succeeds
+      // whatever happens here, so the assistant says out loud that it did what it
+      // was asked - and half of these are the app's own half of something the
+      // shell has ALREADY done to mpv. Dropping them silently left the room quiet
+      // with the screen saying "playing", and a shuffle nobody performed reported
+      // as performed. The queue is the previous person's for as long as the
+      // picker is up, but `chooseProfile` erases it, and music that is audibly
+      // playing is not something the room should be unable to pause.
       // The queue decides FIRST, and the screen only follows a command it really
       // took. `handleMusicCommand` stands down when a film owns the player or
       // when this app is not the one playing - and navigating anyway walked the
@@ -275,7 +297,15 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
       // keeps the history, so Back returns where the person was.
       if (took && String(cmd.action || "").toLowerCase() === "lyrics" && String(cmd.state || "on") !== "off") {
         const app = useApp.getState();
-        if (app.screen.name !== "nowPlaying") app.go({ name: "nowPlaying" });
+        // The COMMAND is not gated on the picker (see above) but the walk to a
+        // screen is, and that distinction is the whole of it: `lyrics` is the one
+        // action here that navigates, and taking the PIN pad off screen is what
+        // opens every other door - the Companion paths decide by the screen's
+        // name too, so once it has moved the next command arrives under the
+        // PREVIOUS person's library. Measured: one publish did it.
+        const at = app.screen.name;
+        if (at === "profiles" || at === "login" || at === "boot") return;
+        if (at !== "nowPlaying") app.go({ name: "nowPlaying" });
       }
     });
     return off;

@@ -6,7 +6,7 @@
 
 import { useEffect } from "react";
 import { useApp } from "./state";
-import { usePlayer } from "./playback/player";
+import { useShowingPlayer } from "./playback/player";
 import { usePrefs } from "./prefs";
 import { onRelease } from "./lifecycle";
 import type { MediaItem } from "./backends/types";
@@ -81,7 +81,7 @@ function stop(): void {
  */
 export function useTheme(item: MediaItem | null | undefined): void {
   const backend = useApp((s) => s.backend);
-  const playing = usePlayer((s) => s.current !== null);
+  const playing = useShowingPlayer();
   const on = usePrefs((s) => s.themeMusic);
   const url = item && backend && on ? backend.themeUrl(item) : undefined;
 
@@ -97,8 +97,13 @@ export function useTheme(item: MediaItem | null | undefined): void {
       return;
     }
     if (playing) {
-      // What is being silenced, remembered before `stop` forgets it.
-      if (playingUrl) silencedByPlayback = playingUrl;
+      // What is being silenced, remembered before `stop` forgets it - and the
+      // screen's OWN theme when nothing was sounding. A film started by voice
+      // puts this screen up underneath itself, so there is nothing playing to
+      // remember, and the theme would then start over the countdown at the end
+      // of the episode: the one moment this exists to keep quiet, in a room
+      // whose volume is set for a film's dialogue.
+      silencedByPlayback = playingUrl ?? url;
       stop();
       return;
     }

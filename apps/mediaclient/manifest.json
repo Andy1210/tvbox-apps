@@ -5,8 +5,12 @@
     "hu": "M\u00e9dia",
     "en": "Media"
   },
-  "version": "0.62.1",
+  "version": "0.62.2",
   "changelog": [
+    {
+      "version": "0.62.2",
+      "notes": "An episode started by voice leaves the series' episode list on screen behind it, so when one ends the countdown to the next appears there instead of on this app's home page. The next- and previous-episode buttons take one press each: the screen says which episode is starting, and presses that arrive while it loads are ignored rather than stepping another episode every time. And on the music player the queue comes back the way it goes away - the song narrows and the list opens beside it, instead of appearing at the left of the screen and sliding across."
+    },
     {
       "version": "0.62.1",
       "notes": "Shuffle and repeat by voice work on a queue that is merely paused or stopped, and a spoken command meant for another app no longer reaches this one's queue."

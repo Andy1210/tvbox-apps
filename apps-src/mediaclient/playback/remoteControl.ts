@@ -8,9 +8,10 @@
 // Answering OK for something that did not happen is how a house ends up saying
 // a film is playing while the television shows the launcher.
 
-import { usePlayer } from "./player";
+import { stillSettling, usePlayer } from "./player";
 import { useMusic } from "./music";
-import { useApp } from "../state";
+import { useApp, type Screen } from "../state";
+import { doesFocusableExist, getCurrentFocusKey } from "@noriginmedia/norigin-spatial-navigation";
 import { isVisible } from "../lifecycle";
 import { rememberedVersion } from "../chosenVersion";
 import type { CommandResult, CompanionCommand } from "../backends/plex/companion";
@@ -56,12 +57,51 @@ function queueId(containerKey: string | undefined): string | undefined {
 function personChanged(who: { backend: unknown }): CommandResult | null {
   const now = useApp.getState();
   if (now.backend !== who.backend) return no("the person on this box changed");
-  const choosing = now.screen.name === "profiles" || now.screen.name === "login" || now.screen.name === "boot";
   // A different sentence, because it is a different thing and the assistant
   // reads it out: with nobody chosen yet the backend has not CHANGED - the box
   // is sitting on its own picker, which is what somebody in the room has to
-  // answer before anything can be sent here.
-  if (choosing) return no("this box is asking who is watching; choose a profile on it first");
+  // answer before anything can be sent here. And only the PICKER offers a
+  // profile: telling somebody at a sign-in screen to choose one is an
+  // instruction they cannot follow.
+  if (now.screen.name === "profiles")
+    return no("this box is asking who is watching; choose a profile on it first");
+  if (now.screen.name === "login" || now.screen.name === "boot") return no("nobody is signed in on this box");
+  return null;
+}
+
+/**
+ * Nobody has said who is watching yet, so nothing may act on this box.
+ *
+ * `playMedia` and the navigation paths each refuse this for themselves; the
+ * TRANSPORT paths had no check at all, and a skip accepted there takes a claim on
+ * the screen - which HIDES the PIN pad the digits are being typed into, for as
+ * long as the step lasts. The poll loop is already stopped while the picker is
+ * up, so nothing legitimate is turned away: this closes the window a command
+ * already in flight arrives through.
+ *
+ * The screen name is not the whole test: a sign-out is a network round trip
+ * before the screen moves, so `backend` is what says nobody is signed in during
+ * it. It is deliberately NOT keyed on the app-wide `failure` - that is written by
+ * `classify` on any 401 OR 403 from any screen's fetch, including the detail page
+ * a cast mounts behind the film it just started, and nothing clears it while a
+ * film plays. Measured: one 403 there and every command was refused, "stop"
+ * included, with the film still playing. The narrower thing that needed guarding
+ * - a controller pressing the "sign in again" button on a failure screen - is
+ * guarded in `navigate`, where the press happens.
+ *
+ * Two sentences, because they are two states and the assistant reads them out:
+ * only the picker offers a profile to choose.
+ *
+ * The two timeline paths are exempt: they change nothing, and this file's own
+ * note records that a refused `subscribe` is answered 400 by the server and the
+ * phone gives up rather than trying again once somebody has picked.
+ */
+function nobodyChosen(path: string): CommandResult | null {
+  if (path.startsWith("/player/timeline/")) return null;
+  const now = useApp.getState();
+  const at = now.screen.name;
+  if (at === "profiles") return no("this box is asking who is watching; choose a profile on it first");
+  if (at === "login" || at === "boot" || !now.backend) return no("nobody is signed in on this box");
   return null;
 }
 
@@ -214,7 +254,12 @@ async function startMusic(
   // it was the home page, with a song coming out of it and no way to tell which
   // one. Every in-app route to a track does this (MusicItem, MusicList,
   // MusicHome); the cast path was the one that did not.
-  useApp.getState().go({ name: "nowPlaying" });
+  //
+  // Unless somebody else is at the box by now: `playQueue` is several round trips
+  // and this is the step after them, so the same check the film path makes here
+  // applies - navigating is what takes the screen away from a profile picker or a
+  // sign-in that has come up in the meantime.
+  if (!personChanged(who)) useApp.getState().go({ name: "nowPlaying" });
   // Remembered for the report that follows: a phone matches what the box says
   // it is playing against the queue IT built, and a report with no queue on it
   // reads as the box playing one loose track.
@@ -305,7 +350,48 @@ function started(id: string | undefined): CommandResult {
  */
 function music(): boolean {
   const m = useMusic.getState();
-  return usePlayer.getState().current === null && m.queue.length > 0 && m.state !== "stopped";
+  // A step between two episodes is the film holding the player too: `current` is
+  // null for the whole of it, so a spoken "pause" during one reached the music
+  // queue instead - and a "stop" was answered ok while the next episode started
+  // a second later.
+  return !filmHasPlayer() && m.queue.length > 0 && m.state !== "stopped";
+}
+
+/**
+ * The buttons a controller may not press for the household.
+ *
+ * Both sign the box out, and the second is reachable from a phone by arrows -
+ * home, Settings, and two presses. Keyed on the CURSOR rather than on any state
+ * near it, because that is what a press reaches, and checked against the live
+ * focusables as well: the library does not clear its focus key when the focused
+ * component unmounts, so the name alone outlives the button and refused an
+ * ordinary OK on a screen with nothing on it but a spinner.
+ */
+const SIGNS_OUT = new Set(["msg-signin", "settings-signout"]);
+
+/** Said out loud, so the two reasons a step is refused are two sentences. */
+const STEPPING = "the box is already changing episode";
+const STARTING = "the box has not shown this one yet";
+
+/**
+ * Why a step was refused, in the words for it - never "it did not start".
+ *
+ * Two states and they are not the same claim: one says another step is running,
+ * the other says the box has not put the LAST one on screen. Answering the first
+ * about the second was measured to tell the room the box was changing episode
+ * three seconds after a film had been asked for by voice, when nothing was
+ * changing at all.
+ */
+function stepRefusal(): string | null {
+  if (usePlayer.getState().moving) return STEPPING;
+  return stillSettling() ? STARTING : null;
+}
+
+
+/** The film player holds the box, a step between two episodes included. */
+function filmHasPlayer(): boolean {
+  const p = usePlayer.getState();
+  return p.current !== null || p.moving !== null;
 }
 
 /**
@@ -318,7 +404,7 @@ function music(): boolean {
  * cursor is, which is what pressing play on the television does.
  */
 function musicToResume(): boolean {
-  return usePlayer.getState().current === null && useMusic.getState().queue.length > 0;
+  return !filmHasPlayer() && useMusic.getState().queue.length > 0;
 }
 
 /**
@@ -370,6 +456,30 @@ async function navigate(what: string): Promise<CommandResult> {
   if (!NAV_KEYS[what] && what !== "back" && what !== "home" && what !== "music") {
     return no("this player does not support that command");
   }
+  // A step between two episodes has nothing on screen to navigate, and these keys
+  // are DISPATCHED AT WINDOW - where spatial navigation's own listener sits on
+  // the same node and, measured in Chromium, runs first whatever the capture flag
+  // says. So the overlay's swallow cannot stop them and this is the guard that
+  // has to: a phone's `select` would otherwise press whatever is focused on the
+  // hidden browsing screen. Refused here, before the screen, like every other
+  // refusal in this function.
+  if (usePlayer.getState().moving && NAV_KEYS[what]) return no(STEPPING);
+  // Nor may a controller press the one button that signs the household out.
+  //
+  // Guarded on what the press would actually HIT rather than on any state near
+  // it, which is what two earlier attempts got wrong. `Message` takes the cursor
+  // as it mounts, and behind a film `hidden` hides the pixels and not the focus
+  // tree - so the cursor sits on that button for the rest of the film, and the
+  // overlay's own swallow cannot stop the press: measured in a real browser, a
+  // key dispatched at window runs its listeners in registration order and
+  // spatial navigation reaches `onEnterPress` synchronously, before this app's
+  // handler exists. Refusing on the app-wide failure flag instead took the whole
+  // D-pad away from a phone for the length of any film with a 403 behind it, and
+  // refusing every failure KIND took Retry away too.
+  const at = getCurrentFocusKey();
+  if (what === "select" && at && SIGNS_OUT.has(at) && doesFocusableExist(at))
+    return no("there is a message on this box waiting to be read");
+
   // On screen: a D-pad press means "move what I am looking at", and a hidden
   // window would answer ok while nothing moved.
   if (!(await bringToFront())) return no("the media app could not come to the screen");
@@ -382,7 +492,16 @@ async function navigate(what: string): Promise<CommandResult> {
     return ok;
   }
   const app = useApp.getState();
+  // Past every refusal, so nothing is given up on the way to one: `bringToFront`
+  // and the check above can both still turn this down, and abandoning the step
+  // first meant a command reported as failed had already thrown the episode away.
+  const step = usePlayer.getState().moving;
+  if (step) usePlayer.getState().cancelMove();
   if (what === "back") {
+    // The same as the remote's Back during a step: give the step up and stay put.
+    // Navigating as well would take the page the person was on as well as the
+    // episode, off one press.
+    if (step) return ok;
     app.back();
     return ok;
   }
@@ -396,7 +515,61 @@ async function navigate(what: string): Promise<CommandResult> {
   return ok;
 }
 
+/**
+ * The screen a cast last put up, by identity.
+ *
+ * What tells "the page this feature opened" from "the page the household opened",
+ * which the screen's own shape cannot: both are item pages. A person who
+ * navigates away and back gets a different object, so their page is theirs again.
+ */
+let castScreen: Screen | null = null;
+
+/**
+ * Put the film's own browse screen behind the player.
+ *
+ * A cast leaves whatever screen was up, which is usually the home page - the
+ * box answers Plex with the app closed, so most casts open it. That screen is
+ * not decoration: the countdown to the next episode is drawn on the SEASON page
+ * (see `Detail`), on the episode it is about to play, so a voice-started episode
+ * ran out over the home page and stepped to the next one with nothing to show
+ * for it. It is also what Back reaches, and what is on screen when the film ends.
+ *
+ * An episode has no page of its own - its season is the list it belongs to - so
+ * that is what opens, pointing at the episode. Anything else opens on itself.
+ *
+ * A season the server did not name falls back to the SERIES, without pointing at
+ * anything: 508 of this library's 8234 episodes carry no `parentRatingKey`, and
+ * the same field is what the prev/next lookup uses - so those have no next
+ * episode and no countdown either way, and all the screen can honestly be is the
+ * thing they belong to. No `focusChildId` there, because an episode is not a
+ * child of a series, and naming a key that will never mount is how a page ends
+ * up with a dead remote.
+ *
+ * One step in the history at most: the first cast pushes, so Back returns
+ * wherever the household was browsing, and every cast after it replaces. Pushing
+ * each time meant an evening of spoken requests had to be pressed back through
+ * one film at a time.
+ */
+function showBrowseScreenFor(item: MediaItem): void {
+  const app = useApp.getState();
+  const episode = item.kind === "episode";
+  const itemId = episode ? (item.parentId ?? item.grandparentId) : item.id;
+  if (!itemId) return;
+  const screen: Screen =
+    episode && item.parentId ? { name: "item", itemId, focusChildId: item.id } : { name: "item", itemId };
+  // Only the page a cast put there is replaced, and it is recognised by identity
+  // rather than by being an item page at all. Keyed on the KIND, one cast erased
+  // the page somebody in the room was reading: they were on a season, another
+  // room asked for a film, and `replace` dropped their page out of the history
+  // instead of leaving it behind the film.
+  if (app.screen === castScreen) app.replace(screen);
+  else app.go(screen);
+  castScreen = screen;
+}
+
 export async function runCompanionCommand(cmd: CompanionCommand): Promise<CommandResult> {
+  const waiting = nobodyChosen(cmd.path);
+  if (waiting) return waiting;
   const p = usePlayer.getState();
   switch (cmd.path) {
     case "/player/playback/playMedia": {
@@ -467,6 +640,23 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         await p.stop();
         return no("the media app went off screen");
       }
+      // Last, because it is about the screen UNDER the film and nothing above
+      // depends on it - and only once the film really started, so a refused cast
+      // does not walk the person to a page they never asked for.
+      //
+      // Asked one more time who is here, and this one is a REFUSAL: the same shape
+      // as the visibility check above, because the same thing is wrong. Measured,
+      // a cast whose stream resolved while the household was choosing a profile
+      // walked the box off its own PIN pad; leaving the film running instead would
+      // hide the pad behind it, which is the same screen taken by a different
+      // means. Stopped rather than left playing, for the reason the line above
+      // gives: the controller is being told this failed.
+      const later = personChanged(asked);
+      if (later) {
+        await p.stop();
+        return later;
+      }
+      showBrowseScreenFor(item);
       return ok;
     }
     case "/player/playback/play":
@@ -478,7 +668,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         else if (m.state === "stopped") await m.playAt(m.index);
         return ok;
       }
-      if (!p.current) return no("nothing is playing");
+      if (!p.current) return no(stepRefusal() ?? "nothing is playing");
       if (p.state === "paused") p.togglePause();
       return ok;
     case "/player/playback/pause":
@@ -486,7 +676,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         if (useMusic.getState().state === "playing") useMusic.getState().toggle();
         return ok;
       }
-      if (!p.current) return no("nothing is playing");
+      if (!p.current) return no(stepRefusal() ?? "nothing is playing");
       if (p.state === "playing") p.togglePause();
       return ok;
     case "/player/playback/playPause":
@@ -496,7 +686,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         useMusic.getState().toggle();
         return ok;
       }
-      if (!p.current) return no("nothing is playing");
+      if (!p.current) return no(stepRefusal() ?? "nothing is playing");
       p.togglePause();
       return ok;
     case "/player/playback/stop":
@@ -504,8 +694,14 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         await useMusic.getState().stop();
         return ok;
       }
-      if (!p.current) return ok; // already what was asked for
-      await p.stop();
+      // A step in flight is given up as well as stopped, and BOTH can be true at
+      // once: a cast landing during a step sets `current` while the step's own
+      // claim is still held. Treating the claim as "nothing is playing" answered
+      // ok without calling stop at all - the film played on and the house was
+      // told it had stopped, which is the one thing this file's header forbids.
+      if (usePlayer.getState().moving) usePlayer.getState().cancelMove();
+      if (!usePlayer.getState().current) return ok; // already what was asked for
+      await usePlayer.getState().stop();
       return ok;
     // Awaited and then checked, for the same reason playMedia is: `playSibling`
     // starts the next episode through the same call that swallows its failures,
@@ -524,6 +720,20 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         await useMusic.getState().next();
         return ok;
       }
+      // BEFORE the siblings guard, because a step clears `siblings` and re-fetches
+      // the neighbours: measured mid-step, "next episode" was answered "nothing
+      // follows this" - a claim about the LIBRARY, read out in the room as "that
+      // was the last one", about a series that has more.
+      const busyNext = stepRefusal();
+      if (busyNext) return no(busyNext);
+      // Nothing is playing at all - a step that was given up leaves no neighbours
+      // behind - and the guard below would answer with a claim about the LIBRARY,
+      // which is the sentence this file forbids four lines above it. `upNext` is
+      // the difference: an episode has just ended with the countdown on screen,
+      // which is exactly when somebody says "next episode", and the neighbours
+      // are real. An abandoned step has none, because giving one up cancels the
+      // countdown with it.
+      if (!p.current && !p.upNext) return no("nothing is playing");
       if (!p.siblings.next) return no("nothing follows this");
       // The item the player says it started, not the one this snapshot held:
       // `siblings` is replaced as the previous film is torn down, so the two
@@ -535,6 +745,16 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         await useMusic.getState().previous();
         return ok;
       }
+      const busyPrev = stepRefusal();
+      if (busyPrev) return no(busyPrev);
+      // Nothing is playing at all - a step that was given up leaves no neighbours
+      // behind - and the guard below would answer with a claim about the LIBRARY,
+      // which is the sentence this file forbids four lines above it. `upNext` is
+      // the difference: an episode has just ended with the countdown on screen,
+      // which is exactly when somebody says "next episode", and the neighbours
+      // are real. An abandoned step has none, because giving one up cancels the
+      // countdown with it.
+      if (!p.current && !p.upNext) return no("nothing is playing");
       if (!p.siblings.prev) return no("nothing comes before this");
       return started((await p.playSibling("prev"))?.id);
     }
@@ -545,7 +765,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         useMusic.getState().seek(Math.max(0, to));
         return ok;
       }
-      if (!p.current) return no("nothing is playing");
+      if (!p.current) return no(stepRefusal() ?? "nothing is playing");
       const to = Number(arg(cmd, "offset"));
       if (!Number.isFinite(to)) return no("no offset in the command");
       p.seekTo(Math.max(0, to));
@@ -556,7 +776,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         useMusic.getState().seek(useMusic.getState().positionMs + 30_000);
         return ok;
       }
-      if (!p.current) return no("nothing is playing");
+      if (!p.current) return no(stepRefusal() ?? "nothing is playing");
       p.seekBy(30_000);
       return ok;
     case "/player/playback/stepBack":
@@ -564,7 +784,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         useMusic.getState().seek(Math.max(0, useMusic.getState().positionMs - 30_000));
         return ok;
       }
-      if (!p.current) return no("nothing is playing");
+      if (!p.current) return no(stepRefusal() ?? "nothing is playing");
       p.seekBy(-30_000);
       return ok;
     // The controller asking to be kept informed about this player. Measured on

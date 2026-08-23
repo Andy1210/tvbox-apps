@@ -148,6 +148,23 @@ interface PlayerState {
    */
   playSibling(which: "prev" | "next"): Promise<MediaItem | undefined>;
   /**
+   * The episode a prev/next press is moving to, while the move is in flight.
+   *
+   * A move is a stop and a start - five round trips - and `current` is null for
+   * all of them, so without this the overlay came down, the browsing screen
+   * behind it stopped being hidden, and the press had nothing left to act on:
+   * pressing again in that window started ANOTHER episode, so one button could
+   * step several at once.
+   */
+  moving: MediaItem | null;
+  /**
+   * Give up a move in flight.
+   *
+   * For Back, which is the only key left during one: the step holds the screen
+   * for as long as the server takes, and eating that press is a dead remote.
+   */
+  cancelMove(): void;
+  /**
    * The episode that will start by itself, and when.
    *
    * Set when one runs out with another behind it. The screen underneath shows a
@@ -171,8 +188,46 @@ let upNextTimer: ReturnType<typeof setTimeout> | null = null;
  * that rely on the lookup lost their prev/next buttons entirely.
  */
 let playToken = 0;
+/**
+ * Which `play` last wrote the running order and the neighbours.
+ *
+ * `forThis !== playToken` cannot tell a CANCEL from a later play, and a later
+ * play has already written its own by then - so an abandoned call's cleanup
+ * cleared the state of the film that really was playing: no prev/next buttons, no
+ * auto-advance at the end, and a spoken "next episode" answered "nothing follows
+ * this". Tokens only rise, so a bigger one here means somebody newer owns it.
+ */
+let orderToken = 0;
 /** Long enough to read the title, short enough not to be a wait. */
 const UP_NEXT_MS = 5_000;
+/**
+ * How long a prev/next step may hold the screen before it gives up the claim.
+ *
+ * Not a cancel - nothing here can take back a request already in flight - it
+ * only stops the CLAIM outliving the move. The Plex request layer has no timeout
+ * of its own, so a server that accepts the connection and never answers would
+ * otherwise leave this set for good: one line on screen, the browsing screen
+ * hidden behind it and Back swallowed, which is a worse remote than the one this
+ * fixes. Past it the screen does what it did before, and a second press is
+ * somebody who has waited long enough to mean it.
+ */
+const MOVE_GIVE_UP_MS = 12_000;
+/**
+ * How long after a start `buffering` still means "it is coming".
+ *
+ * `buffering` is cleared by an event from the box, and the box does not always
+ * send one: `tvbox.play()` confirms nothing, and a refused play produces no
+ * events at all - measured 2 attempts in 5 when the app is not the foreground
+ * one. So the flag can stay true for ever, and anything that refuses on it
+ * refuses for ever with it. This is what keeps the prev/next buttons from dying
+ * on a box that is showing nothing, and it is generous: the shell's own note
+ * puts a Plex film at well over five seconds to appear.
+ */
+const SETTLE_MAX_MS = 10_000;
+/** When the box was last asked to show something. See `stillSettling`. */
+let startedAt = 0;
+/** Whether it has said it did. Set by the box's own event, never by asking it. */
+let shownYet = false;
 let unsubscribePlayer: (() => void) | null = null;
 let currentBackend: MediaBackend | null = null;
 let lifecycleWired = false;
@@ -187,6 +242,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   seekFromMs: null,
   scrubMs: null,
   siblings: {},
+  moving: null,
   upNext: null,
   subDelaySec: 0,
   overlay: false,
@@ -198,12 +254,50 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     set({ upNext: null });
   },
 
+  cancelMove() {
+    if (!get().moving) return;
+    // The request cannot be unsent, so what is cancelled is the CLAIM: the token
+    // moves, and `play` checks it before it tells the box anything. Without that
+    // the episode somebody had just pressed out of arrived on screen seconds
+    // later, over whatever they had gone to instead.
+    playToken += 1;
+    set({ moving: null });
+  },
+
   async playSibling(which) {
     const item = get().siblings[which];
     if (!item || !currentBackend) return undefined;
-    // The queue travels with the move, or stepping once through a playlist
-    // would land on an item that no longer knows it is in one.
-    await get().play(currentBackend, item, { resume: false, queue: get().queue });
+    // One move at a time, and the flag is set before the first await so a second
+    // press cannot get past this line. Each press used to start its own episode
+    // from whatever `siblings` held by then, which is how pressing the button
+    // three times stepped three episodes.
+    if (get().moving) return undefined;
+    // Nor while the box has not shown the LAST one yet. `play` sets `current`
+    // before the file has started - the box is told after it - so the overlay
+    // comes back over a black screen with the buttons focusable again, and a
+    // press there stepped another episode.
+    if (stillSettling()) return undefined;
+    set({ moving: item });
+    const giveUp = setTimeout(() => {
+      if (get().moving === item) set({ moving: null });
+    }, MOVE_GIVE_UP_MS);
+    try {
+      // The queue travels with the move, or stepping once through a playlist
+      // would land on an item that no longer knows it is in one.
+      await get().play(currentBackend, item, { resume: false, queue: get().queue });
+    } finally {
+      // In a finally, because a stream that cannot be resolved leaves `current`
+      // null - and a flag stuck on would leave the player showing a move that
+      // is not happening, with the browsing screen hidden behind it.
+      //
+      // Only its OWN claim, on the same test the timer uses. A request the timer
+      // gave up on can still land, minutes later: unguarded, its `finally`
+      // cleared the claim of the move somebody had started in the meantime, so
+      // the screens came back over a stopped player and that episode arrived
+      // underneath them.
+      clearTimeout(giveUp);
+      if (get().moving === item) set({ moving: null });
+    }
     return item;
   },
 
@@ -214,16 +308,33 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       return;
     }
 
+    // This call's own number, taken BEFORE anything is awaited. Everything below
+    // is on the far side of five round trips, and by then a later play - or a
+    // Back out of a step - may have moved it on; what lands then is an answer to
+    // a question nobody is asking any more.
+    //
+    // Before the teardown, not after it, and that is the whole point: the last
+    // word for the previous episode is two server round trips, which on a slow
+    // server is most of the step. Taken afterwards, this bump OVERWROTE a cancel
+    // that arrived during them - so Back was eaten, the screens came back, and
+    // the episode landed on top of them anyway.
+    playToken += 1;
+    const forThis = playToken;
+
     // Whatever was playing gets its last word before anything else starts.
     await get().stop();
 
+    // Somebody gave this up while the previous episode was being closed off.
+    // `currentBackend` is assigned below rather than above, so a sign-out that
+    // landed during the teardown is not quietly undone by this call.
+    if (forThis !== playToken) return abandoned(forThis, set, get);
     currentBackend = backend;
-    playToken += 1;
     // The episodes either side, worked out HERE rather than by whoever pressed
     // play. A film can be started from a season screen, a carry-on-watching
     // row, a search result or a person's credits, and only one of those knew
     // what the episode was part of - so the buttons appeared on one route and
     // not the others.
+    orderToken = forThis;
     set({ siblings: {}, subDelaySec: 0 });
     get().cancelUpNext();
 
@@ -284,6 +395,21 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       return;
     }
 
+    // Nobody is waiting for this any more, so the box is not told and the screen
+    // is not taken. Checked here rather than after the state is set, because the
+    // one thing that must not happen is a film appearing over what somebody went
+    // to instead - and the session that was just opened is closed, or it sits on
+    // the server as a transcode nothing will ever stop.
+    if (forThis !== playToken) {
+      if (decision.session) void backend.endSession(decision.session).catch(() => {});
+      // The state reset belongs on BOTH checks, and this is the longer window of
+      // the two - three parallel round trips against the one the teardown costs.
+      // By here the queue and the neighbours have been set for an item that never
+      // played, so leaving them made a "next episode" answer ok and start the one
+      // AFTER the episode somebody had just pressed Back out of.
+      return abandoned(forThis, set, get);
+    }
+
     // An explicit start wins over both: a controller that names an offset has
     // said where to begin, and the server's own resume point is then simply a
     // different answer to a question nobody asked.
@@ -301,6 +427,8 @@ export const usePlayer = create<PlayerState>((set, get) => ({
           ? Math.floor(resumeFrom / 1000)
           : 0;
 
+    startedAt = Date.now();
+    shownYet = false;
     set({
       current: { item, decision, markers, detail, choice },
       state: "playing",
@@ -496,6 +624,9 @@ export const usePlayer = create<PlayerState>((set, get) => ({
 
   async stop() {
     if (!get().current) return;
+    // Nothing was asked for, so nothing is settling. Without this a film that
+    // never appeared left the window open with the box showing nothing.
+    startedAt = 0;
     // Before the bridge call, so an event racing the stop is already ignored.
     releasePlayer("video");
     bridge()?.stop?.();
@@ -543,6 +674,51 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   },
 }));
 
+/**
+ * Whether the box is showing a film - a step between two episodes included.
+ *
+ * What the browsing screens key on, rather than `current`: for the length of a
+ * prev/next step the player holds nothing at all, and a screen that reads that
+ * as "playback is over" wakes up behind the transition. Two measured
+ * consequences: the season page refetches its episodes and arms its focus
+ * fallback, so a press lands on a tile nobody can see; and the home screen's
+ * backdrop - which is portalled OUT of the hidden page, so nothing the page does
+ * to itself reaches it - paints four full-screen layers over the picture.
+ *
+ * One expression in one place because those two have to agree: the screens are
+ * hidden on this and the portalled backdrop is dropped on this, and a backdrop
+ * that outlives the hiding is the bug, while one that goes early leaves the rows
+ * on a black page. `useTheme` asks the same question for consistency rather than
+ * for a hole of its own - what keeps a theme out of the gap is that playback
+ * already silenced it.
+ */
+export function useShowingPlayer(): boolean {
+  return usePlayer((s) => s.current !== null || s.moving !== null);
+}
+
+/**
+ * The box has not shown what it was last asked to play, and it still might.
+ *
+ * Keyed on the box's own first-frame event rather than on `buffering`, which is
+ * the same question asked worse: the flag is also set by an ordinary stall on a
+ * transcoded stream, so a rebuffer eight seconds into a film was treated as a
+ * start - the one case the callers all say they exclude.
+ *
+ * Bounded in time as well, because the event may never come: `tvbox.play()`
+ * confirms nothing and a refused play produces no events at all - measured 2
+ * attempts in 5 when the app is not the foreground one. Anything that refuses on
+ * this would otherwise refuse for ever, which killed the prev/next buttons on a
+ * box showing nothing and had the assistant answer for it.
+ */
+export function stillSettling(): boolean {
+  return !shownYet && Date.now() - startedAt < SETTLE_MAX_MS;
+}
+
+/** How much of that window is left, for a caller that has to wait it out. */
+export function settleRemainingMs(): number {
+  return stillSettling() ? Math.max(0, SETTLE_MAX_MS - (Date.now() - startedAt)) : 0;
+}
+
 function randomSession(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
   return `s${Math.floor(Math.random() * 1e12).toString(36)}`;
@@ -580,6 +756,9 @@ whenPlayerLost("video", () => {
   const session = s.current.decision.session;
   if (session && currentBackend) void currentBackend.endSession(session).catch(() => {});
   postNowPlaying({ state: "idle" });
+  // Nothing was asked for any more, so nothing is settling - the same reason
+  // `stop` does this.
+  startedAt = 0;
   usePlayer.setState({
     current: null,
     state: "stopped",
@@ -649,6 +828,10 @@ function wirePlayerEvents(set: Setter, get: () => PlayerState): void {
         if (ev.ms) set({ durationMs: ev.ms });
         break;
       case "playing":
+        // The box's own first-frame reveal, which is the only honest answer to
+        // "has it shown this yet". Everything that waits for a start waits for
+        // this rather than for time to pass.
+        shownYet = true;
         set({ state: "playing", buffering: false });
         break;
       case "buffering":
@@ -664,6 +847,22 @@ function wirePlayerEvents(set: Setter, get: () => PlayerState): void {
         break;
     }
   });
+}
+
+/**
+ * Nothing is playing and nothing is coming: leave the store saying so.
+ *
+ * `stop()` does not clear the neighbours or the running order, and by the second
+ * check `play` has set them for an item that never reached the box - so anything
+ * that reads them afterwards is reading a plan that was abandoned.
+ */
+function abandoned(forThis: number, set: Setter, get: () => PlayerState): void {
+  // Not if somebody newer owns the running order: measured, an abandoned call
+  // landing after a legitimate one had started took that film's prev/next
+  // buttons, its auto-advance and its honest answer to "next episode" with it.
+  if (orderToken > forThis) return;
+  set({ siblings: {}, queue: undefined, subDelaySec: 0 });
+  get().cancelUpNext();
 }
 
 /**
@@ -764,5 +963,13 @@ export function resetPlayer(): void {
   usePlayer.getState().cancelUpNext();
   void usePlayer.getState().stop();
   currentBackend = null;
-  usePlayer.setState({ siblings: {}, queue: undefined, upNext: null, subDelaySec: 0 });
+  // The token, so a play still in flight does not land. This is called on a
+  // sign-out and on a profile switch, and `play` holds its backend as an
+  // argument - so clearing `currentBackend` does not reach it. Measured: a cast
+  // whose stream resolved after a PIN'd switch started the film anyway and wrote
+  // its first progress report with the NEW profile's token, because
+  // `switchProfile` rewrites the session in place. After a sign-out it played on
+  // over the sign-in screen with a revoked credential.
+  playToken += 1;
+  usePlayer.setState({ siblings: {}, moving: null, queue: undefined, upNext: null, subDelaySec: 0 });
 }

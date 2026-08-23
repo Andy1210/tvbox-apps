@@ -9,8 +9,8 @@ import {
 import { FocusButton, useBackspace, useFocusableItem, useI18n } from "@sdk";
 import { useApp } from "./state";
 import { TrackMenu, type Choice } from "./TrackMenu";
-import type { Track } from "./backends/types";
-import { usePlayer } from "./playback/player";
+import type { MediaItem, Track } from "./backends/types";
+import { settleRemainingMs, stillSettling, usePlayer } from "./playback/player";
 import { ScrubPreview } from "./ScrubPreview";
 import { ChapterStrip } from "./ChapterStrip";
 import { NextIcon, PauseIcon, PlayIcon, PreviousIcon } from "./icons";
@@ -29,6 +29,14 @@ import { clock } from "./time";
  * button on a hidden page.
  */
 const IDLE_KEY = "player-idle";
+
+/**
+ * The keys a move swallows.
+ *
+ * The D-pad and OK only: those are the ones spatial navigation would resolve
+ * against the hidden screen behind.
+ */
+const MOVE_SWALLOWS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter"]);
 
 /** Nudge sizes as a press is held. Held longer means further per press. */
 const STEPS_MS = [10_000, 30_000, 60_000];
@@ -63,6 +71,7 @@ export function Player(): React.JSX.Element | null {
   const overlay = usePlayer((s) => s.overlay);
   const scrubMs = usePlayer((s) => s.scrubMs);
   const siblings = usePlayer((s) => s.siblings);
+  const moving = usePlayer((s) => s.moving);
   const subDelaySec = usePlayer((s) => s.subDelaySec);
 
   const [menu, setMenu] = useState<null | "version" | "audio" | "subtitles" | "quality" | "search">(null);
@@ -126,12 +135,46 @@ export function Player(): React.JSX.Element | null {
     };
   }, [current, state, positionMs === 0]);
 
+  /**
+   * The overlay stays up until the box has really shown the film.
+   *
+   * `state` is set to "playing" before the box is told anything, so the
+   * four-second countdown was armed against a screen that was still black:
+   * measured 4.2 s after a step, the overlay was gone with `buffering` still
+   * true - so the longest part of the wait had NOTHING on it, which is the
+   * impression the move screen exists to remove, moved a few seconds later.
+   *
+   * Only at a start (`stillSettling`), not on a mid-film rebuffer: a stall on a
+   * transcoded stream is common, and popping the overlay over the picture every
+   * time one happens is worse than the stall.
+   */
+  useEffect(() => {
+    if (!current) return;
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    const settling = buffering && stillSettling();
+    if (settling) usePlayer.getState().showOverlay(true);
+    if (usePlayer.getState().state === "playing" && usePlayer.getState().scrubMs === null && !chaptersRef.current) {
+      // One timer either way, and the wait is ADDED rather than replaced by a
+      // branch that returns. A branch that pinned the overlay and armed nothing
+      // never hid it again on a box that reports no first frame: `buffering`
+      // cannot end that, and nothing else re-runs this effect.
+      hideTimer.current = setTimeout(
+        () => usePlayer.getState().showOverlay(false),
+        IDLE_HIDE_MS + settleRemainingMs(),
+      );
+    }
+  }, [current, buffering]);
+
   useEffect(() => {
     // The menu owns the D-pad while it is open. This handler is capture-phase on
     // window, ahead of spatial navigation's own - so leaving it running would
     // scrub the film on Left/Right instead of moving between the menu's columns,
     // and OK would both press the focused button and toggle pause.
-    if (!current || menu) return;
+    //
+    // Armed through a move as well, when there is no `current` at all: the
+    // browsing screen behind is hidden but its focusables are still registered,
+    // so a press that got past here reached a screen nobody can see.
+    if ((!current && !moving) || menu) return;
 
     // Re-armed from FRESH state, and after the key has been acted on. Reading
     // the snapshot taken at the top of the handler meant the first arrow press
@@ -152,6 +195,28 @@ export function Player(): React.JSX.Element | null {
 
     const onKey = (e: KeyboardEvent): void => {
       const p = usePlayer.getState();
+      // Nothing to act on between two episodes: the one that was playing is gone
+      // and the next one has not arrived. Swallowed rather than passed on, for
+      // the reason the effect is armed at all.
+      //
+      // `stopImmediatePropagation` as well, which covers the earlier-registered
+      // capture listeners on window that plain `stopPropagation` cannot. What it
+      // does NOT reach is a press a phone sends: those are dispatched AT window,
+      // where - measured in Chromium - listeners run in registration order with
+      // the capture flag ignored, and spatial navigation registers before this
+      // component exists. That door is guarded in `navigate` instead.
+      //
+      // The D-pad only. A media key means the same thing either way and the
+      // music store answers it for itself - see the note in `mediakeys.ts` on
+      // why that guard had to learn about a move.
+      if (!p.current) {
+        if (MOVE_SWALLOWS.has(e.key)) {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+        }
+        return;
+      }
       // Three states, and which one it is decides what every key means.
       //
       // Nothing focused is the DEFAULT and the common case: the arrows jump ten
@@ -296,7 +361,7 @@ export function Player(): React.JSX.Element | null {
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("keyup", onKeyUp, true);
     };
-  }, [current, menu]);
+  }, [current, moving, menu]);
 
   const hasChapters = (current?.detail?.chapters?.length ?? 0) > 0;
   useEffect(() => {
@@ -406,6 +471,23 @@ export function Player(): React.JSX.Element | null {
       return;
     }
     const p = usePlayer.getState();
+    // A step in flight, once the layers a press could be closing are dealt with.
+    // `stop()` clears `current` only
+    // AFTER the previous episode's last word - two server round trips - so for
+    // the whole of the teardown both are set, this handler is the top one on the
+    // stack, and it took Back for itself: the press paused a film that was being
+    // torn down and the step went on to start the episode it had asked to
+    // abandon. The other half of this is in `MediaClient`, for the rest of the
+    // step, where there is no `current` and no player mounted at all.
+    //
+    // Below the menu, and that order is deliberate: a menu open over a step is
+    // reachable (a phone's skip arrives while somebody has the track list up, and
+    // the effect that closes it keys on the item CHANGING), and Back there means
+    // the layer the person opened. It costs one extra press to reach the step.
+    if (p.moving) {
+      p.cancelMove();
+      return;
+    }
     // Then the scrub cursor: it is a question that has not been answered yet,
     // and Back is how a question is withdrawn. Pausing here instead would leave
     // the cursor on screen pointing at a place the film never went.
@@ -493,7 +575,11 @@ export function Player(): React.JSX.Element | null {
       setFocus("skip");
   }, [announcing, skippable, menu]);
 
-  if (!current) return null;
+  // Between two episodes. The old one has stopped and the new one is still
+  // being resolved, so there is nothing to draw an overlay over - but something
+  // has to be on screen, or the press that asked for this looks like it was
+  // never taken, and the next blind press asks for it again.
+  if (!current) return moving ? <Moving item={moving} /> : null;
 
   if (menu && current.detail) {
     const searchSubtitles = async (): Promise<void> => {
@@ -707,6 +793,43 @@ export function Player(): React.JSX.Element | null {
 function IdleAnchor(): React.JSX.Element {
   const { ref } = useFocusableItem({ focusKey: IDLE_KEY, focusable: false });
   return <div ref={ref} className="pointer-events-none absolute h-0 w-0" aria-hidden="true" />;
+}
+
+/**
+ * What is on screen between two episodes.
+ *
+ * Centred, with the spinner `Message` uses, rather than the overlay's own bottom
+ * gradient: an overlay is drawn over a PICTURE, and there is none here - the film
+ * has been stopped and the page is opaque, so photographed on a television the
+ * gradient was black on black and three lines sat in the corner of an empty
+ * screen, which reads as a box that has crashed. This is the shape the app
+ * already uses everywhere else for "working on it".
+ *
+ * Nothing focusable and no buttons: the move cannot be steered. What it is for is
+ * that the press which asked for it is visibly taken - a blank screen is what had
+ * people pressing again, and again.
+ */
+function Moving({ item }: { item: MediaItem }): React.JSX.Element {
+  const { t } = useI18n();
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-[1.6vh] px-[10vw] text-center">
+      <svg
+        viewBox="0 0 24 24"
+        className="h-[4vh] w-[4vh] animate-spin"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        aria-hidden="true"
+      >
+        <path d="M12 3a9 9 0 1 0 9 9" strokeLinecap="round" />
+      </svg>
+      <h2 className="text-[2.8vh] font-semibold tracking-tight">{item.grandparentTitle ?? item.title}</h2>
+      {item.grandparentTitle && (
+        <p className="text-[2.4vh] text-fg-dim">{[episodeNumber(item), item.title].filter(Boolean).join(" · ")}</p>
+      )}
+      <p className="text-[2.2vh] text-fg-dim">{t("player.starting")}</p>
+    </div>
+  );
 }
 
 /**

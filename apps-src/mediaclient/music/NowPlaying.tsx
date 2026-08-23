@@ -64,6 +64,30 @@ const QUEUE_LEAD = 6;
 const SCRUB_STEP_MS = 5_000;
 
 /**
+ * The row this screen is laid out in, in vw. One source for the geometry,
+ * because the animation depends on it: the column's width has to be a LENGTH in
+ * both states for it to animate rather than jump, so the unsettled width is
+ * derived from the other three rather than left to `flex-1`.
+ */
+const ROW_VW = 90;
+/** Between the song and the panel. */
+const GAP_VW = 3;
+/** The queue / lyrics column. */
+const PANEL_VW = 34;
+/** The song alone, centred, once the screen has settled. */
+const SETTLED_VW = 64;
+
+/**
+ * How long after a press the panel comes back.
+ *
+ * The column's width animation is 500 ms on the default ease-in-out curve, and
+ * measured in Chrome it has covered 87.5% of the distance by this point, so the
+ * space is already there. Waiting for all of it reads as slow; not waiting at all
+ * is what put the panel at full width beside a column that had not moved yet.
+ */
+const PANEL_OPEN_MS = 320;
+
+/**
  * How long a playing song sits untouched before the screen settles.
  *
  * Long enough to read the top of the queue and decide, short enough that the
@@ -105,6 +129,21 @@ export function NowPlaying(): React.JSX.Element {
   const [panel, setPanel] = useState<"queue" | "lyrics">("queue");
   /** Nothing pressed for a while, with a song playing: the screen has settled. */
   const [settled, setSettled] = useState(false);
+  /**
+   * Whether the panel is mounted, and whether it is faded in.
+   *
+   * Two flags because the two directions are not symmetrical. Going away it is
+   * unmounted at once and the column widens into the space it left, which is the
+   * direction that already read well. Coming back it has to wait: mounted in the
+   * same frame the column starts narrowing, it appeared at full width next to a
+   * column still 64vw wide, and the whole row then slid across the screen.
+   *
+   * Unmounted rather than hidden for the reason the panel always was - a hidden
+   * subtree is still in the spatial-navigation tree - so the wait is a wait
+   * before mounting, not a wait before showing.
+   */
+  const [panelUp, setPanelUp] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(true);
   /** The words are time-tagged and following the song, so something IS moving. */
   const [lyricsLive, setLyricsLive] = useState(false);
   // What the focused control is called. The row is icons now, and an icon row
@@ -196,6 +235,29 @@ export function NowPlaying(): React.JSX.Element {
     // The track is a dependency on purpose: a new song re-arms the timer, which
     // is what brings the queue back as it changes.
   }, [playing, item?.id, panel, lyricsLive]);
+  useEffect(() => {
+    if (settled) {
+      setPanelUp(false);
+      setPanelOpen(false);
+      return;
+    }
+    const id = setTimeout(() => setPanelUp(true), PANEL_OPEN_MS);
+    return () => clearTimeout(id);
+  }, [settled]);
+  useEffect(() => {
+    if (!panelUp) return;
+    // Two frames. A class set in the same frame as the mount is the one the
+    // element is first painted with, so there would be nothing to fade from.
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => setPanelOpen(true));
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(second);
+    };
+  }, [panelUp]);
+
   useInitialFocus("np-toggle", Boolean(item) && !naming);
   // OFF while the keyboard is up. The keyboard replaces this screen, so np-toggle
   // is unmounted - and the fallback runs in the capture phase, ahead of spatial
@@ -262,7 +324,13 @@ export function NowPlaying(): React.JSX.Element {
   const artist = item.grandparentTitle ?? item.parentTitle;
 
   return (
-    <div className="relative z-10 flex h-full gap-[3vw] px-[5vw] py-[4vh]">
+    <div
+      className="relative z-10 flex h-full py-[4vh]"
+      // The padding and the gap come from the same numbers the column widths are
+      // computed from; split between two places they drift, and a drift here is
+      // a column that shrinks the panel instead of sitting beside it.
+      style={{ gap: `${GAP_VW}vw`, paddingLeft: `${(100 - ROW_VW) / 2}vw`, paddingRight: `${(100 - ROW_VW) / 2}vw` }}
+    >
       {/* The artwork behind a settled screen. Its own layer at the bottom of this
           one's stacking context, so it covers the padding too - a blurred image
           with a hard edge inside the frame reads as a mistake. Faded in rather
@@ -293,10 +361,21 @@ export function NowPlaying(): React.JSX.Element {
           most, and a queue behind a button is a queue nobody looks at - until
           the screen settles, when the song has the middle to itself. */}
       <div
-        className={[
-          "flex min-w-0 flex-col justify-center transition-all duration-500",
-          settled ? "mx-auto w-[64vw] text-center" : "flex-1",
-        ].join(" ")}
+        // `shrink-0`, because the panel mounts while this is still moving: at that
+        // moment the two ask for about 94vw of a 90vw row, and flexbox answers by
+        // shrinking both - a used-value change no transition covers. Measured as a
+        // 27 px snap of this column's right edge in the mount frame.
+        className={`flex min-w-0 shrink-0 flex-col justify-center transition-all duration-500 ${settled ? "text-center" : ""}`}
+        // A length in both states, and the margin written out rather than
+        // `mx-auto`. Measured in Chrome: `width: auto` cannot be interpolated, so
+        // coming back out of the settled state the column started 26 px wide
+        // with the panel already at full width beside it, and the row slid in
+        // from the left of the screen - and an auto margin re-centres the column
+        // the instant the panel mounts, a 340 px jump sideways at 1080p.
+        style={{
+          width: `${settled ? SETTLED_VW : ROW_VW - GAP_VW - PANEL_VW}vw`,
+          marginLeft: `${settled ? (ROW_VW - SETTLED_VW) / 2 : 0}vw`,
+        }}
       >
         {cover && (
           <img
@@ -366,8 +445,14 @@ export function NowPlaying(): React.JSX.Element {
           spatial-navigation tree, so the arrows would walk into a panel nobody
           can see. The settle timer refuses to fire while the cursor is in the
           queue, so nothing focusable is ever taken away under a press. */}
-      {!settled && (
-        <div className="flex w-[34vw] min-w-0 flex-col">
+      {panelUp && (
+        <div
+          className={[
+            "flex min-w-0 shrink-0 flex-col transition-opacity duration-200",
+            panelOpen ? "opacity-100" : "opacity-0",
+          ].join(" ")}
+          style={{ width: `${PANEL_VW}vw` }}
+        >
           <h2 className="shrink-0 px-[1.5vw] pb-[1vh] text-[2.4vh] text-fg-dim">
             {panel === "lyrics" ? t("music.lyrics") : `${t("music.queue")} · ${index + 1}/${queue.length}`}
           </h2>

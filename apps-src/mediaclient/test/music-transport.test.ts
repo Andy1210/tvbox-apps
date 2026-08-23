@@ -443,6 +443,25 @@ describe("a command forwarded from the shell", () => {
     expect(useMusic.getState().index).toBe(0);
   });
 
+  it("stands down between two episodes as well, where nothing is `current`", async () => {
+    // A step to the next episode holds the player for several round trips with
+    // `current` null the whole time. Measured before this: one press of the play
+    // button during one started house music over the episode that was arriving,
+    // and the film took the player straight back - leaving the queue claiming to
+    // play a song nobody could hear, in the mini-player, on the now-playing
+    // screen and in the report the shell publishes.
+    await start([track("a"), track("b")]);
+    useMusic.getState().toggle(); // paused, so a press would resume it
+    await settle();
+    usePlayer.setState({ current: null, moving: { id: "e3" } as never });
+
+    expect(handleMusicKey("MediaPlayPause")).toBe(false);
+    expect(handleMusicCommand({ action: "next" })).toBe(false);
+    await settle();
+    expect(useMusic.getState().state, "still paused, and still on the same song").toBe("paused");
+    expect(useMusic.getState().index).toBe(0);
+  });
+
   it("stands down with nothing queued", () => {
     expect(handleMusicCommand({ action: "next" })).toBe(false);
     expect(handleMusicCommand({ action: "shuffle", state: "on" })).toBe(false);
