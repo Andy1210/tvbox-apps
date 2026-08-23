@@ -6,7 +6,7 @@ import { Grid } from "./Grid";
 import { Row } from "./Row";
 import { Splash } from "./XCloud";
 import { SearchIcon, CloseIcon, ExitIcon } from "./icons";
-import { createMover, nearest } from "./moveTo";
+import { createMover, nearest, pinScroll } from "./moveTo";
 
 // The library. Short curated rows, then everything the subscription covers, with a
 // search over the whole catalogue and a genre filter over what is shown.
@@ -49,6 +49,14 @@ export function Library({
   const mover = useMemo(() => createMover("y"), []);
   const viewport = useRef<HTMLDivElement | null>(null);
   const content = useRef<HTMLDivElement | null>(null);
+  const pin = useMemo(() => pinScroll(), []);
+  const attachViewport = useCallback(
+    (el: HTMLDivElement | null) => {
+      viewport.current = el;
+      pin(el);
+    },
+    [pin],
+  );
 
   const attachContent = useCallback(
     (el: HTMLDivElement | null) => {
@@ -274,8 +282,19 @@ export function Library({
       </header>
 
       {/* The window. It clips, which is why the column below pads. */}
-      <div ref={viewport} className="min-h-0 flex-1 overflow-hidden px-[4vw]">
-        <div ref={attachContent} className="pb-[8vh] pt-[1vh] will-change-transform">
+      {/* Horizontal room for the reach too: a row's first tile sits at this edge. */}
+      <div
+        ref={attachViewport}
+        className="min-h-0 flex-1 overflow-hidden"
+        style={{ paddingLeft: "calc(4vw - var(--focus-reach))", paddingRight: "calc(4vw - var(--focus-reach))" }}
+      >
+        {/* The reach again: this column is inside the window, which clips, so the
+            first row's highlight needs room above it. */}
+        <div
+          ref={attachContent}
+          className="pb-[8vh] will-change-transform"
+          style={{ paddingTop: "var(--focus-reach)" }}
+        >
           {!results &&
             rows.map((r) => (
               <Row key={r.id} id={r.id} label={r.label} titles={r.titles} onPlay={onPlay} onFocused={show} />

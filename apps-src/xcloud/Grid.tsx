@@ -31,9 +31,13 @@ export function Grid({
   }, [titles]);
 
   return (
-    // The gap carries the focus outline, which sits outside a tile: a tighter grid
-    // clips the highlight against its neighbour.
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(13vw,1fr))] gap-x-[1.5vw] gap-y-[2vh] px-[0.5vw]">
+    // The gaps have to clear the focus reach on both sides of a tile, or a
+    // focused one is drawn over its neighbour rather than beside it. Nothing here
+    // clips, so this is about overlap rather than cropping.
+    <div
+      className="grid grid-cols-[repeat(auto-fill,minmax(13vw,1fr))] gap-x-[1.5vw]"
+      style={{ rowGap: "calc(2 * var(--focus-reach) + 0.6vh)", padding: "0 var(--focus-reach)" }}
+    >
       {ordered.map((title) => (
         <Tile
           key={title.titleId}

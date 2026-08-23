@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef } from "react";
 import type { Title } from "./api";
 import { Tile } from "./Tile";
-import { createMover, nearest } from "./moveTo";
+import { createMover, nearest, pinScroll } from "./moveTo";
 
 // A horizontal row, moved by a transform rather than scrolled.
 //
@@ -10,9 +10,12 @@ import { createMover, nearest } from "./moveTo";
 // is what `nearest` means.
 //
 // The padding is not decoration: the focus outline sits outside the tile, and this
-// container clips (it has to, or the row's overflow would draw across the page).
-// Without room reserved, the highlight on the first and last tile is cut off.
-const PAD = "1vh";
+// container clips (it has to, or the tiles past the edge would draw across the
+// page). Without room reserved the highlight is cut off - and it is cut off on all
+// FOUR sides, not just the ends, because the clip box is only as tall as the row.
+// `--focus-reach` is how far a focused tile is drawn outside its own box; see
+// index.css.
+const PAD = "var(--focus-reach)";
 
 export function Row({
   id,
@@ -31,6 +34,7 @@ export function Row({
   const mover = useMemo(() => createMover("x"), []);
   const track = useRef<HTMLDivElement | null>(null);
   const clip = useRef<HTMLDivElement | null>(null);
+  const pin = useMemo(() => pinScroll(), []);
 
   // Memoised: React re-attaches an INLINE ref on every render, and a ref callback
   // that returns a value is read as a cleanup function in React 19.
@@ -73,8 +77,15 @@ export function Row({
   return (
     <section className="mb-[3vh]">
       <h2 className="mb-[1vh] px-[0.5vw] text-2xl text-fg-dim">{label}</h2>
-      <div ref={clip} className="overflow-hidden" style={{ paddingTop: PAD, paddingBottom: PAD }}>
-        <div ref={attachTrack} className="flex w-max gap-[1.5vw] px-[0.5vw]">
+      <div
+        ref={(el) => {
+          clip.current = el;
+          pin(el);
+        }}
+        className="overflow-hidden"
+        style={{ padding: PAD }}
+      >
+        <div ref={attachTrack} className="flex w-max gap-[1.5vw]">
           {titles.map((title) => (
             <Tile
               key={title.titleId}

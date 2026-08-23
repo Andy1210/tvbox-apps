@@ -56,16 +56,24 @@ export function createMover(axis: "x" | "y"): Mover & { attach(el: HTMLElement |
     },
     attach(el) {
       node = el;
-      if (el) el.style.transform = transform(current);
+      if (el) {
+        el.style.transform = transform(current);
+        // Where the layer sits, in the DOM. Same reason a focusable carries
+        // `data-sfocus`: a check about movement needs something to read, and the
+        // transform string is the thing being tested rather than a witness to it.
+        el.dataset.at = String(current);
+      }
     },
     to(px, animate) {
       const next = Math.max(0, Math.round(px));
       if (!node || next === current) {
         current = next;
+        if (node) node.dataset.at = String(current);
         return;
       }
       const from = current;
       current = next;
+      node.dataset.at = String(current);
 
       // The previous animation is cancelled rather than left to finish: two
       // overlapping transform animations on one element compose, and a held
@@ -86,6 +94,38 @@ export function createMover(axis: "x" | "y"): Mover & { attach(el: HTMLElement |
       });
       node.style.transform = transform(next);
     },
+  };
+}
+
+/**
+ * Stop a clipping box from being scrolled behind the mover's back.
+ *
+ * `overflow: hidden` clips but stays SCROLLABLE programmatically, and the browser
+ * scrolls the nearest such ancestor whenever focus lands on something outside it -
+ * as does any `scrollIntoView`, which the SDK's own FocusButton calls on focus. So
+ * a page moved by a transform ends up with two offsets: the one the mover knows
+ * about and a native one nothing here can see.
+ *
+ * Measured: the transform read `matrix(1, 0, 0, 1, 0, 0)` while the column sat
+ * 238 px above its window, and the row looked cropped at the top for no reason the
+ * transform could explain.
+ *
+ * Returns a ref callback to put on the clipping element.
+ */
+export function pinScroll(): (el: HTMLElement | null) => void {
+  let node: HTMLElement | null = null;
+  const reset = () => {
+    if (!node) return;
+    if (node.scrollTop !== 0) node.scrollTop = 0;
+    if (node.scrollLeft !== 0) node.scrollLeft = 0;
+  };
+  return (el) => {
+    if (node) node.removeEventListener("scroll", reset);
+    node = el;
+    if (el) {
+      el.addEventListener("scroll", reset);
+      reset();
+    }
   };
 }
 

@@ -77,3 +77,18 @@
     background: transparent !important;
   }
 }
+
+/* How far a focused tile is drawn outside its own box, and therefore how much
+   every clipping container has to reserve.
+   A tile is 13vw wide and square, so at 1920x1080 it is ~250px: a 1.04 scale adds
+   ~5px on each side, the offset another 4px, and the outline itself 5px - 14px in
+   all. Two earlier attempts reserved 1vh (10.8px) and then 16px; the first cropped
+   by 3px and the second left 2px of slack, which is not a margin, it is a
+   coincidence. 24px is the same sum with room to be wrong in.
+   The scale part is proportional to the tile, so this has to be re-derived if the
+   tile stops being 13vw - measure it, do not adjust it by eye. */
+:root {
+  --focus-outline: 5px;
+  --focus-offset: 4px;
+  --focus-reach: 24px;
+}

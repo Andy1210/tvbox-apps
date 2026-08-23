@@ -2,7 +2,7 @@
   "id": "xcloud",
   "manifestVersion": 1,
   "name": "Xbox Cloud Gaming",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "type": "webclient",
   "status": "ready",
   "accent": "#107c10",
@@ -16,6 +16,10 @@
     "hu": "Xbox Game Pass Ultimate jatekok streamelese egyenesen a TV-re - konzol nelkul. Jelentkezz be a kepernyon megjeleno koddal, aztan parosits egy Bluetooth- vagy USB-kontrollert. Gyors internet kell hozza; a kep elo H.264 videofolyam."
   },
   "changelog": [
+    {
+      "version": "2.1.1",
+      "notes": "The white highlight around the focused game is no longer clipped at the edges of a row."
+    },
     {
       "version": "2.1.0",
       "notes": "Two new rows - what was just added to Game Pass and what is about to leave - a genre filter, and search behind an icon rather than an emoji. The library now draws as soon as the first titles arrive instead of waiting for all of them, and moving through it is smooth."

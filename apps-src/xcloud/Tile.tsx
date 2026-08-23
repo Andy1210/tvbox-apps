@@ -47,14 +47,29 @@ export function Tile({
       data-sfocus={focusKey}
       data-focused={focused ? "1" : undefined}
       className={
-        // The focus has to be readable from a sofa, which a thin inset ring is
-        // not. The outline sits OUTSIDE the tile, so the row and the page both
-        // reserve room for it - a clipped highlight is what a container with
-        // `overflow: hidden` does to it otherwise.
         "relative w-[13vw] shrink-0 overflow-hidden rounded-xl bg-bg-1 text-left transition-all duration-100 " +
-        (focused
-          ? "z-10 scale-105 outline outline-[0.5vh] outline-offset-[0.35vh] outline-focus brightness-110"
-          : "brightness-[0.65]")
+        (focused ? "z-10 scale-[1.04] brightness-110" : "brightness-[0.65]")
+      }
+      // The focus has to be readable from a sofa, which a thin inset ring is not -
+      // so the outline sits OUTSIDE the tile. Everything that clips then has to
+      // reserve room for how far it reaches, which is three things added together:
+      // half the scale growth, the offset, and the outline's own width.
+      // `--focus-reach` in index.css is that sum and the row, the grid and the
+      // page column all pad by it - a reserve short by a few pixels is exactly the
+      // "still clipped a little" this went through twice.
+      //
+      // Inline rather than Tailwind classes because an arbitrary-value outline is
+      // easy to get subtly wrong, and a class that does not compile means NO
+      // outline - worse than a clipped one.
+      style={
+        focused
+          ? {
+              outlineStyle: "solid",
+              outlineColor: "var(--color-focus)",
+              outlineWidth: "var(--focus-outline)",
+              outlineOffset: "var(--focus-offset)",
+            }
+          : undefined
       }
     >
       <div className="aspect-square w-full">
