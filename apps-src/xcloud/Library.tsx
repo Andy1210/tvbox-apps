@@ -425,10 +425,16 @@ export function Library({
                   onEnter={() => setGenre(ALL_GENRES)}
                   onFocused={show}
                 />
-                {genres.map((g, i) => (
+                {genres.map((g) => (
                   <Chip
                     key={g.name}
-                    focusKey={`genre-${i}`}
+                    // Keyed on the NAME, not the position - the same rule the grid
+                    // states for its tiles. The list is sorted by count and the
+                    // catalogue keeps arriving for half a minute, so a positional
+                    // key put a different genre under the cursor between reads, and
+                    // re-registered the focused element under a new key so the next
+                    // press found nothing where it was standing.
+                    focusKey={`genre-${slug(g.name)}`}
                     active={genre === g.name}
                     label={g.name}
                     onEnter={() => setGenre(g.name)}
@@ -503,6 +509,17 @@ function Chip({
     </FocusButton>
   );
 }
+
+// A focus key has to be a stable, safe identifier, and a category name is neither
+// (they carry spaces, ampersands and accents). Collisions cannot matter here: two
+// genres that slug the same would already be one chip to a reader.
+const slug = (s: string) =>
+  s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 
 // Accent-insensitive, so "pokemon" finds "Pokémon" - the same normalisation the
 // plugin's own search route uses.

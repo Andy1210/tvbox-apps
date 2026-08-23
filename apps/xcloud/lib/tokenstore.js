@@ -28,7 +28,10 @@ function save() {
   const tmp = FILE + ".tmp";
   try {
     const dir = path.dirname(FILE);
-    fs.mkdirSync(dir, { recursive: true });
+    // 0700 if WE are the one creating it - the mode a directory holding a refresh
+    // token should have. Not a chmod: an existing `~/.tvbox` belongs to the shell
+    // and its permissions are not this plugin's to change.
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     // fsync before the rename: the rename can otherwise reach the disk before the
     // bytes it points at, and the file that survives a power cut is then empty -
     // which here means the box has no Xbox account at all.

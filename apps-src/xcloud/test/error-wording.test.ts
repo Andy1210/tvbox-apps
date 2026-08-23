@@ -13,6 +13,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import hu from "../locales/hu.json";
 import en from "../locales/en.json";
+
+// Codes the regex below cannot see, because they are not written as a literal at
+// a `code:` key. `errorPayload` in plugin.js falls back to `"error"` for anything
+// thrown without one, so that string reaches `errorText` like any other.
+const EXTRA = ["error"];
 import { errorText } from "../errors";
 
 const PLUGIN = join(__dirname, "..", "..", "..", "apps", "xcloud");
@@ -32,6 +37,7 @@ function codesInSource(): string[] {
     for (const m of src.matchAll(/new (?:Auth|Api|Session)Error\(\s*"([a-z_0-9]+)"/g)) found.add(m[1]);
     for (const m of src.matchAll(/\bcode:\s*"([a-z_0-9]+)"/g)) found.add(m[1]);
   }
+  for (const c of EXTRA) found.add(c);
   return [...found].sort();
 }
 
@@ -43,6 +49,7 @@ describe("error wording", () => {
     expect(codes.length).toBeGreaterThan(15);
     expect(codes).toContain("token_rejected");
     expect(codes).toContain("xsts_failed");
+    expect(codes).toContain("error");
   });
 
   it("has a Hungarian and an English sentence for every one of them", () => {

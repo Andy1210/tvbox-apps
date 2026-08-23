@@ -126,6 +126,21 @@ function stopKeepalive() {
 // Always through here, so a session can never be left behind by a code path that
 // forgot the timer. Stopping is worth doing even though the server reattaches a
 // second /play to the same session: an abandoned one holds a real machine.
+// Why the last session stopped, kept after `live` is gone.
+//
+// `endSession()` nulls `live` synchronously, and the failure path calls it - so
+// the screen, polling every 3 s, saw `{active: false}` and never the `Failed`
+// state written a microtask earlier. Measured: over 40 samples the failure was
+// not observable ONCE. The waiting screen has no branch for "no session", so it
+// sat on "Starting…" with the clock running, for good.
+let lastFailure = null;
+// Which attempt a callback belongs to. Monotonic and never reused, unlike the
+// session id, which the server hands back again on a reattach.
+let passSeq = 0;
+// Long enough for the 3 s poll to collect it several times over, short enough
+// that it cannot explain away some later, unrelated absence of a session.
+const FAILURE_TTL_MS = 120000;
+
 async function endSession() {
   const l = live;
   // Cleared first, so a keepalive tick or a state callback racing this cannot
@@ -256,6 +271,10 @@ module.exports = (host) => {
         .catch(() => {})
         .then(() => {
           auth.signOut();
+          // The account's own caches go with it: `recentCache` holds one account's
+          // Continue row and nothing in it says whose, so signing in as somebody
+          // else inside its 30 s TTL showed the previous person's games.
+          api.forgetAccount();
           // The library is what this account may stream, so it goes with it.
           library.invalidate();
           log("signed out");
@@ -392,7 +411,17 @@ module.exports = (host) => {
           // the session, so nothing else clears them, and a second play of one
           // title left two pairs of intervals pulsing the server.
           stopKeepalive();
-          live = { session, controller, state: "Provisioning", queueSeconds: null, queuedFor: 0, error: null, config: null, ended: null, lastAsked: Date.now() };
+          // …and the previous ladder is ABORTED, not just untimed. `endSession`
+          // does that on the different-id path; the same-id path skips it on
+          // purpose, so the old pass kept running - and because `mine()` compares
+          // by session id, and the id is the same, it matched the NEW `live`. It
+          // owns its own `connectSent`, so it could send a second POST /connect on
+          // an already-connected session (that call is not idempotent), and its
+          // own eventual failure would be written onto a session that is fine.
+          if (live) live.controller.abort();
+          lastFailure = null;
+          const pass = ++passSeq;
+          live = { session, controller, pass, state: "Provisioning", queueSeconds: null, queuedFor: 0, error: null, config: null, ended: null, lastAsked: Date.now() };
           host.json(res, { ok: true, id: session.id, type: session.type, titleId });
 
           // Every callback below asks whether it is still THIS session's. A
@@ -401,7 +430,13 @@ module.exports = (host) => {
           // "is there a live session" is not the same question as "is it mine".
           // Measured: an abandoned pass's `cancelled` was written onto a healthy
           // new session, which then showed an error over a running game.
-          const mine = () => live && live.session.id === session.id;
+          // By PASS, not by session id. The same-id reattach above is the whole
+          // reason `mine()` exists, and it is exactly the case an id cannot tell
+          // apart: both passes see the same id, so an abandoned one's failure was
+          // written onto - and since that failure now ends the session, DELETED -
+          // a session that was perfectly healthy. Measured before this: a slow
+          // first pass took down the second one's stream.
+          const mine = () => live && live.pass === pass;
           sessions
             .waitReady(session, {
               signal: controller.signal,
@@ -420,6 +455,8 @@ module.exports = (host) => {
               if (!mine()) return;
               live.state = "Failed";
               live.error = { code: e.code || "error", error: String(e.message || e) };
+              // Remembered before the cleanup, which nulls `live`.
+              lastFailure = { at: Date.now(), ...live.error };
               // A session that failed is still a session the account is holding.
               endSession().catch(() => {});
             });
@@ -430,17 +467,31 @@ module.exports = (host) => {
     // Polled by the page while it waits, and again after it connects. `config` is
     // null until the session is Provisioned - that is the signal to offer.
     "GET /session/state": (req, res) => {
-      if (!live) return host.json(res, { ok: true, active: false });
+      if (!live) {
+        // Not just "there is no session": if the last one FAILED moments ago, that
+        // is what the screen is waiting to hear.
+        const f = lastFailure && Date.now() - lastFailure.at < FAILURE_TTL_MS ? lastFailure : null;
+        return host.json(res, { ok: true, active: false, ...(f ? { state: "Failed", code: f.code, error: f.error } : {}) });
+      }
       // Someone is watching. See ABANDONED_MS.
       //
       // This is a liveness signal, so it has to come from a page of OURS: the read
       // is open (an `<img src>` needs no credential and carries no Origin), and a
       // clock anything on the box can refresh does not keep the promise the reaper
       // exists for - a session the account is charged a slot for, running with
-      // nobody watching. A fetch from our own page sends `Sec-Fetch-Dest: empty`;
-      // an image, a frame or a stylesheet does not, and neither does a navigation.
-      const dest = String(((req && req.headers) || {})["sec-fetch-dest"] || "");
-      if (dest === "" || dest === "empty") live.lastAsked = Date.now();
+      // nobody watching.
+      //
+      // BOTH headers, because neither is enough. `Sec-Fetch-Dest: empty` separates
+      // a fetch from an image, a frame or a stylesheet - but every fetch sends it,
+      // including a no-cors one from a remote page in another app's window (the
+      // YouTube app is `serve: remote`), which could then hold a session open with
+      // a 30 s poll. `Sec-Fetch-Site` is what says the page is ours; the shell's
+      // own gate turns on the same header. Absent means a non-browser, which is
+      // the tool class this stack has always let through.
+      const h = (req && req.headers) || {};
+      const dest = String(h["sec-fetch-dest"] || "");
+      const site = String(h["sec-fetch-site"] || "");
+      if ((dest === "" || dest === "empty") && site !== "cross-site") live.lastAsked = Date.now();
       host.json(res, {
         ok: true,
         active: true,

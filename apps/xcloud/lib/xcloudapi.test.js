@@ -290,3 +290,26 @@ test("a hydration the caller abandoned reports itself as incomplete", async () =
   // remember it as the whole catalogue.
   assert.ok(Object.keys(r.products).length > 0);
 });
+
+test("the recent row belongs to an account, and is forgotten with it", async () => {
+  // `recentCache` holds one account's Continue row and nothing in it says whose,
+  // so signing out and in as somebody else inside its 30 s TTL served the previous
+  // person's games. The library is invalidated on sign-out; this was not.
+  reset();
+  handler = withAuth((c) => {
+    if (!c.path.startsWith("/v2/titles/mru")) return { status: 404, body: "" };
+    return { status: 200, body: { results: [{ titleId: "A", details: { productId: "P-A" } }] } };
+  });
+  const first = await api.fetchRecentTitles(5);
+  assert.deepEqual(first.map((t) => t.titleId), ["A"]);
+
+  // Somebody else signs in, and the endpoint answers with THEIR row.
+  api.forgetAccount();
+  reset();
+  handler = withAuth((c) => {
+    if (!c.path.startsWith("/v2/titles/mru")) return { status: 404, body: "" };
+    return { status: 200, body: { results: [{ titleId: "B", details: { productId: "P-B" } }] } };
+  });
+  const second = await api.fetchRecentTitles(5);
+  assert.deepEqual(second.map((t) => t.titleId), ["B"], "the previous account's row was served");
+});

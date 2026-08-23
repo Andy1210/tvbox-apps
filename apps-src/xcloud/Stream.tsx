@@ -13,10 +13,19 @@ import { errorText } from "./errors";
 // The queue estimate the server offers is shown as prose, never as a countdown: it
 // said 10 seconds for a wait that took 224, and a timer that expires while you are
 // still waiting is worse than no timer at all.
-// Why the stream stopped, as a code the person can be told. Anything not here
-// leaves quietly - a channel closing during teardown is the app's own doing.
+// Why the stream stopped, as a code the person can be told.
+//
+// `no_frames` is deliberately NOT here, however much it looks like it belongs:
+// the frame gap is the only signal that fires when somebody quits the game from
+// the Xbox guide (see connection.ts), so a deliberate quit would end on a yellow
+// error the person then has to press past - and the branch that shows an error
+// neither closes the handle nor stops the session, so the slot would be held
+// until they did. A stream that never STARTED is the other thing, and it has its
+// own code.
+//
+// Anything not here leaves quietly - a channel closing during teardown is the
+// app's own doing.
 const ENDED_CODES: Record<string, string> = {
-  no_frames: "no_frames",
   no_first_frame: "no_first_frame",
 };
 
@@ -93,6 +102,17 @@ export function Stream({
         const s = await api.sessionState().catch(() => null);
         if (!s || !alive) return;
 
+        // No session, while we are still waiting for one to come up. The plugin
+        // ends a session that failed, so `active: false` is one of the ways a
+        // failure arrives here - and with no branch for it this loop polled on
+        // for ever, leaving the screen on "Starting…" with the clock running.
+        // Measured: over 40 samples the `Failed` state was never once observable.
+        if (s.active === false) {
+          stopPolling();
+          if (s.error) console.warn("[xcloud] session failed:", String(s.error).slice(0, 300));
+          setError(message(s.code));
+          return;
+        }
         if (s.state === "WaitingForResources") {
           setPhase("queued");
           setQueueSeconds(typeof s.queueSeconds === "number" ? s.queueSeconds : null);
@@ -165,8 +185,14 @@ export function Stream({
                   // did nothing. `errors.no_frames` had been written for exactly
                   // this and was reachable from no code at all.
                   const code = ENDED_CODES[why];
-                  if (code) setError(errorText(t, code));
-                  else leave();
+                  if (!code) return leave();
+                  // The session goes even though the screen stays: it failed, and
+                  // it is a machine the account is charged for.
+                  handle.current?.close();
+                  handle.current = null;
+                  stopPolling();
+                  void api.stopSession().catch(() => {});
+                  setError(errorText(t, code));
                 },
                 onStream: (stream, kind) => {
                   const el = kind === "video" ? video.current : audio.current;

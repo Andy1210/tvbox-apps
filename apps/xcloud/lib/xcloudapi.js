@@ -79,6 +79,16 @@ const WAIT_TTL_MS = 30000;
 // Keyed by the count asked for: a cached 5-row answer served a later request for
 // 25 and the Continue row silently lost twenty games for the next 30 seconds.
 const recentCache = { at: 0, n: 0, rows: null };
+
+// Called when the ACCOUNT changes. These caches carry one account's answers and
+// nothing in them says whose: sign out and back in as somebody else inside the
+// 30 s TTL and the Continue row was the previous person's games.
+function forgetAccount() {
+  recentCache.at = 0;
+  recentCache.n = 0;
+  recentCache.rows = null;
+  waitCache.clear();
+}
 const waitCache = new Map();
 
 // Most-recently-used, i.e. the "continue playing" row. `mr` is a count.
@@ -291,6 +301,7 @@ async function fetchSigl(id, opts) {
 }
 
 module.exports = {
+  forgetAccount,
   ApiError,
   SIGL,
   fetchSigl,

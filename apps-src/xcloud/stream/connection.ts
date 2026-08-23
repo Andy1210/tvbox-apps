@@ -424,6 +424,9 @@ export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<S
       } catch {
         return; // a stats read that failed says nothing about the stream
       }
+      // Again AFTER the await: `close()` can land while `getStats` is out, and a
+      // tick that started before the teardown must not report the stream ended.
+      if (closed) return;
       const now = Date.now();
       // Nothing has decoded yet - no stats row at all, or a row still reading 0.
       if (frames <= 0) {

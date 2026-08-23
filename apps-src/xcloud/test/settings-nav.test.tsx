@@ -15,19 +15,23 @@ import en from "../locales/en.json";
 // Resolution and Sound.
 const VALUES: api.SettingsValues = { maxVideoKbps: 0, maxHeight: 0, stereo: true, gameLocale: "" };
 
-// Dispatched at the focused ELEMENT, not at `window`, because that is where a real
-// key event starts and the phases are what this depends on: norigin listens on
-// window in the BUBBLE phase, the panel's own handler in CAPTURE, so on a real
-// event the panel runs first and stops norigin from moving by geometry. Dispatched
-// at window they are both "at target" and run in registration order, which is the
-// opposite - a test artefact that would have proved nothing.
+// Dispatched at an ELEMENT and left to bubble, not fired at `window`, because the
+// phases are what this depends on: norigin listens on window in the BUBBLE phase
+// and the panel's own handler in CAPTURE, so on a real event the panel runs first
+// and stops norigin from moving by geometry. Dispatched AT window they would both
+// be "at target" and run in registration order - the opposite, and a test artefact
+// that would prove nothing.
+//
+// `document.body` rather than the focused element: nothing in the SDK marks the
+// focused node with a class or with DOM focus (FocusButton styles it through
+// props), and for this the only thing that matters is that the event starts below
+// window. An earlier version of this helper queried for `.focused`, matched
+// nothing, and silently fell through to exactly this.
 //
 // And awaited, because norigin's `setFocus` is scheduled rather than synchronous.
 async function press(key: string, lands: string) {
   await act(async () => {
-    const target: EventTarget =
-      document.querySelector("[data-sfocus].focused") || document.activeElement || document.body;
-    target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
   });
   // WAITED for, not assumed: norigin's `setFocus` is scheduled, so how many
   // microtasks it takes depends on what else the runner is doing - which is why

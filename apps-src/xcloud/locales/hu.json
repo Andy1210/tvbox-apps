@@ -56,7 +56,8 @@
     "not_found": "Nem található.",
     "no_frames": "A kép megállt.",
     "no_first_frame": "A játék nem kezdett képet küldeni.",
-    "slow": "Ez tovább tart a szokásosnál."
+    "slow": "Ez tovább tart a szokásosnál.",
+    "error": "Valami hiba történt."
   },
   "library": {
     "recent": "Folytatás",

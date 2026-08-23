@@ -107,6 +107,7 @@ async function startDeviceCodeAuth() {
 // `signal` is an AbortSignal so leaving the sign-in screen actually stops the
 // poll; an orphaned poll keeps a dead code alive for its full 15 minutes.
 async function pollForDeviceCode(deviceCode, opts) {
+  const started = currentEra();
   const o = opts || {};
   let interval = Math.max(1, num(o.interval, 5));
   const deadline = Date.now() + num(o.expiresIn, 900) * 1000;
@@ -125,7 +126,10 @@ async function pollForDeviceCode(deviceCode, opts) {
     });
     const body = res.json() || {};
 
-    if (res.ok && body.refresh_token) return store.setUserToken(body);
+    if (res.ok && body.refresh_token) {
+      if (!stillOurs(started)) throw new AuthError("cancelled", "Signed out while signing in.");
+      return store.setUserToken(body);
+    }
 
     // The pending states are 400s with a body, which is exactly why http.js does
     // not reject on status.
@@ -160,6 +164,7 @@ function sleep(ms, signal) {
 // ---------------------------------------------------------------- token chain
 
 async function refreshUserToken() {
+  const started = currentEra();
   const user = store.getUserToken();
   if (!user || !user.refresh_token) throw new AuthError("not_signed_in", "No Xbox account on this box. Sign in first.");
 
@@ -180,6 +185,7 @@ async function refreshUserToken() {
     }
     throw new AuthError("refresh_failed", "Could not refresh the Xbox sign-in: " + http.describeStatus(res), { status: res.status });
   }
+  if (!stillOurs(started)) throw new AuthError("cancelled", "Signed out while refreshing.");
   return store.setUserToken(body);
 }
 
@@ -206,6 +212,16 @@ const expired = (t) => !t || !t.notAfter || t.notAfter - store.SKEW_SECONDS * 10
 // them mints.
 const inFlight = new Map();
 
+// Bumped by `signOut()`. Every request that can WRITE a credential checks it
+// after its await: clearing `inFlight` stops the next caller from joining an
+// existing request, but it cannot stop the ones already out - and a refresh that
+// started a second before sign-out would otherwise call `store.setUserToken` a
+// second after it, putting the account the user just removed back on disk.
+let era = 0;
+const currentEra = () => era;
+// True when this pass still belongs to the account it started under.
+const stillOurs = (started) => started === era;
+
 function once(key, make) {
   const running = inFlight.get(key);
   if (running) return running;
@@ -222,6 +238,7 @@ function getXstsUserToken() {
 }
 
 async function mintXstsUserToken() {
+  const started = currentEra();
   if (!expired(cache.xstsUser)) return cache.xstsUser;
   const accessToken = await getAccessToken();
   const res = await http.postJson("user.auth.xboxlive.com", "/user/authenticate", {
@@ -237,6 +254,7 @@ async function mintXstsUserToken() {
   const body = res.json() || {};
   if (!body.Token) throw new AuthError("xsts_failed", "Xbox Live returned no user token.");
 
+  if (!stillOurs(started)) throw new AuthError("cancelled", "Signed out while minting a token.");
   cache.xstsUser = { token: body.Token, notAfter: Date.parse(body.NotAfter) || Date.now() + 3600e3 };
   return cache.xstsUser;
 }
@@ -247,6 +265,7 @@ function authorize(relyingParty) {
 }
 
 async function mintRelyingParty(relyingParty) {
+  const started = currentEra();
   if (!expired(cache.rp[relyingParty])) return cache.rp[relyingParty];
   const user = await getXstsUserToken();
   const res = await http.postJson("xsts.auth.xboxlive.com", "/xsts/authorize", {
@@ -263,6 +282,7 @@ async function mintRelyingParty(relyingParty) {
   if (!body.Token) throw new AuthError("xsts_failed", "Xbox Live returned no token for " + relyingParty + ".");
 
   const xui = (body.DisplayClaims && body.DisplayClaims.xui && body.DisplayClaims.xui[0]) || {};
+  if (!stillOurs(started)) throw new AuthError("cancelled", "Signed out while minting a token.");
   cache.rp[relyingParty] = {
     token: body.Token,
     userHash: xui.uhs || "",
@@ -283,6 +303,7 @@ function getStreamingToken(offering) {
 }
 
 async function mintStreamingToken(offering) {
+  const started = currentEra();
   const cached = cache.streaming[offering];
   if (cached && cached.expiresAt - store.SKEW_SECONDS * 1000 > Date.now()) return cached;
   const gssv = await authorize(RP_GSSV);
@@ -315,6 +336,7 @@ async function mintStreamingToken(offering) {
   };
   if (!token.host) throw new AuthError("streaming_token_failed", "The streaming token offered no region to connect to.", { offering });
 
+  if (!stillOurs(started)) throw new AuthError("cancelled", "Signed out while minting a token.");
   cache.streaming[offering] = token;
   return token;
 }
@@ -374,6 +396,7 @@ async function getWebToken() {
 }
 
 function signOut() {
+  era++;
   inFlight.clear();
   store.clear();
   cache.xstsUser = null;

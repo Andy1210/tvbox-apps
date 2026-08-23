@@ -56,7 +56,8 @@
     "not_found": "Not found.",
     "no_frames": "The picture stopped.",
     "no_first_frame": "The game did not start sending a picture.",
-    "slow": "This is taking longer than it should."
+    "slow": "This is taking longer than it should.",
+    "error": "Something went wrong."
   },
   "library": {
     "recent": "Continue",

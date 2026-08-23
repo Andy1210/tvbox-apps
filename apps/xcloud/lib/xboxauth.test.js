@@ -42,7 +42,10 @@ https.request = (opts, cb) => {
     const res = new EventEmitter();
     res.statusCode = out.status;
     res.headers = out.headers || {};
-    setImmediate(() => {
+    // `out.wait` holds the response open, which is how a test does something WHILE
+    // a request is in flight - the only way to reach the code that asks whether
+    // the account it started under is still the account.
+    Promise.resolve(out.wait).then(() => {
       cb(res);
       const text = typeof out.body === "string" ? out.body : JSON.stringify(out.body || {});
       if (text) res.emit("data", Buffer.from(text));
@@ -347,4 +350,28 @@ test("a mint that fails does not wedge the next attempt", async () => {
 test.after(() => {
   https.request = REAL_REQUEST;
   fs.rmSync(DIR, { recursive: true, force: true });
+});
+
+test("a refresh already in flight when the account is signed out does not put it back", async () => {
+  // `signOut()` clears the dedup map, which stops the NEXT caller joining an
+  // existing request - it cannot stop the ones already out. A refresh that
+  // started a second before sign-out would otherwise call `store.setUserToken` a
+  // second after it, writing the account the user just removed back to disk.
+  reset();
+  let release;
+  const held = new Promise((r) => (release = r));
+  handler = (c) => {
+    if (c.host === "login.microsoftonline.com") return { status: 200, body: { access_token: "new", refresh_token: "new-r", expires_in: 3600 }, wait: held };
+    return { status: 500, body: "" };
+  };
+  // A stored account whose access token has expired, so the next call refreshes.
+  store.setUserToken({ access_token: "old", refresh_token: "r", expires_in: -1 });
+  const pending = auth.getAccessToken().catch((e) => e);
+  await new Promise((r) => setImmediate(r));
+  auth.signOut();
+  release();
+  const out = await pending;
+  assert.equal(out instanceof Error, true, "a refresh that outlived its account must not resolve");
+  assert.equal(out.code, "cancelled");
+  assert.equal(store.getUserToken(), null, "the signed-out account was written back");
 });

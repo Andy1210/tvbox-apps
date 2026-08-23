@@ -57,7 +57,6 @@ export interface SessionState {
   code?: string;
   error?: string;
   config?: {
-    serverDetails: unknown;
     overrides: Record<string, unknown>;
     keepAliveMs: number;
     noConnectionTimeoutMs: number;

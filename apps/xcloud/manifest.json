@@ -2,7 +2,7 @@
   "id": "xcloud",
   "manifestVersion": 1,
   "name": "Xbox Cloud Gaming",
-  "version": "2.9.2",
+  "version": "2.9.3",
   "type": "webclient",
   "status": "ready",
   "accent": "#107c10",
@@ -16,6 +16,10 @@
     "hu": "Xbox Game Pass Ultimate játékok streamelése egyenesen a TV-re - konzol nélkül. Jelentkezz be a képernyőn megjelenő kóddal, aztán párosíts egy Bluetooth- vagy USB-kontrollert. Gyors internet kell hozzá; a kép élő H.264 videófolyam."
   },
   "changelog": [
+    {
+      "version": "2.9.3",
+      "notes": "A game that cannot start now says so instead of leaving the screen on Starting for good, quitting from the Xbox guide goes straight back to the library rather than ending on an error, and the genre filters stay where they are while the catalogue is still loading."
+    },
     {
       "version": "2.9.2",
       "notes": "A catalogue read that was interrupted is no longer remembered as the whole library."

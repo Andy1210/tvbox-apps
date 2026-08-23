@@ -281,18 +281,133 @@ test("only a page of OURS keeps the session alive", async (t) => {
     }
     assert.equal(stopped, 1, "an unwatched session has to be ended");
 
-    // …and our own page's fetch does keep one.
+    // A cross-site fetch is not our page either: every fetch sends
+    // `Sec-Fetch-Dest: empty`, including a no-cors one from a remote app's window,
+    // so that header alone would let any page on the box hold a session open.
     stopped = 0;
     await callRoute(table.t, "POST /session/start", { body: { titleId: "GAME" } });
     for (let i = 0; i < 4; i++) await Promise.resolve();
     for (let i = 0; i < 5; i++) {
       t.mock.timers.tick(20000);
       for (let j = 0; j < 3; j++) await Promise.resolve();
-      await callRoute(table.t, "GET /session/state", { headers: { "sec-fetch-dest": "empty" } });
+      await callRoute(table.t, "GET /session/state", {
+        headers: { "sec-fetch-dest": "empty", "sec-fetch-site": "cross-site" },
+      });
+    }
+    assert.equal(stopped, 1, "a remote page held the session open");
+
+    // …and our own page's fetch does keep one. Measured against a real Chromium:
+    // a same-origin fetch sends exactly this pair.
+    stopped = 0;
+    await callRoute(table.t, "POST /session/start", { body: { titleId: "GAME" } });
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    for (let i = 0; i < 5; i++) {
+      t.mock.timers.tick(20000);
+      for (let j = 0; j < 3; j++) await Promise.resolve();
+      await callRoute(table.t, "GET /session/state", {
+        headers: { "sec-fetch-dest": "empty", "sec-fetch-site": "same-origin" },
+      });
     }
     assert.equal(stopped, 0, "a watched session must not be reaped");
   } finally {
     t.mock.timers.reset();
+    Object.assign(sessions, real);
+    instance.stop();
+  }
+});
+
+test("a session that failed to come up is something the screen can still see", async (t) => {
+  // `endSession()` nulls `live` synchronously and the failure path calls it, so
+  // the `Failed` state written a microtask earlier was never observable: the
+  // screen polled, got `{active:false}`, and - having no branch for that while it
+  // waits - sat on "Starting…" with the clock running for good. Measured over 40
+  // samples: not once.
+  const real = { start: sessions.start, waitReady: sessions.waitReady, stop: sessions.stop };
+  sessions.start = async () => ({ id: "S-fail", type: "cloud", target: "GAME" });
+  sessions.waitReady = async () => {
+    throw Object.assign(new Error("the server was not ready"), { code: "provision_timeout" });
+  };
+  sessions.stop = async () => {};
+  const { table, instance } = mount();
+  try {
+    await callRoute(table.t, "POST /session/start", { body: { titleId: "GAME" } });
+    for (let i = 0; i < 6; i++) await Promise.resolve();
+    const s = await callRoute(table.t, "GET /session/state");
+    assert.equal(s.active, false, "the session really is gone");
+    assert.equal(s.state, "Failed", "…and why has to survive it: " + JSON.stringify(s));
+    assert.equal(s.code, "provision_timeout");
+  } finally {
+    Object.assign(sessions, real);
+    instance.stop();
+  }
+});
+
+test("a new attempt is not answered with the last one's failure", async () => {
+  const real = { start: sessions.start, waitReady: sessions.waitReady, configuration: sessions.configuration, stop: sessions.stop };
+  let fail = true;
+  sessions.start = async () => ({ id: "S-mix", type: "cloud", target: "GAME" });
+  sessions.waitReady = async () => {
+    if (fail) throw Object.assign(new Error("no"), { code: "provision_timeout" });
+    return { state: "Provisioned" };
+  };
+  sessions.configuration = async () => ({ keepAliveMs: 60000, noConnectionTimeoutMs: 300000, overrides: {} });
+  sessions.stop = async () => {};
+  const { table, instance } = mount();
+  try {
+    await callRoute(table.t, "POST /session/start", { body: { titleId: "GAME" } });
+    for (let i = 0; i < 6; i++) await Promise.resolve();
+    assert.equal((await callRoute(table.t, "GET /session/state")).state, "Failed");
+    fail = false;
+    await callRoute(table.t, "POST /session/start", { body: { titleId: "GAME" } });
+    for (let i = 0; i < 6; i++) await Promise.resolve();
+    const s = await callRoute(table.t, "GET /session/state");
+    assert.equal(s.active, true);
+    assert.notEqual(s.state, "Failed", "the previous attempt's failure came back: " + JSON.stringify(s));
+  } finally {
+    Object.assign(sessions, real);
+    instance.stop();
+  }
+});
+
+test("an abandoned pass cannot take down the session that replaced it", async () => {
+  // The same-id reattach is the one case `mine()` exists for and the one an id
+  // cannot tell apart: the server hands the SAME session id back, so a slow first
+  // pass matched the second one's `live` - and because a failure now ends the
+  // session, its eventual timeout deleted a stream that was playing.
+  const real = { start: sessions.start, waitReady: sessions.waitReady, configuration: sessions.configuration, stop: sessions.stop };
+  let releaseSlow;
+  const slow = new Promise((r) => (releaseSlow = r));
+  let n = 0;
+  sessions.start = async () => ({ id: "S-same", type: "cloud", target: "GAME" });
+  sessions.waitReady = async () => {
+    if (++n === 1) {
+      await slow;
+      throw Object.assign(new Error("too slow"), { code: "provision_timeout" });
+    }
+    return { state: "Provisioned" };
+  };
+  sessions.configuration = async () => ({ keepAliveMs: 60000, noConnectionTimeoutMs: 300000, overrides: {} });
+  let stops = 0;
+  sessions.stop = async () => {
+    stops++;
+  };
+  const { table, instance } = mount();
+  try {
+    await callRoute(table.t, "POST /session/start", { body: { titleId: "GAME" } });
+    await Promise.resolve();
+    // The same title again: the server reattaches, so the id is identical and
+    // `endSession` is deliberately skipped.
+    await callRoute(table.t, "POST /session/start", { body: { titleId: "GAME" } });
+    for (let i = 0; i < 6; i++) await Promise.resolve();
+    assert.equal((await callRoute(table.t, "GET /session/state")).state, "Provisioned");
+
+    releaseSlow();
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    const s = await callRoute(table.t, "GET /session/state");
+    assert.equal(s.active, true, "the first pass's failure killed the second one's session");
+    assert.equal(s.state, "Provisioned");
+    assert.equal(stops, 0, "nothing should have been stopped");
+  } finally {
     Object.assign(sessions, real);
     instance.stop();
   }
