@@ -11,7 +11,7 @@
 import { stillSettling, usePlayer } from "./player";
 import { useMusic } from "./music";
 import { useApp, type Screen } from "../state";
-import { getCurrentFocusKey } from "@noriginmedia/norigin-spatial-navigation";
+import { doesFocusableExist, getCurrentFocusKey } from "@noriginmedia/norigin-spatial-navigation";
 import { isVisible } from "../lifecycle";
 import { rememberedVersion } from "../chosenVersion";
 import type { CommandResult, CompanionCommand } from "../backends/plex/companion";
@@ -357,6 +357,18 @@ function music(): boolean {
   return !filmHasPlayer() && m.queue.length > 0 && m.state !== "stopped";
 }
 
+/**
+ * The buttons a controller may not press for the household.
+ *
+ * Both sign the box out, and the second is reachable from a phone by arrows -
+ * home, Settings, and two presses. Keyed on the CURSOR rather than on any state
+ * near it, because that is what a press reaches, and checked against the live
+ * focusables as well: the library does not clear its focus key when the focused
+ * component unmounts, so the name alone outlives the button and refused an
+ * ordinary OK on a screen with nothing on it but a spinner.
+ */
+const SIGNS_OUT = new Set(["msg-signin", "settings-signout"]);
+
 /** Said out loud, so the two reasons a step is refused are two sentences. */
 const STEPPING = "the box is already changing episode";
 const STARTING = "the box has not shown this one yet";
@@ -464,7 +476,8 @@ async function navigate(what: string): Promise<CommandResult> {
   // handler exists. Refusing on the app-wide failure flag instead took the whole
   // D-pad away from a phone for the length of any film with a 403 behind it, and
   // refusing every failure KIND took Retry away too.
-  if (what === "select" && getCurrentFocusKey() === "msg-signin")
+  const at = getCurrentFocusKey();
+  if (what === "select" && at && SIGNS_OUT.has(at) && doesFocusableExist(at))
     return no("there is a message on this box waiting to be read");
 
   // On screen: a D-pad press means "move what I am looking at", and a hidden

@@ -3,7 +3,13 @@ import { runCompanionCommand } from "../playback/remoteControl";
 import { usePlayer, resetPlayer } from "../playback/player";
 import { useApp } from "../state";
 import { __lifecycle } from "../lifecycle";
-import { setupRemote, setFocus } from "./remote";
+import { createElement } from "react";
+import { render } from "@testing-library/react";
+import { configureI18n } from "@sdk";
+import { Message, type MessageProps } from "../Message";
+import { setupRemote, setFocus, getCurrentFocusKey } from "./remote";
+import en from "../locales/en.json";
+import hu from "../locales/hu.json";
 import type { StreamDecision } from "../backends/types";
 
 /**
@@ -18,6 +24,7 @@ import type { StreamDecision } from "../backends/types";
  * over that, because none of them was this one.
  */
 
+configureI18n({ hu, en }, { fallback: "en" });
 setupRemote();
 
 const played: { url: string; startSec?: number }[] = [];
@@ -728,23 +735,49 @@ describe("a command from a controller", () => {
     expect(usePlayer.getState().moving, "and nothing took the screen").toBeNull();
   });
 
-  it("will not press the one button that signs the household out", async () => {
+  it("will not press either button that signs the household out", async () => {
     // The guard is on what the press would HIT, not on any state near it.
     // `Message` takes the cursor as it mounts, and behind a film `hidden` hides
     // the pixels and not the focus tree - so the cursor sits on that button for
     // the rest of the film, and the overlay's own swallow cannot stop the press:
     // in a real browser a key dispatched at window runs its listeners in
     // registration order, and spatial navigation gets there first.
+    // Real buttons, mounted one at a time: the guard asks the library whether the
+    // key it is looking at still exists, and `Message` takes the cursor for its
+    // own first button - so two of them in one render measures the same one twice.
+    const mounts: [string, MessageProps][] = [
+      ["msg-signin", { failure: { kind: "signed-out" } }],
+      ["settings-signout", { text: "x", actions: [{ key: "settings-signout", label: "out", onEnter: () => {} }] }],
+    ];
+    for (const [key, props] of mounts) {
+      const { unmount } = render(createElement(Message, props));
+      await setFocus(key);
+      expect(getCurrentFocusKey(), `${key} must be what a press would reach`).toBe(key);
+      expect(await runCompanionCommand({ path: "/player/navigation/select", params: {} }), key).toEqual({
+        ok: false,
+        reason: "there is a message on this box waiting to be read",
+      });
+      unmount();
+    }
+    render(createElement(Message, mounts[0][1]));
     await setFocus("msg-signin");
-    expect(await runCompanionCommand({ path: "/player/navigation/select", params: {} })).toEqual({
-      ok: false,
-      reason: "there is a message on this box waiting to be read",
-    });
     // The arrows are not the danger, and they are all a phone has to get off it.
     expect(await runCompanionCommand({ path: "/player/navigation/moveRight", params: {} })).toEqual({ ok: true });
   });
 
+  it("does not refuse OK on a key the button has left behind", async () => {
+    // The library keeps its focus key when the focused component unmounts, and
+    // nothing re-parks a `Message` returned outside a focus context - so the name
+    // outlived the button and every OK was refused with a message on screen that
+    // said a spinner.
+    const { unmount } = render(createElement(Message, { failure: { kind: "signed-out" } }));
+    await setFocus("msg-signin");
+    unmount();
+    expect(await runCompanionCommand({ path: "/player/navigation/select", params: {} })).toEqual({ ok: true });
+  });
+
   it("still lets a phone press Retry, and OK on an ordinary screen", async () => {
+    render(createElement(Message, { failure: { kind: "unreachable" }, onRetry: () => {} }));
     // Every other message's one button is Retry, which the household may well
     // want to press from a phone - and refusing on the app-wide failure flag took
     // the whole D-pad away for the length of any film with a 403 behind it.
