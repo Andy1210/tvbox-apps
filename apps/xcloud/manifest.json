@@ -2,7 +2,7 @@
   "id": "xcloud",
   "manifestVersion": 1,
   "name": "Xbox Cloud Gaming",
-  "version": "2.6.1",
+  "version": "2.6.2",
   "type": "webclient",
   "status": "ready",
   "accent": "#107c10",
@@ -16,6 +16,10 @@
     "hu": "Xbox Game Pass Ultimate jatekok streamelese egyenesen a TV-re - konzol nelkul. Jelentkezz be a kepernyon megjeleno koddal, aztan parosits egy Bluetooth- vagy USB-kontrollert. Gyors internet kell hozza; a kep elo H.264 videofolyam."
   },
   "changelog": [
+    {
+      "version": "2.6.2",
+      "notes": "Starting a game with the controller no longer quits it immediately."
+    },
     {
       "version": "2.6.1",
       "notes": "Refreshing the catalogue no longer empties it, and a screen with no games still has its menu so there is a way back."

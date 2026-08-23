@@ -31,7 +31,37 @@ export function XCloud({ onExit }: { onExit: () => void }) {
       stopPadNav.current = null;
       return;
     }
-    if (!stopPadNav.current) stopPadNav.current = startGamepadNav();
+    if (stopPadNav.current) return;
+
+    // Wait for every button to be UP before handing the pad back to the UI.
+    //
+    // The SDK's navigation forgets which buttons were at rest when it is torn
+    // down, so a button still held when it starts again reads as a fresh press.
+    // That is not theoretical: the A press that launches a game is still down
+    // when the stream screen appears and asks for the pad back, so it was
+    // replayed as Enter onto the freshly focused Leave button - the game flashed
+    // up and vanished, and the press carried on into the library behind it.
+    let cancelled = false;
+    const held = () => {
+      const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+      for (const pad of pads) {
+        if (pad && pad.connected && pad.buttons.some((b) => b.pressed)) return true;
+      }
+      return false;
+    };
+    const arm = () => {
+      if (cancelled || stopPadNav.current) return;
+      if (held()) {
+        timer = window.setTimeout(arm, 50);
+        return;
+      }
+      stopPadNav.current = startGamepadNav();
+    };
+    let timer = window.setTimeout(arm, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [padToGame]);
   useEffect(() => () => stopPadNav.current?.(), []);
 

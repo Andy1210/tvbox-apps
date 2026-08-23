@@ -112,6 +112,7 @@ export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<S
   let sequence = 0;
   let closed = false;
   let inputEnabled = true;
+  let resumeTimer: number | null = null;
 
   // A send on a channel that has closed throws an InvalidStateError, and it did -
   // the teardown races the last few messages. Every send goes through here.
@@ -133,6 +134,8 @@ export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<S
     inputTimer = null;
     if (frameTimer !== null) clearInterval(frameTimer);
     frameTimer = null;
+    if (resumeTimer !== null) clearTimeout(resumeTimer);
+    resumeTimer = null;
     for (const ch of channels.values()) {
       try {
         ch.close();
@@ -327,8 +330,27 @@ export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<S
       send(message, transactionComplete(id, index));
     },
     setInputEnabled: (on) => {
-      inputEnabled = on;
-      if (on) return;
+      if (on) {
+        // Not until every button is up. The press that answered the dialog is
+        // still held when it closes, and resuming there hands the game a press
+        // nobody meant for it - the same replay, in the other direction, that
+        // made a launched game flash and vanish.
+        if (resumeTimer !== null) clearTimeout(resumeTimer);
+        const arm = () => {
+          resumeTimer = null;
+          if (closed) return;
+          if (readGamepads().some((f) => buttonMask(f) !== 0)) {
+            resumeTimer = window.setTimeout(arm, 50);
+            return;
+          }
+          inputEnabled = true;
+        };
+        arm();
+        return;
+      }
+      if (resumeTimer !== null) clearTimeout(resumeTimer);
+      resumeTimer = null;
+      inputEnabled = false;
       // Release everything on the way out, or the game keeps whatever was held
       // when the dialog opened - a stick pushed, a trigger down - for as long as
       // it is up.
