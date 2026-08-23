@@ -3,6 +3,7 @@ import { runCompanionCommand } from "../playback/remoteControl";
 import { usePlayer, resetPlayer } from "../playback/player";
 import { useApp } from "../state";
 import { __lifecycle } from "../lifecycle";
+import { setupRemote, setFocus } from "./remote";
 import type { StreamDecision } from "../backends/types";
 
 /**
@@ -16,6 +17,8 @@ import type { StreamDecision } from "../backends/types";
  * 200 regardless, so the assistant said the film was playing. 144 tests passed
  * over that, because none of them was this one.
  */
+
+setupRemote();
 
 const played: { url: string; startSec?: number }[] = [];
 
@@ -569,11 +572,31 @@ describe("a command from a controller", () => {
     expect(useApp.getState().screen, "and the picker still has the screen").toEqual({ name: "profiles" });
   });
 
+  it("still steps during the countdown at the end of an episode", async () => {
+    // The guard for a given-up step must not catch the moment somebody actually
+    // says "következő rész": the episode has just ended, the countdown is on
+    // screen, nothing is `current` - and the neighbours are real. Giving a step
+    // up cancels the countdown with it, which is what tells the two apart.
+    await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/library/metadata/27467", commandID: "1" },
+    });
+    // The way it really happens: the file ran out, so `stop()` has been through
+    // and the countdown was armed after it.
+    await usePlayer.getState().stop();
+    usePlayer.setState({
+      upNext: { item: { id: "556", kind: "episode", title: "Next" }, at: Date.now() + 5_000 } as never,
+      siblings: { next: { id: "556", kind: "episode", title: "Next" } } as never,
+    });
+    expect(await runCompanionCommand({ path: "/player/playback/skipNext", params: {} })).toEqual({ ok: true });
+    expect(usePlayer.getState().current?.item.id, "and it really started it").toBe("556");
+  });
+
   it("says nothing is playing after a step was given up, not that the series ended", async () => {
     // A cancelled step leaves no neighbours behind, and the guard for them would
     // answer with a claim about the LIBRARY - the sentence this file forbids four
     // lines above it - about a series that has more.
-    usePlayer.setState({ current: null, moving: null, buffering: false, siblings: {} });
+    usePlayer.setState({ current: null, moving: null, buffering: false, siblings: {}, upNext: null });
     expect(await runCompanionCommand({ path: "/player/playback/skipNext", params: {} })).toEqual({
       ok: false,
       reason: "nothing is playing",
@@ -705,38 +728,32 @@ describe("a command from a controller", () => {
     expect(usePlayer.getState().moving, "and nothing took the screen").toBeNull();
   });
 
-  it("leaves a phone its D-pad while a film plays behind a failed screen", async () => {
-    // The flag is app-wide and outlives the page that set it, and the arrows and
-    // OK are the only controls a phone has over a playing film. Refusing on it
-    // took them away for the length of the film, about a message nobody can see:
-    // the failure screen is hidden behind the picture.
-    await runCompanionCommand({
-      path: "/player/playback/playMedia",
-      params: { queryKey: "/library/metadata/27467", commandID: "1" },
-    });
-    useApp.setState({ failure: { kind: "signed-out" } });
-    expect(await runCompanionCommand({ path: "/player/navigation/moveRight", params: {} })).toEqual({ ok: true });
-    useApp.setState({ failure: null });
-  });
-
-  it("still lets a phone press Retry on a screen that is not a sign-out", async () => {
-    // Every other failure's one button is Retry, which the household may well
-    // want to press from a phone. Only the signed-out screen offers the button
-    // that must not be pressed for them.
-    useApp.setState({ screen: { name: "home" }, failure: { kind: "unreachable" }, history: [] });
-    expect(await runCompanionCommand({ path: "/player/navigation/select", params: {} })).toEqual({ ok: true });
-    useApp.setState({ failure: null });
-  });
-
-  it("will not press the one button on a failure screen", async () => {
-    // `navigation/select` there presses "sign in again", so a LAN caller could
-    // sign the household out with one command. Only the D-pad, and only for that
-    // screen: the flag is app-wide and outlives the message.
-    useApp.setState({ screen: { name: "home" }, failure: { kind: "signed-out" }, history: [] });
+  it("will not press the one button that signs the household out", async () => {
+    // The guard is on what the press would HIT, not on any state near it.
+    // `Message` takes the cursor as it mounts, and behind a film `hidden` hides
+    // the pixels and not the focus tree - so the cursor sits on that button for
+    // the rest of the film, and the overlay's own swallow cannot stop the press:
+    // in a real browser a key dispatched at window runs its listeners in
+    // registration order, and spatial navigation gets there first.
+    await setFocus("msg-signin");
     expect(await runCompanionCommand({ path: "/player/navigation/select", params: {} })).toEqual({
       ok: false,
       reason: "there is a message on this box waiting to be read",
     });
+    // The arrows are not the danger, and they are all a phone has to get off it.
+    expect(await runCompanionCommand({ path: "/player/navigation/moveRight", params: {} })).toEqual({ ok: true });
+  });
+
+  it("still lets a phone press Retry, and OK on an ordinary screen", async () => {
+    // Every other message's one button is Retry, which the household may well
+    // want to press from a phone - and refusing on the app-wide failure flag took
+    // the whole D-pad away for the length of any film with a 403 behind it.
+    await setFocus("msg-retry");
+    expect(await runCompanionCommand({ path: "/player/navigation/select", params: {} })).toEqual({ ok: true });
+
+    await setFocus("detail-play");
+    useApp.setState({ screen: { name: "home" }, failure: { kind: "signed-out" }, history: [] });
+    expect(await runCompanionCommand({ path: "/player/navigation/select", params: {} })).toEqual({ ok: true });
     useApp.setState({ failure: null });
   });
 

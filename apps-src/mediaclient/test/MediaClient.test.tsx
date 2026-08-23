@@ -63,6 +63,10 @@ describe("MediaClient", () => {
       await act(async () => useApp.setState({ screen: { name }, history: [] }));
       await act(async () => deliver?.({ action: "lyrics", state: "on" }));
       expect(useApp.getState().screen.name, `${name} must keep the screen`).toBe(name);
+      // And the command itself was still TAKEN - that half is the whole reason
+      // the gate is on the walk rather than on the command.
+      expect(useMusic.getState().lyricsAsk, `${name} must still take the command`).toBeTruthy();
+      useMusic.setState({ lyricsAsk: null });
     }
 
     useMusic.setState({ queue: [], index: 0, state: "stopped", shuffle: false });

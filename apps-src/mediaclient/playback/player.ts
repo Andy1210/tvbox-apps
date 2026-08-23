@@ -188,6 +188,16 @@ let upNextTimer: ReturnType<typeof setTimeout> | null = null;
  * that rely on the lookup lost their prev/next buttons entirely.
  */
 let playToken = 0;
+/**
+ * Which `play` last wrote the running order and the neighbours.
+ *
+ * `forThis !== playToken` cannot tell a CANCEL from a later play, and a later
+ * play has already written its own by then - so an abandoned call's cleanup
+ * cleared the state of the film that really was playing: no prev/next buttons, no
+ * auto-advance at the end, and a spoken "next episode" answered "nothing follows
+ * this". Tokens only rise, so a bigger one here means somebody newer owns it.
+ */
+let orderToken = 0;
 /** Long enough to read the title, short enough not to be a wait. */
 const UP_NEXT_MS = 5_000;
 /**
@@ -317,13 +327,14 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // Somebody gave this up while the previous episode was being closed off.
     // `currentBackend` is assigned below rather than above, so a sign-out that
     // landed during the teardown is not quietly undone by this call.
-    if (forThis !== playToken) return abandoned(set, get);
+    if (forThis !== playToken) return abandoned(forThis, set, get);
     currentBackend = backend;
     // The episodes either side, worked out HERE rather than by whoever pressed
     // play. A film can be started from a season screen, a carry-on-watching
     // row, a search result or a person's credits, and only one of those knew
     // what the episode was part of - so the buttons appeared on one route and
     // not the others.
+    orderToken = forThis;
     set({ siblings: {}, subDelaySec: 0 });
     get().cancelUpNext();
 
@@ -396,7 +407,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       // By here the queue and the neighbours have been set for an item that never
       // played, so leaving them made a "next episode" answer ok and start the one
       // AFTER the episode somebody had just pressed Back out of.
-      return abandoned(set, get);
+      return abandoned(forThis, set, get);
     }
 
     // An explicit start wins over both: a controller that names an offset has
@@ -845,7 +856,11 @@ function wirePlayerEvents(set: Setter, get: () => PlayerState): void {
  * check `play` has set them for an item that never reached the box - so anything
  * that reads them afterwards is reading a plan that was abandoned.
  */
-function abandoned(set: Setter, get: () => PlayerState): void {
+function abandoned(forThis: number, set: Setter, get: () => PlayerState): void {
+  // Not if somebody newer owns the running order: measured, an abandoned call
+  // landing after a legitimate one had started took that film's prev/next
+  // buttons, its auto-advance and its honest answer to "next episode" with it.
+  if (orderToken > forThis) return;
   set({ siblings: {}, queue: undefined, subDelaySec: 0 });
   get().cancelUpNext();
 }

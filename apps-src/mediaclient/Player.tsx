@@ -471,13 +471,19 @@ export function Player(): React.JSX.Element | null {
       return;
     }
     const p = usePlayer.getState();
-    // A step in flight comes before all of it. `stop()` clears `current` only
+    // A step in flight, once the layers a press could be closing are dealt with.
+    // `stop()` clears `current` only
     // AFTER the previous episode's last word - two server round trips - so for
     // the whole of the teardown both are set, this handler is the top one on the
     // stack, and it took Back for itself: the press paused a film that was being
     // torn down and the step went on to start the episode it had asked to
     // abandon. The other half of this is in `MediaClient`, for the rest of the
     // step, where there is no `current` and no player mounted at all.
+    //
+    // Below the menu, and that order is deliberate: a menu open over a step is
+    // reachable (a phone's skip arrives while somebody has the track list up, and
+    // the effect that closes it keys on the item CHANGING), and Back there means
+    // the layer the person opened. It costs one extra press to reach the step.
     if (p.moving) {
       p.cancelMove();
       return;

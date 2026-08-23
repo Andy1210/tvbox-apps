@@ -511,6 +511,39 @@ describe("stepping to the next episode", () => {
     }
   });
 
+  it("does not clear the running order of the film that superseded it", async () => {
+    // `forThis !== playToken` cannot tell a cancel from a LATER play, and a later
+    // play has already written its queue and its neighbours by then. Measured: the
+    // abandoned call's cleanup took them off the film that really was playing -
+    // no prev/next buttons, no auto-advance, and "next episode" answered "nothing
+    // follows this".
+    const gates: (() => void)[] = [];
+    let asked = 0;
+    const one = fakeBackend() as unknown as { resolveStream(i: string): Promise<unknown> };
+    const gated = {
+      ...fakeBackend(),
+      resolveStream: (id: string) =>
+        (asked += 1) === 1
+          ? new Promise<void>((r) => gates.push(() => r())).then(() => one.resolveStream(id))
+          : one.resolveStream(id),
+    } as unknown as MediaBackend;
+
+    const stalled = usePlayer.getState().play(gated, KIDS[0], { queue: KIDS });
+    await settle();
+    // A second, legitimate start lands first and puts its own order in the store.
+    await usePlayer.getState().play(gated, KIDS[1], { queue: KIDS });
+    onScreen();
+    expect(usePlayer.getState().siblings.next?.id).toBe("e3");
+
+    gates[0]?.(); // the superseded call resolves at last
+    await stalled;
+    await settle();
+
+    expect(usePlayer.getState().current?.item.id, "the later film is still on").toBe("e2");
+    expect(usePlayer.getState().siblings.next?.id, "with its neighbours intact").toBe("e3");
+    expect(usePlayer.getState().queue?.length, "and its running order").toBe(5);
+  });
+
   it("says on screen which episode is starting", async () => {
     const { container } = render(<Player />);
     await act(async () => {

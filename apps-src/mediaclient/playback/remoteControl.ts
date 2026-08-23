@@ -11,6 +11,7 @@
 import { stillSettling, usePlayer } from "./player";
 import { useMusic } from "./music";
 import { useApp, type Screen } from "../state";
+import { getCurrentFocusKey } from "@noriginmedia/norigin-spatial-navigation";
 import { isVisible } from "../lifecycle";
 import { rememberedVersion } from "../chosenVersion";
 import type { CommandResult, CompanionCommand } from "../backends/plex/companion";
@@ -451,16 +452,19 @@ async function navigate(what: string): Promise<CommandResult> {
   // hidden browsing screen. Refused here, before the screen, like every other
   // refusal in this function.
   if (usePlayer.getState().moving && NAV_KEYS[what]) return no(STEPPING);
-  // Nor may a controller press the one button on a SIGNED-OUT failure screen,
-  // which is "sign in again": measured, a `select` there signed the household out
-  // with a single command. Narrow on both axes, because the flag is not the
-  // screen: it is written by any 401 or 403 from any page's fetch - including the
-  // one a cast mounts behind the film it just started - and it outlives them, so
-  // refusing on it while a film plays took the arrows, OK and the overlay away
-  // from a phone for the length of the film, about a message nobody can see. And
-  // only this KIND: every other failure's one button is Retry, which the
-  // household may perfectly well want to press from a phone.
-  if (NAV_KEYS[what] && useApp.getState().failure?.kind === "signed-out" && !filmHasPlayer())
+  // Nor may a controller press the one button that signs the household out.
+  //
+  // Guarded on what the press would actually HIT rather than on any state near
+  // it, which is what two earlier attempts got wrong. `Message` takes the cursor
+  // as it mounts, and behind a film `hidden` hides the pixels and not the focus
+  // tree - so the cursor sits on that button for the rest of the film, and the
+  // overlay's own swallow cannot stop the press: measured in a real browser, a
+  // key dispatched at window runs its listeners in registration order and
+  // spatial navigation reaches `onEnterPress` synchronously, before this app's
+  // handler exists. Refusing on the app-wide failure flag instead took the whole
+  // D-pad away from a phone for the length of any film with a 403 behind it, and
+  // refusing every failure KIND took Retry away too.
+  if (what === "select" && getCurrentFocusKey() === "msg-signin")
     return no("there is a message on this box waiting to be read");
 
   // On screen: a D-pad press means "move what I am looking at", and a hidden
@@ -711,8 +715,12 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       if (busyNext) return no(busyNext);
       // Nothing is playing at all - a step that was given up leaves no neighbours
       // behind - and the guard below would answer with a claim about the LIBRARY,
-      // which is the sentence this file forbids four lines above it.
-      if (!p.current) return no("nothing is playing");
+      // which is the sentence this file forbids four lines above it. `upNext` is
+      // the difference: an episode has just ended with the countdown on screen,
+      // which is exactly when somebody says "next episode", and the neighbours
+      // are real. An abandoned step has none, because giving one up cancels the
+      // countdown with it.
+      if (!p.current && !p.upNext) return no("nothing is playing");
       if (!p.siblings.next) return no("nothing follows this");
       // The item the player says it started, not the one this snapshot held:
       // `siblings` is replaced as the previous film is torn down, so the two
@@ -728,8 +736,12 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       if (busyPrev) return no(busyPrev);
       // Nothing is playing at all - a step that was given up leaves no neighbours
       // behind - and the guard below would answer with a claim about the LIBRARY,
-      // which is the sentence this file forbids four lines above it.
-      if (!p.current) return no("nothing is playing");
+      // which is the sentence this file forbids four lines above it. `upNext` is
+      // the difference: an episode has just ended with the countdown on screen,
+      // which is exactly when somebody says "next episode", and the neighbours
+      // are real. An abandoned step has none, because giving one up cancels the
+      // countdown with it.
+      if (!p.current && !p.upNext) return no("nothing is playing");
       if (!p.siblings.prev) return no("nothing comes before this");
       return started((await p.playSibling("prev"))?.id);
     }
