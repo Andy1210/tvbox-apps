@@ -43,6 +43,9 @@ export interface Status {
 export interface SessionState {
   ok: boolean;
   active: boolean;
+  // Applied by the page to its own SDP offer, so it travels with the session
+  // rather than being fetched at the moment it matters.
+  quality?: { maxVideoKbps: number; stereo: boolean };
   id?: string;
   state?: string;
   queueSeconds?: number | null;
@@ -86,6 +89,19 @@ export const startSignIn = () => post<DeviceCode>("/signin/start");
 export const signInState = () => call<{ state: string; userCode?: string; verificationUri?: string; code?: string; error?: string }>("/signin/state");
 export const cancelSignIn = () => post("/signin/cancel");
 export const signOut = () => post("/signout");
+
+export interface SettingsValues {
+  maxVideoKbps: number;
+  stereo: boolean;
+  gameLocale: string;
+  maxHeight: number;
+}
+
+export const getSettings = () =>
+  call<{ settings: SettingsValues; allowed: Record<string, unknown> }>("/settings");
+export const putSettings = (patch: Partial<SettingsValues>) =>
+  post<{ settings: SettingsValues }>("/settings", patch);
+export const refreshLibrary = () => post("/library/refresh");
 
 export const getLibrary = () =>
   // `filling` means the first screen is here and the rest is still arriving, so

@@ -60,12 +60,7 @@ export function XCloud({ onExit }: { onExit: () => void }) {
     return <Stream title={view.title} onLeave={leaveStream} />;
   }
   return (
-    <Library
-      status={status}
-      onPlay={(title) => setView({ name: "stream", title })}
-      onSignedOut={refresh}
-      onExit={onExit}
-    />
+    <Library status={status} onPlay={(title) => setView({ name: "stream", title })} onSignedOut={refresh} />
   );
 }
 

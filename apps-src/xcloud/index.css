@@ -92,3 +92,71 @@
   --focus-offset: 4px;
   --focus-reach: 24px;
 }
+
+/* The waiting animation, built around the game's own cover art.
+   TRANSFORM AND OPACITY ONLY. On this box those two are composited and everything
+   else repaints every frame - the same reason the library moves itself with a
+   transform instead of scrolling. A glow, a blur or an animated gradient here
+   would cost more GPU than the video that is about to arrive. */
+
+/* Rings leaving the cover, staggered so there is always one in flight. */
+@keyframes xc-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+.xc-ring {
+  animation: xc-ring 2.4s cubic-bezier(0.2, 0.6, 0.35, 1) infinite;
+  will-change: transform, opacity;
+}
+.xc-ring-2 {
+  animation-delay: 0.8s;
+}
+.xc-ring-3 {
+  animation-delay: 1.6s;
+}
+
+/* One arc going round. Rotation is a transform, so this is free. */
+@keyframes xc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.xc-spin {
+  animation: xc-spin 3.6s linear infinite;
+  will-change: transform;
+}
+
+/* The cover breathing, which is what makes the whole thing read as alive rather
+   than as a spinner parked on top of a picture. */
+@keyframes xc-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.035);
+  }
+}
+.xc-breathe {
+  animation: xc-breathe 2.8s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* Someone who has asked for less movement gets the picture and no motion; the
+   elapsed counter still ticks, so the screen has not stopped saying anything. */
+@media (prefers-reduced-motion: reduce) {
+  .xc-ring,
+  .xc-spin,
+  .xc-breathe {
+    animation: none;
+  }
+  .xc-ring {
+    opacity: 0;
+  }
+}

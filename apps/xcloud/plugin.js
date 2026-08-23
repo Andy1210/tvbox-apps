@@ -19,6 +19,7 @@ const auth = require("./lib/xboxauth");
 const library = require("./lib/library");
 const api = require("./lib/xcloudapi");
 const sessions = require("./lib/session");
+const settings = require("./lib/settings");
 
 // One sign-in at a time, and it is deliberately not persisted: a device code dies
 // with the process that requested it, so a code surviving a shell restart in a
@@ -194,6 +195,30 @@ module.exports = (host) => {
       host.json(res, t ? { ok: true, title: t } : { ok: false, code: "not_found", error: "no such title" });
     },
 
+    // What this client can decide for itself. Short on purpose: region and server
+    // are Microsoft's choice on this account (`allowRegionSelection: false`), so
+    // what is left is what we put in the offer and in the session request.
+    "GET /settings": (req, res) =>
+      host.json(res, { ok: true, settings: settings.get(), allowed: settings.ALLOWED }),
+
+    "POST /settings": (req, res, ctx) => {
+      try {
+        host.json(res, { ok: true, settings: settings.set((ctx && ctx.body) || {}) });
+      } catch (e) {
+        // The key is named rather than reported as a generic failure - a screen
+        // that says "could not save" about one bad field is a screen you cannot
+        // fix anything from.
+        host.json(res, { ok: false, code: "bad_setting", error: String(e.message || e) });
+      }
+    },
+
+    // Forget the catalogue, so the next open fetches it again. For when Game Pass
+    // has changed and the day-long cache has not caught up.
+    "POST /library/refresh": (req, res) => {
+      library.invalidate();
+      host.json(res, { ok: true });
+    },
+
     // Game Pass's own curated lists - what was just added, what is about to
     // leave. Answered together because the screen wants them together and each is
     // one small request behind an hour's cache.
@@ -247,11 +272,18 @@ module.exports = (host) => {
           // A second start replaces the first: one screen, one stream.
           await endSession();
 
+          const chosen = settings.get();
+          // A game's language is fixed when the session starts; there is no
+          // changing it once it runs.
+          const width = Number(data.width) || 1920;
+          const height = Number(data.height) || 1080;
+          const cap = chosen.maxHeight || height;
+          const scale = Math.min(1, cap / height);
           const controller = new AbortController();
           const session = await sessions.start(titleId, {
-            locale: locale(),
-            width: Number(data.width) || 1920,
-            height: Number(data.height) || 1080,
+            locale: chosen.gameLocale || locale(),
+            width: Math.round(width * scale),
+            height: Math.round(height * scale),
             timezoneOffsetMinutes: -new Date().getTimezoneOffset(),
           });
           live = { session, controller, state: "Provisioning", queueSeconds: null, queuedFor: 0, error: null, config: null };
@@ -295,6 +327,9 @@ module.exports = (host) => {
         queueSeconds: live.queueSeconds,
         queuedFor: live.queuedFor,
         ...(live.error || {}),
+        // The renderer applies these to its own offer, so they travel with the
+        // session rather than being fetched separately at the moment it matters.
+        quality: { maxVideoKbps: settings.get().maxVideoKbps, stereo: settings.get().stereo },
         config: live.config
           ? {
               serverDetails: live.config.serverDetails,

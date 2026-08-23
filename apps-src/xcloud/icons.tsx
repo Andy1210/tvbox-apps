@@ -38,11 +38,11 @@ export function FilterIcon({ className = "h-[1em] w-[1em]" }: { className?: stri
   );
 }
 
-export function ExitIcon({ className = "h-[1em] w-[1em]" }: { className?: string }) {
+export function SettingsIcon({ className = "h-[1em] w-[1em]" }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={className} aria-hidden="true" {...stroke}>
-      <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3" />
-      <path d="M10 8l-4 4 4 4M6 12h9" />
+      <circle cx="12" cy="12" r="3.2" />
+      <path d="M12 2.5v2.2M12 19.3v2.2M21.5 12h-2.2M4.7 12H2.5M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6M18.7 18.7l-1.6-1.6M6.9 6.9 5.3 5.3" />
     </svg>
   );
 }

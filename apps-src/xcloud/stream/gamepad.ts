@@ -38,8 +38,11 @@ export function readGamepad(pad: Gamepad, index: number): GamepadFrame {
     dpadDown: btn(pad, 13),
     dpadLeft: btn(pad, 14),
     dpadRight: btn(pad, 15),
-    // The Xbox button. Held by us rather than forwarded blind: on a television it
-    // is the only way back out of a stream, so the caller decides.
+    // The Xbox button goes THROUGH to the server, which answers it with xCloud's
+    // own guide overlay. Catching it here to leave the stream was wrong twice
+    // over: it took away the menu the button exists for, and the way out was
+    // already the remote's Back key, which reaches the page as a keypress and
+    // never touches the pad.
     nexus: btn(pad, 16),
     leftThumbX: axis(pad, 0),
     leftThumbY: axis(pad, 1),
@@ -61,15 +64,4 @@ export function readGamepads(): GamepadFrame[] {
     if (pad && pad.connected) out.push(readGamepad(pad, out.length));
   }
   return out;
-}
-
-// True when two frames differ in anything the wire carries. Used to skip a packet
-// when nothing changed: at 60 Hz an idle pad would otherwise be 60 identical
-// messages a second, and the channel is shared with the video's own metadata.
-export function frameChanged(a: GamepadFrame | undefined, b: GamepadFrame): boolean {
-  if (!a) return true;
-  for (const k of Object.keys(b) as Array<keyof GamepadFrame>) {
-    if (a[k] !== b[k]) return true;
-  }
-  return false;
 }

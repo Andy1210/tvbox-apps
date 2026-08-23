@@ -51,13 +51,35 @@
   "stream": {
     "starting": "Starting…",
     "queued": "You are in a queue. This can take a few minutes.",
-    "queuedFor": "{seconds} seconds so far.",
     "connecting": "Connecting…",
     "negotiating": "Negotiating with the server…",
     "play": "Play",
     "stop": "Leave",
     "trial": "This game can be played for {minutes} minutes.",
     "failed": "The stream stopped.",
-    "noPad": "Connect a controller."
+    "noPad": "Connect a controller.",
+    "elapsed": "Elapsed: {time}",
+    "estimate": "the server estimates about {minutes} min",
+    "queuedHint": "You can leave and try again later."
+  },
+  "settings": {
+    "title": "Settings",
+    "quality": "Picture quality",
+    "qualityHint": "an upper limit; the server may send less",
+    "auto": "Automatic",
+    "resolution": "Resolution",
+    "resolutionHint": "on a weak link a smaller picture beats a harder-compressed one",
+    "screen": "The screen's own",
+    "sound": "Sound",
+    "stereo": "Stereo",
+    "mono": "Mono",
+    "gameLanguage": "Game language",
+    "gameLanguageHint": "chosen when the game starts; it cannot change while it runs",
+    "followBox": "Follow the box",
+    "refresh": "Refresh the catalogue",
+    "refreshed": "Refreshed",
+    "close": "Done",
+    "ultimate": "Game Pass Ultimate",
+    "freeToPlay": "Free to play"
   }
 }

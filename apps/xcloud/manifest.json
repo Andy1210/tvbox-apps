@@ -2,7 +2,7 @@
   "id": "xcloud",
   "manifestVersion": 1,
   "name": "Xbox Cloud Gaming",
-  "version": "2.1.2",
+  "version": "2.4.0",
   "type": "webclient",
   "status": "ready",
   "accent": "#107c10",
@@ -16,6 +16,30 @@
     "hu": "Xbox Game Pass Ultimate jatekok streamelese egyenesen a TV-re - konzol nelkul. Jelentkezz be a kepernyon megjeleno koddal, aztan parosits egy Bluetooth- vagy USB-kontrollert. Gyors internet kell hozza; a kep elo H.264 videofolyam."
   },
   "changelog": [
+    {
+      "version": "2.4.0",
+      "notes": "A settings screen: picture quality, resolution, sound and the game language, plus a way to refresh the catalogue. The button that only went back to the launcher is gone - the remote Home key already does that."
+    },
+    {
+      "version": "2.3.0",
+      "notes": "The Xbox button opens the Xbox guide instead of leaving the game. A proper waiting animation while a game starts, and scrolling up to a row no longer cuts off its title."
+    },
+    {
+      "version": "2.2.1",
+      "notes": "The game has sound."
+    },
+    {
+      "version": "2.2.0",
+      "notes": "The controller works in a game. The waiting screen shows how long it has been waiting and can be left with the remote, and a dropped stream no longer leaves a screen with nothing to press."
+    },
+    {
+      "version": "2.1.4",
+      "notes": "The controller works in a game again."
+    },
+    {
+      "version": "2.1.3",
+      "notes": "Diagnostics for controller input."
+    },
     {
       "version": "2.1.2",
       "notes": "Starting a game works again - the screen used to sit on Starting and nothing happened."

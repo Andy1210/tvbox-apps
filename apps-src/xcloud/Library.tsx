@@ -5,7 +5,8 @@ import * as api from "./api";
 import { Grid } from "./Grid";
 import { Row } from "./Row";
 import { Splash } from "./XCloud";
-import { SearchIcon, CloseIcon, ExitIcon } from "./icons";
+import { SearchIcon, CloseIcon, SettingsIcon } from "./icons";
+import { Settings } from "./Settings";
 import { createMover, nearest, pinScroll } from "./moveTo";
 
 // The library. Short curated rows, then everything the subscription covers, with a
@@ -25,16 +26,17 @@ const FILLING_POLL_MS = 3000;
 const STALE_REREAD_MS = 20000;
 const ALL_GENRES = "*";
 
+// No "leave the app" button: the remote's Home already does that, and a second
+// way to do it took a slot in a header where every button costs a press to get
+// past.
 export function Library({
   status,
   onPlay,
   onSignedOut,
-  onExit,
 }: {
   status: api.Status | null;
   onPlay: (title: api.Title) => void;
   onSignedOut: () => void;
-  onExit: () => void;
 }) {
   const { t } = useI18n();
   const [all, setAll] = useState<api.Title[] | null>(null);
@@ -45,6 +47,7 @@ export function Library({
   const [query, setQuery] = useState("");
   const [typing, setTyping] = useState(false);
   const [genre, setGenre] = useState(ALL_GENRES);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const mover = useMemo(() => createMover("y"), []);
   const viewport = useRef<HTMLDivElement | null>(null);
@@ -76,15 +79,26 @@ export function Library({
       if (!box || !col) return;
       const item = el.getBoundingClientRect();
       const view = box.getBoundingClientRect();
+      // A row's heading belongs to the tile under it. Bringing the TILE into view
+      // left "Continue" cut off at the top, because the label was not part of what
+      // was being shown - so for a tile in the first line of its section, the band
+      // starts at the section instead. Only the first line: measuring from the
+      // section top while deep in the grid would jump back to its beginning.
+      let top = item.top;
+      const section = el.closest("section");
+      if (section) {
+        const sec = section.getBoundingClientRect();
+        if (item.top - sec.top < item.height) top = sec.top;
+      }
       // The column is translated by -at, so its rect already carries the shift;
       // adding `at` back gives the position in the un-moved column.
-      const start = item.top - view.top + mover.at;
+      const start = top - view.top + mover.at;
       mover.to(
         nearest({
           at: mover.at,
           viewport: view.height,
           start,
-          size: item.height,
+          size: item.bottom - top,
           // A row flush against the edge is inside the overscan of some sets, and
           // the focus outline needs room beyond that.
           padStart: Math.round(view.height * 0.06),
@@ -234,6 +248,21 @@ export function Library({
 
   const hidden = playable.length - owned.length;
 
+  if (settingsOpen) {
+    return (
+      <Settings
+        status={status}
+        onSignedOut={onSignedOut}
+        onClose={() => {
+          setSettingsOpen(false);
+          // Back to the button it was opened from, or the remote is left with
+          // nothing focused on a screen full of tiles.
+          setTimeout(() => setFocus("lib-settings"), 0);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg-0 text-fg">
       {/* Outside the moving column, so it stays put. */}
@@ -264,19 +293,20 @@ export function Library({
             </FocusButton>
           )}
           <FocusButton
+            focusKey="lib-settings"
+            className="flex items-center gap-3 rounded-lg bg-bg-1 px-6 py-3 text-xl"
+            onEnter={() => setSettingsOpen(true)}
+            label={t("settings.title")}
+          >
+            <SettingsIcon className="h-[1.1em] w-[1.1em]" />
+            <span>{t("settings.title")}</span>
+          </FocusButton>
+          <FocusButton
             focusKey="lib-signout"
             className="rounded-lg bg-bg-1 px-5 py-3 text-xl"
             onEnter={() => void api.signOut().then(onSignedOut)}
           >
             {t("library.signOut")}
-          </FocusButton>
-          <FocusButton
-            focusKey="lib-exit"
-            className="flex items-center rounded-lg bg-bg-1 px-5 py-3 text-xl"
-            onEnter={onExit}
-            label={t("stream.stop")}
-          >
-            <ExitIcon className="h-[1.1em] w-[1.1em]" />
           </FocusButton>
         </div>
       </header>

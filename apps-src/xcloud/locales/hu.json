@@ -51,13 +51,35 @@
   "stream": {
     "starting": "Indítás…",
     "queued": "Sorban állsz. Ez néhány percig is eltarthat.",
-    "queuedFor": "Már {seconds} másodperc.",
     "connecting": "Kapcsolódás…",
     "negotiating": "Egyeztetés a szerverrel…",
     "play": "Játék",
     "stop": "Kilépés",
     "trial": "Ez a játék {minutes} percig játszható.",
     "failed": "A stream megszakadt.",
-    "noPad": "Csatlakoztass egy kontrollert."
+    "noPad": "Csatlakoztass egy kontrollert.",
+    "elapsed": "Eltelt: {time}",
+    "estimate": "a szerver becslése kb. {minutes} perc",
+    "queuedHint": "Nyugodtan kiléphetsz, és később újrapróbálhatod."
+  },
+  "settings": {
+    "title": "Beállítások",
+    "quality": "Képminőség",
+    "qualityHint": "felső határ, a szerver ennél kevesebbet is adhat",
+    "auto": "Automatikus",
+    "resolution": "Felbontás",
+    "resolutionHint": "gyenge vonalnál kisebb kép jobb, mint erősebben tömörített",
+    "screen": "A képernyőé",
+    "sound": "Hang",
+    "stereo": "Sztereó",
+    "mono": "Monó",
+    "gameLanguage": "A játék nyelve",
+    "gameLanguageHint": "indításkor dől el, futás közben nem változtatható",
+    "followBox": "Ahogy a box",
+    "refresh": "Katalógus frissítése",
+    "refreshed": "Frissítve",
+    "close": "Kész",
+    "ultimate": "Game Pass Ultimate",
+    "freeToPlay": "Ingyenes játékok"
   }
 }
