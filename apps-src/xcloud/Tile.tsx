@@ -20,9 +20,20 @@ export function Tile({ title, focusKey, onEnter }: { title: Title; focusKey: str
       ref={ref}
       onClick={onEnter}
       aria-label={title.name || title.titleId}
+      // The focus key, in the DOM, the way FocusButton carries its own: without a
+      // marker a navigation check cannot say WHICH tile the focus is on, and an
+      // assertion about focus with nothing to anchor it is decided by nothing.
+      data-sfocus={focusKey}
+      data-focused={focused ? "1" : undefined}
       className={
-        "relative w-[13vw] shrink-0 overflow-hidden rounded-xl bg-bg-1 text-left transition-transform duration-100 " +
-        (focused ? "scale-105 ring-4 ring-focus" : "ring-0")
+        // The focus has to be readable from a sofa, which a thin ring is not: a
+        // white outline OUTSIDE the tile (so it is not lost against pale box art),
+        // a visible lift, and everything unfocused dimmed so the bright one is the
+        // one being looked at.
+        "relative w-[13vw] shrink-0 overflow-hidden rounded-xl bg-bg-1 text-left transition-all duration-100 " +
+        (focused
+          ? "z-10 scale-110 outline outline-[6px] outline-offset-[3px] outline-focus brightness-110"
+          : "brightness-[0.65]")
       }
     >
       <div className="aspect-square w-full">

@@ -1,5 +1,8 @@
 {
-  "_meta": { "name": "Magyar", "tag": "hu-HU" },
+  "_meta": {
+    "name": "Magyar",
+    "tag": "hu-HU"
+  },
   "title": "Xbox Cloud Gaming",
   "signin": {
     "heading": "Jelentkezz be az Xbox-fiókodba",
@@ -8,7 +11,7 @@
     "start": "Bejelentkezés",
     "cancel": "Mégsem",
     "retry": "Újra",
-    "expiresIn": "A kód {{minutes}} percig érvényes.",
+    "expiresIn": "A kód {minutes} percig érvényes.",
     "keepOpen": "Ez a képernyő maradjon nyitva, amíg be nem fejezted a telefonon."
   },
   "errors": {
@@ -35,19 +38,20 @@
     "loading": "Katalógus betöltése…",
     "partial": "Néhány játék neve még hiányzik.",
     "search": "Keresés",
-    "noResults": "Nincs találat erre: {{query}}",
-    "signedInAs": "Bejelentkezve: {{gamertag}}",
-    "signOut": "Kijelentkezés"
+    "noResults": "Nincs találat erre: {query}",
+    "signedInAs": "Bejelentkezve: {gamertag}",
+    "signOut": "Kijelentkezés",
+    "searchRest": "További {count} játék a keresőben."
   },
   "stream": {
     "starting": "Indítás…",
     "queued": "Sorban állsz. Ez néhány percig is eltarthat.",
-    "queuedFor": "Már {{seconds}} másodperc.",
+    "queuedFor": "Már {seconds} másodperc.",
     "connecting": "Kapcsolódás…",
     "negotiating": "Egyeztetés a szerverrel…",
     "play": "Játék",
     "stop": "Kilépés",
-    "trial": "Ez a játék {{minutes}} percig játszható.",
+    "trial": "Ez a játék {minutes} percig játszható.",
     "failed": "A stream megszakadt.",
     "noPad": "Csatlakoztass egy kontrollert."
   }

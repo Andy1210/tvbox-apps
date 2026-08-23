@@ -11,7 +11,7 @@
     "start": "Sign in",
     "cancel": "Cancel",
     "retry": "Try again",
-    "expiresIn": "The code is valid for {{minutes}} minutes.",
+    "expiresIn": "The code is valid for {minutes} minutes.",
     "keepOpen": "Leave this screen open until you have finished on the phone."
   },
   "errors": {
@@ -38,19 +38,20 @@
     "loading": "Loading the catalogue…",
     "partial": "Some game names are still missing.",
     "search": "Search",
-    "noResults": "Nothing found for {{query}}",
-    "signedInAs": "Signed in as {{gamertag}}",
-    "signOut": "Sign out"
+    "noResults": "Nothing found for {query}",
+    "signedInAs": "Signed in as {gamertag}",
+    "signOut": "Sign out",
+    "searchRest": "{count} more in search."
   },
   "stream": {
     "starting": "Starting…",
     "queued": "You are in a queue. This can take a few minutes.",
-    "queuedFor": "{{seconds}} seconds so far.",
+    "queuedFor": "{seconds} seconds so far.",
     "connecting": "Connecting…",
     "negotiating": "Negotiating with the server…",
     "play": "Play",
     "stop": "Leave",
-    "trial": "This game can be played for {{minutes}} minutes.",
+    "trial": "This game can be played for {minutes} minutes.",
     "failed": "The stream stopped.",
     "noPad": "Connect a controller."
   }
