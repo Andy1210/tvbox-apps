@@ -223,7 +223,7 @@ test("hydrating nothing makes no request", async () => {
   reset();
   handler = withAuth(() => { throw new Error("should not be called"); });
   const r = await api.hydrate([], { market: "DE" });
-  assert.deepEqual(r, { products: {}, partial: false, batches: 0, failedBatches: 0 });
+  assert.deepEqual(r, { products: {}, partial: false, batches: 0, failedBatches: 0, aborted: false });
 });
 
 // ------------------------------------------------------------------ joining
@@ -264,4 +264,29 @@ test("a protocol-relative image URL is made absolute", () => {
 test.after(() => {
   https.request = REAL_REQUEST;
   fs.rmSync(DIR, { recursive: true, force: true });
+});
+
+test("a hydration the caller abandoned reports itself as incomplete", async () => {
+  // Skipped batches used to leave `failed` at zero, so the result came back
+  // `partial: false` - and the library then cached a head-only catalogue as this
+  // language's finished answer, which `isFresh` served for the whole TTL. The
+  // next launch would not even try to refill it.
+  reset();
+  const controller = new AbortController();
+  let served = 0;
+  handler = withAuth((c) => {
+    served++;
+    // Give up part way through, the way a page leaving does.
+    if (served === 1) controller.abort();
+    const sent = JSON.parse(c.body).Products;
+    return { status: 200, body: { Products: Object.fromEntries(sent.map((p) => [p, { ProductTitle: p }])) } };
+  });
+  const all = ids(300);
+  const r = await api.hydrate(all, { market: "DE", signal: controller.signal });
+  assert.equal(r.aborted, true);
+  assert.equal(r.partial, true, "an incomplete answer must say so");
+  assert.ok(served < Math.ceil(all.length / api.CATALOG_BATCH), "it has to actually stop: " + served);
+  // What it DID fetch is still returned - the caller may show it, it just may not
+  // remember it as the whole catalogue.
+  assert.ok(Object.keys(r.products).length > 0);
 });

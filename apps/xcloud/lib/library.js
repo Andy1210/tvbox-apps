@@ -171,10 +171,12 @@ async function doRefresh(opts) {
 
   if (ids.length <= FIRST_SCREEN) state.filling = false;
 
+  let aborted = false;
   if (ids.length > FIRST_SCREEN) {
     const tail = await api.hydrate(ids.slice(FIRST_SCREEN), { language, market: o.market, signal: o.signal });
     products = { ...products, ...tail.products };
     partial = partial || tail.partial;
+    aborted = !!tail.aborted;
     publish(titles, products, partial, o, language);
   }
 
@@ -182,7 +184,10 @@ async function doRefresh(opts) {
   // state object is gone and saving would put an empty one on disk.
   if (o._era !== generation) return state;
   state.filling = false;
-  saveCache();
+  // A pass that STOPPED is not this language's answer. Caching it would serve a
+  // catalogue of fifty titles from disk for the whole TTL, and `isFresh` would
+  // see nothing wrong with it - the next launch would not even try to refill.
+  if (!aborted) saveCache();
   return state;
 }
 

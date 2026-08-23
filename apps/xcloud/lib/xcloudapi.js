@@ -136,7 +136,7 @@ async function fetchWaitTime(titleId, opts) {
 // with prices, availability and sometimes titles that are not this account's.
 async function hydrate(productIds, opts) {
   const ids = [...new Set((productIds || []).filter(Boolean).map(String))];
-  if (!ids.length) return { products: {}, partial: false, batches: 0, failedBatches: 0 };
+  if (!ids.length) return { products: {}, partial: false, batches: 0, failedBatches: 0, aborted: false };
 
   const o = opts || {};
   const market = o.market || (await auth.getCloudStreamingToken()).market || "US";
@@ -151,6 +151,11 @@ async function hydrate(productIds, opts) {
 
   const products = {};
   let failed = 0;
+  // Batches nobody attempted, because the caller went away mid-pass. Counted
+  // separately from failures: they are not an upstream problem, but the result is
+  // just as incomplete, and returning `partial: false` for it is what let a
+  // head-only catalogue be cached as the finished one for the whole TTL.
+  let skipped = 0;
   let cursor = 0;
 
   // A worker pool rather than Promise.all over every batch: the fan-out is what
@@ -160,7 +165,13 @@ async function hydrate(productIds, opts) {
     for (;;) {
       const i = cursor++;
       if (i >= batches.length) return;
-      if (o.signal && o.signal.aborted) return;
+      if (o.signal && o.signal.aborted) {
+        // This one and every one still queued: `cursor` is shared, so whatever is
+        // left is what no worker will now take.
+        skipped += Math.max(0, batches.length - i);
+        cursor = batches.length;
+        return;
+      }
 
       for (let attempt = 0; ; attempt++) {
         let res = null;
@@ -194,7 +205,16 @@ async function hydrate(productIds, opts) {
   if (failed && failed === batches.length) {
     throw new ApiError("catalog_unavailable", "The Game Pass catalogue could not be read (all " + batches.length + " batches failed).");
   }
-  return { products, partial: failed > 0, batches: batches.length, failedBatches: failed };
+  return {
+    products,
+    partial: failed > 0 || skipped > 0,
+    batches: batches.length,
+    failedBatches: failed,
+    // So a caller can tell "some rows are missing because the server would not
+    // answer" from "we stopped", which is the difference between a result worth
+    // keeping and one worth throwing away.
+    aborted: skipped > 0,
+  };
 }
 
 // Join the two halves. The catalogue is keyed by its OWN product id and carries

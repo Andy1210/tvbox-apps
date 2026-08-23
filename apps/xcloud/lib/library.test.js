@@ -514,3 +514,32 @@ test("the cache file is 0600, not whatever the umask says", async () => {
     Object.assign(api, REAL);
   }
 });
+
+test("a library pass that was abandoned mid-way is not cached as the finished one", async () => {
+  // The head is published so the grid can draw, then the tail fills it in. If the
+  // caller goes away during the tail, what is in hand is fifty titles - and
+  // writing that to disk makes it this language's answer for the whole TTL:
+  // `isFresh` sees a full cache and the next launch does not even try.
+  const controller = new AbortController();
+  api.fetchTitles = async () => Array.from({ length: 300 }, (_, i) => ({ titleId: "t" + i, productId: "p" + i }));
+  api.hydrate = async (batch, o) => {
+    if (o && o.signal) {
+      controller.abort();
+      return { products: {}, partial: true, batches: 10, failedBatches: 0, aborted: true };
+    }
+    return { products: Object.fromEntries(batch.map((id) => [id, { ProductTitle: id }])), partial: false, batches: 2, failedBatches: 0, aborted: false };
+  };
+  try {
+    library.invalidate();
+    try {
+      fs.unlinkSync(CACHE);
+    } catch {
+      /* nothing to remove */
+    }
+    await library.get({ language: "en-US", signal: controller.signal });
+    assert.equal(fs.existsSync(CACHE), false, "a truncated catalogue was written to disk");
+  } finally {
+    Object.assign(api, REAL);
+    library.invalidate();
+  }
+});

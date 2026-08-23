@@ -2,7 +2,7 @@
   "id": "xcloud",
   "manifestVersion": 1,
   "name": "Xbox Cloud Gaming",
-  "version": "2.9.1",
+  "version": "2.9.2",
   "type": "webclient",
   "status": "ready",
   "accent": "#107c10",
@@ -16,6 +16,10 @@
     "hu": "Xbox Game Pass Ultimate játékok streamelése egyenesen a TV-re - konzol nélkül. Jelentkezz be a képernyőn megjelenő kóddal, aztán párosíts egy Bluetooth- vagy USB-kontrollert. Gyors internet kell hozzá; a kép élő H.264 videófolyam."
   },
   "changelog": [
+    {
+      "version": "2.9.2",
+      "notes": "A catalogue read that was interrupted is no longer remembered as the whole library."
+    },
     {
       "version": "2.9.1",
       "notes": "Scrolling and the controller now come from the shared toolkit the box ships, so every app moves the same way."
