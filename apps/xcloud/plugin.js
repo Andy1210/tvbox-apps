@@ -18,11 +18,56 @@
 const auth = require("./lib/xboxauth");
 const library = require("./lib/library");
 const api = require("./lib/xcloudapi");
+const sessions = require("./lib/session");
 
 // One sign-in at a time, and it is deliberately not persisted: a device code dies
 // with the process that requested it, so a code surviving a shell restart in a
 // file would be a code the person types in vain.
 let signin = null;
+
+// One television, one screen, so one session. The signalling lives here and the
+// WebRTC lives in the page: Node has no RTCPeerConnection without a native
+// module, and the video and the input channel belong in the renderer anyway. So
+// the offer and the candidates pass THROUGH these routes, and the streaming token
+// never does.
+let live = null;
+
+// The server states how often it wants a pulse (measured: 60 s) and how long it
+// waits without a connection (300 s), so the timer is set from its answer rather
+// than from a number of ours. It runs HERE because a page that reloads mid-stream
+// would otherwise let the session lapse.
+function startKeepalive(cfg) {
+  stopKeepalive();
+  if (!live) return;
+  live.keepaliveTimer = setInterval(() => {
+    if (!live) return stopKeepalive();
+    sessions.keepalive(live.session).catch(() => {
+      /* one missed pulse is not a dropped session; the state route is the truth */
+    });
+  }, (cfg && cfg.keepAliveMs) || 60000);
+  if (live.keepaliveTimer.unref) live.keepaliveTimer.unref();
+}
+
+function stopKeepalive() {
+  if (live && live.keepaliveTimer) clearInterval(live.keepaliveTimer);
+  if (live) live.keepaliveTimer = null;
+}
+
+// Always through here, so a session can never be left behind by a code path that
+// forgot the timer. Stopping is worth doing even though the server reattaches a
+// second /play to the same session: an abandoned one holds a real machine.
+async function endSession() {
+  const l = live;
+  // Cleared first, so a keepalive tick or a state callback racing this cannot
+  // resurrect the session it is about to stop.
+  live = null;
+  if (!l) return;
+  if (l.keepaliveTimer) clearInterval(l.keepaliveTimer);
+  if (l.controller) l.controller.abort();
+  await sessions.stop(l.session).catch(() => {
+    /* a stop that failed leaves a session the next /play will reattach to */
+  });
+}
 
 function errorPayload(e) {
   return {
@@ -116,6 +161,9 @@ module.exports = (host) => {
       if (signin) signin.controller.abort();
       signin = null;
       auth.signOut();
+      // A stream belongs to the account that started it, and its token is about to
+      // stop working anyway.
+      endSession().catch(() => {});
       // The library is what this account may stream, so it goes with the account.
       library.invalidate();
       log("signed out");
@@ -156,6 +204,108 @@ module.exports = (host) => {
         .catch((e) => host.json(res, errorPayload(e)));
     },
 
+    // Starts a stream and drives the ladder to Provisioned. Answers as soon as the
+    // session EXISTS rather than when it is ready, because the wait is the part
+    // that needs a screen: a queue was measured at 224 s on this account, and the
+    // page has to be able to draw it.
+    "POST /session/start": (req, res) => {
+      readBody(req)
+        .then(async (data) => {
+          const titleId = String((data && data.titleId) || "");
+          if (!/^[A-Za-z0-9._-]{1,120}$/.test(titleId)) {
+            return host.json(res, { ok: false, code: "bad_request", error: "titleId missing or malformed" });
+          }
+          // A second start replaces the first: one screen, one stream.
+          await endSession();
+
+          const controller = new AbortController();
+          const session = await sessions.start(titleId, {
+            locale: locale(),
+            width: Number(data.width) || 1920,
+            height: Number(data.height) || 1080,
+            timezoneOffsetMinutes: -new Date().getTimezoneOffset(),
+          });
+          live = { session, controller, state: "Provisioning", queueSeconds: null, queuedFor: 0, error: null, config: null };
+          host.json(res, { ok: true, id: session.id, type: session.type, titleId });
+
+          sessions
+            .waitReady(session, {
+              signal: controller.signal,
+              onState: (st) => { if (live) live.state = st; },
+              onQueue: (secs, elapsed) => { if (live) { live.queueSeconds = secs; live.queuedFor = elapsed; } },
+            })
+            .then(async () => {
+              const cfg = await sessions.configuration(session);
+              if (!live) return;
+              live.config = cfg;
+              live.state = "Provisioned";
+              startKeepalive(cfg);
+            })
+            .catch((e) => {
+              if (live) {
+                live.state = "Failed";
+                live.error = { code: e.code || "error", error: String(e.message || e) };
+              }
+              log("session failed:", e.code || "", e.message);
+            });
+        })
+        .catch((e) => host.json(res, errorPayload(e)));
+    },
+
+    // Polled by the page while it waits, and again after it connects. `config` is
+    // null until the session is Provisioned - that is the signal to offer.
+    "GET /session/state": (req, res) => {
+      if (!live) return host.json(res, { ok: true, active: false });
+      host.json(res, {
+        ok: true,
+        active: true,
+        id: live.session.id,
+        state: live.state,
+        // Deliberately not a countdown: the server's estimate said 10 s for a wait
+        // that took 224, so it is an order of magnitude and nothing more.
+        queueSeconds: live.queueSeconds,
+        queuedFor: live.queuedFor,
+        ...(live.error || {}),
+        config: live.config
+          ? {
+              serverDetails: live.config.serverDetails,
+              overrides: live.config.overrides,
+              keepAliveMs: live.config.keepAliveMs,
+              noConnectionTimeoutMs: live.config.noConnectionTimeoutMs,
+            }
+          : null,
+      });
+    },
+
+    // The offer/answer and the candidates. POST for the same-origin gate, and
+    // because both change server-side state.
+    "POST /session/sdp": (req, res) => {
+      if (!live) return host.json(res, { ok: false, code: "no_session", error: "no session" });
+      readBody(req)
+        .then((data) => {
+          const sdp = String((data && data.sdp) || "");
+          if (!sdp) throw new sessions.SessionError("bad_request", "no sdp");
+          const send = data.chat ? sessions.sendChatSdp : sessions.sendSdp;
+          return send(live.session, sdp, { signal: live.controller.signal });
+        })
+        .then((answer) => host.json(res, { ok: true, answer }))
+        .catch((e) => host.json(res, errorPayload(e)));
+    },
+
+    "POST /session/ice": (req, res) => {
+      if (!live) return host.json(res, { ok: false, code: "no_session", error: "no session" });
+      readBody(req)
+        .then((data) => sessions.sendIce(live.session, data && data.candidate, { signal: live.controller.signal }))
+        .then((candidates) => host.json(res, { ok: true, candidates }))
+        .catch((e) => host.json(res, errorPayload(e)));
+    },
+
+    "POST /session/stop": (req, res) => {
+      endSession()
+        .then(() => host.json(res, { ok: true }))
+        .catch((e) => host.json(res, errorPayload(e)));
+    },
+
     // How long the queue is. Only worth showing when it is not zero, which for an
     // Ultimate account is most of the time.
     "GET /waittime": (req, res) => {
@@ -168,6 +318,37 @@ module.exports = (host) => {
   };
 
   host.registerRoutes("/tvbox/api/xcloud", routes);
+
+  // The shell parses a POST body for its own routes but a plugin route gets the
+  // raw request, so read it here. Capped: this is an unauthenticated loopback API
+  // and an SDP offer is a few kilobytes, not a stream.
+  const MAX_BODY = 256 * 1024;
+  function readBody(req) {
+    if (req.body !== undefined) return Promise.resolve(req.body); // already parsed by the shell
+    return new Promise((resolve, reject) => {
+      let n = 0;
+      const chunks = [];
+      req.on("data", (c) => {
+        // A chunk is a Buffer unless something upstream set an encoding, in which
+        // case it is a string - and `.length` on a string counts characters, so
+        // the cap would be wrong by the multibyte difference.
+        const buf = Buffer.isBuffer(c) ? c : Buffer.from(String(c), "utf8");
+        n += buf.length;
+        if (n > MAX_BODY) return reject(new Error("request body too large"));
+        chunks.push(buf);
+      });
+      req.on("end", () => {
+        const text = Buffer.concat(chunks).toString("utf8");
+        if (!text) return resolve({});
+        try {
+          resolve(JSON.parse(text));
+        } catch {
+          reject(new Error("request body is not JSON"));
+        }
+      });
+      req.on("error", reject);
+    });
+  }
 
   // The catalogue language follows the box, the market does not: the market comes
   // from the streaming token because it is the account's, not the box's.
@@ -205,6 +386,8 @@ module.exports = (host) => {
       idleTimer = null;
       if (signin) signin.controller.abort();
       signin = null;
+      // A shell shutdown must not leave a stream running on a real machine.
+      endSession().catch(() => {});
     },
   };
 };
