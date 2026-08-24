@@ -66,7 +66,7 @@
   "detail": {
     "markSeasonConfirm": "Mark the whole season as watched?",
     "markSeasonUnconfirm": "Mark the whole season as unwatched?",
-    "markSeasonCount": "This moves {n} episodes, and any resume points are lost.",
+    "markSeasonCount": "Episodes affected: {n}. Any resume points are lost.",
     "markSeasonYes": "Yes, the whole season",
     "play": "Play",
     "resume": "Carry on",

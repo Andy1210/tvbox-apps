@@ -267,14 +267,13 @@ describe("marking the whole season", () => {
     await press("detail-watched-season");
     expect(h.marks, "nothing has been asked of the server yet").toEqual([]);
     expect(document.body.textContent).toContain("Mark the whole season as watched?");
-    expect(document.body.textContent, "and it says how much it moves").toContain("2 episodes");
+    expect(document.body.textContent, "and it says how much it moves").toContain("Episodes affected: 2");
     expect(getCurrentFocusKey()).toBe("confirm-no");
   });
 
   it("does nothing when the answer is no", async () => {
     const h = await open();
     await press("detail-watched-season");
-    await settle();
     await press("confirm-no");
     expect(h.marks).toEqual([]);
     expect(ticks()).toBe(0);
@@ -288,7 +287,6 @@ describe("marking the whole season", () => {
     const h = await open();
     expect(ticks()).toBe(0);
     await press("detail-watched-season");
-    await settle();
     await press("confirm-yes");
     expect(h.marks, "the season, not an episode").toEqual([{ id: h.season.id, watched: true }]);
     expect(ticks(), "both episodes").toBe(2);
@@ -483,5 +481,62 @@ describe("a held OK button against a slow server", () => {
     }
     await new Promise((r) => setTimeout(r, 800));
     expect(h.marks.map((m) => m.watched), "one command for the whole hold").toEqual([true]);
+  });
+});
+
+describe("an answer given quickly", () => {
+  it("is not swallowed by the guard that protects the button behind it", async () => {
+    // The panel is the protection for the press that opened it - it opens on
+    // "Cancel" - so the answer itself is not guarded. With the guard on the
+    // write instead of on the press, answering inside the window dropped the
+    // command silently, with the panel already closed.
+    const h = await open();
+    await press("detail-watched-season");
+    await press("confirm-yes");
+    expect(h.marks, "answered at once, and it still counted").toEqual([{ id: h.season.id, watched: true }]);
+    expect(ticks()).toBe(2);
+  });
+});
+
+describe("a season of one episode", () => {
+  it("does not say \"1 episodes\"", async () => {
+    // The count is interpolated into one sentence, and English disagrees with
+    // itself at one. The wording carries no number agreement at all now.
+    const { render, act } = await import("@testing-library/react");
+    const { configureI18n } = await import("@sdk");
+    const { Detail } = await import("../Detail");
+    const { useApp } = await import("../state");
+    const en = (await import("../locales/en.json")).default;
+    const hu = (await import("../locales/hu.json")).default;
+    configureI18n({ hu, en }, { fallback: "en" });
+    const season: MediaItem = { id: "one-season", kind: "season", title: "1. évad" };
+    const only: MediaItem[] = [{ id: "only-ep", kind: "episode", title: "Egyetlen", index: 1, parentIndex: 1 }];
+    useApp.setState({
+      backend: {
+        kind: "plex",
+        item: async () => detailOf(season),
+        children: async () => only,
+        setWatched: async () => {},
+        posterUrl: () => undefined,
+        artUrl: () => undefined,
+        backdropUrl: () => undefined,
+        themeUrl: () => undefined,
+        imageHeaders: () => ({}),
+        markers: async () => [],
+      } as never,
+      screen: { name: "item", itemId: season.id },
+      history: [],
+      failure: null,
+    });
+    render(<Detail itemId={season.id} />);
+    for (let i = 0; i < 4; i++) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await flushFocus();
+    }
+    await press("detail-watched-season");
+    expect(document.body.textContent).not.toContain("1 episodes");
+    expect(document.body.textContent).toContain("Episodes affected: 1");
   });
 });

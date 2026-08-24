@@ -352,6 +352,12 @@ export function Detail({
    * `repeat`. Suppressing a press is the safe direction for a toggle - it
    * withholds a write, it can never cause one.
    *
+   * It guards the PRESS, not the write, and that distinction is a bug fixed:
+   * with it inside `setWatchedOn` an answer given to the season panel within
+   * the window of the press that OPENED it was dropped silently, with the panel
+   * already closed. The panel is that press's protection - it opens on
+   * "Cancel" - so the answer needs none.
+   *
    * `performance.now()` rather than the wall clock: these boxes have no
    * battery-backed clock, so the first NTP correction after a cold boot steps
    * time backwards - and a negative elapsed reads as "too soon" for as long as
@@ -394,11 +400,6 @@ export function Detail({
    * longer the highlighted one.
    */
   const setWatchedOn = async (target: MediaItem, next: boolean, sweep: MediaItem[] = []): Promise<void> => {
-    // The window is pushed FIRST, before any other refusal: a repeat swallowed
-    // by `busy` used not to move it, so on a write slower than the window a
-    // held button admitted a second command and undid the first - measured at a
-    // 600 ms write, [watched, unwatched] from one hold.
-    if (bounced()) return;
     if (!backend || busy || !target.id) return;
     const items = [target, ...sweep.filter((i) => i.id && i.id !== target.id)];
     const before = new Map<string, ViewState>(
@@ -764,7 +765,9 @@ export function Detail({
             {playable && watchTarget && (
               <FocusButton
                 focusKey="detail-watched"
-                onEnter={() => void setWatchedOn(watchTarget, !watched)}
+                onEnter={() => {
+                  if (!bounced()) void setWatchedOn(watchTarget, !watched);
+                }}
                 className="rounded-[1vh] bg-white/10 px-[2vw] py-[1.4vh] text-[2.1vh]"
               >
                 {/* Named, because on a season this button is about ONE episode
