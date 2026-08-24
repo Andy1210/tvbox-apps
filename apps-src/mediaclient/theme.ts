@@ -28,8 +28,16 @@ let silencedByPlayback: string | null = null;
 
 /** Fade over this long rather than cutting, which is startling on a TV. */
 const FADE_MS = 600;
-/** Under the room's conversation, not over it - 0.35 was almost nothing on a TV. */
-const LEVEL = 0.7;
+/**
+ * Under the room's conversation, not over it.
+ *
+ * A level is a judgement about one room and one television, so it is a constant
+ * rather than anything derived: 0.35 was almost nothing on a TV and 0.7 was too
+ * loud, and this sits at 60% of the 0.7. It is amplitude, not loudness - the
+ * step from 0.7 is about 4.4 dB, so a change here reads smaller than the
+ * numbers suggest.
+ */
+const LEVEL = 0.42;
 
 /** Walk an element's volume to `to`, and run `done` when it arrives. */
 function fade(a: HTMLAudioElement, to: number, done?: () => void): () => void {

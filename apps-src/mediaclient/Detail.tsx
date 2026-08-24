@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { FocusContext, doesFocusableExist, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, useBackspace, useI18n } from "@sdk";
 import { Row } from "./Row";
+import { episodeNumber } from "./Tile";
 import { Message } from "./Message";
 import { artworkScale } from "./posters";
 import { CastRow } from "./CastRow";
@@ -10,6 +11,7 @@ import { Reviews } from "./Reviews";
 import { TitleArt } from "./TitleArt";
 import { Summary } from "./Summary";
 import { LanguagePicker } from "./LanguagePicker";
+import { Confirm } from "./Confirm";
 import { Backdrop } from "./Backdrop";
 import { useTheme } from "./theme";
 import { useFocusFallback, useInitialFocus, useScrollToTopOnFirst } from "./focus";
@@ -28,6 +30,12 @@ function runtime(ms: number | undefined, t: (key: string, vars?: Record<string, 
   const m = total % 60;
   return h ? t("detail.runtimeHm", { h: String(h), m: String(m) }) : t("detail.runtimeM", { m: String(m) });
 }
+
+/** The part of an item this screen ever patches by hand. */
+type ViewState = Pick<MediaItem, "viewCount" | "viewOffsetMs">;
+
+/** Two presses closer together than this are one press that bounced. */
+const PRESS_GAP_MS = 400;
 
 /**
  * One film or series.
@@ -81,6 +89,8 @@ export function Detail({
   // Only to re-render while a countdown is running; the value is the clock.
   const [, setTick] = useState(0);
   const [picking, setPicking] = useState(false);
+  /** The season-wide mark, waiting to be answered. */
+  const [confirming, setConfirming] = useState(false);
   const [detail, setDetail] = useState<ItemDetail | null>(null);
   const [busy, setBusy] = useState(false);
   const [children, setChildren] = useState<MediaItem[]>([]);
@@ -93,6 +103,23 @@ export function Detail({
    * did not exist yet.
    */
   const [settled, setSettled] = useState(false);
+
+  /**
+   * View-state changes this screen has made that the server has not answered yet.
+   *
+   * The post-playback refetch above writes `detail` and `children` too, and its
+   * answer is a round trip old: pressing the button while one was in flight had
+   * the tick appear and then vanish as the refetch landed, with the press
+   * already on the server. Kept by id and applied on top of whatever arrives, so
+   * the press wins until it is confirmed or reverted.
+   */
+  const marks = useRef(new Map<string, ViewState>());
+  /** Ids whose write has not answered yet, which are the only marks worth keeping. */
+  const settling = useRef(new Set<string>());
+  const withMarks = <T extends MediaItem>(item: T): T => {
+    const m = marks.current.get(item.id);
+    return m ? { ...item, ...m } : item;
+  };
 
   useEffect(() => {
     if (!backend) return;
@@ -122,6 +149,12 @@ export function Detail({
     setSubLang(undefined);
     setSubId(undefined);
     setPicking(false);
+    setConfirming(false);
+    // Held by id, and an id is only meaningful within one library - but this is
+    // really about the screen having been rebuilt from the server, which is what
+    // a pending patch exists to survive.
+    marks.current.clear();
+    settling.current.clear();
 
     (async () => {
       try {
@@ -210,6 +243,12 @@ export function Detail({
     if (!wasPlaying.current) return;
     wasPlaying.current = false;
     if (!backend || !detail) return;
+    // A settled mark is not truth any more, and playback is what makes newer
+    // truth: an episode marked watched and then stopped ten minutes in came
+    // back with its real resume point, and a mark left applied on top put it
+    // back to nothing - so the tile lost its bar and Play stopped resuming it.
+    // A write still in the air is different and is kept.
+    for (const id of [...marks.current.keys()]) if (!settling.current.has(id)) marks.current.delete(id);
     const kind = detail.kind;
     let live = true;
     void (async () => {
@@ -223,8 +262,11 @@ export function Detail({
               : Promise.resolve(null),
         ]);
         if (!live) return;
-        setDetail(d);
-        if (kids) setChildren(kids);
+        // Under whatever this screen has changed by hand since the request went
+        // out - the answer is a round trip old and would otherwise take a tick
+        // back off that is already on the server.
+        setDetail(withMarks(d));
+        if (kids) setChildren(kids.map(withMarks));
       } catch (e) {
         // Nothing is said about it: the screen it would replace is a correct one
         // that is merely a few minutes old, and a failure screen over it would be
@@ -254,31 +296,135 @@ export function Detail({
   // The focus container IS the scroller here, so one ref serves both.
   const toTop = useScrollToTopOnFirst(ref);
 
-  const watched = (detail?.viewCount ?? 0) > 0;
+  /**
+   * The item the watched button acts on, and where its state is read from.
+   *
+   * On a season that is the EPISODE the page is describing, not the season. A
+   * season carries a `viewCount` of its own that says nothing about "the season
+   * is watched" - Plex rolls a child's scrobble up into it, so it is above zero
+   * after one episode and disagrees with `viewedLeafCount` on 225 of this
+   * library's 400 seasons. The button therefore read "mark as unwatched" with
+   * fifteen episodes to go, and pressing it scrobbled or unscrobbled all of them
+   * at once. Everything else on this screen - the title under the art, the
+   * synopsis, the cast, the scores, the language button - already describes the
+   * highlighted episode.
+   *
+   * Its view state comes from the ROW rather than from `focused`, because only
+   * the row is kept current: the post-playback refetch above replaces `children`
+   * and never `focused`, and `backend.item` answers from a 30 s cache - so after
+   * watching an episode its tile carried a tick while the button was still
+   * offering to mark it watched, two claims about one episode on one screen.
+   *
+   * Null until the highlight has loaded, which is what keeps the button off
+   * rather than pointed at the season: a control that acts on the wrong item is
+   * worse than one that appears a round trip late.
+   */
+  const watchTarget: ItemDetail | MediaItem | null =
+    detail?.kind === "season"
+      ? ((focused && children.find((c) => c.id === focused.id)) ?? focused ?? null)
+      : (detail ?? null);
+  const watched = (watchTarget?.viewCount ?? 0) > 0;
+  /** A season is watched when nothing in it is left, which is what its row says. */
+  const seasonWatched = children.length > 0 && children.every((c) => (c.viewCount ?? 0) > 0);
+
+  /** Overwrite the view state of the listed ids wherever this screen holds it. */
+  const repaint = (state: Map<string, ViewState>): void => {
+    const put = <T extends MediaItem>(item: T): T => {
+      const v = state.get(item.id);
+      return v ? { ...item, ...v } : item;
+    };
+    setDetail((d) => (d && state.has(d.id) ? put(d) : d));
+    setFocused((f) => (f && state.has(f.id) ? put(f) : f));
+    setChildren((kids) => (kids.some((c) => state.has(c.id)) ? kids.map(put) : kids));
+  };
+
+  /**
+   * A remote repeats, so a press that lands twice must not undo itself.
+   *
+   * Measured on the box: two presses 150 ms apart marked and then unmarked, and
+   * the only evidence was a 180 ms flash of the tick - from the sofa, a button
+   * that does nothing. `busy` cannot cover it; the write answers in well under
+   * that against a server on the LAN.
+   *
+   * The window is pushed forward by a REFUSED press as well as an accepted one,
+   * which is what makes a held OK button one command rather than one every
+   * 400 ms: spatial navigation fires on every keydown and does not look at
+   * `repeat`. Suppressing a press is the safe direction for a toggle - it
+   * withholds a write, it can never cause one.
+   *
+   * `performance.now()` rather than the wall clock: these boxes have no
+   * battery-backed clock, so the first NTP correction after a cold boot steps
+   * time backwards - and a negative elapsed reads as "too soon" for as long as
+   * the step lasted, which is both buttons dead with nothing to say why.
+   */
+  const lastPress = useRef(0);
+  /** True when this press is the tail of the last one rather than a new one. */
+  const bounced = (): boolean => {
+    const now = performance.now();
+    const soon = now - lastPress.current < PRESS_GAP_MS;
+    lastPress.current = now;
+    return soon;
+  };
 
   /**
    * Flip watched state, and show it straight away.
    *
-   * The item is patched locally rather than refetched: the server answers the
+   * The items are patched locally rather than refetched: the server answers the
    * scrobble before its own view state has settled, so reading it back returns
    * the OLD value often enough that the button appeared not to work. A refetch
    * on failure would be worse - it would replace a correct optimistic state
    * with a stale one.
+   *
+   * The patch reaches the ROW as well as the button, because the tick somebody
+   * is looking for is on the tile: this screen keeps the children it was built
+   * with for as long as it is up, so marking an episode watched changed the
+   * button's label and nothing else until the screen was left and opened again.
+   * `sweep` is what a season's own button carries - one call moves every episode
+   * on the server, so every tile has to move with it.
+   *
+   * `viewOffsetMs` is cleared in both directions, and that is not tidiness - the
+   * tile draws a progress bar OR a tick, never both, so a half-watched episode
+   * patched with a view count alone still showed the bar and no tick. It matches
+   * the server: measured, a Plex scrobble clears the offset and an unscrobble
+   * clears both.
+   *
+   * The revert is per id and functional rather than a snapshot of the screen:
+   * the cursor moves while the write is in flight, and putting `focused` back as
+   * it was pulled the synopsis, cast and backdrop onto an episode that was no
+   * longer the highlighted one.
    */
-  const toggleWatched = async (): Promise<void> => {
-    if (!backend || !detail || busy) return;
+  const setWatchedOn = async (target: MediaItem, next: boolean, sweep: MediaItem[] = []): Promise<void> => {
+    // The window is pushed FIRST, before any other refusal: a repeat swallowed
+    // by `busy` used not to move it, so on a write slower than the window a
+    // held button admitted a second command and undid the first - measured at a
+    // 600 ms write, [watched, unwatched] from one hold.
+    if (bounced()) return;
+    if (!backend || busy || !target.id) return;
+    const items = [target, ...sweep.filter((i) => i.id && i.id !== target.id)];
+    const before = new Map<string, ViewState>(
+      items.map((i) => [i.id, { viewCount: i.viewCount, viewOffsetMs: i.viewOffsetMs }]),
+    );
+    const after = new Map<string, ViewState>(
+      items.map((i) => [i.id, { viewCount: next ? Math.max(1, i.viewCount ?? 0) : 0, viewOffsetMs: undefined }]),
+    );
     setBusy(true);
-    const next = !watched;
-    setDetail({ ...detail, viewCount: next ? Math.max(1, detail.viewCount ?? 0) : 0 });
+    for (const [id, v] of after) {
+      marks.current.set(id, v);
+      settling.current.add(id);
+    }
+    repaint(after);
     try {
-      await backend.setWatched(detail.id, next);
+      await backend.setWatched(target.id, next);
     } catch (e) {
       log.warn("could not change watched state", e);
-      setDetail(detail); // put the button back where it was
+      for (const id of after.keys()) marks.current.delete(id);
+      repaint(before);
     } finally {
+      for (const id of after.keys()) settling.current.delete(id);
       setBusy(false);
     }
   };
+
   // Arriving from a carry-on-watching tile opens on THAT episode rather than on
   // the play button, so the page is already describing what was pressed.
   // Whatever this screen actually has: the episode someone arrived pointing at,
@@ -337,7 +483,7 @@ export function Detail({
     // armed behind it; the panel's keys are none of the above, so every press
     // it could not resolve threw focus back onto the play button - which is
     // exactly "I cannot navigate in the subtitle list".
-    !playing && !picking,
+    !playing && !picking && !confirming,
   );
 
   /**
@@ -501,6 +647,23 @@ export function Detail({
   return (
     <FocusContext.Provider value={focusKey}>
       <Backdrop item={shown} />
+      {confirming && (
+        <Confirm
+          title={t(seasonWatched ? "detail.markSeasonUnconfirm" : "detail.markSeasonConfirm")}
+          detail={t("detail.markSeasonCount", { n: String(children.length) })}
+          confirmLabel={t("detail.markSeasonYes")}
+          onConfirm={() => {
+            setConfirming(false);
+            void setWatchedOn(detail, !seasonWatched, children);
+            // Back to the button that asked, which the panel took focus from.
+            setFocus("detail-watched-season");
+          }}
+          onClose={() => {
+            setConfirming(false);
+            setFocus("detail-watched-season");
+          }}
+        />
+      )}
       {picking && (
         <LanguagePicker
           version={tracksFrom}
@@ -598,13 +761,37 @@ export function Detail({
                 somewhere else, or abandoned twenty minutes in and not worth
                 resuming, has no other way to be put right - and the carry-on
                 row is built from exactly this state. */}
-            {playable && (
+            {playable && watchTarget && (
               <FocusButton
                 focusKey="detail-watched"
-                onEnter={() => void toggleWatched()}
+                onEnter={() => void setWatchedOn(watchTarget, !watched)}
                 className="rounded-[1vh] bg-white/10 px-[2vw] py-[1.4vh] text-[2.1vh]"
               >
-                {t(watched ? "detail.markUnwatched" : "detail.markWatched")}
+                {/* Named, because on a season this button is about ONE episode
+                    and nothing around it says which: the largest text on the
+                    screen is the series, the episode's own name is a guest's
+                    name at 2vh, and no tile is highlighted while the cursor is
+                    up here. The designation is what the tile captions carry. */}
+                {[episodeNumber(watchTarget), t(watched ? "detail.markUnwatched" : "detail.markWatched")]
+                  .filter(Boolean)
+                  .join(" \u00b7 ")}
+              </FocusButton>
+            )}
+            {/* And the season as a whole, which is what the ONE button used to
+                do to every episode at once while reading as if it were about
+                one. It stays: a season watched on somebody else's television is
+                otherwise sixteen trips into the row and back. It is also what
+                the arrival screen has instead of a Play button and nothing else
+                - Right from Play used to be a dead press there. */}
+            {detail.kind === "season" && children.length > 0 && (
+              <FocusButton
+                focusKey="detail-watched-season"
+                onEnter={() => {
+                  if (!bounced()) setConfirming(true);
+                }}
+                className="rounded-[1vh] bg-white/10 px-[2vw] py-[1.4vh] text-[2.1vh]"
+              >
+                {t(seasonWatched ? "detail.markSeasonUnwatched" : "detail.markSeasonWatched")}
               </FocusButton>
             )}
           </div>
@@ -692,7 +879,8 @@ export function Detail({
               // Whatever this screen actually has above the row. Aiming at a
               // button that is not rendered leaves the app with no origin and
               // swallows the press.
-              for (const key of ["detail-play", "detail-lang", "detail-watched", "lib-arrange"]) {
+              const above = ["detail-play", "detail-lang", "detail-watched", "detail-watched-season", "lib-arrange"];
+              for (const key of above) {
                 if (doesFocusableExist(key)) {
                   setFocus(key);
                   return false;

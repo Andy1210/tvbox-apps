@@ -4,6 +4,7 @@
     "tag": "hu-HU"
   },
   "common": {
+    "cancel": "Mégse",
     "loading": "Betöltés…",
     "done": "Vissza",
     "back": "Vissza"
@@ -63,6 +64,10 @@
     "noCollections": "Ebben a könyvtárban nincsenek gyűjtemények."
   },
   "detail": {
+    "markSeasonConfirm": "Az egész évadot nézettnek jelölöd?",
+    "markSeasonUnconfirm": "Az egész évadot nem nézettnek jelölöd?",
+    "markSeasonCount": "{n} epizódot érint, és a félbehagyottak helye elveszik.",
+    "markSeasonYes": "Igen, az egész évadot",
     "play": "Lejátszás",
     "resume": "Folytatás",
     "seasons": "Évadok",
@@ -76,6 +81,8 @@
     "runtimeM": "{m} p",
     "markWatched": "Jelöld nézettnek",
     "markUnwatched": "Jelöld nem nézettnek",
+    "markSeasonWatched": "Jelöld nézettnek az évadot",
+    "markSeasonUnwatched": "Jelöld nem nézettnek az évadot",
     "inThis": "Tartalma",
     "emptyCollection": "Ebben a gyűjteményben nincs semmi.",
     "emptyPlaylist": "Ez a lejátszási lista üres.",

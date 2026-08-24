@@ -285,3 +285,19 @@ describe("what a sort is called", () => {
     expect((await backend.filterOptions()).map((f) => f.title)).toContain("Műfaj");
   });
 });
+
+describe("the unwatched count a tile now reads as \"finished\"", () => {
+  it("is set for a series and a season and for nothing else", () => {
+    // Jellyfin fills UnplayedItemCount in for a boxset and a playlist as well,
+    // and a tile draws its tick from that count being zero - so a collection
+    // with nothing marked would carry a watched tick that means nothing. The
+    // Plex mapper has always restricted it to the two kinds it describes.
+    const count = (type: string): number | undefined =>
+      toItem({ Id: "1", Name: "x", Type: type, UserData: { UnplayedItemCount: 0 } } as never).unwatchedCount;
+    expect(count("Series")).toBe(0);
+    expect(count("Season")).toBe(0);
+    expect(count("BoxSet")).toBeUndefined();
+    expect(count("Playlist")).toBeUndefined();
+    expect(count("Movie")).toBeUndefined();
+  });
+});
