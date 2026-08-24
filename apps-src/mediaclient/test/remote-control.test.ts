@@ -626,16 +626,23 @@ describe("a command from a controller", () => {
     expect(usePlayer.getState().moving, "the step is given up too").toBeNull();
   });
 
-  it("does not claim a film is starting when one is playing", async () => {
-    // The same window from the other side: pause and play were refusing a film
-    // that really was playing, because the step's claim was still held.
+  it("refuses to pause a film that is about to be replaced", async () => {
+    // `current` is the OUTGOING film for the whole of a step now, so a pause
+    // reaches a film that is a second from being swapped: measured, the assistant
+    // was told it had paused and the television was playing again straight after.
+    // The remote's own keys are swallowed for the same reason.
     usePlayer.setState({
       current: { item: { id: "900" }, decision: {}, markers: [], choice: { version: 0 } } as never,
       state: "playing",
       moving: { id: "e3" } as never,
     });
-    expect(await runCompanionCommand({ path: "/player/playback/pause", params: {} })).toEqual({ ok: true });
-    expect(usePlayer.getState().state).toBe("paused");
+    for (const path of ["pause", "play", "playPause", "seekTo", "stepForward", "stepBack"]) {
+      expect(await runCompanionCommand({ path: `/player/playback/${path}`, params: { queryOffset: "1000" } }), path).toEqual({
+        ok: false,
+        reason: "the box is already changing episode",
+      });
+    }
+    expect(usePlayer.getState().state, "and the film is untouched").toBe("playing");
   });
 
   it("says which of the two it is when a step is refused", async () => {

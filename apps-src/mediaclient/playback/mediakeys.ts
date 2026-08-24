@@ -68,12 +68,13 @@ const ACTIONS = {
  * that is a decision, not a listener.
  */
 export function handleMusicKey(key: string): boolean {
-  // A step between two episodes counts as the film holding the player. `current`
-  // is null for the whole of it, so a single press of the play button during one
-  // started house music over the episode that was arriving - and the film took
-  // the player straight back, leaving the queue claiming to play a song nobody
-  // could hear, in the mini-player, on the now-playing screen and in the report
-  // the shell publishes.
+  // A step between two episodes counts as the film holding the player. A step
+  // that runs with nothing on screen - a spoken "next episode" during the
+  // end-of-episode countdown - leaves `current` null for the whole of it, and one
+  // press of the play button there started house music over the episode that was
+  // arriving; the film then took the player straight back, leaving the queue
+  // claiming to play a song nobody could hear, in the mini-player, on the
+  // now-playing screen and in the report the shell publishes.
   if (usePlayer.getState().current || usePlayer.getState().moving) return false;
   const m = useMusic.getState();
   // Nothing queued: the press is left alone rather than swallowed, so a remote

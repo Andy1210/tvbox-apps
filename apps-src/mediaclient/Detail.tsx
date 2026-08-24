@@ -77,6 +77,7 @@ export function Detail({
   const [focused, setFocused] = useState<ItemDetail | null>(null);
   const [firstChild, setFirstChild] = useState<ItemDetail | null>(null);
   const upNext = usePlayer((s) => s.upNext);
+  const moving = usePlayer((s) => s.moving);
   // Only to re-render while a countdown is running; the value is the clock.
   const [, setTick] = useState(0);
   const [picking, setPicking] = useState(false);
@@ -416,8 +417,25 @@ export function Detail({
    * one started unannounced. It also left the fallback focus key pointing at a
    * tile that was never mounted, so the first press during that window was
    * swallowed. The row is what gives the countdown both a place and a key.
+   *
+   * `moving` for the same reason one step further on: a spoken "next episode"
+   * during the countdown cancels it and starts a step, and on a film opened from
+   * a playlist that emptied the only row on the page - the person watched it
+   * vanish while nothing started. Scoped to THIS page, because the store is
+   * global and any childless detail page would otherwise draw a row holding an
+   * episode of another series - but scoped to the page's own LIST as well as to
+   * parentage, or the scoping undoes the fix: a film has no parent to match (Plex
+   * gives a movie no `parentRatingKey`), so parentage alone never fires on the
+   * one page this exists for, and where it does fire `children` is non-empty and
+   * the fallback is unreachable.
    */
-  const rowItems = children.length ? children : upNext ? [upNext.item] : [];
+  const rowItems = children.length
+    ? children
+    : upNext
+      ? [upNext.item]
+      : moving && (moving.parentId === itemId || order.some((q) => q.id === moving.id))
+        ? [moving]
+        : [];
   /**
    * What Play starts.
    *
@@ -683,7 +701,11 @@ export function Detail({
               return true;
             }}
             countdownFor={
-              upNext ? { id: upNext.item.id, seconds: Math.max(0, Math.ceil((upNext.at - Date.now()) / 1000)) } : null
+              upNext
+                ? { id: upNext.item.id, seconds: Math.max(0, Math.ceil((upNext.at - Date.now()) / 1000)) }
+                : moving
+                  ? { id: moving.id, seconds: "…" }
+                  : null
             }
             onFocusItem={(item) => {
               if (item.kind !== "episode" || !backend) return;

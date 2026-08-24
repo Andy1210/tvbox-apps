@@ -369,7 +369,15 @@ function music(): boolean {
  */
 const SIGNS_OUT = new Set(["msg-signin", "settings-signout"]);
 
-/** Said out loud, so the two reasons a step is refused are two sentences. */
+/**
+ * Said out loud, so the two reasons a step is refused are two sentences.
+ *
+ * `STEPPING` also answers the transport paths while a step runs, and that is not
+ * pedantry: `current` is the OUTGOING film for the whole of one now, so a pause
+ * went to a film that was about to be replaced - measured, the assistant was told
+ * it had paused and the television was playing a second later. The remote's keys
+ * are swallowed for the same reason.
+ */
 const STEPPING = "the box is already changing episode";
 const STARTING = "the box has not shown this one yet";
 
@@ -501,7 +509,11 @@ async function navigate(what: string): Promise<CommandResult> {
     // The same as the remote's Back during a step: give the step up and stay put.
     // Navigating as well would take the page the person was on as well as the
     // episode, off one press.
-    if (step) return ok;
+    //
+    // And an honest answer when the cancel did not take: inside the hand-over it
+    // stands down deliberately, so answering ok told the assistant a step had been
+    // given up while it went on to start the episode.
+    if (step) return usePlayer.getState().moving ? no("the box is too far into the change to stop it") : ok;
     app.back();
     return ok;
   }
@@ -668,6 +680,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         else if (m.state === "stopped") await m.playAt(m.index);
         return ok;
       }
+      if (usePlayer.getState().moving) return no(STEPPING);
       if (!p.current) return no(stepRefusal() ?? "nothing is playing");
       if (p.state === "paused") p.togglePause();
       return ok;
@@ -676,6 +689,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         if (useMusic.getState().state === "playing") useMusic.getState().toggle();
         return ok;
       }
+      if (usePlayer.getState().moving) return no(STEPPING);
       if (!p.current) return no(stepRefusal() ?? "nothing is playing");
       if (p.state === "playing") p.togglePause();
       return ok;
@@ -686,6 +700,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         useMusic.getState().toggle();
         return ok;
       }
+      if (usePlayer.getState().moving) return no(STEPPING);
       if (!p.current) return no(stepRefusal() ?? "nothing is playing");
       p.togglePause();
       return ok;
@@ -699,7 +714,10 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       // claim is still held. Treating the claim as "nothing is playing" answered
       // ok without calling stop at all - the film played on and the house was
       // told it had stopped, which is the one thing this file's header forbids.
-      if (usePlayer.getState().moving) usePlayer.getState().cancelMove();
+      // Forced, because this is an instruction to stop: a plain cancel stands
+      // down once the hand-over has begun, and the box was then told to stop,
+      // answered ok, and started the next episode a second later anyway.
+      if (usePlayer.getState().moving) usePlayer.getState().cancelMove(true);
       if (!usePlayer.getState().current) return ok; // already what was asked for
       await usePlayer.getState().stop();
       return ok;
@@ -765,6 +783,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         useMusic.getState().seek(Math.max(0, to));
         return ok;
       }
+      if (usePlayer.getState().moving) return no(STEPPING);
       if (!p.current) return no(stepRefusal() ?? "nothing is playing");
       const to = Number(arg(cmd, "offset"));
       if (!Number.isFinite(to)) return no("no offset in the command");
@@ -776,6 +795,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         useMusic.getState().seek(useMusic.getState().positionMs + 30_000);
         return ok;
       }
+      if (usePlayer.getState().moving) return no(STEPPING);
       if (!p.current) return no(stepRefusal() ?? "nothing is playing");
       p.seekBy(30_000);
       return ok;
@@ -784,6 +804,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         useMusic.getState().seek(Math.max(0, useMusic.getState().positionMs - 30_000));
         return ok;
       }
+      if (usePlayer.getState().moving) return no(STEPPING);
       if (!p.current) return no(stepRefusal() ?? "nothing is playing");
       p.seekBy(-30_000);
       return ok;

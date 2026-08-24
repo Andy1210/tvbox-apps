@@ -60,9 +60,8 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   const screen = useApp((s) => s.screen);
   const boot = useApp((s) => s.boot);
   const back = useApp((s) => s.back);
-  // A step between two episodes counts as playing: the player holds nothing for
-  // the length of the move, so without it the browsing screens came back for a
-  // second - drawn over the transition, and taking the presses meant for it.
+  // What the browsing screens are hidden behind, and the same expression the
+  // home screen's portalled backdrop is dropped on - see the note on the hook.
   const playing = useShowingPlayer();
 
   // The same navigation ticks the launcher uses, honouring the same box-wide
