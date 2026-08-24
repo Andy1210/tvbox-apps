@@ -5,8 +5,12 @@
     "hu": "M\u00e9dia",
     "en": "Media"
   },
-  "version": "0.62.2",
+  "version": "0.62.3",
   "changelog": [
+    {
+      "version": "0.62.3",
+      "notes": "Changing episode no longer blanks the television twice. The picture you are watching stays up while the next one is fetched, so the screen changes once, when the new episode appears - and if it cannot be fetched, the one you were watching simply carries on instead of stopping into a black screen."
+    },
     {
       "version": "0.62.2",
       "notes": "An episode started by voice leaves the series' episode list on screen behind it, so when one ends the countdown to the next appears there instead of on this app's home page. The next- and previous-episode buttons take one press each: the screen says which episode is starting, and presses that arrive while it loads are ignored rather than stepping another episode every time. And on the music player the queue comes back the way it goes away - the song narrows and the list opens beside it, instead of appearing at the left of the screen and sliding across."

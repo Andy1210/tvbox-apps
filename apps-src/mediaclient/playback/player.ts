@@ -111,7 +111,15 @@ interface PlayerState {
   /** Leave the cursor where the film actually is. */
   cancelScrub(): void;
   seekTo(ms: number): void;
-  stop(): Promise<void>;
+  /**
+   * End what is playing.
+   *
+   * `handOver` is for the one caller that is about to give the box a new file:
+   * it does the bookkeeping - the last progress report, the server session, the
+   * event subscription - and leaves the box, the claim and `current` alone. See
+   * the note in `play`.
+   */
+  stop(opts?: { handOver?: boolean }): Promise<void>;
   showOverlay(on: boolean): void;
   /**
    * How far the subtitles are shifted, in seconds.
@@ -176,6 +184,28 @@ interface PlayerState {
 }
 
 let scheduler: PlaybackScheduler | null = null;
+/** What the store says when the box is showing nothing. */
+const STOPPED = {
+  current: null,
+  state: "stopped",
+  positionMs: 0,
+  seekTargetMs: null,
+  seekFromMs: null,
+  scrubMs: null,
+  overlay: false,
+  buffering: false,
+} as const satisfies Partial<PlayerState>;
+
+/**
+ * Which step a claim belongs to.
+ *
+ * Not the item: with the outgoing film left on screen, a step that was given up
+ * and the step after it are both aimed at the SAME episode object - so comparing
+ * items let an abandoned call's cleanup clear a live claim, which is the failure
+ * this guard exists for.
+ */
+let moveSeq = 0;
+
 /** A restart is in flight. See changeTracks. */
 let restarting = false;
 let upNextTimer: ReturnType<typeof setTimeout> | null = null;
@@ -256,6 +286,9 @@ export const usePlayer = create<PlayerState>((set, get) => ({
 
   cancelMove() {
     if (!get().moving) return;
+    // The sequence moves as well, so the cancelled step's own cleanup cannot
+    // reach a claim taken after it.
+    moveSeq += 1;
     // The request cannot be unsent, so what is cancelled is the CLAIM: the token
     // moves, and `play` checks it before it tells the box anything. Without that
     // the episode somebody had just pressed out of arrived on screen seconds
@@ -277,9 +310,10 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // comes back over a black screen with the buttons focusable again, and a
     // press there stepped another episode.
     if (stillSettling()) return undefined;
+    const mine = ++moveSeq;
     set({ moving: item });
     const giveUp = setTimeout(() => {
-      if (get().moving === item) set({ moving: null });
+      if (moveSeq === mine) set({ moving: null });
     }, MOVE_GIVE_UP_MS);
     try {
       // The queue travels with the move, or stepping once through a playlist
@@ -296,7 +330,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       // the screens came back over a stopped player and that episode arrived
       // underneath them.
       clearTimeout(giveUp);
-      if (get().moving === item) set({ moving: null });
+      if (moveSeq === mine) set({ moving: null });
     }
     return item;
   },
@@ -321,13 +355,86 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     playToken += 1;
     const forThis = playToken;
 
-    // Whatever was playing gets its last word before anything else starts.
-    await get().stop();
+    // THE NEW FILE IS RESOLVED BEFORE THE OLD ONE IS TOUCHED, and that ordering
+    // is the whole of a fix rather than a tidy-up.
+    //
+    // The box keeps its display mode for as long as something is claiming it, and
+    // the shell's own `launchMpv` relies on that: it stops the running mpv with
+    // `keepMode` set, because "releasing in between would blank the TV twice".
+    // Telling the box to stop FIRST threw that away - the mode went back to the
+    // UI's, then the new file claimed it again, and a mode switch blanks HDMI for
+    // one to three seconds. Measured on a box's own compositor log: 1920x1080@24
+    // on play, 1360x768@60 on stop, and back. Two blanks per episode change, and
+    // the second one is where the new episode's first seconds went.
+    //
+    // Resolving first buys the other half too: a stream that cannot be resolved
+    // now leaves the film that is playing alone, where before the box had already
+    // been stopped by the time the request failed.
+    const session = randomSession();
+    const choice = {
+      version: opts?.version ?? 0,
+      audio: opts?.audio,
+      subtitle: opts?.subtitle,
+      maxBitrateKbps: opts?.maxBitrateKbps,
+    };
+    let decision: StreamDecision;
+    let markers: Marker[] = [];
+    let detail: ItemDetail | undefined;
+    try {
+      [decision, markers, detail] = await Promise.all([
+        backend.resolveStream(item.id, {
+          session,
+          panel: tv.panel ?? null,
+          version: choice.version,
+          // Named by the caller or not at all. `changeTracks` reads it off the
+          // item that is playing and passes it in, which is the only case there
+          // is - a version SWITCH. Reading it here from `current` would now be
+          // reading the OUTGOING film, because it is still on screen.
+          partId: opts?.partId,
+          audio: choice.audio,
+          subtitle: choice.subtitle,
+          maxBitrateKbps: choice.maxBitrateKbps,
+        }),
+        backend.markers(item.id).catch(() => []),
+        // Needed for the track menu, and cheap: the same document the decision
+        // path already fetched is still cached.
+        backend.item(item.id).catch(() => undefined),
+      ]);
+    } catch (e) {
+      log.warn("could not resolve a stream", e);
+      set({ error: "unplayable" });
+      return;
+    }
 
-    // Somebody gave this up while the previous episode was being closed off.
-    // `currentBackend` is assigned below rather than above, so a sign-out that
-    // landed during the teardown is not quietly undone by this call.
-    if (forThis !== playToken) return abandoned(forThis, set, get);
+    // Nobody is waiting for this any more. Nothing has been torn down yet, so
+    // there is nothing to put back - only the session to close, or it sits on the
+    // server as a transcode nothing will ever stop. `abandoned` must NOT run
+    // here: the film still playing owns the running order.
+    if (forThis !== playToken) {
+      if (decision.session) void backend.endSession(decision.session).catch(() => {});
+      return;
+    }
+
+    // Now the outgoing film's last word - its progress and its session - without
+    // telling the box anything. The picture stays up until `tv.play` below
+    // replaces it, so there is no gap to look at and no second mode change.
+    await get().stop({ handOver: true });
+
+    // Somebody gave this up while that was in flight. Here `abandoned` IS right:
+    // the outgoing film has been closed off, and what is left in the store is a
+    // plan nobody is following.
+    if (forThis !== playToken) {
+      if (decision.session) void backend.endSession(decision.session).catch(() => {});
+      // The hand-over deliberately left the box playing and the store saying so,
+      // because something was about to replace it. Nothing will now, so this is
+      // where it really stops - and the store has to say that too, or the page
+      // goes on drawing an overlay for a film the box is no longer showing.
+      releasePlayer("video");
+      bridge()?.stop?.();
+      startedAt = 0;
+      set(STOPPED);
+      return abandoned(forThis, set, get);
+    }
     currentBackend = backend;
     // The episodes either side, worked out HERE rather than by whoever pressed
     // play. A film can be started from a season screen, a carry-on-watching
@@ -359,55 +466,6 @@ export const usePlayer = create<PlayerState>((set, get) => ({
         .catch(() => {
           /* no neighbours is the same as not knowing them */
         });
-    }
-    const session = randomSession();
-    const choice = {
-      version: opts?.version ?? 0,
-      audio: opts?.audio,
-      subtitle: opts?.subtitle,
-      maxBitrateKbps: opts?.maxBitrateKbps,
-    };
-    let decision: StreamDecision;
-    let markers: Marker[] = [];
-    let detail: ItemDetail | undefined;
-    try {
-      [decision, markers, detail] = await Promise.all([
-        backend.resolveStream(item.id, {
-          session,
-          panel: tv.panel ?? null,
-          version: choice.version,
-          // Known only once this title's files have been listed, which is the
-          // second play onwards - a version SWITCH. The first play has nothing
-          // to name yet and asks for the position it was given.
-          partId: opts?.partId ?? get().current?.detail?.versions[choice.version]?.partId,
-          audio: choice.audio,
-          subtitle: choice.subtitle,
-          maxBitrateKbps: choice.maxBitrateKbps,
-        }),
-        backend.markers(item.id).catch(() => []),
-        // Needed for the track menu, and cheap: the same document the decision
-        // path already fetched is still cached.
-        backend.item(item.id).catch(() => undefined),
-      ]);
-    } catch (e) {
-      log.warn("could not resolve a stream", e);
-      set({ error: "unplayable" });
-      return;
-    }
-
-    // Nobody is waiting for this any more, so the box is not told and the screen
-    // is not taken. Checked here rather than after the state is set, because the
-    // one thing that must not happen is a film appearing over what somebody went
-    // to instead - and the session that was just opened is closed, or it sits on
-    // the server as a transcode nothing will ever stop.
-    if (forThis !== playToken) {
-      if (decision.session) void backend.endSession(decision.session).catch(() => {});
-      // The state reset belongs on BOTH checks, and this is the longer window of
-      // the two - three parallel round trips against the one the teardown costs.
-      // By here the queue and the neighbours have been set for an item that never
-      // played, so leaving them made a "next episode" answer ok and start the one
-      // AFTER the episode somebody had just pressed Back out of.
-      return abandoned(forThis, set, get);
     }
 
     // An explicit start wins over both: a controller that names an offset has
@@ -622,28 +680,30 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     void scheduler?.flush("seek");
   },
 
-  async stop() {
+  async stop(opts) {
     if (!get().current) return;
+    const handOver = opts?.handOver === true;
     // Nothing was asked for, so nothing is settling. Without this a film that
-    // never appeared left the window open with the box showing nothing.
-    startedAt = 0;
+    // never appeared left the window open with the box showing nothing. A
+    // hand-over is the opposite - something WAS asked for - and the window is
+    // stamped again when the new file's `current` goes in.
+    if (!handOver) startedAt = 0;
     // Before the bridge call, so an event racing the stop is already ignored.
-    releasePlayer("video");
-    bridge()?.stop?.();
+    // Neither happens on a hand-over: the box is about to be given a new file,
+    // and telling it to stop first is what makes the television blank twice.
+    if (!handOver) {
+      releasePlayer("video");
+      bridge()?.stop?.();
+    }
     unsubscribePlayer?.();
     unsubscribePlayer = null;
     await scheduler?.end();
     scheduler = null;
-    set({
-      current: null,
-      state: "stopped",
-      positionMs: 0,
-      seekTargetMs: null,
-      seekFromMs: null,
-      scrubMs: null,
-      overlay: false,
-      buffering: false,
-    });
+    // The picture stays until the new one replaces it, so the store keeps saying
+    // what the box is really showing. Clearing it here left the page with nothing
+    // on it for the length of the swap.
+    if (handOver) return;
+    set(STOPPED);
   },
 
   showOverlay(on) {
@@ -677,10 +737,12 @@ export const usePlayer = create<PlayerState>((set, get) => ({
 /**
  * Whether the box is showing a film - a step between two episodes included.
  *
- * What the browsing screens key on, rather than `current`: for the length of a
- * prev/next step the player holds nothing at all, and a screen that reads that
- * as "playback is over" wakes up behind the transition. Two measured
- * consequences: the season page refetches its episodes and arms its focus
+ * What the browsing screens key on, rather than `current`. A step keeps the
+ * outgoing picture up now, so the two agree for almost all of one - but not for
+ * the instant a step that was given up puts the store back to stopped while the
+ * claim is still held, and a screen that reads that as "playback is over" wakes
+ * up behind it. Two measured consequences from when the gap was seconds rather
+ * than a frame: the season page refetches its episodes and arms its focus
  * fallback, so a press lands on a tile nobody can see; and the home screen's
  * backdrop - which is portalled OUT of the hidden page, so nothing the page does
  * to itself reaches it - paints four full-screen layers over the picture.

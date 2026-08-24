@@ -45,6 +45,8 @@ const KIDS = [ep("e1"), ep("e2"), ep("e3"), ep("e4"), ep("e5")];
 /** How long the server takes to answer for the episode being moved to. */
 let resolveMs = 0;
 let started: string[] = [];
+/** Every time the box was told to stop, which is what releases the display mode. */
+let boxStops = 0;
 let listeners: ((ev: { type: string; reason?: string }) => void)[] = [];
 
 /**
@@ -83,11 +85,14 @@ function fakeBackend(): MediaBackend {
 
 beforeEach(() => {
   started = [];
+  boxStops = 0;
   listeners = [];
   resolveMs = 0;
   (globalThis as unknown as { tvbox: unknown }).tvbox = {
     play: (url: string) => started.push(url),
-    stop: () => {},
+    stop: () => {
+      boxStops += 1;
+    },
     pause: () => {},
     resume: () => {},
     onPlayer: (fn: (ev: { type: string; reason?: string }) => void) => {
@@ -130,15 +135,16 @@ describe("stepping to the next episode", () => {
     // window exists at all.
     resolveMs = 40;
     await remote.ok();
-    // Mid-move: nothing is playing and the next one has not arrived.
-    expect(usePlayer.getState().current).toBeNull();
+    // Mid-step the OUTGOING film is still what the box is showing.
+    expect(usePlayer.getState().current?.item.id).toBe("e2");
+    expect(usePlayer.getState().moving?.id).toBe("e3");
 
-    // Two more asks inside the window. The button itself is unmounted with the
-    // overlay, so this is the shape they arrive in: the button once it has come
-    // back, and a phone's or a spoken skipNext, which go straight here.
+    // Two more asks inside the window. The button itself is drawn for the film
+    // that is still on, so this is the shape they arrive in: a press on it, and a
+    // phone's or a spoken skipNext, which go straight here.
     const second = await usePlayer.getState().playSibling("next");
     const third = await usePlayer.getState().playSibling("next");
-    expect([second, third], "a move in flight refuses another").toEqual([undefined, undefined]);
+    expect([second, third], "a step in flight refuses another").toEqual([undefined, undefined]);
 
     await settle(200);
     expect(usePlayer.getState().current?.item.id, "one press, one episode").toBe("e3");
@@ -149,28 +155,34 @@ describe("stepping to the next episode", () => {
     expect(started).toEqual(["http://server/e2.mkv", "http://server/e3.mkv"]);
   });
 
-  it("still counts as showing a film while it moves", async () => {
-    // The screens behind key on this, and for the length of the move the player
-    // holds nothing: read as "playback is over" they wake up behind the
-    // transition. The home screen's backdrop is the sharp one - it is portalled
-    // out of the hidden page, so nothing the page does to itself reaches it, and
-    // four full-screen layers land over the picture.
+  it("never tells the box to stop, so the television changes mode once", async () => {
+    // The box keeps its display mode while something claims it, and the shell's
+    // own relaunch stops the running mpv with `keepMode` set for exactly that
+    // reason. Telling the box to stop first threw it away: the mode went back to
+    // the UI's and the new file claimed it again, and a mode switch blanks HDMI
+    // for one to three seconds. Two blanks per episode change, and the second one
+    // is where the new episode's first seconds went.
     const { container } = render(<Showing />);
     await act(async () => {
       await usePlayer.getState().play(fakeBackend(), KIDS[1]);
       onScreen();
     });
-    expect(container.textContent).toBe("showing");
+    expect(boxStops, "nothing has been stopped yet").toBe(0);
 
     resolveMs = 40;
-    const move = usePlayer.getState().playSibling("next");
+    const step = usePlayer.getState().playSibling("next");
     await settle(10);
-    expect(usePlayer.getState().current, "nothing is playing at this instant").toBeNull();
-    expect(container.textContent, "and the screens must stay out of the way").toBe("showing");
+    // The outgoing film is still on screen and still playing, which is what
+    // leaves the mode claimed - and what the browsing screens key on.
+    expect(usePlayer.getState().current?.item.id).toBe("e2");
+    expect(container.textContent).toBe("showing");
 
     await act(async () => {
-      await move;
+      await step;
     });
+    expect(usePlayer.getState().current?.item.id).toBe("e3");
+    expect(started).toEqual(["http://server/e2.mkv", "http://server/e3.mkv"]);
+    expect(boxStops, "the box was handed the new file, never told to stop").toBe(0);
     expect(container.textContent).toBe("showing");
   });
 
@@ -251,21 +263,20 @@ describe("stepping to the next episode", () => {
       onScreen();
       void usePlayer.getState().playSibling("next"); // held open
       await vi.advanceTimersByTimeAsync(0);
-      const abandoned = usePlayer.getState().moving;
-      expect(abandoned?.id).toBe("e3");
+      expect(usePlayer.getState().moving?.id).toBe("e3");
 
       await vi.advanceTimersByTimeAsync(12_000); // given up on
       expect(usePlayer.getState().moving).toBeNull();
 
       void usePlayer.getState().playSibling("next"); // a second step, also held
       await vi.advanceTimersByTimeAsync(0);
-      const live = usePlayer.getState().moving;
-      expect(live, "the second step holds the claim").toBeTruthy();
-      expect(live).not.toBe(abandoned);
+      expect(usePlayer.getState().moving?.id, "the second step holds the claim").toBe("e3");
 
       gates[0]?.(); // the abandoned request lands at last
       await vi.advanceTimersByTimeAsync(50);
-      expect(usePlayer.getState().moving, "and the claim is still the second step's").toBe(live);
+      // Identity cannot tell the two apart - the film never changed, so both
+      // steps are aimed at the same episode - so the claim is held by sequence.
+      expect(usePlayer.getState().moving, "and the claim is still the second step's").not.toBeNull();
       expect(started, "nor does the abandoned episode reach the box").toEqual(["http://server/e2.mkv"]);
       gates[1]?.();
       await vi.advanceTimersByTimeAsync(50);
@@ -274,11 +285,11 @@ describe("stepping to the next episode", () => {
     }
   });
 
-  it("hands the screen back when Back gives up a step, and drops what lands later", async () => {
-    // Back is the only key left during a step, and eating it for as long as the
-    // server takes is a dead remote. It cannot unsend the request, so what it
-    // cancels is the claim - and the film that was on its way must not appear
-    // over whatever the person went to instead.
+  it("leaves the film that is playing alone when Back gives a step up", async () => {
+    // Back is the only key left during a step, and it cannot unsend the request -
+    // so what it cancels is the claim. Nothing has been torn down at that point
+    // any more, which is the whole shape of the fix: the episode somebody changed
+    // their mind about never arrives, and the one they were watching carries on.
     const gates: (() => void)[] = [];
     let asked = 0;
     const one = fakeBackend() as unknown as { resolveStream(i: string): Promise<unknown> };
@@ -290,20 +301,22 @@ describe("stepping to the next episode", () => {
           : one.resolveStream(id),
     } as unknown as MediaBackend;
 
-    await usePlayer.getState().play(gated, KIDS[1]);
+    await usePlayer.getState().play(gated, KIDS[1], { queue: KIDS });
     onScreen();
     const step = usePlayer.getState().playSibling("next");
     await settle();
     expect(usePlayer.getState().moving?.id).toBe("e3");
 
     usePlayer.getState().cancelMove();
-    expect(usePlayer.getState().moving, "the screens come back at once").toBeNull();
+    expect(usePlayer.getState().moving, "the claim goes at once").toBeNull();
 
     gates[0]?.();
     await step;
     await settle();
-    expect(usePlayer.getState().current, "and nothing arrives after it").toBeNull();
-    expect(started, "the box was never told to play it").toEqual(["http://server/e2.mkv"]);
+    expect(usePlayer.getState().current?.item.id, "and the film carries on").toBe("e2");
+    expect(usePlayer.getState().siblings.next?.id, "with its neighbours").toBe("e3");
+    expect(started, "the box was never told to play the other one").toEqual(["http://server/e2.mkv"]);
+    expect(boxStops, "nor to stop this one").toBe(0);
   });
 
   it("gives the buttons back if the box never says it started", async () => {
@@ -376,12 +389,12 @@ describe("stepping to the next episode", () => {
     expect(started, "and the episode never reached the box").toEqual(["http://server/e2.mkv"]);
   });
 
-  it("leaves nothing to step through when the step is given up mid-resolve either", async () => {
-    // The longer of the two windows - three parallel round trips against the one
-    // the teardown costs - and by then the queue and the neighbours have been set
-    // for an item that never played. Measured before this: Back on the way to e3,
-    // then "next episode" started e4, skipping the one that had just been
-    // cancelled.
+  it("keeps the outgoing film's running order when a step is given up mid-resolve", async () => {
+    // The resolve is the longer of the two windows, and nothing has been torn
+    // down inside it - so a cancel there must leave the film that is playing
+    // exactly as it was, order and all. Before the reorder this was the window in
+    // which the queue and the neighbours had already been replaced for an item
+    // that never played, and "next episode" then started the one after it.
     const gates: (() => void)[] = [];
     let asked = 0;
     const one = fakeBackend() as unknown as { resolveStream(i: string): Promise<unknown> };
@@ -402,9 +415,9 @@ describe("stepping to the next episode", () => {
     await step;
     await settle();
 
-    expect(usePlayer.getState().current).toBeNull();
-    expect(usePlayer.getState().siblings, "no neighbours for an item that never played").toEqual({});
-    expect(usePlayer.getState().queue).toBeUndefined();
+    expect(usePlayer.getState().current?.item.id).toBe("e2");
+    expect(usePlayer.getState().siblings).toEqual({ prev: KIDS[0], next: KIDS[2] });
+    expect(usePlayer.getState().queue?.length).toBe(5);
     expect(started).toEqual(["http://server/e2.mkv"]);
   });
 
@@ -542,24 +555,5 @@ describe("stepping to the next episode", () => {
     expect(usePlayer.getState().current?.item.id, "the later film is still on").toBe("e2");
     expect(usePlayer.getState().siblings.next?.id, "with its neighbours intact").toBe("e3");
     expect(usePlayer.getState().queue?.length, "and its running order").toBe(5);
-  });
-
-  it("says on screen which episode is starting", async () => {
-    const { container } = render(<Player />);
-    await act(async () => {
-      await usePlayer.getState().play(fakeBackend(), KIDS[1]);
-      onScreen();
-    });
-    await settle();
-    await setFocus("pb-next");
-
-    resolveMs = 40;
-    await remote.ok();
-    // The screen behind must not come back either, which is what the browsing
-    // screens key on: a film that is on its way counts as playing.
-    expect(usePlayer.getState().current === null && usePlayer.getState().moving !== null).toBe(true);
-    expect(container.textContent).toContain("A Series");
-    expect(container.textContent).toContain(en.player.starting);
-    await settle(200);
   });
 });
