@@ -10,7 +10,7 @@ import { create } from "zustand";
 import type { ItemDetail, MediaBackend, Marker, MediaItem, PlaybackState, StreamDecision } from "../backends/types";
 import { PlaybackScheduler, type NowPlayingReport } from "./scheduler";
 import { onRelease, onResume } from "../lifecycle";
-import { claimPlayer, heldByAnother, releasePlayer, whenPlayerLost } from "./owner";
+import { claimPlayer, heldByAnother, ownsPlayer, releasePlayer, whenPlayerLost } from "./owner";
 import { log } from "../redact";
 
 /** Auto-advance starts the next episode this long before the file truly ends. */
@@ -354,6 +354,11 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // the episode landed on top of them anyway.
     playToken += 1;
     const forThis = playToken;
+    // Before the resolve, not after it. The auto-advance timer is five seconds
+    // and the resolve is three round trips, so left armed it fired first, bumped
+    // the token and abandoned the call it raced: measured, a film asked for by
+    // voice during the countdown was replaced by the next episode.
+    get().cancelUpNext();
 
     // THE NEW FILE IS RESOLVED BEFORE THE OLD ONE IS TOUCHED, and that ordering
     // is the whole of a fix rather than a tidy-up.
@@ -418,6 +423,11 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // Now the outgoing film's last word - its progress and its session - without
     // telling the box anything. The picture stays up until `tv.play` below
     // replaces it, so there is no gap to look at and no second mode change.
+    //
+    // Which film that is, remembered for the abandon below: the last word is two
+    // server round trips and anything can have taken the box by the time it
+    // returns.
+    const outgoing = get().current?.item.id;
     await get().stop({ handOver: true });
 
     // Somebody gave this up while that was in flight. Here `abandoned` IS right:
@@ -429,10 +439,19 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       // because something was about to replace it. Nothing will now, so this is
       // where it really stops - and the store has to say that too, or the page
       // goes on drawing an overlay for a film the box is no longer showing.
-      releasePlayer("video");
-      bridge()?.stop?.();
-      startedAt = 0;
-      set(STOPPED);
+      //
+      // Only what this call was holding, and that is not a formality: these two
+      // lines used to run at the top of `stop`, before any await, where nothing
+      // could have overtaken them. They now land two round trips later. Measured
+      // both ways - a newer film that had really started was torn off the screen,
+      // and a song that had taken the player was silenced while the music store
+      // went on saying it was playing.
+      if (ownsPlayer("video") && get().current?.item.id === outgoing) {
+        releasePlayer("video");
+        bridge()?.stop?.();
+        startedAt = 0;
+        set(STOPPED);
+      }
       return abandoned(forThis, set, get);
     }
     currentBackend = backend;
@@ -443,7 +462,6 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // not the others.
     orderToken = forThis;
     set({ siblings: {}, subDelaySec: 0 });
-    get().cancelUpNext();
 
     const queue = opts?.queue;
     const inQueue = queue ? queue.findIndex((q) => q.id === item.id) : -1;
@@ -697,8 +715,13 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     }
     unsubscribePlayer?.();
     unsubscribePlayer = null;
-    await scheduler?.end();
-    scheduler = null;
+    // Compared after the await, because ending one is two server round trips and
+    // a newer film can have installed its own in the meantime: nulling that one
+    // left its progress unreported, its transcode un-pinged and nothing able to
+    // reach the timer still running behind it.
+    const mine = scheduler;
+    await mine?.end();
+    if (scheduler === mine) scheduler = null;
     // The picture stays until the new one replaces it, so the store keeps saying
     // what the box is really showing. Clearing it here left the page with nothing
     // on it for the length of the swap.
@@ -735,27 +758,28 @@ export const usePlayer = create<PlayerState>((set, get) => ({
 }));
 
 /**
- * Whether the box is showing a film - a step between two episodes included.
+ * Whether the box is showing a film.
  *
- * What the browsing screens key on, rather than `current`. A step keeps the
- * outgoing picture up now, so the two agree for almost all of one - but not for
- * the instant a step that was given up puts the store back to stopped while the
- * claim is still held, and a screen that reads that as "playback is over" wakes
- * up behind it. Two measured consequences from when the gap was seconds rather
- * than a frame: the season page refetches its episodes and arms its focus
- * fallback, so a press lands on a tile nobody can see; and the home screen's
- * backdrop - which is portalled OUT of the hidden page, so nothing the page does
- * to itself reaches it - paints four full-screen layers over the picture.
+ * One expression in one place because two things have to agree about it: the
+ * browsing screens are hidden on this, and the home screen's backdrop - which is
+ * portalled OUT of the hidden page, so nothing the page does to itself reaches
+ * it - is dropped on this. A backdrop that outlives the hiding paints four
+ * full-screen layers over the picture; one that goes early leaves the rows on a
+ * black page.
  *
- * One expression in one place because those two have to agree: the screens are
- * hidden on this and the portalled backdrop is dropped on this, and a backdrop
- * that outlives the hiding is the bug, while one that goes early leaves the rows
- * on a black page. `useTheme` asks the same question for consistency rather than
- * for a hole of its own - what keeps a theme out of the gap is that playback
- * already silenced it.
+ * `current` alone, and a step in flight is deliberately NOT counted. It was, for
+ * as long as a step tore the picture down: the screens had to stay hidden over
+ * the gap. A step keeps the outgoing picture up now, so `current` covers that -
+ * and where a step really does run with nothing playing, which is a spoken "next
+ * episode" during the end-of-episode countdown, the right thing is the opposite.
+ * Hiding then left the television black with the countdown behind it, where
+ * leaving the season list up shows exactly what is happening.
+ *
+ * `useTheme` asks the same question for consistency rather than for a hole of
+ * its own - what keeps a theme out of a gap is that playback already silenced it.
  */
 export function useShowingPlayer(): boolean {
-  return usePlayer((s) => s.current !== null || s.moving !== null);
+  return usePlayer((s) => s.current !== null);
 }
 
 /**
@@ -821,16 +845,7 @@ whenPlayerLost("video", () => {
   // Nothing was asked for any more, so nothing is settling - the same reason
   // `stop` does this.
   startedAt = 0;
-  usePlayer.setState({
-    current: null,
-    state: "stopped",
-    positionMs: 0,
-    seekTargetMs: null,
-    seekFromMs: null,
-    scrubMs: null,
-    overlay: false,
-    buffering: false,
-  });
+  usePlayer.setState(STOPPED);
 });
 
 type Setter = (partial: Partial<PlayerState>) => void;
@@ -914,9 +929,10 @@ function wirePlayerEvents(set: Setter, get: () => PlayerState): void {
 /**
  * Nothing is playing and nothing is coming: leave the store saying so.
  *
- * `stop()` does not clear the neighbours or the running order, and by the second
- * check `play` has set them for an item that never reached the box - so anything
- * that reads them afterwards is reading a plan that was abandoned.
+ * By the second check the hand-over has said the outgoing film's last word, and
+ * the neighbours and the running order in the store are still ITS - a plan for a
+ * film the box is no longer going to be given. Anything that reads them
+ * afterwards is reading something nobody is following.
  */
 function abandoned(forThis: number, set: Setter, get: () => PlayerState): void {
   // Not if somebody newer owns the running order: measured, an abandoned call

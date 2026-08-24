@@ -3,6 +3,7 @@ import { act, render } from "@testing-library/react";
 import { configureI18n } from "@sdk";
 import { Player } from "../Player";
 import { usePlayer, resetPlayer, useShowingPlayer } from "../playback/player";
+import { claimPlayer, ownsPlayer, resetPlayerOwner } from "../playback/owner";
 import { useApp } from "../state";
 import { setupRemote, remote, setFocus, flushFocus } from "./remote";
 import en from "../locales/en.json";
@@ -184,6 +185,109 @@ describe("stepping to the next episode", () => {
     expect(started).toEqual(["http://server/e2.mkv", "http://server/e3.mkv"]);
     expect(boxStops, "the box was handed the new file, never told to stop").toBe(0);
     expect(container.textContent).toBe("showing");
+  });
+
+  it("does not stop a film that started while it was handing over", async () => {
+    // The release and the box's stop used to run at the top of `stop`, before any
+    // await, where nothing could overtake them. On the abandon path they now land
+    // two server round trips later - so without the check they tore a film that
+    // had really started off the screen.
+    const gates: (() => void)[] = [];
+    const slowStop = {
+      ...fakeBackend(),
+      endSession: () => new Promise<void>((r) => gates.push(() => r())),
+    } as unknown as MediaBackend;
+
+    await usePlayer.getState().play(slowStop, KIDS[1]);
+    onScreen();
+    const step = usePlayer.getState().playSibling("next");
+    await settle();
+
+    // A second, legitimate start lands while the first is still saying goodbye.
+    usePlayer.getState().cancelMove();
+    await usePlayer.getState().play(fakeBackend(), KIDS[4]);
+    onScreen();
+    const stops = boxStops;
+
+    gates[0]?.();
+    await step;
+    await settle();
+    expect(usePlayer.getState().current?.item.id, "the newer film is still on").toBe("e5");
+    expect(boxStops, "and the box was not told to stop it").toBe(stops);
+  });
+
+  it("does not silence music that took the player while it was handing over", async () => {
+    // Same window, the other owner. `stop` is protected by `whenPlayerLost`
+    // clearing `current`; the abandon path runs past that, so without the check
+    // it stopped the song while the music store went on saying it was playing.
+    const gates: (() => void)[] = [];
+    const slowStop = {
+      ...fakeBackend(),
+      endSession: () => new Promise<void>((r) => gates.push(() => r())),
+    } as unknown as MediaBackend;
+
+    await usePlayer.getState().play(slowStop, KIDS[1]);
+    onScreen();
+    const step = usePlayer.getState().playSibling("next");
+    await settle();
+
+    claimPlayer("music"); // the film's own teardown runs through whenPlayerLost
+    usePlayer.getState().cancelMove();
+    const stops = boxStops;
+
+    gates[0]?.();
+    await step;
+    await settle();
+    expect(boxStops, "the song plays on").toBe(stops);
+    expect(ownsPlayer("music")).toBe(true);
+    resetPlayerOwner();
+  });
+
+  it("leaves the screen up when a step runs with nothing playing", async () => {
+    // The one case a step really does run with no picture: an episode has ended,
+    // the countdown is on screen, and a spoken "next episode" arrives. Hiding the
+    // browsing screens there left the television black with the countdown behind
+    // it - the opposite of what the hiding is for.
+    const { container } = render(<Showing />);
+    await act(async () => {
+      await usePlayer.getState().play(fakeBackend(), KIDS[1]);
+      onScreen();
+    });
+    expect(container.textContent).toBe("showing");
+
+    await act(async () => usePlayer.getState().stop());
+    resolveMs = 40;
+    const step = usePlayer.getState().playSibling("next");
+    await settle(10);
+    expect(usePlayer.getState().moving?.id, "a step really is in flight").toBe("e3");
+    expect(container.textContent, "and the season list stays up").toBe("idle");
+    await act(async () => {
+      await step;
+    });
+  });
+
+  it("does not let the countdown beat a film asked for while it was resolving", async () => {
+    // The auto-advance timer is five seconds and a resolve is three round trips,
+    // so left armed it fired first, bumped the token and abandoned the call it
+    // raced: measured, a film asked for by voice during the countdown was
+    // replaced by the next episode.
+    vi.useFakeTimers();
+    try {
+      await usePlayer.getState().play(fakeBackend(), KIDS[1], { queue: KIDS });
+      onScreen();
+      usePlayer.setState({ durationMs: 1_000_000, positionMs: 1_000_000 });
+      listeners.forEach((l) => l({ type: "finished" }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(usePlayer.getState().upNext?.item.id, "the countdown is armed").toBe("e3");
+
+      resolveMs = 6_000; // longer than the countdown
+      const asked = usePlayer.getState().play(fakeBackend(), KIDS[4]);
+      await vi.advanceTimersByTimeAsync(7_000);
+      await asked;
+      expect(usePlayer.getState().current?.item.id, "what was asked for, not what was next").toBe("e5");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("gives the screen back if the move never lands", async () => {
