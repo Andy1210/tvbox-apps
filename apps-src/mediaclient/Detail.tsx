@@ -77,6 +77,7 @@ export function Detail({
   const [focused, setFocused] = useState<ItemDetail | null>(null);
   const [firstChild, setFirstChild] = useState<ItemDetail | null>(null);
   const upNext = usePlayer((s) => s.upNext);
+  const moving = usePlayer((s) => s.moving);
   // Only to re-render while a countdown is running; the value is the clock.
   const [, setTick] = useState(0);
   const [picking, setPicking] = useState(false);
@@ -416,8 +417,13 @@ export function Detail({
    * one started unannounced. It also left the fallback focus key pointing at a
    * tile that was never mounted, so the first press during that window was
    * swallowed. The row is what gives the countdown both a place and a key.
+   *
+   * `moving` for the same reason one step further on: a spoken "next episode"
+   * during the countdown cancels it and starts a step, and on a film opened from
+   * a playlist that emptied the only row on the page - the person watched it
+   * vanish while nothing started.
    */
-  const rowItems = children.length ? children : upNext ? [upNext.item] : [];
+  const rowItems = children.length ? children : upNext ? [upNext.item] : moving ? [moving] : [];
   /**
    * What Play starts.
    *

@@ -30,6 +30,16 @@ import { clock } from "./time";
  */
 const IDLE_KEY = "player-idle";
 
+/**
+ * The keys that act on the film itself.
+ *
+ * Ignored while a step is in flight, because whatever they do to the outgoing
+ * film is thrown away when it is replaced. The arrows are not here: they move
+ * the cursor and the scrub cursor, which the swap takes with it anyway, and
+ * taking navigation away from somebody looking at a live picture is worse.
+ */
+const TRANSPORT = new Set(["Enter", "MediaPlayPause", "MediaStop", "MediaTrackNext", "MediaTrackPrevious"]);
+
 /** Nudge sizes as a press is held. Held longer means further per press. */
 const STEPS_MS = [10_000, 30_000, 60_000];
 /** The overlay hides itself this long after the last press. */
@@ -63,6 +73,8 @@ export function Player(): React.JSX.Element | null {
   const overlay = usePlayer((s) => s.overlay);
   const scrubMs = usePlayer((s) => s.scrubMs);
   const siblings = usePlayer((s) => s.siblings);
+  const moving = usePlayer((s) => s.moving);
+  const error = usePlayer((s) => s.error);
   const subDelaySec = usePlayer((s) => s.subDelaySec);
 
   const [menu, setMenu] = useState<null | "version" | "audio" | "subtitles" | "quality" | "search">(null);
@@ -142,8 +154,20 @@ export function Player(): React.JSX.Element | null {
   useEffect(() => {
     if (!current) return;
     if (hideTimer.current) clearTimeout(hideTimer.current);
-    const settling = buffering && stillSettling();
-    if (settling) usePlayer.getState().showOverlay(true);
+    // A step keeps it up too. The picture does not go away any more, so the
+    // overlay is the ONLY place a press can be acknowledged - and measured, the
+    // rendered page was byte-identical before the press and a second into the
+    // step, then faded out at four seconds with the film still the old one.
+    if (buffering && stillSettling()) usePlayer.getState().showOverlay(true);
+    // A step holds it open outright rather than adding to the countdown: the
+    // wait has no bound the box will report, and this is the only place the
+    // press can be acknowledged now that the picture stays. Safe to pin because
+    // `moving` is cleared in a `finally` and bounded by the give-up timer, and
+    // this effect re-runs when it clears.
+    if (moving) {
+      usePlayer.getState().showOverlay(true);
+      return;
+    }
     if (usePlayer.getState().state === "playing" && usePlayer.getState().scrubMs === null && !chaptersRef.current) {
       // One timer either way, and the wait is ADDED rather than replaced by a
       // branch that returns. A branch that pinned the overlay and armed nothing
@@ -154,7 +178,7 @@ export function Player(): React.JSX.Element | null {
         IDLE_HIDE_MS + settleRemainingMs(),
       );
     }
-  }, [current, buffering]);
+  }, [current, buffering, moving]);
 
   useEffect(() => {
     // The menu owns the D-pad while it is open. This handler is capture-phase on
@@ -182,6 +206,18 @@ export function Player(): React.JSX.Element | null {
 
     const onKey = (e: KeyboardEvent): void => {
       const p = usePlayer.getState();
+      // While a step is in flight the film on screen is about to be replaced, so
+      // a transport press aimed at it is thrown away by the swap: measured, OK
+      // paused the outgoing episode and the new one started playing a second
+      // later, i.e. somebody pressed pause and got a playing television. The
+      // press still brings the overlay up, where the line above says why.
+      if (p.moving && TRANSPORT.has(e.key)) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        p.showOverlay(true);
+        return;
+      }
       // Three states, and which one it is decides what every key means.
       //
       // Nothing focused is the DEFAULT and the common case: the arrows jump ten
@@ -437,6 +473,9 @@ export function Player(): React.JSX.Element | null {
     }
     const p = usePlayer.getState();
     // A step in flight, once the layers a press could be closing are dealt with.
+    // It always RETURNS, whether or not the cancel took: past the hand-over there
+    // is nothing to go back to, and falling through to the pause below would mean
+    // one press with two outcomes, split by a window nobody can see.
     // `stop()` clears `current` only
     // AFTER the previous episode's last word - two server round trips - so for
     // the whole of the teardown both are set, this handler is the top one on the
@@ -679,6 +718,20 @@ export function Player(): React.JSX.Element | null {
                       the thing being checked - "which one is this" - and the
                       name on its own does not answer it. */}
                   {[episodeNumber(current.item), current.item.title].filter(Boolean).join(" · ")}
+                </span>
+              )}
+              {/* What the press did, beside the title of what is still playing.
+                  The film carries on through a step now, so without this a press
+                  of Next changed nothing on screen at all until the new episode
+                  appeared - and a step that FAILED changed nothing ever. */}
+              {moving && (
+                <span className="text-[2.1vh] text-white/85 [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]">
+                  {t("player.starting", { title: episodeNumber(moving) || moving.title })}
+                </span>
+              )}
+              {!moving && error && (
+                <span className="text-[2.1vh] text-white/85 [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]">
+                  {t("player.failed")}
                 </span>
               )}
               {buffering && (

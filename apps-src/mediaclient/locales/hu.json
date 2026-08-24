@@ -93,6 +93,8 @@
     "skipCredits": "Stáblista átugrása",
     "buffering": "Pufferelés…",
     "converting": "Átalakítás ehhez a boxhoz",
+    "starting": "{title} indítása…",
+    "failed": "Ezt nem sikerült elindítani",
     "play": "Lejátszás",
     "pause": "Szünet",
     "tracks": "Hang és felirat",

@@ -232,7 +232,7 @@ describe("stepping to the next episode", () => {
     await settle();
 
     claimPlayer("music"); // the film's own teardown runs through whenPlayerLost
-    usePlayer.getState().cancelMove();
+    resetPlayer(); // a sign-out: the token moves, and the step is abandoned
     const stops = boxStops;
 
     gates[0]?.();
@@ -288,6 +288,86 @@ describe("stepping to the next episode", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("says on the overlay that the press was taken, and keeps saying it", async () => {
+    // The picture does not go away during a step any more, so the overlay is the
+    // only place a press can be acknowledged. Measured before this: the rendered
+    // page was byte-identical before the press and a second into the step, and
+    // then the overlay faded out at four seconds with the old episode still on.
+    vi.useFakeTimers();
+    try {
+      const { container } = render(<Player />);
+      await act(async () => {
+        await usePlayer.getState().play(fakeBackend(), KIDS[1]);
+        onScreen();
+      });
+      await act(async () => await vi.advanceTimersByTimeAsync(0));
+      const before = container.textContent;
+
+      resolveMs = 20_000;
+      void usePlayer.getState().playSibling("next");
+      await act(async () => await vi.advanceTimersByTimeAsync(50));
+      expect(container.textContent, "the press changed something").not.toBe(before);
+      expect(container.textContent).toContain("S1E3");
+
+      // Past the idle hide, which is when the wait is longest.
+      await act(async () => await vi.advanceTimersByTimeAsync(6_000));
+      expect(usePlayer.getState().overlay, "and it is still on screen").toBe(true);
+      expect(container.textContent).toContain("S1E3");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("throws away a pause aimed at the film that is being replaced", async () => {
+    // The press reaches an overlay that looks entirely ordinary, so it is easy to
+    // make: measured, OK paused the outgoing episode and the new one started
+    // playing a second later - somebody pressed pause and got a playing
+    // television. The press still brings the overlay up, where the line above
+    // says what is happening.
+    render(<Player />);
+    await act(async () => {
+      await usePlayer.getState().play(fakeBackend(), KIDS[1]);
+      onScreen();
+    });
+    await settle();
+    resolveMs = 60;
+    const step = usePlayer.getState().playSibling("next");
+    await settle(10);
+    // The remote's own play/pause key, which acts whatever has focus.
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "MediaPlayPause", bubbles: true, cancelable: true }));
+    });
+    expect(usePlayer.getState().state, "the outgoing film is not paused").toBe("playing");
+    expect(usePlayer.getState().overlay, "but the press is acknowledged").toBe(true);
+
+    await act(async () => {
+      await step;
+    });
+    expect(usePlayer.getState().current?.item.id).toBe("e3");
+    expect(usePlayer.getState().state).toBe("playing");
+  });
+
+  it("says so when a step could not be started", async () => {
+    // The film carries on, which is right - but the press then produced nothing
+    // visible at all, which is indistinguishable from a dead remote. `error` was
+    // read by no component in the app.
+    const broken = { ...fakeBackend(), resolveStream: () => Promise.reject(new Error("no")) } as unknown as MediaBackend;
+    const { container } = render(<Player />);
+    await act(async () => {
+      await usePlayer.getState().play(fakeBackend(), KIDS[1]);
+      onScreen();
+    });
+    await settle();
+    usePlayer.setState({ siblings: { next: KIDS[2] } });
+    // The sibling step goes through the broken backend.
+    await act(async () => {
+      await usePlayer.getState().play(broken, KIDS[2]);
+    });
+    await settle();
+    expect(usePlayer.getState().current?.item.id, "the film carries on").toBe("e2");
+    expect(container.textContent).toContain(en.player.failed);
   });
 
   it("gives the screen back if the move never lands", async () => {
@@ -461,12 +541,12 @@ describe("stepping to the next episode", () => {
     }
   });
 
-  it("gives the step up on a Back pressed during the teardown", async () => {
-    // The press, not the store call: `stop()` clears `current` only after the
-    // previous episode's last word, so for the whole teardown the player is still
-    // mounted and its own Back handler is the top one on the stack - it paused a
-    // film that was being torn down, and the step went on to start the episode
-    // the press had asked to abandon.
+  it("lets the swap finish when Back lands inside the hand-over", async () => {
+    // Past the hand-over the outgoing film's progress has been reported and its
+    // session ended, so there is nothing to go back TO - honouring the cancel
+    // there stopped the box and left the person on a season list, while the same
+    // press a moment earlier let the film carry on. One press, two outcomes,
+    // split by a window nobody can see. The window is two server round trips.
     const gates: (() => void)[] = [];
     const slowStop = {
       ...fakeBackend(),
@@ -481,16 +561,16 @@ describe("stepping to the next episode", () => {
     await settle();
     const step = usePlayer.getState().playSibling("next");
     await settle();
-    expect(usePlayer.getState().current?.item.id, "still tearing the last one down").toBe("e2");
-    expect(usePlayer.getState().moving?.id).toBe("e3");
+    expect(usePlayer.getState().current?.item.id, "still saying the last one's last word").toBe("e2");
 
     await remote.back();
-    expect(usePlayer.getState().moving, "the press gave the step up").toBeNull();
+    expect(usePlayer.getState().moving?.id, "the press is not honoured here").toBe("e3");
 
     gates[0]?.();
     await step;
     await settle();
-    expect(started, "and the episode never reached the box").toEqual(["http://server/e2.mkv"]);
+    expect(usePlayer.getState().current?.item.id, "and the episode that was asked for arrives").toBe("e3");
+    expect(boxStops, "without the box ever being told to stop").toBe(0);
   });
 
   it("keeps the outgoing film's running order when a step is given up mid-resolve", async () => {
@@ -523,59 +603,6 @@ describe("stepping to the next episode", () => {
     expect(usePlayer.getState().siblings).toEqual({ prev: KIDS[0], next: KIDS[2] });
     expect(usePlayer.getState().queue?.length).toBe(5);
     expect(started).toEqual(["http://server/e2.mkv"]);
-  });
-
-  it("leaves nothing to step through after a step is given up", async () => {
-    // The teardown has already run by then, and `stop` does not clear the
-    // neighbours - so they survived a cancelled step and the next `skipNext`
-    // answered ok and started an episode on a box that was showing nothing.
-    const gates: (() => void)[] = [];
-    const slowStop = {
-      ...fakeBackend(),
-      endSession: () => new Promise<void>((r) => gates.push(() => r())),
-    } as unknown as MediaBackend;
-
-    await usePlayer.getState().play(slowStop, KIDS[1]);
-    onScreen();
-    const step = usePlayer.getState().playSibling("next");
-    await settle();
-    usePlayer.getState().cancelMove();
-    gates[0]?.();
-    await step;
-    await settle();
-
-    expect(usePlayer.getState().current).toBeNull();
-    expect(usePlayer.getState().siblings, "nothing to step to").toEqual({});
-    expect(await usePlayer.getState().playSibling("next"), "and nothing steps").toBeUndefined();
-    expect(started).toEqual(["http://server/e2.mkv"]);
-  });
-
-  it("drops a step that was given up while the last episode was being closed off", async () => {
-    // The last word for the previous episode is two server round trips, which on
-    // a slow server is most of the step - and the token used to be taken AFTER
-    // them, so a Back arriving in that window was eaten and the episode landed
-    // anyway. Back looked like it had worked and then the film started on top of
-    // the screen it had returned to.
-    // `end()` awaits the final progress report and then the session; holding the
-    // session is holding the teardown.
-    const gates: (() => void)[] = [];
-    const slowStop = {
-      ...fakeBackend(),
-      endSession: () => new Promise<void>((r) => gates.push(() => r())),
-    } as unknown as MediaBackend;
-
-    await usePlayer.getState().play(slowStop, KIDS[1]);
-    onScreen();
-    const step = usePlayer.getState().playSibling("next");
-    await settle();
-    expect(usePlayer.getState().moving?.id, "the step is inside the teardown").toBe("e3");
-
-    usePlayer.getState().cancelMove();
-    gates[0]?.();
-    await step;
-    await settle();
-    expect(usePlayer.getState().current, "nothing arrives after it").toBeNull();
-    expect(started, "and the box was never told to play it").toEqual(["http://server/e2.mkv"]);
   });
 
   it("does not let a sign-out leave an episode arriving behind it", async () => {

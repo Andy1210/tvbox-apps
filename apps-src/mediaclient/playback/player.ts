@@ -206,6 +206,17 @@ const STOPPED = {
  */
 let moveSeq = 0;
 
+/**
+ * The outgoing film's last word is being said.
+ *
+ * Past this there is nothing to go back to - its progress has been reported and
+ * its session ended - so a cancel arriving here is ignored and the swap is
+ * allowed to finish. Measured before: the same Back gave two opposite results
+ * depending on a window nobody can see, and the destructive one was the wrong
+ * one - it stopped the film the press was trying to keep.
+ */
+let handingOver = false;
+
 /** A restart is in flight. See changeTracks. */
 let restarting = false;
 let upNextTimer: ReturnType<typeof setTimeout> | null = null;
@@ -285,7 +296,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   },
 
   cancelMove() {
-    if (!get().moving) return;
+    if (!get().moving || handingOver) return;
     // The sequence moves as well, so the cancelled step's own cleanup cannot
     // reach a claim taken after it.
     moveSeq += 1;
@@ -428,7 +439,12 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // server round trips and anything can have taken the box by the time it
     // returns.
     const outgoing = get().current?.item.id;
-    await get().stop({ handOver: true });
+    handingOver = true;
+    try {
+      await get().stop({ handOver: true });
+    } finally {
+      handingOver = false;
+    }
 
     // Somebody gave this up while that was in flight. Here `abandoned` IS right:
     // the outgoing film has been closed off, and what is left in the store is a
