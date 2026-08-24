@@ -5,8 +5,12 @@
     "hu": "M\u00e9dia",
     "en": "Media"
   },
-  "version": "0.62.3",
+  "version": "0.62.4",
   "changelog": [
+    {
+      "version": "0.62.4",
+      "notes": "Marking an episode watched from the series' episode list now puts the tick on that episode straight away, instead of only showing up after leaving the list and coming back. The button says which episode it is about (\"S2E6 \u00b7 Mark as watched\") and moves only that one: before, a single press moved the whole season, and it read \"mark as unwatched\" as soon as one episode had been seen. Marking a whole season is still there, as its own button beside Play, and it now asks first - the question opens with \"Cancel\" selected, so a remote that repeats a press cannot answer it. A season poster no longer shows a finished tick while episodes are left unwatched. And a series' theme music on the episode list is quieter."
+    },
     {
       "version": "0.62.3",
       "notes": "Changing episode no longer blanks the television twice. The picture you are watching stays up while the next one is fetched, so the screen changes once, when the new episode appears - and if it cannot be fetched, the one you were watching simply carries on instead of stopping into a black screen."

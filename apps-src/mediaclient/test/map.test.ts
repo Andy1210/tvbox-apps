@@ -213,3 +213,33 @@ describe("letter buckets", () => {
     expect(accented).toBeGreaterThan(zIndex);
   });
 });
+
+describe("the unwatched count a tile now reads as \"finished\"", () => {
+  it("never goes negative", () => {
+    // A server mid-scan, or one that has lost the file under a watched episode,
+    // reports more watched leaves than it has. Below zero the badge prints "-2"
+    // and, since a tile draws its tick from this being zero, a finished season
+    // loses the tick instead.
+    const season = toItem({
+      ratingKey: 9,
+      type: "season",
+      title: "1. évad",
+      leafCount: 10,
+      viewedLeafCount: 12,
+    } as never);
+    expect(season.unwatchedCount).toBe(0);
+  });
+
+  it("is set for a series and a season and for nothing else", () => {
+    // A playlist carries a leafCount too, and painting it said "278 unwatched"
+    // on a list of 252 items - and a tick would now say it was finished.
+    const kinds = (type: string): number | undefined =>
+      toItem({ ratingKey: 1, type, title: "x", leafCount: 4, viewedLeafCount: 1 } as never).unwatchedCount;
+    expect(kinds("show")).toBe(3);
+    expect(kinds("season")).toBe(3);
+    expect(kinds("playlist")).toBeUndefined();
+    expect(kinds("collection")).toBeUndefined();
+    expect(kinds("movie")).toBeUndefined();
+    expect(kinds("episode")).toBeUndefined();
+  });
+});

@@ -4,6 +4,7 @@
     "tag": "en-GB"
   },
   "common": {
+    "cancel": "Cancel",
     "loading": "Loading…",
     "done": "Back",
     "back": "Back"
@@ -63,6 +64,10 @@
     "noCollections": "This library has no collections."
   },
   "detail": {
+    "markSeasonConfirm": "Mark the whole season as watched?",
+    "markSeasonUnconfirm": "Mark the whole season as unwatched?",
+    "markSeasonCount": "Episodes affected: {n}. Any resume points are lost.",
+    "markSeasonYes": "Yes, the whole season",
     "play": "Play",
     "resume": "Carry on",
     "seasons": "Seasons",
@@ -76,6 +81,8 @@
     "runtimeM": "{m}m",
     "markWatched": "Mark as watched",
     "markUnwatched": "Mark as unwatched",
+    "markSeasonWatched": "Mark season as watched",
+    "markSeasonUnwatched": "Mark season as unwatched",
     "inThis": "In this",
     "emptyCollection": "There is nothing in this collection.",
     "emptyPlaylist": "This playlist is empty.",

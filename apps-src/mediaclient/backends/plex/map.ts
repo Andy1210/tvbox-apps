@@ -204,9 +204,13 @@ export function toItem(m: PlexMetadata): MediaItem {
     // Series and seasons only. A playlist also carries leafCount, and painting
     // it as an unwatched badge said "278 unwatched" on a list that returns 252
     // items and has no watched state of its own - wrong twice over.
+    // Clamped, because a tile now reads a zero here as "finished": a server
+    // mid-scan, or one that has lost the file under a watched episode, can
+    // report more watched leaves than it has, and a negative is neither zero
+    // nor a number to print in the badge.
     unwatchedCount:
       typeof leaf === "number" && (toKind(m.type) === "show" || toKind(m.type) === "season")
-        ? leaf - (viewedLeaf ?? 0)
+        ? Math.max(0, leaf - (viewedLeaf ?? 0))
         : undefined,
     childCount: leaf,
   };

@@ -188,7 +188,16 @@ export function toItem(it: JellyfinItem): MediaItem {
     // from this, and a "carry on watching" row is mostly episodes.
     thumb: imagePath(it.Id, it.ImageTags?.Primary) ?? imagePath(it.SeriesId || "", it.SeriesPrimaryImageTag),
     art: imagePath(it.Id, it.BackdropImageTags?.[0], "Backdrop"),
-    unwatchedCount: user.UnplayedItemCount,
+    // Series and seasons only, which is where the Plex mapper below has always
+    // drawn the line and why: a count of "unplayed children" is a fact about a
+    // series, and painting it on a list said "278 unwatched" on 252 items. It
+    // matters more now that a tile reads a zero here as FINISHED, so any other
+    // kind Jellyfin chooses to count children for - a boxset, a playlist -
+    // would carry a tick nobody defined. `viewCount` decides for those, as
+    // before. Not measured against a live Jellyfin: this server has no
+    // credential to hand, so the guard is the cautious shape rather than a
+    // record of what it answers.
+    unwatchedCount: kind === "show" || kind === "season" ? user.UnplayedItemCount : undefined,
   };
 }
 

@@ -95,7 +95,15 @@ export function Tile({
   const src = art && art.url === posterUrl ? art.src : null;
   const [broken, setBroken] = useState(false);
   const pct = progress(item);
-  const watched = !pct && (item.viewCount ?? 0) > 0;
+  // What "watched" means for a LIST of things is that none of them is left, and
+  // its own `viewCount` does not say that: Plex rolls a child's scrobble up into
+  // the parent, so marking episodes by hand took one season's count from 2 to 7
+  // while its `viewedLeafCount` stayed 0 - a finished tick beside the tile's own
+  // "16 unwatched" badge, which unscrobbling the episodes never took back off.
+  // `unwatchedCount` is set for a series and a season and for nothing else, so
+  // it is also the test for which kind of item this is.
+  const watched =
+    !pct && (item.unwatchedCount !== undefined ? item.unwatchedCount === 0 : (item.viewCount ?? 0) > 0);
   const showsTitleInPlace = (!src || broken) && item.title !== "";
 
   // The callback is held in a ref and the effect depends on `focused` alone.
