@@ -202,7 +202,10 @@ interface PlayerState {
 let scheduler: PlaybackScheduler | null = null;
 /** "S2E7" where the server numbers it, the title where it does not. */
 function episodeLabel(item: MediaItem): string | null {
-  return item.parentIndex && item.index ? `S${item.parentIndex}E${item.index}` : null;
+  // The same test the tile's own label uses: a season 0 special and an episode 0
+  // are numbered, and truthiness called them unnumbered - so the two lines of one
+  // overlay named the same episode two different ways.
+  return item.parentIndex !== undefined && item.index !== undefined ? `S${item.parentIndex}E${item.index}` : null;
 }
 
 /** What the store says when the box is showing nothing. */
@@ -489,10 +492,12 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     //
     // Which film that is, remembered for the abandon below: the last word is two
     // server round trips and anything can have taken the box by the time it
-    // returns. The OBJECT, because `play` builds a fresh one each time and the id
+    // returns. The STREAM, because `play` resolves a fresh one each time: an id
     // cannot tell two plays of the same film apart - a subtitle change during a
-    // step restarts the same episode, and comparing ids tore it off the screen.
-    const outgoing = get().current;
+    // step restarts the same episode, and comparing ids tore it off the screen -
+    // while the wrapper object is replaced by a track switch that started no new
+    // play at all.
+    const outgoing = get().current?.decision;
     handingOver = forThis;
     try {
       await get().stop({ handOver: true });
@@ -516,7 +521,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       // both ways - a newer film that had really started was torn off the screen,
       // and a song that had taken the player was silenced while the music store
       // went on saying it was playing.
-      if (ownsPlayer("video") && get().current === outgoing) {
+      if (ownsPlayer("video") && get().current?.decision === outgoing) {
         releasePlayer("video");
         bridge()?.stop?.();
         startedAt = 0;
@@ -790,7 +795,12 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // left its progress unreported, its transcode un-pinged and nothing able to
     // reach the timer still running behind it.
     const mine = scheduler;
-    const was = get().current;
+    // The stream, not the wrapper. `changeTracks`' local switch and a subtitle
+    // download both replace `current` with a re-wrap of the same play, and an
+    // object comparison read that as "somebody else took the box" - so the reset
+    // was skipped after the release and the bridge stop had already gone out,
+    // leaving the store saying a film was playing over a stopped box.
+    const was = get().current?.decision;
     await mine?.end();
     if (scheduler === mine) scheduler = null;
     // The picture stays until the new one replaces it, so the store keeps saying
@@ -801,7 +811,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // started while this was saying the last one's goodbye is on the box, and
     // saying "stopped" over it unhid the browsing screens, painted the portalled
     // backdrop over the picture and took the overlay and its keys away.
-    if (get().current !== was) return;
+    if (get().current?.decision !== was) return;
     set(STOPPED);
   },
 

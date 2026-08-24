@@ -423,13 +423,17 @@ export function Detail({
    * a playlist that emptied the only row on the page - the person watched it
    * vanish while nothing started. Scoped to THIS page, because the store is
    * global and any childless detail page would otherwise draw a row holding an
-   * episode of another series.
+   * episode of another series - but scoped to the page's own LIST as well as to
+   * parentage, or the scoping undoes the fix: a film has no parent to match (Plex
+   * gives a movie no `parentRatingKey`), so parentage alone never fires on the
+   * one page this exists for, and where it does fire `children` is non-empty and
+   * the fallback is unreachable.
    */
   const rowItems = children.length
     ? children
     : upNext
       ? [upNext.item]
-      : moving && moving.parentId === itemId
+      : moving && (moving.parentId === itemId || order.some((q) => q.id === moving.id))
         ? [moving]
         : [];
   /**

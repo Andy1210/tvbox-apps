@@ -573,6 +573,33 @@ describe("stepping to the next episode", () => {
     await settle();
   });
 
+  it("does not reset the store when a track switch re-wraps the film mid-stop", async () => {
+    // `changeTracks`' local switch and a subtitle download both replace the
+    // wrapper without starting a play, and an object comparison read that as
+    // "somebody else took the box" - so the reset was skipped after the release
+    // and the bridge stop had already gone out, leaving the store saying a film
+    // was playing over a stopped one. Recovery from the sofa was three presses.
+    const gates: (() => void)[] = [];
+    const slowStop = {
+      ...fakeBackend(),
+      endSession: () => new Promise<void>((r) => gates.push(() => r())),
+    } as unknown as MediaBackend;
+
+    await usePlayer.getState().play(slowStop, KIDS[1]);
+    onScreen();
+    const stopping = usePlayer.getState().stop();
+    await settle();
+    // The same play, re-wrapped - which is all a local track switch does.
+    const cur = usePlayer.getState().current;
+    usePlayer.setState({ current: { ...(cur as NonNullable<typeof cur>) } });
+
+    gates[0]?.();
+    await stopping;
+    await settle();
+    expect(usePlayer.getState().current, "the store agrees with the box").toBeNull();
+    expect(usePlayer.getState().state).toBe("stopped");
+  });
+
   it("gives the screen back if the move never lands", async () => {
     // Nothing here can cancel a request already in flight, so the only thing
     // bounded is the CLAIM. The Plex request layer has no timeout of its own, so
