@@ -76,7 +76,7 @@ export function Player(): React.JSX.Element | null {
   const scrubMs = usePlayer((s) => s.scrubMs);
   const siblings = usePlayer((s) => s.siblings);
   const moving = usePlayer((s) => s.moving);
-  const error = usePlayer((s) => s.error);
+  const stepFailed = usePlayer((s) => s.stepFailed);
   const subDelaySec = usePlayer((s) => s.subDelaySec);
 
   const [menu, setMenu] = useState<null | "version" | "audio" | "subtitles" | "quality" | "search">(null);
@@ -739,14 +739,17 @@ export function Player(): React.JSX.Element | null {
                   The film carries on through a step now, so without this a press
                   of Next changed nothing on screen at all until the new episode
                   appeared - and a step that FAILED changed nothing ever. */}
-              {moving && (
-                <span className="text-[2.1vh] text-white/85 [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]">
-                  {t("player.starting", { title: episodeNumber(moving) || moving.title })}
-                </span>
-              )}
-              {!moving && error && (
-                <span className="text-[2.1vh] text-white/85 [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.9)]">
-                  {t("player.failed")}
+              {/* Set apart from the title, not laid beside it. Two episode
+                  designators on one baseline at the same size read as one long
+                  title with nothing marking which is NOW and which is next; the
+                  bar, the clock and the highlighted button all still describe the
+                  outgoing film, so this line is the only thing that has changed
+                  and it has to look like it. */}
+              {(moving || stepFailed) && (
+                <span className="rounded-[0.6vh] bg-white/15 px-[0.8vw] py-[0.2vh] text-[2.1vh] font-semibold text-white">
+                  {moving
+                    ? t("player.starting", { title: episodeNumber(moving) || moving.title })
+                    : t("player.failed", { title: stepFailed ?? "" })}
                 </span>
               )}
               {buffering && (

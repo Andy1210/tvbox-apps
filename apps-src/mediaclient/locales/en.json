@@ -94,7 +94,7 @@
     "buffering": "Buffering…",
     "converting": "Converting for this box",
     "starting": "Starting {title}…",
-    "failed": "That could not be started",
+    "failed": "{title} could not be started",
     "play": "Play",
     "pause": "Pause",
     "tracks": "Audio and subtitles",

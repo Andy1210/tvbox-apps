@@ -31,7 +31,8 @@ export interface TileProps {
   /** Intercept an arrow before spatial navigation resolves it. */
   onArrowPress?: (direction: string) => boolean;
   /** Seconds until this one starts by itself. Drawn over the poster. */
-  countdown?: number;
+  /** Over the poster: a countdown's number, or a mark that this one is starting. */
+  countdown?: number | string;
 }
 
 /** How far through the item, 0-1, or null when it was never started. */

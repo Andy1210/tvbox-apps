@@ -166,6 +166,17 @@ interface PlayerState {
    */
   moving: MediaItem | null;
   /**
+   * A step somebody asked for that could not be started, for as long as saying so
+   * is still an answer to their press.
+   *
+   * Not `error`: that field is also set by the box's own non-fatal playback
+   * event, it is written by whichever attempt failed last whether or not it was
+   * about the film on screen, and nothing clears it - so the line it drew came up
+   * beside a film that was playing perfectly well, ten minutes later, and once
+   * next to "Pufferelés…" at the same time.
+   */
+  stepFailed: string | null;
+  /**
    * Give up a move in flight.
    *
    * For Back, which is the only key left during one: the step holds the screen
@@ -189,6 +200,11 @@ interface PlayerState {
 }
 
 let scheduler: PlaybackScheduler | null = null;
+/** "S2E7" where the server numbers it, the title where it does not. */
+function episodeLabel(item: MediaItem): string | null {
+  return item.parentIndex && item.index ? `S${item.parentIndex}E${item.index}` : null;
+}
+
 /** What the store says when the box is showing nothing. */
 const STOPPED = {
   current: null,
@@ -220,7 +236,7 @@ let moveSeq = 0;
  * depending on a window nobody can see, and the destructive one was the wrong
  * one - it stopped the film the press was trying to keep.
  */
-let handingOver = false;
+let handingOver = 0;
 
 /** A restart is in flight. See changeTracks. */
 let restarting = false;
@@ -270,6 +286,10 @@ const MOVE_GIVE_UP_MS = 12_000;
  * puts a Plex film at well over five seconds to appear.
  */
 const SETTLE_MAX_MS = 10_000;
+/** How long "that could not be started" is still an answer to the press. */
+const STEP_FAILED_MS = 8_000;
+let stepFailedTimer: ReturnType<typeof setTimeout> | null = null;
+
 /** When the box was last asked to show something. See `stillSettling`. */
 let startedAt = 0;
 /** Whether it has said it did. Set by the box's own event, never by asking it. */
@@ -289,6 +309,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   scrubMs: null,
   siblings: {},
   moving: null,
+  stepFailed: null,
   upNext: null,
   subDelaySec: 0,
   overlay: false,
@@ -302,7 +323,10 @@ export const usePlayer = create<PlayerState>((set, get) => ({
 
   cancelMove(force) {
     if (!get().moving) return;
-    if (handingOver && force !== true) return;
+    // Only the newest play's hand-over may refuse a cancel. An older call can be
+    // in one while somebody starts a step of their own - measured, and the cancel
+    // for THAT step was then eaten by a window belonging to another call.
+    if (handingOver === playToken && force !== true) return;
     // The sequence moves as well, so the cancelled step's own cleanup cannot
     // reach a claim taken after it.
     moveSeq += 1;
@@ -328,7 +352,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // press there stepped another episode.
     if (stillSettling()) return undefined;
     const mine = ++moveSeq;
-    set({ moving: item });
+    set({ moving: item, stepFailed: null });
     const giveUp = setTimeout(() => {
       if (moveSeq === mine) set({ moving: null });
     }, MOVE_GIVE_UP_MS);
@@ -347,7 +371,18 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       // the screens came back over a stopped player and that episode arrived
       // underneath them.
       clearTimeout(giveUp);
-      if (moveSeq === mine) set({ moving: null });
+      if (moveSeq === mine) {
+        // What the person asked for, and whether it happened - the only thing the
+        // overlay is entitled to say a press failed about. Cleared by the next
+        // step, by anything that starts, and by its own timer, because a line
+        // about a press should not outlive the press by much.
+        const failed = get().current?.item.id !== item.id;
+        set({ moving: null, stepFailed: failed ? (episodeLabel(item) ?? item.title) : null });
+        if (failed) {
+          if (stepFailedTimer) clearTimeout(stepFailedTimer);
+          stepFailedTimer = setTimeout(() => set({ stepFailed: null }), STEP_FAILED_MS);
+        }
+      }
     }
     return item;
   },
@@ -380,6 +415,10 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // clear except a successful start, so the line it draws came back beside the
     // title of a film that was playing perfectly well.
     if (get().error) set({ error: null });
+    if (get().stepFailed) {
+      if (stepFailedTimer) clearTimeout(stepFailedTimer);
+      set({ stepFailed: null });
+    }
 
     // THE NEW FILE IS RESOLVED BEFORE THE OLD ONE IS TOUCHED, and that ordering
     // is the whole of a fix rather than a tidy-up.
@@ -454,11 +493,11 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // cannot tell two plays of the same film apart - a subtitle change during a
     // step restarts the same episode, and comparing ids tore it off the screen.
     const outgoing = get().current;
-    handingOver = true;
+    handingOver = forThis;
     try {
       await get().stop({ handOver: true });
     } finally {
-      handingOver = false;
+      if (handingOver === forThis) handingOver = 0;
     }
 
     // Somebody gave this up while that was in flight. Here `abandoned` IS right:
@@ -1086,5 +1125,5 @@ export function resetPlayer(): void {
   // `switchProfile` rewrites the session in place. After a sign-out it played on
   // over the sign-in screen with a revoked credential.
   playToken += 1;
-  usePlayer.setState({ siblings: {}, moving: null, queue: undefined, upNext: null, subDelaySec: 0 });
+  usePlayer.setState({ siblings: {}, moving: null, stepFailed: null, queue: undefined, upNext: null, subDelaySec: 0 });
 }

@@ -353,21 +353,28 @@ describe("stepping to the next episode", () => {
     // The film carries on, which is right - but the press then produced nothing
     // visible at all, which is indistinguishable from a dead remote. `error` was
     // read by no component in the app.
-    const broken = { ...fakeBackend(), resolveStream: () => Promise.reject(new Error("no")) } as unknown as MediaBackend;
+    let asked = 0;
+    const one = fakeBackend() as unknown as { resolveStream(i: string): Promise<unknown> };
+    const breaks = {
+      ...fakeBackend(),
+      resolveStream: (id: string) => ((asked += 1) === 1 ? one.resolveStream(id) : Promise.reject(new Error("no"))),
+    } as unknown as MediaBackend;
+
     const { container } = render(<Player />);
     await act(async () => {
-      await usePlayer.getState().play(fakeBackend(), KIDS[1]);
+      await usePlayer.getState().play(breaks, KIDS[1]);
       onScreen();
     });
     await settle();
-    usePlayer.setState({ siblings: { next: KIDS[2] } });
-    // The sibling step goes through the broken backend.
     await act(async () => {
-      await usePlayer.getState().play(broken, KIDS[2]);
+      await usePlayer.getState().playSibling("next");
     });
     await settle();
     expect(usePlayer.getState().current?.item.id, "the film carries on").toBe("e2");
-    expect(container.textContent).toContain(en.player.failed);
+    // Named, because the line is about the press and not about the film on
+    // screen: it says which episode did not start.
+    expect(container.textContent).toContain("S1E3");
+    expect(usePlayer.getState().stepFailed).toBe("S1E3");
   });
 
   it("really stops when an explicit stop lands inside the hand-over", async () => {
@@ -526,6 +533,44 @@ describe("stepping to the next episode", () => {
     await settle();
     expect(usePlayer.getState().current?.item.id).toBe("e4");
     expect(usePlayer.getState().error, "the film that is playing did not fail").toBeNull();
+  });
+
+  it("does not let one call's hand-over eat another step's cancel", async () => {
+    // The window belongs to ONE play. An older call can still be saying the last
+    // film's goodbye while somebody starts a step of their own - and the cancel
+    // for THAT step was refused on a window belonging to a different call.
+    const stopGates: (() => void)[] = [];
+    const resolveGates: (() => void)[] = [];
+    let asked = 0;
+    const one = fakeBackend() as unknown as { resolveStream(i: string): Promise<unknown> };
+    const gated = {
+      ...fakeBackend(),
+      endSession: () => new Promise<void>((r) => stopGates.push(() => r())),
+      resolveStream: (id: string) =>
+        (asked += 1) <= 2
+          ? one.resolveStream(id)
+          : new Promise<void>((r) => resolveGates.push(() => r())).then(() => one.resolveStream(id)),
+    } as unknown as MediaBackend;
+
+    await usePlayer.getState().play(gated, KIDS[1]);
+    onScreen();
+    // An older play parks in its hand-over.
+    const older = usePlayer.getState().play(gated, KIDS[4]);
+    await settle();
+
+    // Somebody's own step starts and parks in its resolve.
+    const step = usePlayer.getState().playSibling("next");
+    await settle();
+    expect(usePlayer.getState().moving, "the step took a claim").not.toBeNull();
+
+    usePlayer.getState().cancelMove();
+    expect(usePlayer.getState().moving, "and it is theirs to give up").toBeNull();
+
+    stopGates.forEach((g) => g());
+    resolveGates.forEach((g) => g());
+    await older;
+    await step;
+    await settle();
   });
 
   it("gives the screen back if the move never lands", async () => {

@@ -421,9 +421,17 @@ export function Detail({
    * `moving` for the same reason one step further on: a spoken "next episode"
    * during the countdown cancels it and starts a step, and on a film opened from
    * a playlist that emptied the only row on the page - the person watched it
-   * vanish while nothing started.
+   * vanish while nothing started. Scoped to THIS page, because the store is
+   * global and any childless detail page would otherwise draw a row holding an
+   * episode of another series.
    */
-  const rowItems = children.length ? children : upNext ? [upNext.item] : moving ? [moving] : [];
+  const rowItems = children.length
+    ? children
+    : upNext
+      ? [upNext.item]
+      : moving && moving.parentId === itemId
+        ? [moving]
+        : [];
   /**
    * What Play starts.
    *
@@ -689,7 +697,11 @@ export function Detail({
               return true;
             }}
             countdownFor={
-              upNext ? { id: upNext.item.id, seconds: Math.max(0, Math.ceil((upNext.at - Date.now()) / 1000)) } : null
+              upNext
+                ? { id: upNext.item.id, seconds: Math.max(0, Math.ceil((upNext.at - Date.now()) / 1000)) }
+                : moving
+                  ? { id: moving.id, seconds: "…" }
+                  : null
             }
             onFocusItem={(item) => {
               if (item.kind !== "episode" || !backend) return;
