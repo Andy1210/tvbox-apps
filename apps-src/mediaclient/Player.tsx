@@ -34,11 +34,13 @@ const IDLE_KEY = "player-idle";
  * The keys that act on the film itself.
  *
  * Ignored while a step is in flight, because whatever they do to the outgoing
- * film is thrown away when it is replaced. The arrows are not here: they move
- * the cursor and the scrub cursor, which the swap takes with it anyway, and
- * taking navigation away from somebody looking at a live picture is worse.
+ * film is thrown away when it is replaced. The arrows are not here - taking
+ * navigation away from somebody looking at a live picture is worse - but the one
+ * thing they do to the FILM, the ten-second jump from rest, is refused where it
+ * happens. The stop key is not here either: that is an instruction rather than a
+ * nudge, and it is obeyed.
  */
-const TRANSPORT = new Set(["Enter", "MediaPlayPause", "MediaStop", "MediaTrackNext", "MediaTrackPrevious"]);
+const TRANSPORT = new Set(["Enter", "MediaPlayPause", "MediaTrackNext", "MediaTrackPrevious"]);
 
 /** Nudge sizes as a press is held. Held longer means further per press. */
 const STEPS_MS = [10_000, 30_000, 60_000];
@@ -195,6 +197,11 @@ export function Player(): React.JSX.Element | null {
     const rearmHide = (): void => {
       if (hideTimer.current) clearTimeout(hideTimer.current);
       const p = usePlayer.getState();
+      // A step holds the overlay open, and this runs at the end of every key the
+      // handler did not swallow - so one arrow press took the acknowledgement
+      // away four seconds later with the old episode still on screen, which is
+      // the thing the pin exists to prevent.
+      if (p.moving) return;
       // Browsing chapters is not idling. Without this the strip closed under the
       // cursor after four seconds of looking at the pictures - which is what
       // looking at pictures takes - and dropped focus to rest, so the next Right
@@ -259,7 +266,11 @@ export function Player(): React.JSX.Element | null {
           // bar it is an ordinary jump, which is what a press expects when
           // nothing has been chosen.
           if (onBar) p.scrubBy(dir * step);
-          else p.seekBy(dir * step);
+          // Not into a film that is being replaced: the seek costs a transcode
+          // segment on a stream discarded a second later and writes a resume
+          // point nobody watched. The cursor on the bar is different - the swap
+          // takes it with it.
+          else if (!p.moving) p.seekBy(dir * step);
           break;
         }
         case "Enter":
@@ -291,6 +302,10 @@ export function Player(): React.JSX.Element | null {
           break;
         case "MediaStop":
           e.preventDefault();
+          // An instruction, so it is obeyed even mid-step, where a plain cancel
+          // is not: otherwise the stop key did nothing at all for as long as a
+          // step lasted and the next episode started regardless.
+          p.cancelMove(true);
           void p.stop();
           break;
         // A dedicated skip key is unambiguous, so it jumps rather than arming a

@@ -370,6 +370,164 @@ describe("stepping to the next episode", () => {
     expect(container.textContent).toContain(en.player.failed);
   });
 
+  it("really stops when an explicit stop lands inside the hand-over", async () => {
+    // A plain cancel stands down there, so that one Back press has one outcome -
+    // but an instruction to stop cannot: measured, the box was told to stop, the
+    // house was told it had stopped, and the step went on to start the next
+    // episode a second later.
+    const gates: (() => void)[] = [];
+    const slowStop = {
+      ...fakeBackend(),
+      endSession: () => new Promise<void>((r) => gates.push(() => r())),
+    } as unknown as MediaBackend;
+
+    await usePlayer.getState().play(slowStop, KIDS[1]);
+    onScreen();
+    const step = usePlayer.getState().playSibling("next");
+    await settle();
+    expect(usePlayer.getState().moving?.id).toBe("e3");
+
+    usePlayer.getState().cancelMove(true);
+    await usePlayer.getState().stop();
+    gates[0]?.();
+    await step;
+    await settle();
+    expect(usePlayer.getState().current, "nothing is playing").toBeNull();
+    expect(started, "and no episode arrived after it").toEqual(["http://server/e2.mkv"]);
+  });
+
+  it("does not tear off a restart of the same film", async () => {
+    // Two plays of one episode are the same id, so the abandon guard cannot use
+    // it: a subtitle change during a step restarts the same film, and comparing
+    // ids blanked the television and brought the browsing screens back.
+    const gates: (() => void)[] = [];
+    const slowStop = {
+      ...fakeBackend(),
+      endSession: () => new Promise<void>((r) => gates.push(() => r())),
+    } as unknown as MediaBackend;
+
+    await usePlayer.getState().play(slowStop, KIDS[1]);
+    onScreen();
+    const step = usePlayer.getState().playSibling("next");
+    await settle();
+    usePlayer.getState().cancelMove(true);
+    await usePlayer.getState().play(fakeBackend(), KIDS[1]); // the same episode again
+    onScreen();
+    const stops = boxStops;
+
+    gates[0]?.();
+    await step;
+    await settle();
+    expect(usePlayer.getState().current?.item.id, "the restart is still on").toBe("e2");
+    expect(boxStops, "and the box was not told to stop it").toBe(stops);
+  });
+
+  it("keeps the acknowledgement up when other keys are pressed", async () => {
+    // `rearmHide` runs at the end of every key the handler does not swallow, and
+    // none of them changes what the pin keys on - so one arrow press took the
+    // acknowledgement away four seconds later with the old episode still on.
+    vi.useFakeTimers();
+    try {
+      render(<Player />);
+      await act(async () => {
+        await usePlayer.getState().play(fakeBackend(), KIDS[1]);
+        onScreen();
+      });
+      await act(async () => await vi.advanceTimersByTimeAsync(0));
+
+      resolveMs = 20_000;
+      void usePlayer.getState().playSibling("next");
+      await act(async () => await vi.advanceTimersByTimeAsync(50));
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true }));
+      });
+      await act(async () => await vi.advanceTimersByTimeAsync(6_000));
+      expect(usePlayer.getState().overlay, "still on screen after an arrow").toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not seek a film that is about to be replaced", async () => {
+    // From rest an arrow is a ten-second jump, not a cursor: it costs a transcode
+    // segment on a stream discarded a second later and writes a resume point
+    // nobody watched.
+    render(<Player />);
+    await act(async () => {
+      await usePlayer.getState().play(fakeBackend(), KIDS[1]);
+      onScreen();
+    });
+    await settle();
+    await setFocus("player-idle");
+
+    resolveMs = 60;
+    const step = usePlayer.getState().playSibling("next");
+    await settle(10);
+    await remote.right();
+    expect(usePlayer.getState().seekTargetMs, "no jump into the outgoing film").toBeNull();
+    await act(async () => {
+      await step;
+    });
+  });
+
+  it("does not carry one attempt's failure onto the next film", async () => {
+    // `error` had no owner and no clear except a successful start, so the line it
+    // draws came back beside the title of a film that was playing perfectly well.
+    const broken = { ...fakeBackend(), resolveStream: () => Promise.reject(new Error("no")) } as unknown as MediaBackend;
+    await usePlayer.getState().play(fakeBackend(), KIDS[1]);
+    onScreen();
+    usePlayer.setState({ siblings: { next: KIDS[2] } });
+    await usePlayer.getState().play(broken, KIDS[2]);
+    expect(usePlayer.getState().error).toBe("unplayable");
+
+    // A fresh attempt clears it as it STARTS, not when it succeeds - otherwise the
+    // line stayed beside the title of a film that was playing perfectly well, for
+    // the length of the next attempt and beyond.
+    const gates: (() => void)[] = [];
+    const slow = {
+      ...fakeBackend(),
+      resolveStream: () => new Promise<void>((r) => gates.push(() => r())).then(() => ({
+        url: "http://server/e4.mkv",
+        audio: "auto",
+        sub: "no",
+        session: "s",
+        transcoded: false,
+        version: 0,
+      })),
+    } as unknown as MediaBackend;
+    const attempt = usePlayer.getState().play(slow, KIDS[3]);
+    await settle();
+    expect(usePlayer.getState().error, "gone the moment another attempt starts").toBeNull();
+    gates[0]?.();
+    await attempt;
+  });
+
+  it("does not write an abandoned attempt's failure onto the film that replaced it", async () => {
+    const gates: (() => void)[] = [];
+    let asked = 0;
+    const one = fakeBackend() as unknown as { resolveStream(i: string): Promise<unknown> };
+    const gated = {
+      ...fakeBackend(),
+      resolveStream: (id: string) =>
+        (asked += 1) === 2
+          ? new Promise<void>((r) => gates.push(() => r())).then(() => Promise.reject(new Error("no")))
+          : one.resolveStream(id),
+    } as unknown as MediaBackend;
+
+    await usePlayer.getState().play(gated, KIDS[1]);
+    onScreen();
+    const abandonedStep = usePlayer.getState().play(gated, KIDS[2]); // stalls, then fails
+    await settle();
+    await usePlayer.getState().play(fakeBackend(), KIDS[3]); // and is superseded
+    onScreen();
+
+    gates[0]?.();
+    await abandonedStep;
+    await settle();
+    expect(usePlayer.getState().current?.item.id).toBe("e4");
+    expect(usePlayer.getState().error, "the film that is playing did not fail").toBeNull();
+  });
+
   it("gives the screen back if the move never lands", async () => {
     // Nothing here can cancel a request already in flight, so the only thing
     // bounded is the CLAIM. The Plex request layer has no timeout of its own, so

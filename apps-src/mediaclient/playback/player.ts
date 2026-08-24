@@ -170,8 +170,13 @@ interface PlayerState {
    *
    * For Back, which is the only key left during one: the step holds the screen
    * for as long as the server takes, and eating that press is a dead remote.
+   *
+   * `force` is for an explicit STOP - the remote's stop key, or a phone's, or a
+   * spoken one. A plain cancel is ignored once the hand-over has begun, so that
+   * one press has one outcome; an instruction to stop cannot be, or the box was
+   * told to stop, answered ok, and started the next episode anyway.
    */
-  cancelMove(): void;
+  cancelMove(force?: boolean): void;
   /**
    * The episode that will start by itself, and when.
    *
@@ -295,8 +300,9 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     set({ upNext: null });
   },
 
-  cancelMove() {
-    if (!get().moving || handingOver) return;
+  cancelMove(force) {
+    if (!get().moving) return;
+    if (handingOver && force !== true) return;
     // The sequence moves as well, so the cancelled step's own cleanup cannot
     // reach a claim taken after it.
     moveSeq += 1;
@@ -370,6 +376,10 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // the token and abandoned the call it raced: measured, a film asked for by
     // voice during the countdown was replaced by the next episode.
     get().cancelUpNext();
+    // Last time's failure is not this attempt's. `error` had no owner and no
+    // clear except a successful start, so the line it draws came back beside the
+    // title of a film that was playing perfectly well.
+    if (get().error) set({ error: null });
 
     // THE NEW FILE IS RESOLVED BEFORE THE OLD ONE IS TOUCHED, and that ordering
     // is the whole of a fix rather than a tidy-up.
@@ -418,7 +428,10 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       ]);
     } catch (e) {
       log.warn("could not resolve a stream", e);
-      set({ error: "unplayable" });
+      // Nobody is waiting for this one, so its failure is not news about whatever
+      // is playing now: an abandoned call's late failure used to write the line
+      // onto the film that had replaced it.
+      if (forThis === playToken) set({ error: "unplayable" });
       return;
     }
 
@@ -437,8 +450,10 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     //
     // Which film that is, remembered for the abandon below: the last word is two
     // server round trips and anything can have taken the box by the time it
-    // returns.
-    const outgoing = get().current?.item.id;
+    // returns. The OBJECT, because `play` builds a fresh one each time and the id
+    // cannot tell two plays of the same film apart - a subtitle change during a
+    // step restarts the same episode, and comparing ids tore it off the screen.
+    const outgoing = get().current;
     handingOver = true;
     try {
       await get().stop({ handOver: true });
@@ -462,7 +477,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       // both ways - a newer film that had really started was torn off the screen,
       // and a song that had taken the player was silenced while the music store
       // went on saying it was playing.
-      if (ownsPlayer("video") && get().current?.item.id === outgoing) {
+      if (ownsPlayer("video") && get().current === outgoing) {
         releasePlayer("video");
         bridge()?.stop?.();
         startedAt = 0;
@@ -736,12 +751,18 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // left its progress unreported, its transcode un-pinged and nothing able to
     // reach the timer still running behind it.
     const mine = scheduler;
+    const was = get().current;
     await mine?.end();
     if (scheduler === mine) scheduler = null;
     // The picture stays until the new one replaces it, so the store keeps saying
     // what the box is really showing. Clearing it here left the page with nothing
     // on it for the length of the swap.
     if (handOver) return;
+    // Same window as the scheduler pointer above, and the same test: a film that
+    // started while this was saying the last one's goodbye is on the box, and
+    // saying "stopped" over it unhid the browsing screens, painted the portalled
+    // backdrop over the picture and took the overlay and its keys away.
+    if (get().current !== was) return;
     set(STOPPED);
   },
 

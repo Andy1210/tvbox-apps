@@ -699,7 +699,10 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       // claim is still held. Treating the claim as "nothing is playing" answered
       // ok without calling stop at all - the film played on and the house was
       // told it had stopped, which is the one thing this file's header forbids.
-      if (usePlayer.getState().moving) usePlayer.getState().cancelMove();
+      // Forced, because this is an instruction to stop: a plain cancel stands
+      // down once the hand-over has begun, and the box was then told to stop,
+      // answered ok, and started the next episode a second later anyway.
+      if (usePlayer.getState().moving) usePlayer.getState().cancelMove(true);
       if (!usePlayer.getState().current) return ok; // already what was asked for
       await usePlayer.getState().stop();
       return ok;
