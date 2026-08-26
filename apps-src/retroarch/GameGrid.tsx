@@ -37,12 +37,21 @@ function Console({
   row,
   first,
   active,
+  noCovers,
   onPick,
   onEnter,
 }: {
   row: RailRow;
   first: boolean;
   active: boolean;
+  /**
+   * Nothing on screen beside the rail to commit to: a list that settled with nothing
+   * in it, or an error standing where the covers would be. Both halves wait for the
+   * read to finish - an error is left on screen for the whole of the NEXT console's
+   * read, and answering right with it while a list is still coming is a shortcut
+   * past the very list it was asked for.
+   */
+  noCovers: boolean;
   onPick: (system: string) => void;
   onEnter: () => void;
 }) {
@@ -56,11 +65,22 @@ function Console({
       onFocus: () => onPick(row.system),
       onEnterPress: onEnter,
       onArrowPress: (dir) => {
-        if (dir === "up" && first) {
-          jump(TABS);
-          return false;
-        }
+        // Swallow a press only once it has landed, the way every other edge in
+        // this app does it. A hop that goes nowhere and eats the arrow anyway is
+        // a button that does nothing at all, with no geometry left to fall back
+        // on - which is what `jump` returns its answer for.
+        if (dir === "up" && first) return !jump(TABS);
+        // Right commits this console and moves to its covers. With the list still
+        // coming that is right - the request is answered when it lands - but with
+        // nothing on screen to commit to it goes where OK goes from this row, to
+        // the same pair. Deliberately the same: from a sofa right and OK are one
+        // gesture here, and answering them differently is how one of the two ends
+        // up being the dead one. That is also why this is the same answer the
+        // effect below would reach a render later, rather than a different one:
+        // what it saves is arming a request that has to be put down again, which
+        // is the state every bug in this file has been made of.
         if (dir === "right") {
+          if (noCovers) return !jump(EMPTY_ACTION, SEARCH);
           onEnter();
           return false;
         }
@@ -110,22 +130,13 @@ function Tile({
       onEnterPress: () => (marking ? onMark(game, pos) : onPlay(game)),
       onFocus: () => onFocusPos(pos),
       onArrowPress: (dir) => {
-        if (dir === "up" && pos < COLS) {
-          jump(FAVOURITE, SEARCH, TABS);
-          return false;
-        }
+        if (dir === "up" && pos < COLS) return !jump(FAVOURITE, SEARCH, TABS);
         // Left out of the first column goes to the console rail, at the console it
         // was left on - geometry would pick whichever row happens to sit next to this
         // tile, which is how "left" used to land on the top console.
-        if (dir === "left" && pos % COLS === 0) {
-          jump(RAIL);
-          return false;
-        }
+        if (dir === "left" && pos % COLS === 0) return !jump(RAIL);
         // ... and right out of the last column goes to the letter rail.
-        if (dir === "right" && pos % COLS === COLS - 1) {
-          jump(ALPHA);
-          return false;
-        }
+        if (dir === "right" && pos % COLS === COLS - 1) return !jump(ALPHA);
         return true;
       },
     },
@@ -186,47 +197,59 @@ function Tile({
   );
 }
 
+// Its own component, and that is the point: the button is drawn only while a search
+// is active, so its focusable must only EXIST then. Declared beside the search
+// button, the hook stayed mounted with nothing to attach its ref to - and a
+// focusable with no node measures as a zero-size rectangle at the top left, which
+// spatial navigation happily walks to. The cursor then sits on nothing: no
+// highlight anywhere, and the next press decided by geometry against a corner.
+function SearchClear({ onPress, onArrowPress }: { onPress: () => void; onArrowPress: (dir: string) => boolean }) {
+  const { t } = useI18n();
+  // Pressing this unmounts it - clearing the search is what takes the button away -
+  // so it hands the cursor on before it goes. Left to itself, focus stays on a key
+  // whose element is gone: nothing is highlighted, the next press is dropped, and
+  // where the cursor reappears is whichever recovery net notices first.
+  const clear = () => {
+    onPress();
+    jump(SEARCH);
+  };
+  const { ref, focused } = useFocusableItem({ focusKey: "search-clear", onEnterPress: clear, onArrowPress });
+  return (
+    <div
+      ref={ref}
+      onClick={clear}
+      className={[
+        "px-[1vw] py-[0.8vh] rounded-[1vh] text-[1.6vh] font-semibold",
+        focused ? "bg-white text-[#06090d]" : "bg-white/5",
+      ].join(" ")}
+    >
+      {t("retroarch.clear")}
+    </div>
+  );
+}
+
 function SearchButton({ onPress, onClear }: { onPress: () => void; onClear?: () => void }) {
   const { t } = useI18n();
   // Up from here is the tab row; down goes back to whatever tile was last focused
   // (setFocus on a container restores its own last child).
   const upDown = (dir: string) => {
-    if (dir === "up") {
-      jump(TABS);
-      return false;
-    }
+    if (dir === "up") return !jump(TABS);
     if (dir === "down") {
       // The covers if there are any, else the empty-library button, else the
       // console list - never "grid-page", whose children are containers
       // themselves and which resolves to nothing useful. EMPTY_ACTION is in the
       // list because with no games that button is the only thing below here, and
       // it sets no arrow handling of its own: skipping it sent the cursor past
-      // the one control the screen was offering.
-      jump(TILES, EMPTY_ACTION, RAIL);
-      return false;
+      // the one control the screen was offering. A screen with none of the three
+      // (a search that matched nothing) leaves the arrow to geometry.
+      return !jump(TILES, EMPTY_ACTION, RAIL);
     }
     return true;
   };
   const { ref, focused } = useFocusableItem({ focusKey: "search", onEnterPress: onPress, onArrowPress: upDown });
-  const { ref: cref, focused: cfocused } = useFocusableItem({
-    focusKey: "search-clear",
-    onEnterPress: () => onClear && onClear(),
-    onArrowPress: upDown,
-  });
   return (
     <div className="flex items-center gap-[0.6vw]">
-      {onClear && (
-        <div
-          ref={cref}
-          onClick={onClear}
-          className={[
-            "px-[1vw] py-[0.8vh] rounded-[1vh] text-[1.6vh] font-semibold",
-            cfocused ? "bg-white text-[#06090d]" : "bg-white/5",
-          ].join(" ")}
-        >
-          {t("retroarch.clear")}
-        </div>
-      )}
+      {onClear && <SearchClear onPress={onClear} onArrowPress={upDown} />}
       <div
         ref={ref}
         onClick={onPress}
@@ -265,14 +288,8 @@ function FavouriteButton({ on, onPress }: { on: boolean; onPress: () => void }) 
     focusKey: FAVOURITE,
     onEnterPress: onPress,
     onArrowPress: (dir) => {
-      if (dir === "up") {
-        jump(TABS);
-        return false;
-      }
-      if (dir === "down") {
-        jump(TILES, EMPTY_ACTION, RAIL);
-        return false;
-      }
+      if (dir === "up") return !jump(TABS);
+      if (dir === "down") return !jump(TILES, EMPTY_ACTION, RAIL);
       return true;
     },
   });
@@ -321,11 +338,13 @@ function EmptyAction({ onPress }: { onPress: () => void }) {
 function ConsoleRail({
   systems,
   active,
+  noCovers,
   onPick,
   onEnter,
 }: {
   systems: RailRow[];
   active: string;
+  noCovers: boolean;
   onPick: (system: string) => void;
   onEnter: () => void;
 }) {
@@ -339,6 +358,7 @@ function ConsoleRail({
             row={s}
             first={k === 0}
             active={s.system === active}
+            noCovers={noCovers}
             onPick={onPick}
             onEnter={onEnter}
           />
@@ -471,13 +491,48 @@ export function GameGrid({
   // focus was yanked out of the rail mid-walk.
   const [toTiles, setToTiles] = useState(false);
   const first = useRef(true);
+  // A request names the console it was made on, so it is put down when the cursor
+  // moves to another one - answering it there is the rail pulling focus out from
+  // under somebody who was only walking it, which is the same failure by a longer
+  // route. Not on a QUERY change: a finished search arms this very request, and
+  // clearing it there would leave the results with nobody on them.
   useEffect(() => {
-    if (!shown.length) return;
-    if (!toTiles && !first.current) return;
-    first.current = false;
     setToTiles(false);
-    setFocus(tileKey(shown[0]));
-  }, [toTiles, shown]);
+  }, [system]);
+  useEffect(() => {
+    if (!toTiles && !first.current) return;
+    if (loading) return; // the list is on its way; answer when it lands
+    // No console chosen yet, which is what the app looks like for a moment at
+    // startup - an empty list is reported before the consoles have even arrived.
+    // Reading that as a list that settled empty spends the first-list request
+    // before there is any list to spend it on, and the app then opens with no
+    // cursor anywhere until the recovery net puts one somewhere.
+    if (!system) return;
+    if (!error && shown.length) {
+      first.current = false;
+      setToTiles(false);
+      setFocus(tileKey(shown[0]));
+      return;
+    }
+    // Nothing to move to: a list that settled with nothing in it, or an error panel
+    // standing where the covers would be - and behind that panel the list is stale,
+    // so its keys name tiles that are not on screen.
+    //
+    // Both requests come down here, the first-list one included. An error is an
+    // answer as much as an empty list is: the app has opened either way, with a
+    // cursor somewhere, and a request left standing is then spent on whatever the
+    // person walks onto next - which is the rail pulling focus out from under
+    // somebody who was only walking it.
+    first.current = false;
+    if (!toTiles) return;
+    setToTiles(false);
+    // The empty view's own button, or failing that Search, which every one of these
+    // screens draws: a no-match search has no button (it is drawn only when nothing
+    // was searched for), and neither does a console that failed to read. Answering
+    // with nothing is what leaves the cursor on the on-screen keyboard that has just
+    // unmounted under it.
+    jump(EMPTY_ACTION, SEARCH);
+  }, [toTiles, shown, loading, system, error]);
 
   const rows = Math.ceil(shown.length / COLS);
   const end = Math.min(rows, start + WINDOW_ROWS);
@@ -573,7 +628,13 @@ export function GameGrid({
     <FocusContext.Provider value={focusKey}>
       <div ref={ref} className="h-full flex gap-[1.5vw] px-[3vw] pb-[2vh]">
         {systems.length > 0 && (
-          <ConsoleRail systems={systems} active={system} onPick={onSystem} onEnter={() => setToTiles(true)} />
+          <ConsoleRail
+            systems={systems}
+            active={system}
+            noCovers={!loading && (!!error || !shown.length)}
+            onPick={onSystem}
+            onEnter={() => setToTiles(true)}
+          />
         )}
         <div className="flex-1 min-w-0 flex flex-col">
           <div className="flex items-baseline justify-between gap-[1vw] pb-[1vh]">

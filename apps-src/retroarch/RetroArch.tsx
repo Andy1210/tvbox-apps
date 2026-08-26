@@ -110,6 +110,18 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
    */
   const listCache = useRef(new Map<string, Entry[]>());
   const [loading, setLoading] = useState(true);
+  /**
+   * Which console the list on screen belongs to.
+   *
+   * `loading` alone cannot say, because it is raised from inside the effect that
+   * reads a list: there is one committed render where the new console is chosen,
+   * the flag is still down, and `games` is still the LAST console's. Anything that
+   * reads "the list has settled" saw an answer there that belongs to neither
+   * console - and an empty one, at startup, before any console had been chosen at
+   * all. A ref rather than state: nothing renders on it, and every place that sets
+   * it is followed by a `setGames` that re-renders anyway.
+   */
+  const gamesFor = useRef("");
   const [error, setError] = useState("");
   const [starting, setStarting] = useState("");
   /**
@@ -175,6 +187,7 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
   const refsKey = refs ? refs.map((r) => r.system + "\u0000" + r.label).join("\u0001") : "";
   useEffect(() => {
     if (!system) {
+      gamesFor.current = "";
       setGames([]);
       setLoading(false);
       return;
@@ -188,11 +201,13 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
         if (!wanted) {
           const rows = await listOf(system);
           if (!alive) return;
+          gamesFor.current = system;
           setGames(rows);
         } else {
           const lists = new Map<string, Entry[]>();
           for (const sys of new Set(wanted.map((r) => r.system))) lists.set(sys, await listOf(sys));
           if (!alive) return;
+          gamesFor.current = system;
           setGames(
             wanted
               .map((r) => (lists.get(r.system) || []).find((g) => g.label === r.label))
@@ -201,7 +216,15 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
         }
         if (alive) setError("");
       } catch {
-        if (alive) setError(t("retroarch.gamesError"));
+        if (!alive) return;
+        setError(t("retroarch.gamesError"));
+        // And drop what is on screen with it. The error panel replaces the covers,
+        // but the LIST stayed as it was - the previous console's - so everything
+        // downstream still believed in tiles nobody could see: focus was handed to
+        // one of them, and the remote then sat on a key with nothing behind it
+        // until the recovery net pulled it back.
+        gamesFor.current = system;
+        setGames([]);
       } finally {
         if (alive) setLoading(false);
       }
@@ -409,7 +432,7 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
               marking={marking}
               onMarking={setMarking}
               games={games}
-              loading={loading}
+              loading={loading || gamesFor.current !== system}
               error={error}
               onSystem={setSystem}
               onPlay={onPlay}

@@ -2,8 +2,12 @@
   "id": "retroarch",
   "manifestVersion": 1,
   "name": "RetroArch",
-  "version": "1.13.0",
+  "version": "1.13.1",
   "changelog": [
+    {
+      "version": "1.13.1",
+      "notes": "On a console with no games left, Right and OK now move to the button beside it instead of doing nothing - and neither pulls the cursor out of the console list a moment later. The cursor also stays somewhere you can see it after a search that finds nothing, after clearing one, and when a game refuses to start - that screen used to leave the remote with nothing to press but Back."
+    },
     {
       "version": "1.13.0",
       "notes": "Two categories at the top of the console list: Favourites, and the last eighteen games you played. The star next to Search puts the game you are on into your favourites, and a star on the cover says it is there. The screensaver now comes up over the games grid too, after the same wait as everywhere else - never during a game."
