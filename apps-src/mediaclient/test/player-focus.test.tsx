@@ -331,9 +331,56 @@ describe("the overlay's own controls", () => {
     expect(usePlayer.getState().overlay).toBe(false);
     expect(usePlayer.getState().state).toBe("playing");
 
-    // With them closed, Back is what it always was.
+    // With them closed, Back leaves the film - it does not pause it.
     await remote.back();
-    expect(usePlayer.getState().state).toBe("paused");
+    await settle();
+    expect(usePlayer.getState().state).toBe("stopped");
+    expect(usePlayer.getState().current).toBe(null);
+  });
+
+  it("leaves the film on ONE press when nothing is open over it", async () => {
+    // The bug, in the order it was pressed on a sofa: Back paused the film, and
+    // pausing raises the overlay, so the next press only closed the controls and
+    // it took a third to get back to the film's own page. A bare picture and a
+    // Back press is somebody leaving; there is no state in between for a second
+    // press to be about.
+    render(<Player />);
+    await settle();
+    await act(async () => {
+      usePlayer.setState({ overlay: false });
+    });
+    await settle();
+
+    await remote.back();
+    await settle();
+
+    expect(usePlayer.getState().state).toBe("stopped");
+    expect(usePlayer.getState().current).toBe(null);
+  });
+
+  it("leaves a PAUSED film on the press that follows the controls", async () => {
+    // A paused film always has the controls up - one with a bare frozen frame
+    // reads as a dead box - so the only way to a paused picture with nothing
+    // over it is the Back press that closed them. The press after that leaves,
+    // rather than being the third of three.
+    render(<Player />);
+    await settle();
+    await act(async () => {
+      usePlayer.setState({ state: "paused" });
+    });
+    await settle();
+    // The controls came back up by themselves, exactly as they do on a sofa.
+    expect(usePlayer.getState().overlay).toBe(true);
+
+    await remote.back();
+    await settle();
+    expect(usePlayer.getState().overlay).toBe(false);
+    expect(usePlayer.getState().current).not.toBe(null);
+
+    await remote.back();
+    await settle();
+
+    expect(usePlayer.getState().current).toBe(null);
   });
 });
 

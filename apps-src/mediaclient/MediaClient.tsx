@@ -245,9 +245,10 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   // Back walks the screens first and only leaves the app from the top, which is
   // what the remote's Back means everywhere else on this box.
   //
-  // While something is playing the player takes Back for itself (it pauses
-  // rather than stops), so this must not also act on it - two handlers would
-  // pause the film AND navigate away from it.
+  // While something is playing the player takes Back for itself (it closes what
+  // is open over the film, and stops the film when nothing is), so this must not
+  // also act on it - two handlers would stop the film AND walk a screen back
+  // behind it, landing the person somewhere they never asked to be.
   useBackspace(() => {
     if (usePlayer.getState().current) return;
     // Between two episodes Back gives up the STEP rather than being eaten. There

@@ -6,7 +6,7 @@ import {
   setFocus,
   useFocusable,
 } from "@noriginmedia/norigin-spatial-navigation";
-import { FocusButton, useBackspace, useFocusableItem, useI18n } from "@sdk";
+import { FocusButton, isBackKey, useBackspace, useFocusableItem, useI18n } from "@sdk";
 import { useApp } from "./state";
 import { TrackMenu, type Choice } from "./TrackMenu";
 import type { Track } from "./backends/types";
@@ -212,6 +212,16 @@ export function Player(): React.JSX.Element | null {
     };
 
     const onKey = (e: KeyboardEvent): void => {
+      // Back is not an input that wakes the controls, and this handler must not
+      // be what decides that. It belongs to the useBackspace stack below, which
+      // closes what is open over the film or - with nothing open - leaves it.
+      // Both listeners are window CAPTURE listeners, so which one sees a key
+      // first is decided by which mounted first: the stack's is installed once,
+      // at app start, so today this never runs for Back. If it ever did, the
+      // press would raise the overlay and the stack would then read that as
+      // "close the controls" - a Back that can never leave the film, which is
+      // the shape of the bug this handling was fixed for.
+      if (isBackKey(e)) return;
       const p = usePlayer.getState();
       // While a step is in flight the film on screen is about to be replaced, so
       // a transport press aimed at it is thrown away by the swap: measured, OK
@@ -466,8 +476,17 @@ export function Player(): React.JSX.Element | null {
     if (current) applySubtitleStyle();
   }, [current]);
 
-  // Back pauses and keeps the frame; stopping loses where you were, which
-  // matters more on a television than on a phone. Only a paused film stops.
+  // With nothing open over the film, Back LEAVES it: the box stops playing and
+  // the screen the film was started from - the film's or the series' own page -
+  // comes back. Where you were is not lost by that; `stop()` reports the
+  // position to the server on its way out, so Play resumes from the same second.
+  //
+  // It used to pause instead and stop only on a second press, and that never
+  // worked as written: pausing RAISES the overlay (`togglePause` sets it), so
+  // the second press was eaten by the overlay branch below and leaving the film
+  // took three presses - pause, close the controls, stop. Pausing is not what
+  // Back means on a television anyway, and it is already one press away: OK
+  // brings the controls up with the pause button under the cursor.
   //
   // Through the SDK's stack rather than a listener of our own: it installs a
   // single capture-phase handler at app start and stops propagation, so a raw
@@ -515,15 +534,17 @@ export function Player(): React.JSX.Element | null {
       return;
     }
     // Then the overlay. Back means "undo the last thing I opened", and with the
-    // controls up that is the controls - pausing the film instead is an answer
+    // controls up that is the controls - leaving the film instead is an answer
     // to a question nobody asked.
     if (p.overlay) {
       p.showOverlay(false);
       setFocus(IDLE_KEY);
       return;
     }
-    if (p.state === "playing") p.togglePause();
-    else void p.stop();
+    // Nothing left over the picture, so the press is about the film itself.
+    // Whether it is playing or paused, one press ends it and hands the screen
+    // back to whatever is behind this one.
+    void p.stop();
   }, Boolean(current));
 
   // Focus is taken off anything the overlay does not own, and handed to
