@@ -67,11 +67,27 @@ const IDLE_HIDE_MS = 4_000;
  * second tap exactly, but the SDK's stack hands its handlers no event, and a
  * double TAP is not a repeat either.
  *
- * A second, deliberate press inside the window is swallowed, which is the price.
- * It is the cheaper mistake by a distance: one press to leave the page again,
- * against being put somewhere nobody asked for with the film gone.
+ * A deliberate press inside the window is swallowed, and one landing just as it
+ * closes can be lost with it. That is the price, and it is the cheaper mistake by
+ * a distance: a press or two to leave the page again, against being put somewhere
+ * nobody asked for with the film gone.
  */
 const LEAVE_GRACE_MS = 1_000;
+/**
+ * Two Back presses closer together than this are one key being HELD.
+ *
+ * What the sliding window has to tell apart, and the two are far enough apart to
+ * be told: a held key repeats every 112 ms, and somebody pressing again because
+ * nothing seems to have happened does it about every 600 ms (both measured
+ * through the page on a box). Without this test the window slid for any press at
+ * all, so eight deliberate taps 600 ms apart were ALL swallowed and the remote
+ * looked dead on a page that was working - the opposite failure to the one the
+ * window exists for, and unbounded.
+ *
+ * The first repeat of a hold lands 450 ms in and so does not pass this test; it
+ * does not need to, being well inside the window the press itself opened.
+ */
+const REPEAT_GAP_MS = 300;
 
 /**
  * What is on screen while something plays.
@@ -477,6 +493,8 @@ export function Player(): React.JSX.Element | null {
    * behind it is a remote whose Back does nothing.
    */
   const leaveUntil = useRef(0);
+  /** When Back was last pressed, to tell a held key from a second press. */
+  const lastBackAt = useRef(0);
   /**
    * The skip button leaving takes the cursor with it.
    *
@@ -529,20 +547,25 @@ export function Player(): React.JSX.Element | null {
   // playing while the overlay claimed Back had acted on it.
   useBackspace(
     () => {
+      const now = Date.now();
+      const sincePrev = now - lastBackAt.current;
+      lastBackAt.current = now;
       // The film is already gone, so this is the tail of the gesture that left
       // it - a repeat of the same press, or the second tap of somebody who could
-      // not see that the first had worked. Swallowed rather than passed on, and
-      // each one pushes the window out so a held key is absorbed for as long as
-      // it is held; see LEAVE_GRACE_MS.
+      // not see that the first had worked. Swallowed rather than passed on; see
+      // LEAVE_GRACE_MS.
       if (!usePlayer.getState().current) {
         // Past the deadline the window is over however the flag got here, so let
         // go of the key rather than swallow presses for ever. This press is lost
         // - the next one reaches the screen behind.
-        if (Date.now() >= leaveUntil.current) {
+        if (now >= leaveUntil.current) {
           setLeaving(false);
           return;
         }
-        leaveUntil.current = Date.now() + LEAVE_GRACE_MS;
+        // Only a REPEAT pushes the window out, so a held key is absorbed for as
+        // long as it is held while a person pressing again is not held off for
+        // ever; see REPEAT_GAP_MS.
+        if (sincePrev <= REPEAT_GAP_MS) leaveUntil.current = now + LEAVE_GRACE_MS;
         return;
       }
       // Back closes the menu first: it is a layer over the film, and ending the
@@ -596,6 +619,13 @@ export function Player(): React.JSX.Element | null {
       // Nothing left over the picture, so the press is about the film itself.
       // Whether it is playing or paused, one press ends it and hands the screen
       // back to whatever is behind this one.
+      // Armed HERE rather than in the effect below, so there is no instant at
+      // which the film has gone and the deadline has not been set yet: between
+      // the store clearing `current` and a passive effect running, a repeat would
+      // read a stale deadline, take the branch above and let go of the key. It
+      // needs the teardown to outlast the first repeat to fire, which is why it
+      // was never seen - the same shape as the bug that made the window a no-op.
+      leaveUntil.current = now + LEAVE_GRACE_MS;
       setLeaving(true);
       void p.stop();
       // `enabled` outlives the film by LEAVE_GRACE_MS, counted from the moment it
@@ -623,7 +653,10 @@ export function Player(): React.JSX.Element | null {
   // always means the moment there is a picture again.
   useEffect(() => {
     if (!leaving || current) return;
-    leaveUntil.current = Date.now() + LEAVE_GRACE_MS;
+    // At LEAST a second from the film going: a slow teardown must not eat the
+    // window the press opened. Never shortens it - a hold in progress has
+    // already pushed the deadline further out than this.
+    leaveUntil.current = Math.max(leaveUntil.current, Date.now() + LEAVE_GRACE_MS);
     let id: ReturnType<typeof setTimeout>;
     // Re-checked rather than fired once, because every swallowed press moves the
     // deadline: the window has to close a second after the LAST Back, not a

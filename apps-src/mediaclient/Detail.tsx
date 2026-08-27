@@ -486,7 +486,12 @@ export function Detail({
   // The film has gone and this page is back: the cursor comes with it, rather
   // than waiting for a press. `first` is the play button, so the gesture that
   // measured worst - Back to leave, OK to carry on watching - works.
-  useFocusOnReveal(first, ownsDetailKey, !playing && !picking && !confirming);
+  //
+  // `!moving` is not decoration: `current` is null for the whole of an episode
+  // step, five round trips of it, so without it a step counts as this page being
+  // revealed and parks the cursor on the OUTGOING episode's tile, behind a player
+  // that is still up. The same guard, for the same reason, as the fallback's.
+  useFocusOnReveal(first, ownsDetailKey, !playing && !moving && !picking && !confirming);
 
   useFocusFallback(
     // The play button when there is one; otherwise the first child, which is
@@ -691,7 +696,14 @@ export function Detail({
             setSubLang(ordinal === "none" ? "none" : track?.language);
             setSubId(track?.language ? undefined : track?.id);
           }}
-          onClose={() => setPicking(false)}
+          onClose={() => {
+            setPicking(false);
+            // Back to the button that opened it, the way the confirm above does.
+            // Without it the panel closes onto a cursor that is nowhere, and
+            // whatever puts one back lands on Play - so Back out of the audio
+            // menu moved the highlight to a different button entirely.
+            setFocus("detail-lang");
+          }}
         />
       )}
       <div

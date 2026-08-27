@@ -496,6 +496,49 @@ describe("the overlay's own controls", () => {
     expect(outer).not.toHaveBeenCalled();
   });
 
+  it("lets go of the key for somebody who keeps PRESSING it", async () => {
+    // The other side of the sliding window, and the failure it can become: a
+    // held key repeats every 112 ms, but a person pressing again because nothing
+    // seems to have happened does it about every 600 ms. Sliding for any press
+    // at all, eight deliberate taps 600 ms apart were every one swallowed and
+    // the remote looked dead on a page that was working.
+    const outer = vi.fn();
+    function Outer(): null {
+      useBackspace(outer);
+      return null;
+    }
+    usePlayer.setState({ stop: slowStop });
+    render(
+      <>
+        <Outer />
+        <Player />
+      </>,
+    );
+    await settle();
+    await act(async () => {
+      usePlayer.setState({ overlay: false });
+    });
+    await settle();
+
+    await remote.back();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 60));
+    });
+    expect(usePlayer.getState().current).toBe(null);
+
+    // Taps at a person's cadence, well outside the repeat gap. One is swallowed
+    // by the window the leave opened, and one can be lost as it closes - but the
+    // screen behind is reachable rather than held off for as long as they press.
+    for (let i = 0; i < 6; i++) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 600));
+      });
+      await remote.back();
+      await settle();
+    }
+    expect(outer).toHaveBeenCalled();
+  });
+
   it("swallows the rest of the gesture instead of navigating behind the film", async () => {
     // Measured on a box: `stop()` clears `current` in tens of milliseconds, and
     // the moment it does this handler unregisters and the app's own Back handler
