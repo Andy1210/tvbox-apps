@@ -9,7 +9,7 @@
   "changelog": [
     {
       "version": "0.62.5",
-      "notes": "Back leaves a film in one press. With nothing on screen over the picture, Back stops the film - playing or paused - and puts you back on the film's or the series' own page, and where you were is not lost: the position is saved on the way out, so Play carries on from the same second. Before, the first press paused the film and brought the controls up, the second only closed the controls, and it took a third to get out. Pausing is still one press away: OK brings the controls up with the pause button already selected. Holding Back, or pressing it twice because the picture is still up while the film winds down, leaves you on that page rather than carrying on out of the app behind it."
+      "notes": "Back leaves a film in one press. With nothing on screen over the picture, Back stops the film - playing or paused - and puts you back on the film's or the series' own page, and where you were is not lost: the position is saved on the way out, so Play carries on from the same second. Before, the first press paused the film and brought the controls up, the second only closed the controls, and it took a third to get out. Pausing is still one press away: OK brings the controls up with the pause button already selected. The screen goes dark for about a second while the film winds down, so pressing Back again - or just leaning on it - is easy to do: those extra presses now leave you on that page instead of carrying on out of the app behind it."
     },
     {
       "version": "0.62.4",

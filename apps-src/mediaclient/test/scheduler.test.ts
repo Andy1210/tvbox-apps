@@ -209,6 +209,10 @@ describe("playback scheduler", () => {
     const last = backend.reportProgress.mock.calls.at(-1);
     expect(last?.[0]).toBe("7");
     expect(last?.[1]).toBe(120_000);
+    // "stopped", not the live state: the shell has already killed the player by
+    // the time this runs, and the caller releases the session next. A last word
+    // of "playing" leaves the server holding a session nobody is watching.
+    expect(last?.[3]).toBe("stopped");
 
     // Now let it come back, and let the ticker run on.
     open?.();

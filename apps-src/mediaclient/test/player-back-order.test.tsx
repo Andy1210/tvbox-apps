@@ -65,6 +65,17 @@ async function settle(): Promise<void> {
 
 describe("Back with the player's own key listener registered first", () => {
   it("still leaves the film on one press", async () => {
+    // The premise, asserted rather than assumed: NOTHING has taken a Back key
+    // before this render. The SDK's stack installs its window listener on the
+    // first enabled handler and calls `preventDefault` whenever it has one, so
+    // an unprevented Back key means the stack is still empty and the player's
+    // own listener is about to register first. Without this, a wrapper added to
+    // this file - or moving `useBackspace` above the key effect in Player.tsx -
+    // would leave the test passing with the guard deleted, covering nothing.
+    const probe = new KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true });
+    window.dispatchEvent(probe);
+    expect(probe.defaultPrevented).toBe(false);
+
     render(<Player />);
     await settle();
     // The controls come up on mount and hide themselves four seconds later; the

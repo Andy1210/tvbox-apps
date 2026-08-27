@@ -182,8 +182,13 @@ export class PlaybackScheduler {
     this.stopTimer();
     if (!t) return;
     this.target = null;
+    // "stopped", like `end()`, not the live state the flush this replaced used to
+    // send: the shell has already killed the player by the time this runs (it
+    // removes mpv's exit listeners first, so no event ever reaches the page), and
+    // the caller releases the session on the next line. A last word of "playing"
+    // leaves the server holding a session for a film nobody is watching.
     void this.deps.backend
-      .reportProgress(t.itemId, this.deps.position(), t.durationMs, this.deps.state())
+      .reportProgress(t.itemId, this.deps.position(), t.durationMs, "stopped")
       .catch((e: unknown) => log.warn("release progress report failed", e));
   }
 

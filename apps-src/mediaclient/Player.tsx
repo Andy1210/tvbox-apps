@@ -47,21 +47,29 @@ const STEPS_MS = [10_000, 30_000, 60_000];
 /** The overlay hides itself this long after the last press. */
 const IDLE_HIDE_MS = 4_000;
 /**
- * How long a Back press that LEFT the film goes on owning the key.
+ * How long after the LAST Back press a film has just been left for.
  *
- * Measured on a box: `stop()` clears `current` in tens of milliseconds against
- * a server on the same network, and the moment it does this handler unregisters
- * and `MediaClient`'s takes over and NAVIGATES. So the second half of one
- * gesture landed on a different screen than the film was started from - two
- * taps 50 ms apart stopped the film and walked to the app's home rows, and a
- * thumb resting on Back for 0.7 s left the app altogether. The press that
- * leaves the film has to absorb its own repeats, because the PICTURE is still
- * up while mpv tears down: "nothing happened, press it again" is what a person
- * does, and they are right to.
+ * The moment `stop()` clears `current`, this handler unregisters and
+ * `MediaClient`'s takes over and NAVIGATES - so the rest of one gesture landed
+ * on a screen nobody asked for. Measured on a box: two taps 600 ms apart stopped
+ * the film and walked to the app's home rows, and a thumb resting on Back left
+ * the app altogether. The screen is black for most of a second after the press
+ * (the film's window is gone within ~140 ms and the page behind it paints at
+ * ~1 s), so "nothing happened, press it again" is what a person does, and they
+ * are right to.
  *
- * A second, deliberate press inside the window is swallowed, which is the
- * price. It is the cheaper mistake by a distance: one press to leave the page
- * again, against being put somewhere nobody asked for with the film gone.
+ * The window SLIDES: every swallowed press pushes it out again. A fixed one
+ * cannot work, because a held key goes on producing repeats for as long as it is
+ * held - measured through the page, the first repeat lands 450 ms in and then one
+ * every 112 ms - so a 1.5 s thumb-rest cleared a fixed second and left the app.
+ * Sliding, a hold of any length is absorbed and the window closes a second after
+ * the key is released. `KeyboardEvent.repeat` would separate a hold from a
+ * second tap exactly, but the SDK's stack hands its handlers no event, and a
+ * double TAP is not a repeat either.
+ *
+ * A second, deliberate press inside the window is swallowed, which is the price.
+ * It is the cheaper mistake by a distance: one press to leave the page again,
+ * against being put somewhere nobody asked for with the film gone.
  */
 const LEAVE_GRACE_MS = 1_000;
 
@@ -463,6 +471,13 @@ export function Player(): React.JSX.Element | null {
   /** Set by the Back press that leaves the film; see LEAVE_GRACE_MS. */
   const [leaving, setLeaving] = useState(false);
   /**
+   * Swallow Back until this instant. The DEADLINE is what bounds the window,
+   * not the flag: a hidden renderer is frozen, so the timer that clears the flag
+   * can be deferred past its own window, and a flag left set with no deadline
+   * behind it is a remote whose Back does nothing.
+   */
+  const leaveUntil = useRef(0);
+  /**
    * The skip button leaving takes the cursor with it.
    *
    * It unmounts when the marker passes, when three seconds are up, or when the
@@ -514,9 +529,22 @@ export function Player(): React.JSX.Element | null {
   // playing while the overlay claimed Back had acted on it.
   useBackspace(
     () => {
-      // The film is already gone, so this is the tail of the gesture that left it.
-      // Swallowed rather than passed on; see LEAVE_GRACE_MS.
-      if (!usePlayer.getState().current) return;
+      // The film is already gone, so this is the tail of the gesture that left
+      // it - a repeat of the same press, or the second tap of somebody who could
+      // not see that the first had worked. Swallowed rather than passed on, and
+      // each one pushes the window out so a held key is absorbed for as long as
+      // it is held; see LEAVE_GRACE_MS.
+      if (!usePlayer.getState().current) {
+        // Past the deadline the window is over however the flag got here, so let
+        // go of the key rather than swallow presses for ever. This press is lost
+        // - the next one reaches the screen behind.
+        if (Date.now() >= leaveUntil.current) {
+          setLeaving(false);
+          return;
+        }
+        leaveUntil.current = Date.now() + LEAVE_GRACE_MS;
+        return;
+      }
       // Back closes the menu first: it is a layer over the film, and ending the
       // film underneath an open menu would be two things at once.
       // The search is a screen of its own inside the menu, so Back leaves it
@@ -595,7 +623,20 @@ export function Player(): React.JSX.Element | null {
   // always means the moment there is a picture again.
   useEffect(() => {
     if (!leaving || current) return;
-    const id = setTimeout(() => setLeaving(false), LEAVE_GRACE_MS);
+    leaveUntil.current = Date.now() + LEAVE_GRACE_MS;
+    let id: ReturnType<typeof setTimeout>;
+    // Re-checked rather than fired once, because every swallowed press moves the
+    // deadline: the window has to close a second after the LAST Back, not a
+    // second after the first.
+    const check = (): void => {
+      const left = leaveUntil.current - Date.now();
+      if (left > 0) {
+        id = setTimeout(check, left);
+        return;
+      }
+      setLeaving(false);
+    };
+    id = setTimeout(check, LEAVE_GRACE_MS);
     return () => clearTimeout(id);
   }, [leaving, current]);
 

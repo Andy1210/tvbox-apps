@@ -620,17 +620,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       // back yet when the report follows straight after. Stopping in that window
       // wrote the PRE-seek position as the resume point - so a scrub twenty
       // minutes on, then Back, resumed twenty minutes behind.
-      position: () => {
-        const s = get();
-        // Clamped, because this is now a number a CALLER can influence: `seekTo`
-        // does not clamp (unlike `seekBy` and `commitScrub`) and the Plex
-        // Companion door hands it whatever offset it was sent, which then never
-        // settles and sticks. Reporting that to the server writes a view offset
-        // the film never reached - far enough on, and the item is marked watched
-        // and drops out of Continue Watching.
-        const at = s.seekTargetMs ?? s.positionMs;
-        return s.durationMs > 0 ? Math.max(0, Math.min(s.durationMs, at)) : Math.max(0, at);
-      },
+      position: () => reportedPosition(get()),
       state: () => get().state,
       nowPlaying: () => nowPlayingFor(get()),
       postNowPlaying,
@@ -909,6 +899,31 @@ export function settleRemainingMs(): number {
 function randomSession(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
   return `s${Math.floor(Math.random() * 1e12).toString(36)}`;
+}
+
+/**
+ * The position to tell the SERVER about - which is not always the one on screen.
+ *
+ * `seekTargetMs` first, for the reason `changeTracks` gives: a committed scrub is
+ * where the film is GOING, and the box has not reported back yet when a report
+ * follows straight after. Reporting `positionMs` there wrote the PRE-seek
+ * position, so a scrub twenty minutes on and then Back resumed twenty minutes
+ * behind.
+ *
+ * Clamped, because that makes it a number a CALLER can influence: `seekTo` does
+ * not clamp the way `seekBy` and `commitScrub` do, and the Plex Companion door
+ * passes on whatever offset it was sent. An out-of-range target never satisfies
+ * the settle test, so it sticks - and far enough on, the server marks the item
+ * watched and drops it out of Continue Watching.
+ *
+ * A duration of 0 means the item never said how long it is; there is nothing to
+ * clamp against then, and refusing to report at all would lose the resume point
+ * this exists to keep.
+ */
+export function reportedPosition(s: Pick<PlayerState, "positionMs" | "seekTargetMs" | "durationMs">): number {
+  const at = s.seekTargetMs ?? s.positionMs;
+  if (!Number.isFinite(at)) return 0;
+  return s.durationMs > 0 ? Math.max(0, Math.min(s.durationMs, at)) : Math.max(0, at);
 }
 
 function nowPlayingFor(s: PlayerState): NowPlayingReport {

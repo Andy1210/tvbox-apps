@@ -450,6 +450,52 @@ describe("the overlay's own controls", () => {
     expect(outer).not.toHaveBeenCalled();
   });
 
+  it("swallows a HELD Back for as long as it is held", async () => {
+    // Measured through the page on a box: a held key produces its first repeat
+    // 450 ms in and then one every 112 ms, for as long as the thumb rests. A
+    // FIXED window cannot cover that at any sane length - 1000 ms cleared at
+    // 1.5 s and the box left the app - so the window slides: every swallowed
+    // press pushes it out, and it closes a second after the last one.
+    //
+    // Replayed at about half the real interval and well past the window's own
+    // length, which is the part that matters: a fixed window expires mid-hold
+    // and hands the rest of the burst to the screen behind, a sliding one does
+    // not.
+    const outer = vi.fn();
+    function Outer(): null {
+      useBackspace(outer);
+      return null;
+    }
+    usePlayer.setState({ stop: slowStop });
+    render(
+      <>
+        <Outer />
+        <Player />
+      </>,
+    );
+    await settle();
+    await act(async () => {
+      usePlayer.setState({ overlay: false });
+    });
+    await settle();
+
+    await remote.back();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 60));
+    });
+    expect(usePlayer.getState().current).toBe(null);
+
+    // The thumb stays down for over a second and a half: a 1000 ms window that
+    // did not slide would have expired a third of the way through.
+    for (let i = 0; i < 26; i++) {
+      await remote.back();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 60));
+      });
+    }
+    expect(outer).not.toHaveBeenCalled();
+  });
+
   it("swallows the rest of the gesture instead of navigating behind the film", async () => {
     // Measured on a box: `stop()` clears `current` in tens of milliseconds, and
     // the moment it does this handler unregisters and the app's own Back handler
@@ -489,9 +535,11 @@ describe("the overlay's own controls", () => {
     expect(outer).not.toHaveBeenCalled();
 
     // And the window closes: a press that arrives after it is an ordinary Back
-    // on the screen behind, which is somebody leaving the page.
+    // on the screen behind, which is somebody leaving the page. Timed from the
+    // LAST swallowed press, with margin - the window is 1000 ms and a loaded
+    // runner fires a timer late, never early.
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 1_100));
+      await new Promise((r) => setTimeout(r, 1_600));
     });
     await remote.back();
     await settle();
