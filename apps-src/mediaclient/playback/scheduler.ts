@@ -121,7 +121,14 @@ export class PlaybackScheduler {
       this.lastProgress = now;
       this.lastNowPlaying = now;
       await this.reportProgress();
-      this.deps.postNowPlaying(this.deps.nowPlaying());
+      // Re-read, because `end()` may have run while that report was in flight:
+      // it nulls the target before its first await and posts `idle`, and that
+      // has to be the LAST word on the topic. The payload is retained, so a
+      // now-playing sent after it goes on announcing a film that has stopped -
+      // until something else plays. That window used to be three presses wide
+      // (Back paused, closed the controls, then stopped); it is now one press,
+      // and pressing Back and then an arrow is an ordinary way to leave.
+      if (this.target) this.deps.postNowPlaying(this.deps.nowPlaying());
       log.info(`flushed (${reason})`);
     })();
     this.flushing = run;

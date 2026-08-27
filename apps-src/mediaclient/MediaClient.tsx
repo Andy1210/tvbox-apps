@@ -252,7 +252,7 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
   useBackspace(() => {
     if (usePlayer.getState().current) return;
     // Between two episodes Back gives up the STEP rather than being eaten. There
-    // is nothing to pause and nothing to go back to yet, and the step can hold
+    // is no film on screen to act on and nothing to go back to yet, and the step can hold
     // the screen for as long as the server takes - so a press that did nothing
     // at all was a remote that had died. Navigating instead would leave the
     // episode arriving behind a screen nobody asked for, which is why this

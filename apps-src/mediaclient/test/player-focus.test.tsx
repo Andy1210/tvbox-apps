@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { act, render } from "@testing-library/react";
-import { configureI18n } from "@sdk";
+import { configureI18n, useBackspace } from "@sdk";
 import { Player } from "../Player";
 import { usePlayer, __wirePlayerEventsForTest } from "../playback/player";
 import { useApp } from "../state";
@@ -359,17 +359,28 @@ describe("the overlay's own controls", () => {
   });
 
   it("leaves a PAUSED film on the press that follows the controls", async () => {
-    // A paused film always has the controls up - one with a bare frozen frame
-    // reads as a dead box - so the only way to a paused picture with nothing
-    // over it is the Back press that closed them. The press after that leaves,
-    // rather than being the third of three.
+    // Pausing RAISES the controls (`togglePause` sets `overlay`), which is the
+    // mechanism the three-press bug was made of, so it is pinned here rather
+    // than assumed: this test starts from a bare picture and pauses the way the
+    // remote does, so if that mechanism ever changes this says so.
+    //
+    // A paused film therefore always has the controls up - one with a bare
+    // frozen frame reads as a dead box - so the only way to a paused picture
+    // with nothing over it is the Back press that closed them. The press after
+    // that leaves, rather than being the third of three.
     render(<Player />);
     await settle();
     await act(async () => {
-      usePlayer.setState({ state: "paused" });
+      usePlayer.setState({ overlay: false });
     });
     await settle();
-    // The controls came back up by themselves, exactly as they do on a sofa.
+    expect(usePlayer.getState().overlay).toBe(false);
+
+    await act(async () => {
+      usePlayer.getState().togglePause();
+    });
+    await settle();
+    expect(usePlayer.getState().state).toBe("paused");
     expect(usePlayer.getState().overlay).toBe(true);
 
     await remote.back();
@@ -381,6 +392,54 @@ describe("the overlay's own controls", () => {
     await settle();
 
     expect(usePlayer.getState().current).toBe(null);
+  });
+
+  it("swallows the rest of the gesture instead of navigating behind the film", async () => {
+    // Measured on a box: `stop()` clears `current` in tens of milliseconds, and
+    // the moment it does this handler unregisters and the app's own Back handler
+    // becomes top and NAVIGATES. Two taps 50 ms apart stopped the film and
+    // walked to the app's home rows; a thumb resting on Back for 0.7 s left the
+    // app. The picture is still up while mpv tears down, so pressing again is
+    // exactly what a person does.
+    //
+    // `outer` stands in for MediaClient's handler: mounted BEFORE the player, so
+    // it is lower in the SDK's stack and hears a Back key only once the player's
+    // handler has gone.
+    const outer = vi.fn();
+    function Outer(): null {
+      useBackspace(outer);
+      return null;
+    }
+    render(
+      <>
+        <Outer />
+        <Player />
+      </>,
+    );
+    await settle();
+    await act(async () => {
+      usePlayer.setState({ overlay: false });
+    });
+    await settle();
+
+    await remote.back();
+    await settle();
+    expect(usePlayer.getState().current).toBe(null);
+
+    // The repeats of the same press, with the film already gone.
+    await remote.back();
+    await remote.back();
+    await settle();
+    expect(outer).not.toHaveBeenCalled();
+
+    // And the window closes: a press that arrives after it is an ordinary Back
+    // on the screen behind, which is somebody leaving the page.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 1_100));
+    });
+    await remote.back();
+    await settle();
+    expect(outer).toHaveBeenCalledTimes(1);
   });
 });
 

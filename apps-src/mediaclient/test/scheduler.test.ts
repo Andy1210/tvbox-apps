@@ -143,6 +143,41 @@ describe("playback scheduler", () => {
     expect(s.active).toBe(false);
   });
 
+  it("says nothing more about what is playing once it has ended", async () => {
+    // `idle` has to be the LAST word. The payload is retained by the box and read
+    // by the house, so a now-playing that lands after it goes on announcing a
+    // film that has stopped - until something else plays. Two ways in, and this
+    // covers both: a flush whose report was still in flight when the item ended,
+    // and a flush that arrives afterwards.
+    //
+    // Reachable in one gesture now that Back leaves the film on the first press:
+    // `stop()` awaits the final report and the session release with the key
+    // handler still mounted, so Back and then an arrow is enough.
+    const backend = fakeBackend();
+    let open: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      open = r;
+    });
+    backend.reportProgress.mockImplementationOnce(async () => {
+      await gate;
+    });
+
+    const s = make(backend);
+    s.start({ itemId: "7", durationMs: 600_000, session: "sess" });
+    await vi.advanceTimersByTimeAsync(0);
+    posted.length = 0;
+
+    const inFlight = s.flush("seek");
+    await s.end();
+    open?.();
+    await inFlight;
+    // And one that starts after the end, which is the same mistake a moment later.
+    await s.flush("pause");
+
+    expect(posted.at(-1)?.state).toBe("idle");
+    expect(posted.filter((r) => r.state !== "idle")).toEqual([]);
+  });
+
   it("still ends cleanly when the final report is refused", async () => {
     const backend = fakeBackend();
     backend.reportProgress.mockRejectedValue(new Error("server said no"));

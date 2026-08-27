@@ -615,7 +615,12 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     scheduler?.stopTimer();
     scheduler = new PlaybackScheduler({
       backend,
-      position: () => get().positionMs,
+      // seekTargetMs first, for the reason `changeTracks` gives below: a
+      // committed scrub is where the film is GOING, and the box has not reported
+      // back yet when the report follows straight after. Stopping in that window
+      // wrote the PRE-seek position as the resume point - so a scrub twenty
+      // minutes on, then Back, resumed twenty minutes behind.
+      position: () => get().seekTargetMs ?? get().positionMs,
       state: () => get().state,
       nowPlaying: () => nowPlayingFor(get()),
       postNowPlaying,
