@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { act, render } from "@testing-library/react";
-import { configureI18n } from "@sdk";
+import { configureI18n, useBackspace } from "@sdk";
 import { Player } from "../Player";
 import { usePlayer, __wirePlayerEventsForTest } from "../playback/player";
 import { useApp } from "../state";
@@ -29,7 +29,24 @@ setupRemote();
 
 const item: MediaItem = { id: "m1", kind: "movie", title: "Film", durationMs: 3_600_000 };
 
+/**
+ * The store's own `stop`, and a slow one over it.
+ *
+ * On a box `stop()` awaits a final progress report and a session release before
+ * it clears `current` - so the film is still `current` for a while after the
+ * press, which is exactly the window the leave-grace has to survive. The bare
+ * fixture has no scheduler, so `stop()` resolves inside one microtask drain and
+ * every timing question answers itself the wrong way: a first cut of the grace
+ * window passed here and did nothing at all on a television.
+ */
+const realStop = usePlayer.getState().stop;
+const slowStop = async (opts?: { handOver?: boolean }): Promise<void> => {
+  await new Promise((r) => setTimeout(r, 20));
+  await realStop(opts);
+};
+
 beforeEach(async () => {
+  usePlayer.setState({ stop: realStop });
   useApp.setState({ backend: null });
   usePlayer.setState({
     current: {
@@ -331,9 +348,245 @@ describe("the overlay's own controls", () => {
     expect(usePlayer.getState().overlay).toBe(false);
     expect(usePlayer.getState().state).toBe("playing");
 
-    // With them closed, Back is what it always was.
+    // With them closed, Back leaves the film - it does not pause it.
     await remote.back();
+    await settle();
+    expect(usePlayer.getState().state).toBe("stopped");
+    expect(usePlayer.getState().current).toBe(null);
+  });
+
+  it("leaves the film on ONE press when nothing is open over it", async () => {
+    // The bug, in the order it was pressed on a sofa: Back paused the film, and
+    // pausing raises the overlay, so the next press only closed the controls and
+    // it took a third to get back to the film's own page. A bare picture and a
+    // Back press is somebody leaving; there is no state in between for a second
+    // press to be about.
+    render(<Player />);
+    await settle();
+    await act(async () => {
+      usePlayer.setState({ overlay: false });
+    });
+    await settle();
+
+    await remote.back();
+    await settle();
+
+    expect(usePlayer.getState().state).toBe("stopped");
+    expect(usePlayer.getState().current).toBe(null);
+  });
+
+  it("leaves a PAUSED film on the press that follows the controls", async () => {
+    // Pausing RAISES the controls (`togglePause` sets `overlay`), which is the
+    // mechanism the three-press bug was made of, so it is pinned here rather
+    // than assumed: this test starts from a bare picture and pauses the way the
+    // remote does, so if that mechanism ever changes this says so.
+    //
+    // A paused film therefore always has the controls up - one with a bare
+    // frozen frame reads as a dead box - so the only way to a paused picture
+    // with nothing over it is the Back press that closed them. The press after
+    // that leaves, rather than being the third of three.
+    render(<Player />);
+    await settle();
+    await act(async () => {
+      usePlayer.setState({ overlay: false });
+    });
+    await settle();
+    expect(usePlayer.getState().overlay).toBe(false);
+
+    await act(async () => {
+      usePlayer.getState().togglePause();
+    });
+    await settle();
     expect(usePlayer.getState().state).toBe("paused");
+    expect(usePlayer.getState().overlay).toBe(true);
+
+    await remote.back();
+    await settle();
+    expect(usePlayer.getState().overlay).toBe(false);
+    expect(usePlayer.getState().current).not.toBe(null);
+
+    await remote.back();
+    await settle();
+
+    expect(usePlayer.getState().current).toBe(null);
+  });
+
+  it("swallows the rest of the gesture while the film is still tearing down", async () => {
+    // The same press as below, with `stop()` taking as long as it does on a box.
+    // That is the whole of the window: `current` is still set for the length of
+    // the final report and the session release, and a grace that keys off
+    // `current` rather than off the PRESS closes before it ever opened.
+    const outer = vi.fn();
+    function Outer(): null {
+      useBackspace(outer);
+      return null;
+    }
+    usePlayer.setState({ stop: slowStop });
+    render(
+      <>
+        <Outer />
+        <Player />
+      </>,
+    );
+    await settle();
+    await act(async () => {
+      usePlayer.setState({ overlay: false });
+    });
+    await settle();
+
+    await remote.back();
+    await settle();
+    // Still there: the box has not finished tearing it down.
+    expect(usePlayer.getState().current).not.toBe(null);
+
+    // The repeats arrive during the teardown, and after it.
+    await remote.back();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 60));
+    });
+    expect(usePlayer.getState().current).toBe(null);
+    await remote.back();
+    await settle();
+    expect(outer).not.toHaveBeenCalled();
+  });
+
+  it("swallows a HELD Back for as long as it is held", async () => {
+    // Measured through the page on a box: a held key produces its first repeat
+    // 450 ms in and then one every 112 ms, for as long as the thumb rests. A
+    // FIXED window cannot cover that at any sane length - 1000 ms cleared at
+    // 1.5 s and the box left the app - so the window slides: every swallowed
+    // press pushes it out, and it closes a second after the last one.
+    //
+    // Replayed at about half the real interval and well past the window's own
+    // length, which is the part that matters: a fixed window expires mid-hold
+    // and hands the rest of the burst to the screen behind, a sliding one does
+    // not.
+    const outer = vi.fn();
+    function Outer(): null {
+      useBackspace(outer);
+      return null;
+    }
+    usePlayer.setState({ stop: slowStop });
+    render(
+      <>
+        <Outer />
+        <Player />
+      </>,
+    );
+    await settle();
+    await act(async () => {
+      usePlayer.setState({ overlay: false });
+    });
+    await settle();
+
+    await remote.back();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 60));
+    });
+    expect(usePlayer.getState().current).toBe(null);
+
+    // The thumb stays down for over a second and a half: a 1000 ms window that
+    // did not slide would have expired a third of the way through.
+    for (let i = 0; i < 26; i++) {
+      await remote.back();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 60));
+      });
+    }
+    expect(outer).not.toHaveBeenCalled();
+  });
+
+  it("lets go of the key for somebody who keeps PRESSING it", async () => {
+    // The other side of the sliding window, and the failure it can become: a
+    // held key repeats every 112 ms, but a person pressing again because nothing
+    // seems to have happened does it about every 600 ms. Sliding for any press
+    // at all, eight deliberate taps 600 ms apart were every one swallowed and
+    // the remote looked dead on a page that was working.
+    const outer = vi.fn();
+    function Outer(): null {
+      useBackspace(outer);
+      return null;
+    }
+    usePlayer.setState({ stop: slowStop });
+    render(
+      <>
+        <Outer />
+        <Player />
+      </>,
+    );
+    await settle();
+    await act(async () => {
+      usePlayer.setState({ overlay: false });
+    });
+    await settle();
+
+    await remote.back();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 60));
+    });
+    expect(usePlayer.getState().current).toBe(null);
+
+    // Taps at a person's cadence, well outside the repeat gap. One is swallowed
+    // by the window the leave opened, and one can be lost as it closes - but the
+    // screen behind is reachable rather than held off for as long as they press.
+    for (let i = 0; i < 6; i++) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 600));
+      });
+      await remote.back();
+      await settle();
+    }
+    expect(outer).toHaveBeenCalled();
+  });
+
+  it("swallows the rest of the gesture instead of navigating behind the film", async () => {
+    // Measured on a box: `stop()` clears `current` in tens of milliseconds, and
+    // the moment it does this handler unregisters and the app's own Back handler
+    // becomes top and NAVIGATES. Two taps 50 ms apart stopped the film and
+    // walked to the app's home rows; a thumb resting on Back for 0.7 s left the
+    // app. The picture is still up while mpv tears down, so pressing again is
+    // exactly what a person does.
+    //
+    // `outer` stands in for MediaClient's handler: mounted BEFORE the player, so
+    // it is lower in the SDK's stack and hears a Back key only once the player's
+    // handler has gone.
+    const outer = vi.fn();
+    function Outer(): null {
+      useBackspace(outer);
+      return null;
+    }
+    render(
+      <>
+        <Outer />
+        <Player />
+      </>,
+    );
+    await settle();
+    await act(async () => {
+      usePlayer.setState({ overlay: false });
+    });
+    await settle();
+
+    await remote.back();
+    await settle();
+    expect(usePlayer.getState().current).toBe(null);
+
+    // The repeats of the same press, with the film already gone.
+    await remote.back();
+    await remote.back();
+    await settle();
+    expect(outer).not.toHaveBeenCalled();
+
+    // And the window closes: a press that arrives after it is an ordinary Back
+    // on the screen behind, which is somebody leaving the page. Timed from the
+    // LAST swallowed press, with margin - the window is 1000 ms and a loaded
+    // runner fires a timer late, never early.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 1_600));
+    });
+    await remote.back();
+    await settle();
+    expect(outer).toHaveBeenCalledTimes(1);
   });
 });
 

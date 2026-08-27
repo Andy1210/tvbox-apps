@@ -615,7 +615,12 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     scheduler?.stopTimer();
     scheduler = new PlaybackScheduler({
       backend,
-      position: () => get().positionMs,
+      // seekTargetMs first, for the reason `changeTracks` gives below: a
+      // committed scrub is where the film is GOING, and the box has not reported
+      // back yet when the report follows straight after. Stopping in that window
+      // wrote the PRE-seek position as the resume point - so a scrub twenty
+      // minutes on, then Back, resumed twenty minutes behind.
+      position: () => reportedPosition(get()),
       state: () => get().state,
       nowPlaying: () => nowPlayingFor(get()),
       postNowPlaying,
@@ -896,6 +901,31 @@ function randomSession(): string {
   return `s${Math.floor(Math.random() * 1e12).toString(36)}`;
 }
 
+/**
+ * The position to tell the SERVER about - which is not always the one on screen.
+ *
+ * `seekTargetMs` first, for the reason `changeTracks` gives: a committed scrub is
+ * where the film is GOING, and the box has not reported back yet when a report
+ * follows straight after. Reporting `positionMs` there wrote the PRE-seek
+ * position, so a scrub twenty minutes on and then Back resumed twenty minutes
+ * behind.
+ *
+ * Clamped, because that makes it a number a CALLER can influence: `seekTo` does
+ * not clamp the way `seekBy` and `commitScrub` do, and the Plex Companion door
+ * passes on whatever offset it was sent. An out-of-range target never satisfies
+ * the settle test, so it sticks - and far enough on, the server marks the item
+ * watched and drops it out of Continue Watching.
+ *
+ * A duration of 0 means the item never said how long it is; there is nothing to
+ * clamp against then, and refusing to report at all would lose the resume point
+ * this exists to keep.
+ */
+export function reportedPosition(s: Pick<PlayerState, "positionMs" | "seekTargetMs" | "durationMs">): number {
+  const at = s.seekTargetMs ?? s.positionMs;
+  if (!Number.isFinite(at)) return 0;
+  return s.durationMs > 0 ? Math.max(0, Math.min(s.durationMs, at)) : Math.max(0, at);
+}
+
 function nowPlayingFor(s: PlayerState): NowPlayingReport {
   const item = s.current?.item;
   if (!item) return { state: "idle" };
@@ -1095,7 +1125,14 @@ function wireLifecycle(): void {
     if (!s.current) return;
     // Synchronous-ish and best effort: the page may be frozen immediately after,
     // so this fires the requests and does not wait for them.
-    void scheduler?.flush("hidden");
+    //
+    // `release()` rather than `flush()`, and the order matters: a flush posts a
+    // now-playing when its report comes back, which lands AFTER the idle below
+    // and re-announces a film nobody is watching - retained, and read by the
+    // house, until something else plays. It also leaves the ticker running, so
+    // the announcement repeated every ten seconds for a film the shell had
+    // already killed. Measured on this path, not reasoned about.
+    scheduler?.release();
     postNowPlaying({ state: "idle" });
     const session = s.current.decision.session;
     if (session && currentBackend) void currentBackend.endSession(session).catch(() => {});

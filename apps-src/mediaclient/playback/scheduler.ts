@@ -121,7 +121,14 @@ export class PlaybackScheduler {
       this.lastProgress = now;
       this.lastNowPlaying = now;
       await this.reportProgress();
-      this.deps.postNowPlaying(this.deps.nowPlaying());
+      // Re-read, because `end()` may have run while that report was in flight:
+      // it nulls the target before its first await and posts `idle`, and that
+      // has to be the LAST word on the topic. The payload is retained, so a
+      // now-playing sent after it goes on announcing a film that has stopped -
+      // until something else plays. That window used to be three presses wide
+      // (Back paused, closed the controls, then stopped); it is now one press,
+      // and pressing Back and then an arrow is an ordinary way to leave.
+      if (this.target) this.deps.postNowPlaying(this.deps.nowPlaying());
       log.info(`flushed (${reason})`);
     })();
     this.flushing = run;
@@ -151,6 +158,38 @@ export class PlaybackScheduler {
     // house, and it also holds the box's own idle gate open.
     this.deps.postNowPlaying({ state: "idle" });
     if (t.session) await this.deps.backend.endSession(t.session).catch(() => {});
+  }
+
+  /**
+   * Last word from a page that may be FROZEN a moment later.
+   *
+   * The shell hides an app's window rather than destroying it and sends no
+   * teardown signal (see lifecycle.ts), so the exit runs on a visibility event
+   * with no promise that anything after an await will resume. `end()` is the
+   * wrong shape there: it awaits the report before it posts the idle.
+   *
+   * So the report is FIRED and not waited for, and then this goes silent - the
+   * timer stopped and the target dropped - which is what stops the ticker
+   * announcing a film the box has already killed, and what lets the caller's own
+   * idle post be the last word. Without the drop, the in-flight report's own
+   * now-playing lands AFTER that idle and re-announces the film, retained, until
+   * something else plays.
+   *
+   * The caller posts the idle itself, synchronously, for the same reason.
+   */
+  release(): void {
+    const t = this.target;
+    this.stopTimer();
+    if (!t) return;
+    this.target = null;
+    // "stopped", like `end()`, not the live state the flush this replaced used to
+    // send: the shell has already killed the player by the time this runs (it
+    // removes mpv's exit listeners first, so no event ever reaches the page), and
+    // the caller releases the session on the next line. A last word of "playing"
+    // leaves the server holding a session for a film nobody is watching.
+    void this.deps.backend
+      .reportProgress(t.itemId, this.deps.position(), t.durationMs, "stopped")
+      .catch((e: unknown) => log.warn("release progress report failed", e));
   }
 
   get active(): boolean {

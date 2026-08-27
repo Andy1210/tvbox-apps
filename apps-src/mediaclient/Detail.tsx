@@ -14,7 +14,7 @@ import { LanguagePicker } from "./LanguagePicker";
 import { Confirm } from "./Confirm";
 import { Backdrop } from "./Backdrop";
 import { useTheme } from "./theme";
-import { useFocusFallback, useInitialFocus, useScrollToTopOnFirst } from "./focus";
+import { useFocusFallback, useFocusOnReveal, useInitialFocus, useScrollToTopOnFirst } from "./focus";
 import { usePlayer, useShowingPlayer } from "./playback/player";
 import { rememberedVersion, useChosenVersion } from "./chosenVersion";
 import { classify, useApp } from "./state";
@@ -36,6 +36,27 @@ type ViewState = Pick<MediaItem, "viewCount" | "viewOffsetMs">;
 
 /** Two presses closer together than this are one press that bounced. */
 const PRESS_GAP_MS = 400;
+
+/**
+ * Which focus keys belong to this screen.
+ *
+ * Shared by the two hooks that put the cursor back, so they cannot disagree
+ * about whose cursor it is. The failure screen's own button is in here for a
+ * reason: it replaces this whole screen, so its key is the only one on it - and
+ * a predicate that did not recognise it pulled focus onto a key the failure
+ * screen never renders, on the FIRST arrow press. "Something went wrong / Try
+ * again", highlighted, and the remote does nothing but Back.
+ */
+function ownsDetailKey(key: string): boolean {
+  return (
+    key.startsWith("detail-") ||
+    key.startsWith("cast-") ||
+    key.startsWith("children-") ||
+    key.startsWith("extras-") ||
+    key.startsWith("review-") ||
+    key.startsWith("msg-")
+  );
+}
 
 /**
  * One film or series.
@@ -462,24 +483,23 @@ export function Detail({
   }, [upNext, itemId]);
   // Returning from playback unmounts the player, which held focus - without a
   // fallback the detail page comes back with the D-pad dead.
+  // The film has gone and this page is back: the cursor comes with it, rather
+  // than waiting for a press. `first` is the play button, so the gesture that
+  // measured worst - Back to leave, OK to carry on watching - works.
+  //
+  // `!moving` is not decoration: `current` is null for the whole of an episode
+  // step, five round trips of it, so without it a step counts as this page being
+  // revealed and parks the cursor on the OUTGOING episode's tile, behind a player
+  // that is still up. The same guard, for the same reason, as the fallback's.
+  useFocusOnReveal(first, ownsDetailKey, !playing && !moving && !picking && !confirming);
+
   useFocusFallback(
     // The play button when there is one; otherwise the first child, which is
     // what a group screen has instead. A group with NEITHER - an empty
     // collection, and this server has one - left nothing focusable at all, so
     // every press was discarded and only Back worked.
     first,
-    (key) =>
-      key.startsWith("detail-") ||
-      key.startsWith("cast-") ||
-      key.startsWith("children-") ||
-      key.startsWith("extras-") ||
-      key.startsWith("review-") ||
-      // The failure screen's own button. It replaces this whole screen, so its
-      // key is the only one on it - and a predicate that did not recognise it
-      // pulled focus onto a key the failure screen never renders, on the FIRST
-      // arrow press. "Something went wrong / Try again", highlighted, and the
-      // remote does nothing but Back.
-      key.startsWith("msg-"),
+    ownsDetailKey,
     // Not while the language panel is up. This is a window listener and stays
     // armed behind it; the panel's keys are none of the above, so every press
     // it could not resolve threw focus back onto the play button - which is
@@ -676,7 +696,14 @@ export function Detail({
             setSubLang(ordinal === "none" ? "none" : track?.language);
             setSubId(track?.language ? undefined : track?.id);
           }}
-          onClose={() => setPicking(false)}
+          onClose={() => {
+            setPicking(false);
+            // Back to the button that opened it, the way the confirm above does.
+            // Without it the panel closes onto a cursor that is nowhere, and
+            // whatever puts one back lands on Play - so Back out of the audio
+            // menu moved the highlight to a different button entirely.
+            setFocus("detail-lang");
+          }}
         />
       )}
       <div

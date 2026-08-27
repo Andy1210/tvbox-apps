@@ -6,7 +6,7 @@ import {
   setFocus,
   useFocusable,
 } from "@noriginmedia/norigin-spatial-navigation";
-import { FocusButton, useBackspace, useFocusableItem, useI18n } from "@sdk";
+import { FocusButton, isBackKey, useBackspace, useFocusableItem, useI18n } from "@sdk";
 import { useApp } from "./state";
 import { TrackMenu, type Choice } from "./TrackMenu";
 import type { Track } from "./backends/types";
@@ -46,6 +46,48 @@ const TRANSPORT = new Set(["Enter", "MediaPlayPause", "MediaTrackNext", "MediaTr
 const STEPS_MS = [10_000, 30_000, 60_000];
 /** The overlay hides itself this long after the last press. */
 const IDLE_HIDE_MS = 4_000;
+/**
+ * How long after the LAST Back press a film has just been left for.
+ *
+ * The moment `stop()` clears `current`, this handler unregisters and
+ * `MediaClient`'s takes over and NAVIGATES - so the rest of one gesture landed
+ * on a screen nobody asked for. Measured on a box: two taps 600 ms apart stopped
+ * the film and walked to the app's home rows, and a thumb resting on Back left
+ * the app altogether. The screen is black for most of a second after the press
+ * (the film's window is gone within ~140 ms and the page behind it paints at
+ * ~1 s), so "nothing happened, press it again" is what a person does, and they
+ * are right to.
+ *
+ * The window SLIDES: every swallowed press pushes it out again. A fixed one
+ * cannot work, because a held key goes on producing repeats for as long as it is
+ * held - measured through the page, the first repeat lands 450 ms in and then one
+ * every 112 ms - so a 1.5 s thumb-rest cleared a fixed second and left the app.
+ * Sliding, a hold of any length is absorbed and the window closes a second after
+ * the key is released. `KeyboardEvent.repeat` would separate a hold from a
+ * second tap exactly, but the SDK's stack hands its handlers no event, and a
+ * double TAP is not a repeat either.
+ *
+ * A deliberate press inside the window is swallowed, and one landing just as it
+ * closes can be lost with it. That is the price, and it is the cheaper mistake by
+ * a distance: a press or two to leave the page again, against being put somewhere
+ * nobody asked for with the film gone.
+ */
+const LEAVE_GRACE_MS = 1_000;
+/**
+ * Two Back presses closer together than this are one key being HELD.
+ *
+ * What the sliding window has to tell apart, and the two are far enough apart to
+ * be told: a held key repeats every 112 ms, and somebody pressing again because
+ * nothing seems to have happened does it about every 600 ms (both measured
+ * through the page on a box). Without this test the window slid for any press at
+ * all, so eight deliberate taps 600 ms apart were ALL swallowed and the remote
+ * looked dead on a page that was working - the opposite failure to the one the
+ * window exists for, and unbounded.
+ *
+ * The first repeat of a hold lands 450 ms in and so does not pass this test; it
+ * does not need to, being well inside the window the press itself opened.
+ */
+const REPEAT_GAP_MS = 300;
 
 /**
  * What is on screen while something plays.
@@ -212,6 +254,16 @@ export function Player(): React.JSX.Element | null {
     };
 
     const onKey = (e: KeyboardEvent): void => {
+      // Back is not an input that wakes the controls, and this handler must not
+      // be what decides that. It belongs to the useBackspace stack below, which
+      // closes what is open over the film or - with nothing open - leaves it.
+      // Both listeners are window CAPTURE listeners, so which one sees a key
+      // first is decided by which mounted first: the stack's is installed once,
+      // at app start, so today this never runs for Back. If it ever did, the
+      // press would raise the overlay and the stack would then read that as
+      // "close the controls" - a Back that can never leave the film, which is
+      // the shape of the bug this handling was fixed for.
+      if (isBackKey(e)) return;
       const p = usePlayer.getState();
       // While a step is in flight the film on screen is about to be replaced, so
       // a transport press aimed at it is thrown away by the swap: measured, OK
@@ -432,6 +484,17 @@ export function Player(): React.JSX.Element | null {
    * is one press away.
    */
   const [announcing, setAnnouncing] = useState(false);
+  /** Set by the Back press that leaves the film; see LEAVE_GRACE_MS. */
+  const [leaving, setLeaving] = useState(false);
+  /**
+   * Swallow Back until this instant. The DEADLINE is what bounds the window,
+   * not the flag: a hidden renderer is frozen, so the timer that clears the flag
+   * can be deferred past its own window, and a flag left set with no deadline
+   * behind it is a remote whose Back does nothing.
+   */
+  const leaveUntil = useRef(0);
+  /** When Back was last pressed, to tell a held key from a second press. */
+  const lastBackAt = useRef(0);
   /**
    * The skip button leaving takes the cursor with it.
    *
@@ -466,65 +529,149 @@ export function Player(): React.JSX.Element | null {
     if (current) applySubtitleStyle();
   }, [current]);
 
-  // Back pauses and keeps the frame; stopping loses where you were, which
-  // matters more on a television than on a phone. Only a paused film stops.
+  // With nothing open over the film, Back LEAVES it: the box stops playing and
+  // the screen the film was started from - the film's or the series' own page -
+  // comes back. Where you were is not lost by that; `stop()` reports the
+  // position to the server on its way out, so Play resumes from the same second.
+  //
+  // It used to pause instead and stop only on a second press, and that never
+  // worked as written: pausing RAISES the overlay (`togglePause` sets it), so
+  // the second press was eaten by the overlay branch below and leaving the film
+  // took three presses - pause, close the controls, stop. Pausing is not what
+  // Back means on a television anyway, and it is already one press away: OK
+  // brings the controls up with the pause button under the cursor.
   //
   // Through the SDK's stack rather than a listener of our own: it installs a
   // single capture-phase handler at app start and stops propagation, so a raw
-  // listener registered later never sees the key at all - the film would keep
-  // playing while the overlay claimed Back would pause it.
-  useBackspace(() => {
-    // Back closes the menu first: it is a layer over the film, and leaving it
-    // open while the film pauses underneath would be two things at once.
-    // The search is a screen of its own inside the menu, so Back leaves it
-    // before it leaves the menu - one press, one layer.
-    if (menu === "search") {
-      setMenu("subtitles");
-      return;
-    }
-    if (menu) {
-      setMenu(null);
-      return;
-    }
-    const p = usePlayer.getState();
-    // A step in flight, once the layers a press could be closing are dealt with.
-    // It always RETURNS, whether or not the cancel took: past the hand-over there
-    // is nothing to go back to, and falling through to the pause below would mean
-    // one press with two outcomes, split by a window nobody can see.
-    // `stop()` clears `current` only
-    // AFTER the previous episode's last word - two server round trips - so for
-    // the whole of the teardown both are set, this handler is the top one on the
-    // stack, and it took Back for itself: the press paused a film that was being
-    // torn down and the step went on to start the episode it had asked to
-    // abandon. The other half of this is in `MediaClient`, for the rest of the
-    // step, where there is no `current` and no player mounted at all.
-    //
-    // Below the menu, and that order is deliberate: a menu open over a step is
-    // reachable (a phone's skip arrives while somebody has the track list up, and
-    // the effect that closes it keys on the item CHANGING), and Back there means
-    // the layer the person opened. It costs one extra press to reach the step.
-    if (p.moving) {
-      p.cancelMove();
-      return;
-    }
-    // Then the scrub cursor: it is a question that has not been answered yet,
-    // and Back is how a question is withdrawn. Pausing here instead would leave
-    // the cursor on screen pointing at a place the film never went.
-    if (p.scrubMs !== null) {
-      p.cancelScrub();
-      return;
-    }
-    // Then the overlay. Back means "undo the last thing I opened", and with the
-    // controls up that is the controls - pausing the film instead is an answer
-    // to a question nobody asked.
-    if (p.overlay) {
-      p.showOverlay(false);
-      setFocus(IDLE_KEY);
-      return;
-    }
-    if (p.state === "playing") p.togglePause();
-    else void p.stop();
-  }, Boolean(current));
+  // listener registered later never sees the key at all - the film would go on
+  // playing while the overlay claimed Back had acted on it.
+  useBackspace(
+    () => {
+      const now = Date.now();
+      const sincePrev = now - lastBackAt.current;
+      lastBackAt.current = now;
+      // The film is already gone, so this is the tail of the gesture that left
+      // it - a repeat of the same press, or the second tap of somebody who could
+      // not see that the first had worked. Swallowed rather than passed on; see
+      // LEAVE_GRACE_MS.
+      if (!usePlayer.getState().current) {
+        // Past the deadline the window is over however the flag got here, so let
+        // go of the key rather than swallow presses for ever. This press is lost
+        // - the next one reaches the screen behind.
+        if (now >= leaveUntil.current) {
+          setLeaving(false);
+          return;
+        }
+        // Only a REPEAT pushes the window out, so a held key is absorbed for as
+        // long as it is held while a person pressing again is not held off for
+        // ever; see REPEAT_GAP_MS.
+        if (sincePrev <= REPEAT_GAP_MS) leaveUntil.current = now + LEAVE_GRACE_MS;
+        return;
+      }
+      // Back closes the menu first: it is a layer over the film, and ending the
+      // film underneath an open menu would be two things at once.
+      // The search is a screen of its own inside the menu, so Back leaves it
+      // before it leaves the menu - one press, one layer.
+      if (menu === "search") {
+        setMenu("subtitles");
+        return;
+      }
+      if (menu) {
+        setMenu(null);
+        return;
+      }
+      const p = usePlayer.getState();
+      // A step in flight, once the layers a press could be closing are dealt with.
+      // It always RETURNS, whether or not the cancel took: past the hand-over there
+      // is nothing to go back to, and falling through to the stop below would mean
+      // one press with two outcomes, split by a window nobody can see.
+      // `stop()` clears `current` only
+      // AFTER the previous episode's last word - two server round trips - so for
+      // the whole of the teardown both are set, this handler is the top one on the
+      // stack, and it took Back for itself: the press acted on a film that was
+      // being torn down and the step went on to start the episode it had asked to
+      // abandon. The other half of this is in `MediaClient`, for the rest of the
+      // step, where there is no `current` and no player mounted at all.
+      //
+      // Below the menu, and that order is deliberate: a menu open over a step is
+      // reachable (a phone's skip arrives while somebody has the track list up, and
+      // the effect that closes it keys on the item CHANGING), and Back there means
+      // the layer the person opened. It costs one extra press to reach the step.
+      if (p.moving) {
+        p.cancelMove();
+        return;
+      }
+      // Then the scrub cursor: it is a question that has not been answered yet,
+      // and Back is how a question is withdrawn. Ending the film here instead
+      // would throw away the scene somebody was in the middle of choosing.
+      if (p.scrubMs !== null) {
+        p.cancelScrub();
+        return;
+      }
+      // Then the overlay. Back means "undo the last thing I opened", and with the
+      // controls up that is the controls - leaving the film instead is an answer
+      // to a question nobody asked.
+      if (p.overlay) {
+        p.showOverlay(false);
+        setFocus(IDLE_KEY);
+        return;
+      }
+      // Nothing left over the picture, so the press is about the film itself.
+      // Whether it is playing or paused, one press ends it and hands the screen
+      // back to whatever is behind this one.
+      // Armed HERE rather than in the effect below, so there is no instant at
+      // which the film has gone and the deadline has not been set yet: between
+      // the store clearing `current` and a passive effect running, a repeat would
+      // read a stale deadline, take the branch above and let go of the key. It
+      // needs the teardown to outlast the first repeat to fire, which is why it
+      // was never seen - the same shape as the bug that made the window a no-op.
+      leaveUntil.current = now + LEAVE_GRACE_MS;
+      setLeaving(true);
+      void p.stop();
+      // `enabled` outlives the film by LEAVE_GRACE_MS, counted from the moment it
+      // really goes: this handler has to stay on top of the stack after `current`
+      // clears, or the rest of one gesture navigates the screen behind. It
+      // absorbs, and does nothing else - the film is already going, and there is
+      // no layer left to close.
+    },
+    Boolean(current) || leaving,
+  );
+
+  // The window is timed from the film actually GOING, not from the press.
+  //
+  // `stop()` clears `current` only after a final progress report and a session
+  // release, so for the whole of the teardown the film is still `current` - and
+  // the first cut of this closed the window on exactly that, reading "the
+  // picture is back" off a film that had not left yet. It cancelled itself
+  // before it opened and the regression it exists for was still there on a box,
+  // while the test passed: the bare fixture has no scheduler, so `stop()`
+  // resolved in one microtask drain and `current` was already null. Nothing
+  // here may key off `current` being SET.
+  //
+  // A film that really does start inside the window costs nothing: `enabled` is
+  // true either way and the handler branches on `current`, so Back means what it
+  // always means the moment there is a picture again.
+  useEffect(() => {
+    if (!leaving || current) return;
+    // At LEAST a second from the film going: a slow teardown must not eat the
+    // window the press opened. Never shortens it - a hold in progress has
+    // already pushed the deadline further out than this.
+    leaveUntil.current = Math.max(leaveUntil.current, Date.now() + LEAVE_GRACE_MS);
+    let id: ReturnType<typeof setTimeout>;
+    // Re-checked rather than fired once, because every swallowed press moves the
+    // deadline: the window has to close a second after the LAST Back, not a
+    // second after the first.
+    const check = (): void => {
+      const left = leaveUntil.current - Date.now();
+      if (left > 0) {
+        id = setTimeout(check, left);
+        return;
+      }
+      setLeaving(false);
+    };
+    id = setTimeout(check, LEAVE_GRACE_MS);
+    return () => clearTimeout(id);
+  }, [leaving, current]);
 
   // Focus is taken off anything the overlay does not own, and handed to
   // NOBODY: nothing focused is the overlay's resting state, where the arrows
@@ -993,7 +1140,7 @@ function ButtonRow({
       )}
       {/* Only when there is something to choose between. A button that opens a
           panel with nothing in it is worse than no button - and the panel is
-          what Back would then close instead of pausing. */}
+          then one more layer for Back to peel before it can leave the film. */}
       {canChooseTracks && (
         <>
           <FocusButton focusKey="pb-tracks" onEnter={onTracks} className={cls}>
