@@ -29,7 +29,24 @@ setupRemote();
 
 const item: MediaItem = { id: "m1", kind: "movie", title: "Film", durationMs: 3_600_000 };
 
+/**
+ * The store's own `stop`, and a slow one over it.
+ *
+ * On a box `stop()` awaits a final progress report and a session release before
+ * it clears `current` - so the film is still `current` for a while after the
+ * press, which is exactly the window the leave-grace has to survive. The bare
+ * fixture has no scheduler, so `stop()` resolves inside one microtask drain and
+ * every timing question answers itself the wrong way: a first cut of the grace
+ * window passed here and did nothing at all on a television.
+ */
+const realStop = usePlayer.getState().stop;
+const slowStop = async (opts?: { handOver?: boolean }): Promise<void> => {
+  await new Promise((r) => setTimeout(r, 20));
+  await realStop(opts);
+};
+
 beforeEach(async () => {
+  usePlayer.setState({ stop: realStop });
   useApp.setState({ backend: null });
   usePlayer.setState({
     current: {
@@ -392,6 +409,45 @@ describe("the overlay's own controls", () => {
     await settle();
 
     expect(usePlayer.getState().current).toBe(null);
+  });
+
+  it("swallows the rest of the gesture while the film is still tearing down", async () => {
+    // The same press as below, with `stop()` taking as long as it does on a box.
+    // That is the whole of the window: `current` is still set for the length of
+    // the final report and the session release, and a grace that keys off
+    // `current` rather than off the PRESS closes before it ever opened.
+    const outer = vi.fn();
+    function Outer(): null {
+      useBackspace(outer);
+      return null;
+    }
+    usePlayer.setState({ stop: slowStop });
+    render(
+      <>
+        <Outer />
+        <Player />
+      </>,
+    );
+    await settle();
+    await act(async () => {
+      usePlayer.setState({ overlay: false });
+    });
+    await settle();
+
+    await remote.back();
+    await settle();
+    // Still there: the box has not finished tearing it down.
+    expect(usePlayer.getState().current).not.toBe(null);
+
+    // The repeats arrive during the teardown, and after it.
+    await remote.back();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 60));
+    });
+    expect(usePlayer.getState().current).toBe(null);
+    await remote.back();
+    await settle();
+    expect(outer).not.toHaveBeenCalled();
   });
 
   it("swallows the rest of the gesture instead of navigating behind the film", async () => {

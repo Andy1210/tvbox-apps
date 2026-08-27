@@ -570,22 +570,31 @@ export function Player(): React.JSX.Element | null {
       // back to whatever is behind this one.
       setLeaving(true);
       void p.stop();
-      // `enabled` outlives the film by LEAVE_GRACE_MS: this handler has to stay on
-      // top of the stack after `current` goes, or the rest of one gesture navigates
-      // the screen behind. It absorbs, and does nothing else - the film is already
-      // going, and there is no layer left to close.
+      // `enabled` outlives the film by LEAVE_GRACE_MS, counted from the moment it
+      // really goes: this handler has to stay on top of the stack after `current`
+      // clears, or the rest of one gesture navigates the screen behind. It
+      // absorbs, and does nothing else - the film is already going, and there is
+      // no layer left to close.
     },
     Boolean(current) || leaving,
   );
 
-  // The window closes on its own, and a film starting closes it early: with a
-  // picture on screen again the press means what it always means.
+  // The window is timed from the film actually GOING, not from the press.
+  //
+  // `stop()` clears `current` only after a final progress report and a session
+  // release, so for the whole of the teardown the film is still `current` - and
+  // the first cut of this closed the window on exactly that, reading "the
+  // picture is back" off a film that had not left yet. It cancelled itself
+  // before it opened and the regression it exists for was still there on a box,
+  // while the test passed: the bare fixture has no scheduler, so `stop()`
+  // resolved in one microtask drain and `current` was already null. Nothing
+  // here may key off `current` being SET.
+  //
+  // A film that really does start inside the window costs nothing: `enabled` is
+  // true either way and the handler branches on `current`, so Back means what it
+  // always means the moment there is a picture again.
   useEffect(() => {
-    if (!leaving) return;
-    if (current) {
-      setLeaving(false);
-      return;
-    }
+    if (!leaving || current) return;
     const id = setTimeout(() => setLeaving(false), LEAVE_GRACE_MS);
     return () => clearTimeout(id);
   }, [leaving, current]);

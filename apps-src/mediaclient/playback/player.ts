@@ -620,7 +620,17 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       // back yet when the report follows straight after. Stopping in that window
       // wrote the PRE-seek position as the resume point - so a scrub twenty
       // minutes on, then Back, resumed twenty minutes behind.
-      position: () => get().seekTargetMs ?? get().positionMs,
+      position: () => {
+        const s = get();
+        // Clamped, because this is now a number a CALLER can influence: `seekTo`
+        // does not clamp (unlike `seekBy` and `commitScrub`) and the Plex
+        // Companion door hands it whatever offset it was sent, which then never
+        // settles and sticks. Reporting that to the server writes a view offset
+        // the film never reached - far enough on, and the item is marked watched
+        // and drops out of Continue Watching.
+        const at = s.seekTargetMs ?? s.positionMs;
+        return s.durationMs > 0 ? Math.max(0, Math.min(s.durationMs, at)) : Math.max(0, at);
+      },
       state: () => get().state,
       nowPlaying: () => nowPlayingFor(get()),
       postNowPlaying,
@@ -1100,7 +1110,14 @@ function wireLifecycle(): void {
     if (!s.current) return;
     // Synchronous-ish and best effort: the page may be frozen immediately after,
     // so this fires the requests and does not wait for them.
-    void scheduler?.flush("hidden");
+    //
+    // `release()` rather than `flush()`, and the order matters: a flush posts a
+    // now-playing when its report comes back, which lands AFTER the idle below
+    // and re-announces a film nobody is watching - retained, and read by the
+    // house, until something else plays. It also leaves the ticker running, so
+    // the announcement repeated every ten seconds for a film the shell had
+    // already killed. Measured on this path, not reasoned about.
+    scheduler?.release();
     postNowPlaying({ state: "idle" });
     const session = s.current.decision.session;
     if (session && currentBackend) void currentBackend.endSession(session).catch(() => {});

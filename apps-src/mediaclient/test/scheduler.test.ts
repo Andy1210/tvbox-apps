@@ -178,6 +178,51 @@ describe("playback scheduler", () => {
     expect(posted.filter((r) => r.state !== "idle")).toEqual([]);
   });
 
+  it("goes silent on release, so the caller's idle is the last word", async () => {
+    // The exit that cannot await anything: the shell hides an app's window and
+    // sends no teardown signal, so this runs on a visibility event and the page
+    // may be frozen immediately after. `flush` was the wrong shape for it - its
+    // now-playing lands when the report comes back, i.e. AFTER the idle the
+    // caller posts, and re-announces a film nobody is watching. Retained, and
+    // read by the house, until something else plays.
+    const backend = fakeBackend();
+    let open: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      open = r;
+    });
+    backend.reportProgress.mockImplementation(async () => {
+      await gate;
+    });
+
+    const s = make(backend);
+    s.start({ itemId: "7", durationMs: 600_000, session: "sess" });
+    await vi.advanceTimersByTimeAsync(0);
+    posted.length = 0;
+    position = 120_000;
+
+    // What `onRelease` does, in its order: fire the last report, then say idle.
+    s.release();
+    posted.push({ state: "idle" });
+
+    // The report went out - the position is not lost - and it went out for THIS
+    // item, with the state it was really in.
+    const last = backend.reportProgress.mock.calls.at(-1);
+    expect(last?.[0]).toBe("7");
+    expect(last?.[1]).toBe(120_000);
+
+    // Now let it come back, and let the ticker run on.
+    open?.();
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(posted.at(-1)?.state).toBe("idle");
+    expect(posted.filter((r) => r.state !== "idle")).toEqual([]);
+    // And nothing goes on reporting a film the box has already killed.
+    const after = backend.reportProgress.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(backend.reportProgress.mock.calls.length).toBe(after);
+    expect(s.active).toBe(false);
+  });
+
   it("still ends cleanly when the final report is refused", async () => {
     const backend = fakeBackend();
     backend.reportProgress.mockRejectedValue(new Error("server said no"));

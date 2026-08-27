@@ -160,6 +160,33 @@ export class PlaybackScheduler {
     if (t.session) await this.deps.backend.endSession(t.session).catch(() => {});
   }
 
+  /**
+   * Last word from a page that may be FROZEN a moment later.
+   *
+   * The shell hides an app's window rather than destroying it and sends no
+   * teardown signal (see lifecycle.ts), so the exit runs on a visibility event
+   * with no promise that anything after an await will resume. `end()` is the
+   * wrong shape there: it awaits the report before it posts the idle.
+   *
+   * So the report is FIRED and not waited for, and then this goes silent - the
+   * timer stopped and the target dropped - which is what stops the ticker
+   * announcing a film the box has already killed, and what lets the caller's own
+   * idle post be the last word. Without the drop, the in-flight report's own
+   * now-playing lands AFTER that idle and re-announces the film, retained, until
+   * something else plays.
+   *
+   * The caller posts the idle itself, synchronously, for the same reason.
+   */
+  release(): void {
+    const t = this.target;
+    this.stopTimer();
+    if (!t) return;
+    this.target = null;
+    void this.deps.backend
+      .reportProgress(t.itemId, this.deps.position(), t.durationMs, this.deps.state())
+      .catch((e: unknown) => log.warn("release progress report failed", e));
+  }
+
   get active(): boolean {
     return this.target !== null;
   }
