@@ -687,15 +687,17 @@ async function boxDeviceOn(acc) {
 async function findBoxAccount() {
   const ordered = [activeAccount(), ...accounts.list.filter((a) => a && a.id !== accounts.active)].filter(Boolean);
   let complete = ordered.length > 0; // no linked account at all is not a completed sweep
+  let answered = false; // …and `answered` is the weaker question: did ANY of them reply?
   for (const a of ordered) {
     try {
       const id = await boxDeviceOn(a);
-      if (id) return { account: a, devId: id, complete: true };
+      answered = true;
+      if (id) return { account: a, devId: id, complete: true, answered: true };
     } catch (e) {
       complete = false; // this account never answered, so its silence means nothing
     }
   }
-  return { account: null, devId: "", complete };
+  return { account: null, devId: "", complete, answered };
 }
 
 // The box's device id within one account's list, cached: a transport press must
@@ -786,8 +788,9 @@ async function boxOwner(needDevice) {
   //
   // Reads only. A handover whose event was lost (the hook swallows a failed post)
   // leaves this pointing at the previous account for up to the TTL, and a
-  // COMMAND sent there goes to a device id that no longer exists — which Spotify
-  // accepts and quietly does nothing with, i.e. a button that reports success.
+  // COMMAND sent there goes out as an account that no longer holds the box —
+  // which Spotify accepts and quietly does nothing with, i.e. a button that
+  // reports success.
   // A press is a human-paced event and can afford to ask.
   const cached = !named && !needDevice && cachedBoxOwner();
   if (cached) return { ...cached, swept: true };

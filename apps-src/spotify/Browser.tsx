@@ -87,6 +87,7 @@ export function playErrorText(
     box_not_found: "spotify.boxNotFound",
     box_signed_out: "spotify.boxSignedOut",
     recovery_failed: "spotify.recoveryFailed",
+    recovery_cooling: "spotify.recoveryCooling",
     box_unreachable: "spotify.boxUnreachable",
     box_lookup_failed: "spotify.lookupFailed",
     box_other_account: "spotify.otherAccount",
@@ -199,20 +200,26 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
   const [slow, setSlow] = useState(false); // the wait has outlived a normal start
   const wanted = useRef(""); // the playlist whose read is still worth showing (see openPlaylist)
 
-  // A play that is still in flight when the user leaves. It can be twenty
-  // seconds behind them by the time it answers, and both of its endings are
-  // wrong once they have moved on: a success calls onPlayed() and throws them
-  // from wherever they now are into Now Playing, and a failure writes into a
-  // screen that may already be gone. Pressing Back is the one clear statement
-  // that they no longer want this, so it is what stands the answer down.
-  const abandoned = useRef(false);
-  useEffect(() => () => {
-    abandoned.current = true; // unmounted: nothing here can be shown or navigated
-  }, []);
+  // A play that is still in flight when this screen goes. It can be twenty
+  // seconds behind by the time it answers, and calling onBack's navigation from a
+  // component that has unmounted moves a screen nobody is on.
+  //
+  // Only UNMOUNT counts, not Back out of a playlist. Backing out is not "I did
+  // not mean that": the music does start, so the honest thing is still to show
+  // the player - suppressing that left a song playing in the room with nothing on
+  // screen saying what, which is worse than the late navigation it was meant to
+  // avoid. The same goes for a failure: if this screen is still up, it says so.
+  const gone = useRef(false);
+  useEffect(
+    () => () => {
+      gone.current = true;
+    },
+    [],
+  );
 
   // Back: out of a playlist -> playlist list; otherwise leave the browser.
   useBackspace(() => {
-    abandoned.current = true;
+    setErr(""); // a message about a playlist they have just left is noise on the list
     if (openPl) {
       wanted.current = ""; // whatever that playlist's read answers, it is no longer wanted
       setOpenPl(null);
@@ -294,12 +301,11 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
 
   const playAndGo = async (body: { contextUri?: string; uris?: string[]; offset?: number; collection?: boolean }) => {
     if (starting) return; // one request at a time (signing the box back in takes a while)
-    abandoned.current = false;
     setStarting(true);
     setErr("");
     const r = await play(body);
     setStarting(false);
-    if (abandoned.current) return; // they pressed Back while this was in flight
+    if (gone.current) return; // this screen is gone; nothing to show or navigate
     if (r.ok) {
       // The row that was pressed, so Back from the player lands on it rather
       // than on the tab: "that was the wrong song, try the next one" is the
@@ -320,16 +326,12 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
   // so without this, every later Play all would still be shuffled.
   const startAll = async (p: Playlist, shuffle: boolean, at: number) => {
     if (starting) return;
-    abandoned.current = false;
     setStarting(true);
     setErr("");
     const r = await play({ contextUri: p.uri, ...(at > 0 ? { offset: at } : {}) });
-    if (abandoned.current) {
-      setStarting(false);
-      return;
-    }
     if (!r.ok) {
       setStarting(false);
+      if (gone.current) return;
       setErr(playErrorText(t, r.error || ""));
       return;
     }
@@ -337,7 +339,7 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
     // screen would say nothing while the order is the opposite of what was asked.
     const err = await control("shuffle", shuffle);
     setStarting(false);
-    if (abandoned.current) return; // the music is playing; they have simply moved on
+    if (gone.current) return; // the music is playing; this screen just is not here to say so
     if (err) {
       setErr(/not registered|HTTP 403/i.test(err) ? t("spotify.notRegistered") : t("spotify.shuffleFailed"));
       return;
@@ -398,16 +400,26 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
 
   return (
     <FocusContext.Provider value={focusKey}>
-      <div ref={ref} className="h-full flex flex-col px-[4vw] py-[3vh] min-h-0">
-        {err && (
-          <div className="mb-[1.5vh] shrink-0 px-[2vw] py-[1.4vh] rounded-[1vh] bg-red-500/15 text-[1.9vh] text-red-100 max-w-[80vw]">
-            {err}
-          </div>
-        )}
-        {starting && (
-          <div className="mb-[1.5vh] shrink-0 px-[2vw] py-[1.4vh] rounded-[1vh] bg-white/10 text-[1.9vh] flex items-center gap-[1vw] max-w-[80vw]">
-            <div className="w-[2.2vh] h-[2.2vh] rounded-full border-[0.35vh] border-white/25 border-t-white animate-spin shrink-0" />
-            {slow ? `${t("spotify.starting")} ${t("spotify.startingSlow")}` : t("spotify.starting")}
+      <div ref={ref} className="relative h-full flex flex-col px-[4vw] py-[3vh] min-h-0">
+        {/* Anchored to the bottom rather than placed above the tabs, the way the
+            player screen already does it: in the column each of these is about a
+            row tall, so one failed press moved the tabs, the play buttons and
+            every row four times - spinner in, spinner out, message in, message
+            out - under a focus the person was still using. The list is
+            overflow-y-auto and keeps its scrollTop, so the rows really did jump.
+            On its own backdrop for the same reason as there: it sits over the
+            list. */}
+        {(err || starting) && (
+          <div className="absolute bottom-[3vh] left-[4vw] right-[4vw] z-30 pointer-events-none">
+            {err && (
+              <div className="px-[2vw] py-[1.4vh] rounded-[1vh] bg-red-950/95 text-[1.9vh] text-red-100">{err}</div>
+            )}
+            {starting && !err && (
+              <div className="px-[2vw] py-[1.4vh] rounded-[1vh] bg-neutral-900/95 text-[1.9vh] flex items-center gap-[1vw]">
+                <div className="w-[2.2vh] h-[2.2vh] rounded-full border-[0.35vh] border-white/25 border-t-white animate-spin shrink-0" />
+                {slow ? `${t("spotify.starting")} ${t("spotify.startingSlow")}` : t("spotify.starting")}
+              </div>
+            )}
           </div>
         )}
         <Tabs>

@@ -670,15 +670,42 @@ test("one unrelated account's outage does not hide what the box's own account sa
 test("the sweep says whether it actually asked", async () => {
   reset("u1");
   serve({ boxOn: "" });
-  assert.deepEqual(await api.findBoxAccount(), { account: null, devId: "", complete: true });
+  assert.deepEqual(await api.findBoxAccount(), { account: null, devId: "", complete: true, answered: true });
 
+  // Nothing came back at all: neither "everybody said no" nor "somebody said no".
   serveNoListing();
-  assert.equal((await api.findBoxAccount()).complete, false);
+  assert.deepEqual(await api.findBoxAccount(), { account: null, devId: "", complete: false, answered: false });
 
   serve({ boxOn: "u2" });
   const hit = await api.findBoxAccount();
   assert.equal(hit.account.id, "u2");
   assert.equal(hit.complete, true);
+  assert.equal(hit.answered, true);
+});
+
+// `answered` is the weaker of the two, and the recovery reads it rather than
+// `complete`: after a restart, "did the box come back" only needs ONE account to
+// have replied. Judging it on `complete` turned a real failure into "Spotify is
+// unreachable" whenever a second, unrelated account was rate-limited.
+test("the sweep also says whether anybody replied at all", async () => {
+  reset("u1");
+  handler = (url, opts, body) => {
+    if (url === "/api/token") {
+      const refresh = new URLSearchParams(body).get("refresh_token");
+      return { status: 200, body: JSON.stringify({ access_token: "at-" + refresh, expires_in: 3600 }) };
+    }
+    if (url === "/v1/me/player/devices") {
+      const who = String((opts.headers || {}).Authorization || "").replace("Bearer at-r", "u");
+      if (who === "u1") return { status: 200, body: JSON.stringify({ devices: [PHONE] }) };
+      return { status: 500, body: "" }; // the other account is rate-limited
+    }
+    return { status: 404, body: "" };
+  };
+
+  const r = await api.findBoxAccount();
+  assert.equal(r.account, null);
+  assert.equal(r.complete, false, "not every account answered");
+  assert.equal(r.answered, true, "but one did, and it did not have the box");
 });
 
 // LAST: it removes an account, and the module's list is process-wide.

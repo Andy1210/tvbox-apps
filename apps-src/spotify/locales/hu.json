@@ -36,7 +36,7 @@
     "connectToggleHint": "Kikapcsolva a box nem látszik castingra, és a Connect szolgáltatás nem fut.",
     "on": "Be",
     "off": "Ki",
-    "boxSignedOut": "A box kijelentkezett a Spotify-ból, és magától nem tud visszalépni. Castolj rá egyszer a telefonodról — utána innen is menni fog.",
+    "boxSignedOut": "A box ki van jelentkezve a Spotify-ból, és magától nem tud visszajelentkezni. Castolj rá egyszer a telefonodról — utána innen is menni fog.",
     "lookupFailed": "A Spotify most nem érhető el. Próbáld újra pár másodperc múlva.",
     "inUse": "Valaki épp castol a boxra — előbb állítsd le azt a lejátszást.",
     "lyrics": "Dalszöveg",
@@ -99,9 +99,12 @@
     "voiceSearching": "„{query}” keresése a Spotifyon…",
     "voiceNoMatch": "A Spotify nem talált semmit erre: „{query}”.",
     "voiceNoAccount": "Hanggal indított zenéhez kösd be a Spotify-fiókot az app beállításaiban.",
-    "recoveryFailed": "Nem sikerült visszajelentkeztetni a boxot a Spotify-ba. Castolj rá egyszer a telefonodról.",
-    "connectOff": "A Spotify Connect ki van kapcsolva ezen a boxon. Kapcsold be a Spotify beállításainál.",
-    "notConnected": "Nincs összekötve Spotify-fiók. Kösd be a Fiókoknál.",
-    "startingSlow": "A box visszajelentkeztetése eltarthat egy kis ideig."
+    "recoveryFailed": "A box nem tudott visszajelentkezni a Spotify-ba. Castolj rá egyszer a telefonodról.",
+    "connectOff": "A Spotify Connect ki van kapcsolva ezen a boxon. A Beállításokban kapcsold be.",
+    "notConnected": "Nincs összekötve Spotify-fiók. Kösd be a fiókod a Fiókoknál.",
+    "startingSlow": "A box visszajelentkeztetése eltarthat egy kis ideig.",
+    "recoveryCooling": "Az előbb próbáltuk visszakapcsolni a boxot, és nem sikerült. Várj egy percet, vagy castolj rá a telefonodról.",
+    "ctrlUnreachable": "A box most nem látszik Spotify-eszközként. Indítsd el innen a lejátszást, vagy castolj rá a telefonodról.",
+    "ctrlError": "A parancs nem ment át. Próbáld újra."
   }
 }

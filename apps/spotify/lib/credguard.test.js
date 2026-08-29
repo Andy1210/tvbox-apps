@@ -14,7 +14,7 @@ const path = require("path");
 const test = require("node:test");
 const assert = require("node:assert");
 
-const { createCredGuard, isCredentialRejection, isUp } = require("./credguard");
+const { createCredGuard, isCredentialRejection, isUp, isSupervisorExit } = require("./credguard");
 
 // The measured lines. The denial is the one that killed the box; the AP line
 // above it is what makes the failure so misleading (the login DID work, one step
@@ -158,4 +158,40 @@ test("the daemon's own lines are told apart from the supervisor's", () => {
   assert.equal(AUTHED.includes(" ERROR "), false, "INFO must not reach shell.log");
   assert.equal(SPAWN.startsWith("["), false);
   assert.equal(EXITED.startsWith("["), false);
+});
+
+// The plugin clears the box's now-playing claim and its cached device id on this
+// line, so what it accepts matters: too loose and a track title takes the box's
+// state out from under a live cast; too strict and a dead daemon keeps reporting
+// a song, with position_ms still advancing, into Home Assistant.
+test("a daemon that has gone is recognised, and only the supervisor can say so", () => {
+  // The three real forms, from this fleet's own logs.
+  assert.equal(isSupervisorExit("exited code 1 sig null"), true);
+  assert.equal(isSupervisorExit("exited code null sig SIGKILL"), true);
+  assert.equal(isSupervisorExit("exited code null sig SIGTERM"), true);
+  assert.equal(isSupervisorExit(EXITED), true);
+  assert.equal(isSupervisorExit("  exited code 0 sig null  "), true, "the supervisor trims, so this does too");
+
+  // Everything librespot itself writes, including a line quoting the phrase. A
+  // record env_logger produced carries its own prefix and can never match.
+  assert.equal(isSupervisorExit(AUTHED), false);
+  assert.equal(isSupervisorExit(PUBLISHED), false);
+  assert.equal(isSupervisorExit(DENIED), false);
+  assert.equal(isSupervisorExit(SPAWN), false);
+  assert.equal(
+    isSupervisorExit("[2026-08-29T12:00:00Z INFO  librespot_playback::player] exited code 1 sig null"),
+    false,
+    "a prefixed record is the daemon's, whatever it says",
+  );
+
+  // A trimmed fragment of a multi-line daemon record is the one way an unprefixed
+  // line can arrive, so the whole form has to be required rather than a prefix.
+  assert.equal(isSupervisorExit("exited code"), false);
+  assert.equal(isSupervisorExit("exited code 1"), false);
+  assert.equal(isSupervisorExit("exited code 1 sig"), false);
+  assert.equal(isSupervisorExit("exited code one sig null"), false);
+  assert.equal(isSupervisorExit("Loading <exited code 1 sig null>"), false);
+  assert.equal(isSupervisorExit("exited code 1 sig null and then some"), false);
+  assert.equal(isSupervisorExit(""), false);
+  assert.equal(isSupervisorExit(undefined), false);
 });

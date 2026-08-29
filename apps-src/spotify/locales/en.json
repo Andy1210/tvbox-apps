@@ -99,9 +99,12 @@
     "voiceSearching": "Looking for “{query}” on Spotify…",
     "voiceNoMatch": "Spotify found nothing for “{query}”.",
     "voiceNoAccount": "Connect a Spotify account in this app's settings to start music by voice.",
-    "recoveryFailed": "Couldn't sign the box back in to Spotify. Cast to it once from your phone.",
-    "connectOff": "Spotify Connect is switched off on this box. Turn it on in the Spotify settings.",
-    "notConnected": "No Spotify account is linked. Link one under Accounts.",
-    "startingSlow": "Signing the box back in may take a moment."
+    "recoveryFailed": "The box could not sign back in to Spotify. Cast to it once from your phone.",
+    "connectOff": "Spotify Connect is switched off on this box. Turn it on in Settings.",
+    "notConnected": "No Spotify account is linked. Link yours under Accounts.",
+    "startingSlow": "Signing the box back in may take a moment.",
+    "recoveryCooling": "We just tried to bring the box back and it didn't work. Wait a minute, or cast to it from your phone.",
+    "ctrlUnreachable": "The box is not showing up as a Spotify device right now. Start playback from here, or cast to it from your phone.",
+    "ctrlError": "The command didn't get through. Try again."
   }
 }

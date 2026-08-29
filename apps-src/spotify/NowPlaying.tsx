@@ -304,11 +304,20 @@ export function NowPlaying({
   // not addressable as a device at all. Each needs a different thing done about
   // it, and none of them is "Spotify error" - which is what they all used to read
   // as, on a screen whose buttons had just silently reached another room.
+  //
+  // Deliberately NOT the play path's mapping: a transport press never signs the
+  // box back in - only a play does - so the five messages that talk about that
+  // recovery would be promises this screen cannot keep. `ctrlUnreachable` says
+  // the one thing that helps here instead: press Play, or cast.
   const ctrlMessage = (err: string) => {
     if (err === "box_other_account") return t("spotify.otherAccount");
     if (err === "box_not_found") return t("spotify.boxNotFound");
-    if (err === "box_unreachable") return t("spotify.boxUnreachable");
-    return /not registered|HTTP 403/i.test(err) ? t("spotify.notRegistered") : t("spotify.apiError", { error: err });
+    if (err === "box_unreachable") return t("spotify.ctrlUnreachable");
+    if (/not registered|HTTP 403/i.test(err)) return t("spotify.notRegistered");
+    // Everything left is Spotify's own wording or an internal code - `HTTP 404`,
+    // `not connected` - and neither belongs on a television.
+    console.warn("[spotify] control failed:", err);
+    return t("spotify.ctrlError");
   };
 
   const doControl = (a: string, v?: boolean | string) =>

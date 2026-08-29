@@ -271,7 +271,7 @@ function pushState() {
 //
 // The owner goes with it, and only here: the daemon that was signed in is the one
 // being killed, and the next one comes up naming nobody until somebody casts to
-// it. Kept, it would address commands to a device id that no longer exists -
+// it. Kept, it would address commands to a device nothing is behind any more -
 // which Spotify accepts and silently does nothing with.
 function clear() {
   reset();
