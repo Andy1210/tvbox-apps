@@ -36,7 +36,12 @@ const SCOPES = [
   "playlist-read-private",
   "playlist-read-collaborative",
   "user-library-read",
-  "streaming", // lets librespot sign the box into this account with our access token (the "adopt" step)
+  // Asked for because a Spotify app that controls playback is expected to hold
+  // it. It does NOT let librespot sign the box in with our token: login5 refuses
+  // a third-party client at Connect registration with this scope present, and
+  // with `app-remote-control` too - measured. The box signs itself in from its
+  // own saved login instead.
+  "streaming",
 ].join(" ");
 
 // Loopback redirect (the only http redirect Spotify allows). Must be registered
@@ -668,18 +673,29 @@ async function boxDeviceOn(acc) {
   return dev ? dev.id : "";
 }
 // Which linked account currently sees the box in its device list (preferring the
-// active one), or null. The box (librespot) follows whoever last held its session.
+// active one). The box (librespot) follows whoever last held its session.
+//
+// `complete` is the second answer and it is not cosmetic: "every account said no"
+// and "we could not ask" look identical from an empty result, and they call for
+// opposite things. The first is a box with no Connect registration, which the
+// plugin fixes by restarting the daemon; the second is a listing that failed (an
+// outage, a 429, a refresh that did not come back) behind which the box may be
+// perfectly fine and playing, and restarting there takes the music off somebody
+// for a reason that was never established. Carried in the result rather than kept
+// as module state because a sweep is a chain of awaits and the /player poll runs
+// one of its own every twenty seconds.
 async function findBoxAccount() {
   const ordered = [activeAccount(), ...accounts.list.filter((a) => a && a.id !== accounts.active)].filter(Boolean);
+  let complete = ordered.length > 0; // no linked account at all is not a completed sweep
   for (const a of ordered) {
     try {
       const id = await boxDeviceOn(a);
-      if (id) return { account: a, devId: id };
+      if (id) return { account: a, devId: id, complete: true };
     } catch (e) {
-      /* try next account */
+      complete = false; // this account never answered, so its silence means nothing
     }
   }
-  return null;
+  return { account: null, devId: "", complete };
 }
 
 // The box's device id within one account's list, cached: a transport press must
@@ -765,24 +781,28 @@ async function boxOwner(needDevice) {
   // A press is a human-paced event and can afford to ask.
   const cached = !named && !needDevice && cachedBoxOwner();
   if (cached) return cached;
-  let found = null;
+  let found = { account: null, devId: "", complete: false };
   try {
     found = await findBoxAccount();
   } catch (e) {
-    found = null;
+    found = { account: null, devId: "", complete: false };
   }
-  if (found) {
+  if (found.account) {
     rememberBoxDevice(found.account, found.devId); // paid for once, not again next press
     return { state: "ours", account: found.account, devId: found.devId };
   }
-  if (named) return { state: "unreachable", account: named, devId: "" };
+  // `swept` says the empty answer was actually established. Every caller that
+  // acts on "the box is not addressable" needs it, because the alternative -
+  // nobody answered - is not a fact about the box at all.
+  const swept = !!found.complete;
+  if (named) return { state: "unreachable", account: named, devId: "", swept };
   // A name we cannot use only means "somebody else is on the box" while their
   // session is UP. A guest who cast once and went home leaves their name behind,
   // and reading that as an owner refused every press and every play from the TV
-  // until the daemon was restarted — adoption included, since that is gated on
-  // the box being free.
+  // until the daemon was restarted — the recovery included, since that is gated
+  // on the box being free.
   if (user && spotifyBridge.sessionActive()) return { state: "other", account: null, devId: "" };
-  return { state: "none", account: null, devId: "" };
+  return { state: "none", account: null, devId: "", swept };
 }
 // The device cache read back as an owner: same TTL, same key, and the account has
 // to still be linked - removing an account must not leave the box addressed as it.
@@ -878,16 +898,18 @@ async function boxPlayerState() {
   }
 }
 
-// A fresh access token for the ACTIVE account (for handing the box's librespot
-// this account's session — the play path's "adopt" step in the Spotify plugin).
+// A fresh access token for the ACTIVE account. NOT a way to sign the box's
+// librespot in: login5 refuses a third-party app's token at Connect
+// registration whatever its scopes, and librespot poisons its credential cache
+// on the way (see librespotArgv in plugin.js). Web API calls only.
 function activeAccessToken() {
   return tokenFor(activeAccount());
 }
 // Play a playlist (context_uri) or track uris ON THE BOX. Find whichever
 // connected account currently owns the box device and play there; then switch
 // active to it so the transport controls target the same session. If no linked
-// account can see the box, report it — the caller (plugin) may then adopt the
-// box into the active account and retry.
+// account can see the box, report which of the two it is — the caller (plugin)
+// signs the daemon back in from its saved login and retries.
 // Spotify refuses a very large `uris` array, and a flat copy of a playlist is not
 // the playlist anyway: `next` runs off the end of the copy, and shuffle and repeat
 // only ever see the tracks that were copied. So anything with a context of its own
@@ -911,12 +933,12 @@ async function play({ contextUri, uris, offset, collection, keepActive }) {
   // continuation nobody asked for still repointed the household's library.
   if (keepActive) suppressFollowUntil = Date.now() + FOLLOW_SUPPRESS_MS;
   const found = await boxOwner(true);
-  // `box_not_found` is the answer that lets the caller ADOPT — restart librespot
-  // signed into the active account, which tears down whatever session the box is
-  // holding. So only a box nobody holds may answer it. A box held by an account
-  // we cannot address (a listing that failed, a 429) or by one we have not linked
-  // says so instead: neither is a reason to take the box off somebody, and the
-  // paused-cast case slips past adoption's is_playing guard.
+  // `box_not_found` and `box_unreachable` both say the device cannot be
+  // addressed, and both let the caller restart the daemon to sign it back in;
+  // they differ only in whether librespot has named an owner since this shell
+  // started. `box_other_account` must NOT be one of them: an account we have not
+  // linked is holding the box, so a restart would take it off a person, and
+  // nothing we send could reach that playback anyway.
   // A refusal is not a play, so it must not go on suppressing the follow: a
   // continuation that never started would otherwise keep the launcher off a real
   // cast for the rest of the window.
@@ -925,6 +947,12 @@ async function play({ contextUri, uris, offset, collection, keepActive }) {
     return { ok: false, error };
   };
   if (found.state === "other") return refuse("box_other_account");
+  // No linked account answered, so nothing about the box was established:
+  // `box_lookup_failed` rather than either of the two below, both of which the
+  // caller reads as "the box has no Connect registration" and answers by
+  // restarting the daemon - which would be taking the box off somebody on the
+  // strength of a listing that never came back.
+  if (!found.devId && !found.swept) return refuse("box_lookup_failed");
   if (found.state === "unreachable" || (found.account && !found.devId)) return refuse("box_unreachable");
   if (!found.account) return refuse("box_not_found");
   const { account: target, devId } = found;

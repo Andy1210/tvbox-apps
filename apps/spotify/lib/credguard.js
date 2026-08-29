@@ -24,12 +24,17 @@
 //
 // Four bounds, and each one is a way of being wrong that costs more than the bug:
 //
-//   - A start that carried --access-token is IGNORED. The adopt path (playing
-//     from the TV with no prior cast) starts librespot with a one-shot token, and
-//     librespot then uses the token INSTEAD of the cached credentials - so the
-//     denial is about the token, and throwing away a perfectly good saved login
-//     for it would cost the user the account features they were trying to use.
-//     Measured in the same incident: three token starts were refused in a row.
+//   - A start that carried --access-token is IGNORED: librespot uses the token
+//     INSTEAD of the cached credentials, so the denial is about the token and
+//     throwing away a good saved login for it would cost the user the account
+//     features they were trying to use. Nothing passes `withToken: true` any
+//     more - the start that did was the "adopt" step, removed once it was
+//     measured to be the CAUSE of this failure rather than a bystander: a
+//     third-party app's token is always refused at Connect registration, and
+//     librespot writes the token-derived credential into credentials.json before
+//     being refused, which is what turned a working login into a rejected one.
+//     The bound stays because the option does, and a poisoned file from an older
+//     build is exactly what this module still has to clean up.
 //   - TWO consecutive denials, not one. A single denial could be Spotify's own
 //     answer to a bad moment; two, seconds apart, with the same blob, is the blob.
 //     The wait costs about six seconds.

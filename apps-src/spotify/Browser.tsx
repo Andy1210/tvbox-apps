@@ -250,11 +250,15 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
     const key =
       r.error === "box_not_found"
         ? "spotify.boxNotFound"
-        : r.error === "adopt_failed"
-          ? "spotify.adoptFailed"
-          : r.error === "in_use"
-            ? "spotify.inUse"
-            : "";
+        : r.error === "box_signed_out"
+          ? "spotify.boxSignedOut"
+          : r.error === "box_unreachable"
+            ? "spotify.boxUnreachable"
+            : r.error === "box_lookup_failed"
+              ? "spotify.lookupFailed"
+              : r.error === "in_use"
+                ? "spotify.inUse"
+                : "";
     setErr(key ? t(key) : t("spotify.playError", { error: r.error || "?" }));
   };
 

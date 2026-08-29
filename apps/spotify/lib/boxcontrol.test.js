@@ -104,6 +104,23 @@ function serve({ boxOn, player, boxId }) {
   };
 }
 
+// The token endpoint answers, every device listing refuses. "Nobody answered" and
+// "everybody said no" leave the same empty result behind, and the plugin acts on
+// that result by restarting the daemon - so they must not reach it as one error.
+// 500 rather than the 429 this really is in the field: a rate-limited read ends up
+// here too, but only after apiGet has slept through its retries, and that is six
+// seconds this suite does not need to spend.
+function serveNoListing() {
+  handler = (url, opts, body) => {
+    if (url === "/api/token") {
+      const refresh = new URLSearchParams(body).get("refresh_token");
+      return { status: 200, body: JSON.stringify({ access_token: "at-" + refresh, expires_in: 3600 }) };
+    }
+    if (url === "/v1/me/player/devices") return { status: 500, body: "" };
+    return { status: 404, body: "" };
+  };
+}
+
 // A cast is librespot telling us it changed hands; the id is the same string the
 // Web API calls that user's id. `true` is the trust flag plugin.js passes for an
 // event carrying the daemon's key.
@@ -184,22 +201,15 @@ test("a stranger is only named after the device lists agree", async () => {
 test("a listing that fails is not a box to take off somebody", async () => {
   reset("u1");
   castFrom("u2");
-  handler = (url, opts, body) => {
-    if (url === "/api/token") {
-      const refresh = new URLSearchParams(body).get("refresh_token");
-      return { status: 200, body: JSON.stringify({ access_token: "at-" + refresh, expires_in: 3600 }) };
-    }
-    // 500 rather than the 429 this really is in the field: a rate-limited read
-    // ends up here too, but only after apiGet has slept through its retries, and
-    // that is six seconds this suite does not need to spend.
-    if (url === "/v1/me/player/devices") return { status: 500, body: "" };
-    return { status: 404, body: "" };
-  };
+  serveNoListing();
 
   assert.deepEqual(await api.control("pause"), { ok: false, error: "box_unreachable" });
-  // play() answers the same way, because `box_not_found` is what lets the caller
-  // restart librespot into another account - over the top of a live session.
-  assert.deepEqual(await api.play({ uris: ["spotify:track:x"] }), { ok: false, error: "box_unreachable" });
+  // play() says something narrower, and the difference is what the caller does
+  // about it: both `box_not_found` and `box_unreachable` are read as "the box has
+  // no Connect registration" and answered by restarting the daemon, over the top
+  // of whatever session it is holding. Nothing was established here, so neither
+  // may be the answer.
+  assert.deepEqual(await api.play({ uris: ["spotify:track:x"] }), { ok: false, error: "box_lookup_failed" });
   assert.equal(writes().length, 0);
 });
 
@@ -618,6 +628,28 @@ test("a disconnect gives the box back to the device lists rather than to the las
 
   assert.equal(r.ok, true);
   assert.equal(writes()[0].bearer, "at-r1", "resolved again from who can see the box");
+});
+
+test("a box every account was asked about, and none of them has, is unreachable", async () => {
+  reset("u1");
+  serve({ boxOn: "" });
+  castFrom("u1"); // an owner is named, which is what a cast does
+
+  assert.deepEqual(await api.play({ uris: ["spotify:track:x"] }), { ok: false, error: "box_unreachable" });
+});
+
+test("the sweep says whether it actually asked", async () => {
+  reset("u1");
+  serve({ boxOn: "" });
+  assert.deepEqual(await api.findBoxAccount(), { account: null, devId: "", complete: true });
+
+  serveNoListing();
+  assert.equal((await api.findBoxAccount()).complete, false);
+
+  serve({ boxOn: "u2" });
+  const hit = await api.findBoxAccount();
+  assert.equal(hit.account.id, "u2");
+  assert.equal(hit.complete, true);
 });
 
 // LAST: it removes an account, and the module's list is process-wide.
