@@ -3,7 +3,7 @@ import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spat
 import { useI18n, useBackspace, useConfigStore, FocusButton, tvbox } from "@sdk";
 import { NowPlaying } from "./NowPlaying";
 import { SpotifySettings } from "./SpotifySettings";
-import { Browser } from "./Browser";
+import { Browser, playErrorText } from "./Browser";
 import { useSpotifyStore } from "./stores/spotify";
 import { authStatus, play, search, setSpotifyEnabled, URIS_MAX, type AuthStatus } from "./api";
 
@@ -199,7 +199,7 @@ export function Spotify({ onExit }: { onExit: () => void }) {
       // The result list is the running order, so what was asked for is followed
       // by more of the same rather than by silence.
       const out = await play({ uris: r.tracks.slice(0, URIS_MAX).map((x) => x.uri) });
-      setAsked(out.ok ? "" : t("spotify.playError", { error: out.error || "?" }));
+      setAsked(out.ok ? "" : playErrorText(t, out.error || ""));
     });
   }, [wanted, auth, connected, t]);
 

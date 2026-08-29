@@ -68,6 +68,38 @@ function apiErrorText(t: (k: string, p?: Record<string, string>) => string, erro
   return t("spotify.apiError", { error });
 }
 
+// Why a play did nothing. Its own exported function because there are THREE call
+// sites - a row, "play all"/"shuffle all", and the voice request in Spotify.tsx -
+// and a mapping that lives inside one of them is a mapping the other two do not
+// have: measured, the two most prominent Play buttons on the screen still put a
+// raw `box_unreachable` on the television.
+//
+// The fall-through takes no interpolation. The codes that reach it include
+// `HTTP <status> <80 characters of Spotify's JSON body>`, which is the ugliest
+// thing this app could put in front of a sofa; the code belongs in the console,
+// where whoever is debugging can read it.
+export function playErrorText(
+  t: (k: string, p?: Record<string, string>) => string,
+  error: string,
+  log = true,
+): string {
+  const keys: Record<string, string> = {
+    box_not_found: "spotify.boxNotFound",
+    box_signed_out: "spotify.boxSignedOut",
+    recovery_failed: "spotify.recoveryFailed",
+    box_unreachable: "spotify.boxUnreachable",
+    box_lookup_failed: "spotify.lookupFailed",
+    box_other_account: "spotify.otherAccount",
+    connect_off: "spotify.connectOff",
+    in_use: "spotify.inUse",
+    "not connected": "spotify.notConnected",
+  };
+  const key = keys[error];
+  if (key) return t(key);
+  if (log) console.warn("[spotify] play failed:", error);
+  return t("spotify.playError");
+}
+
 // The playlist position of a row. Falls back to the row index for a list that
 // carries no positions (search results, or a box whose shell predates them),
 // where the two are the same thing anyway.
@@ -160,11 +192,27 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
   const setQuery = (v: string): void => remember({ query: v });
   const [osk, setOsk] = useState(false);
   const [err, setErr] = useState("");
-  const [starting, setStarting] = useState(false); // play may take ~20s when the box is being adopted
+  // A press that has to sign the box back in costs a poll loop on the box, so
+  // this can run to ~20s. "A few seconds" was measured wrong and it matters:
+  // told that, a person starts pressing things at eight.
+  const [starting, setStarting] = useState(false);
+  const [slow, setSlow] = useState(false); // the wait has outlived a normal start
   const wanted = useRef(""); // the playlist whose read is still worth showing (see openPlaylist)
+
+  // A play that is still in flight when the user leaves. It can be twenty
+  // seconds behind them by the time it answers, and both of its endings are
+  // wrong once they have moved on: a success calls onPlayed() and throws them
+  // from wherever they now are into Now Playing, and a failure writes into a
+  // screen that may already be gone. Pressing Back is the one clear statement
+  // that they no longer want this, so it is what stands the answer down.
+  const abandoned = useRef(false);
+  useEffect(() => () => {
+    abandoned.current = true; // unmounted: nothing here can be shown or navigated
+  }, []);
 
   // Back: out of a playlist -> playlist list; otherwise leave the browser.
   useBackspace(() => {
+    abandoned.current = true;
     if (openPl) {
       wanted.current = ""; // whatever that playlist's read answers, it is no longer wanted
       setOpenPl(null);
@@ -172,11 +220,25 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
     } else onBack();
   }, !osk);
 
+  // Long enough to read an answer to a wait that can itself be twenty seconds:
+  // the longest of these carries an instruction ("Kösd be a fiókod a
+  // Fiókoknál"), and at six seconds a glance away lost it with no way back
+  // except pressing play and waiting again.
   useEffect(() => {
     if (!err) return;
-    const id = setTimeout(() => setErr(""), 6000);
+    const id = setTimeout(() => setErr(""), 12000);
     return () => clearTimeout(id);
   }, [err]);
+  // Say the long case out loud rather than letting the short label sit there for
+  // twenty seconds looking stuck.
+  useEffect(() => {
+    if (!starting) {
+      setSlow(false);
+      return;
+    }
+    const id = setTimeout(() => setSlow(true), 5000);
+    return () => clearTimeout(id);
+  }, [starting]);
   // The box changed hands while this screen was up, so these rows belong to
   // somebody else's library now. Dropped rather than relabelled: the header would
   // otherwise name one account over another's tracks, and pressing one of them
@@ -231,11 +293,13 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
   });
 
   const playAndGo = async (body: { contextUri?: string; uris?: string[]; offset?: number; collection?: boolean }) => {
-    if (starting) return; // one request at a time (adoption can take a while)
+    if (starting) return; // one request at a time (signing the box back in takes a while)
+    abandoned.current = false;
     setStarting(true);
     setErr("");
     const r = await play(body);
     setStarting(false);
+    if (abandoned.current) return; // they pressed Back while this was in flight
     if (r.ok) {
       // The row that was pressed, so Back from the player lands on it rather
       // than on the tab: "that was the wrong song, try the next one" is the
@@ -247,19 +311,7 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
       return;
     }
     // Surface why nothing played instead of silently returning.
-    const key =
-      r.error === "box_not_found"
-        ? "spotify.boxNotFound"
-        : r.error === "box_signed_out"
-          ? "spotify.boxSignedOut"
-          : r.error === "box_unreachable"
-            ? "spotify.boxUnreachable"
-            : r.error === "box_lookup_failed"
-              ? "spotify.lookupFailed"
-              : r.error === "in_use"
-                ? "spotify.inUse"
-                : "";
-    setErr(key ? t(key) : t("spotify.playError", { error: r.error || "?" }));
+    setErr(playErrorText(t, r.error || ""));
   };
 
   // Shuffle is a setting on the ACTIVE player, and there is no active player until
@@ -268,18 +320,24 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
   // so without this, every later Play all would still be shuffled.
   const startAll = async (p: Playlist, shuffle: boolean, at: number) => {
     if (starting) return;
+    abandoned.current = false;
     setStarting(true);
     setErr("");
     const r = await play({ contextUri: p.uri, ...(at > 0 ? { offset: at } : {}) });
+    if (abandoned.current) {
+      setStarting(false);
+      return;
+    }
     if (!r.ok) {
       setStarting(false);
-      setErr(t("spotify.playError", { error: r.error || "?" }));
+      setErr(playErrorText(t, r.error || ""));
       return;
     }
     // A refused shuffle would otherwise be invisible: playback started, so the
     // screen would say nothing while the order is the opposite of what was asked.
     const err = await control("shuffle", shuffle);
     setStarting(false);
+    if (abandoned.current) return; // the music is playing; they have simply moved on
     if (err) {
       setErr(/not registered|HTTP 403/i.test(err) ? t("spotify.notRegistered") : t("spotify.shuffleFailed"));
       return;
@@ -349,7 +407,7 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
         {starting && (
           <div className="mb-[1.5vh] shrink-0 px-[2vw] py-[1.4vh] rounded-[1vh] bg-white/10 text-[1.9vh] flex items-center gap-[1vw] max-w-[80vw]">
             <div className="w-[2.2vh] h-[2.2vh] rounded-full border-[0.35vh] border-white/25 border-t-white animate-spin shrink-0" />
-            {t("spotify.starting")}
+            {slow ? `${t("spotify.starting")} ${t("spotify.startingSlow")}` : t("spotify.starting")}
           </div>
         )}
         <Tabs>

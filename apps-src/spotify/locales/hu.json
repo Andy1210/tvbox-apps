@@ -26,9 +26,9 @@
     "searchPrompt": "Keresés a Spotify-on",
     "emptyList": "Még üres",
     "followedHint": "A lista dalait csak a tulajdonos böngészheti — használd az Összes lejátszása gombot.",
-    "playError": "Nem indult el a lejátszás: {error}",
+    "playError": "Nem indult el a lejátszás. Próbáld újra.",
     "boxNotFound": "A box most egyik csatlakoztatott Spotify-fiókon sincs rajta. Kösd be a fiókod a Fiókoknál (vagy castolj rá egyszer a telefonodról).",
-    "starting": "Lejátszás indítása… (a box bejelentkeztetése eltarthat pár másodpercig)",
+    "starting": "Lejátszás indítása…",
     "enableTitle": "Spotify Connect bekapcsolása",
     "enableHint": "Tedd ezt a boxot Spotify Connect célponttá, hogy a telefonodról ide tudj zenét küldeni. Fiók nem kell — a bekapcsolás elindítja a Connect szolgáltatást ezen a boxon.",
     "enable": "Bekapcsolás",
@@ -36,8 +36,8 @@
     "connectToggleHint": "Kikapcsolva a box nem látszik castingra, és a Connect szolgáltatás nem fut.",
     "on": "Be",
     "off": "Ki",
-    "boxSignedOut": "A box nincs bejelentkezve a Spotify-ba, és magától nem tud. Castolj rá egyszer a telefonodról — utána innen is menni fog.",
-    "lookupFailed": "Nem sikerült elérni a Spotify-t, így nem tudni, látszik-e a box. Próbáld újra pár másodperc múlva.",
+    "boxSignedOut": "A box kijelentkezett a Spotify-ból, és magától nem tud visszalépni. Castolj rá egyszer a telefonodról — utána innen is menni fog.",
+    "lookupFailed": "A Spotify most nem érhető el. Próbáld újra pár másodperc múlva.",
     "inUse": "Valaki épp castol a boxra — előbb állítsd le azt a lejátszást.",
     "lyrics": "Dalszöveg",
     "lyricsLoading": "Dalszöveg betöltése…",
@@ -71,7 +71,7 @@
     "apiUnreachable": "A Spotify most nem érhető el.",
     "apiError": "Spotify hiba: {error}",
     "otherAccount": "Most egy másik Spotify-fiókról szól a zene. Arról a telefonról állítsd le, vagy kösd össze a fiókot a Fiókoknál.",
-    "boxUnreachable": "A box most nem látszik Spotify-eszközként. Próbáld újra pár másodperc múlva.",
+    "boxUnreachable": "A box most nem látszik Spotify-eszközként. Próbáld újra egy kicsit később.",
     "searchInList": "Keresés a listában",
     "clear": "Keresés törlése",
     "sort": "Rendezés",
@@ -98,6 +98,10 @@
     "upNext": "Következik",
     "voiceSearching": "„{query}” keresése a Spotifyon…",
     "voiceNoMatch": "A Spotify nem talált semmit erre: „{query}”.",
-    "voiceNoAccount": "Hanggal indított zenéhez kösd be a Spotify-fiókot az app beállításaiban."
+    "voiceNoAccount": "Hanggal indított zenéhez kösd be a Spotify-fiókot az app beállításaiban.",
+    "recoveryFailed": "Nem sikerült visszajelentkeztetni a boxot a Spotify-ba. Castolj rá egyszer a telefonodról.",
+    "connectOff": "A Spotify Connect ki van kapcsolva ezen a boxon. Kapcsold be a Spotify beállításainál.",
+    "notConnected": "Nincs összekötve Spotify-fiók. Kösd be a Fiókoknál.",
+    "startingSlow": "A box visszajelentkeztetése eltarthat egy kis ideig."
   }
 }
