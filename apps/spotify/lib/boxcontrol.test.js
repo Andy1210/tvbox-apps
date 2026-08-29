@@ -95,11 +95,28 @@ function serve({ boxOn, player, boxId }) {
     }
     const who = String((opts.headers || {}).Authorization || "").replace("Bearer at-r", "u");
     if (url === "/v1/me/player/devices") {
-      const box = boxId ? { ...BOX, id: boxId } : BOX; // a respawned librespot is a new device id
+      const box = boxId ? { ...BOX, id: boxId } : BOX; // a renamed (or replaced) box is a new device id
       return { status: 200, body: JSON.stringify({ devices: who === boxOn ? [PHONE, box] : [PHONE] }) };
     }
     if (url === "/v1/me/player") return { status: 200, body: JSON.stringify(player || {}) };
     if (url.startsWith("/v1/me/player/")) return { status: 204, body: "" }; // any transport write
+    return { status: 404, body: "" };
+  };
+}
+
+// The token endpoint answers, every device listing refuses. "Nobody answered" and
+// "everybody said no" leave the same empty result behind, and the plugin acts on
+// that result by restarting the daemon - so they must not reach it as one error.
+// 500 rather than the 429 this really is in the field: a rate-limited read ends up
+// here too, but only after apiGet has slept through its retries, and that is six
+// seconds this suite does not need to spend.
+function serveNoListing() {
+  handler = (url, opts, body) => {
+    if (url === "/api/token") {
+      const refresh = new URLSearchParams(body).get("refresh_token");
+      return { status: 200, body: JSON.stringify({ access_token: "at-" + refresh, expires_in: 3600 }) };
+    }
+    if (url === "/v1/me/player/devices") return { status: 500, body: "" };
     return { status: 404, body: "" };
   };
 }
@@ -184,28 +201,21 @@ test("a stranger is only named after the device lists agree", async () => {
 test("a listing that fails is not a box to take off somebody", async () => {
   reset("u1");
   castFrom("u2");
-  handler = (url, opts, body) => {
-    if (url === "/api/token") {
-      const refresh = new URLSearchParams(body).get("refresh_token");
-      return { status: 200, body: JSON.stringify({ access_token: "at-" + refresh, expires_in: 3600 }) };
-    }
-    // 500 rather than the 429 this really is in the field: a rate-limited read
-    // ends up here too, but only after apiGet has slept through its retries, and
-    // that is six seconds this suite does not need to spend.
-    if (url === "/v1/me/player/devices") return { status: 500, body: "" };
-    return { status: 404, body: "" };
-  };
+  serveNoListing();
 
   assert.deepEqual(await api.control("pause"), { ok: false, error: "box_unreachable" });
-  // play() answers the same way, because `box_not_found` is what lets the caller
-  // restart librespot into another account - over the top of a live session.
-  assert.deepEqual(await api.play({ uris: ["spotify:track:x"] }), { ok: false, error: "box_unreachable" });
+  // play() says something narrower, and the difference is what the caller does
+  // about it: both `box_not_found` and `box_unreachable` are read as "the box has
+  // no Connect registration" and answered by restarting the daemon, over the top
+  // of whatever session it is holding. Nothing was established here, so neither
+  // may be the answer.
+  assert.deepEqual(await api.play({ uris: ["spotify:track:x"] }), { ok: false, error: "box_lookup_failed" });
   assert.equal(writes().length, 0);
 });
 
 test("a free box is the only one play() may report as free", async () => {
   reset("u1");
-  serve({ boxOn: "" }); // nobody holds it: adoption is allowed to follow
+  serve({ boxOn: "" }); // nobody holds it: the caller may sign the daemon back in
 
   assert.deepEqual(await api.play({ uris: ["spotify:track:x"] }), { ok: false, error: "box_not_found" });
 
@@ -418,17 +428,21 @@ test("music starting is enough to follow the box, with no session event at all",
   assert.equal(api.listAccounts().find((a) => a.active).id, "u2");
 });
 
-test("a respawned daemon is a new device id, and the old one is not reused", async () => {
+test("once the cache is dropped the id is looked up again, not reused", async () => {
   reset("u1");
   serve({ boxOn: "u2" });
   castFrom("u2");
   await api.control("pause");
   assert.match(writes()[0].path, /device_id=dev-box$/);
 
-  // The shell restarts librespot (a rename, a give-up): same name, new device.
+  // librespot derives its Connect id from the device NAME, so a restart alone
+  // does not change it - a RENAME does, and so does the box being replaced. What
+  // this pins is the other half: after forgetBoxDevice the next press asks
+  // Spotify rather than answering out of the cache, because Spotify accepts a
+  // stale id and silently does nothing with it.
   seen = [];
   serve({ boxOn: "u2", boxId: "dev-box-2" });
-  bridge.clear(); // what stopLibrespot/restartLibrespot do
+  bridge.clear(); // what stopLibrespot/restartLibrespot/a daemon exit do
   api.forgetBoxDevice();
   castFrom("u2");
   await api.control("pause");
@@ -486,7 +500,7 @@ test("a guest who cast once and went home does not lock the TV out of its own bo
   disconnected(); // they stopped and left
 
   // The name is still the last thing librespot said, and it must not go on
-  // refusing every press - nor block the adoption that gets the box back.
+  // refusing every press - nor block the restart that gets the box back.
   assert.deepEqual(await api.play({ uris: ["spotify:track:x"] }), { ok: false, error: "box_not_found" });
   assert.equal((await api.control("pause")).error, "box_not_found");
 });
@@ -518,14 +532,14 @@ test("a forged disconnect cannot hand a stranger's live cast to the TV", async (
   assert.equal(
     (await api.play({ uris: ["spotify:track:x"] })).error,
     "box_other_account",
-    "still theirs, and still not adoptable",
+    "still theirs, and still not ours to restart",
   );
 
   disconnected(); // ...and when the daemon says it, the box is free again
   assert.equal((await api.play({ uris: ["spotify:track:x"] })).error, "box_not_found");
 });
 
-test("an activation is a new device id, even when the same account activates again", async () => {
+test("an activation re-reads the device id, even when the same account activates again", async () => {
   reset("u1");
   bridge.onSessionUser((u) => api.boxSignedInAs(u)); // what plugin.js wires up
   serve({ boxOn: "u2" });
@@ -618,6 +632,80 @@ test("a disconnect gives the box back to the device lists rather than to the las
 
   assert.equal(r.ok, true);
   assert.equal(writes()[0].bearer, "at-r1", "resolved again from who can see the box");
+});
+
+test("a box every account was asked about, and none of them has, is unreachable", async () => {
+  reset("u1");
+  serve({ boxOn: "" });
+  castFrom("u1"); // an owner is named, which is what a cast does
+
+  assert.deepEqual(await api.play({ uris: ["spotify:track:x"] }), { ok: false, error: "box_unreachable" });
+});
+
+test("one unrelated account's outage does not hide what the box's own account said", async () => {
+  reset("u1");
+  castFrom("u2"); // librespot says u2 holds the box
+  handler = (url, opts, body) => {
+    if (url === "/api/token") {
+      const refresh = new URLSearchParams(body).get("refresh_token");
+      return { status: 200, body: JSON.stringify({ access_token: "at-" + refresh, expires_in: 3600 }) };
+    }
+    if (url === "/v1/me/player/devices") {
+      const who = String((opts.headers || {}).Authorization || "").replace("Bearer at-r", "u");
+      // u2 - the account holding the box - answers cleanly and does not list it.
+      // u1, which has nothing to do with this, is rate-limited.
+      if (who === "u2") return { status: 200, body: JSON.stringify({ devices: [PHONE] }) };
+      return { status: 500, body: "" };
+    }
+    return { status: 404, body: "" };
+  };
+
+  assert.deepEqual(
+    await api.play({ uris: ["spotify:track:x"] }),
+    { ok: false, error: "box_unreachable" },
+    "the box's own account answering is enough: a family member's 429 must not disable the recovery",
+  );
+});
+
+test("the sweep says whether it actually asked", async () => {
+  reset("u1");
+  serve({ boxOn: "" });
+  assert.deepEqual(await api.findBoxAccount(), { account: null, devId: "", complete: true, answered: true });
+
+  // Nothing came back at all: neither "everybody said no" nor "somebody said no".
+  serveNoListing();
+  assert.deepEqual(await api.findBoxAccount(), { account: null, devId: "", complete: false, answered: false });
+
+  serve({ boxOn: "u2" });
+  const hit = await api.findBoxAccount();
+  assert.equal(hit.account.id, "u2");
+  assert.equal(hit.complete, true);
+  assert.equal(hit.answered, true);
+});
+
+// `answered` is the weaker of the two, and the recovery reads it rather than
+// `complete`: after a restart, "did the box come back" only needs ONE account to
+// have replied. Judging it on `complete` turned a real failure into "Spotify is
+// unreachable" whenever a second, unrelated account was rate-limited.
+test("the sweep also says whether anybody replied at all", async () => {
+  reset("u1");
+  handler = (url, opts, body) => {
+    if (url === "/api/token") {
+      const refresh = new URLSearchParams(body).get("refresh_token");
+      return { status: 200, body: JSON.stringify({ access_token: "at-" + refresh, expires_in: 3600 }) };
+    }
+    if (url === "/v1/me/player/devices") {
+      const who = String((opts.headers || {}).Authorization || "").replace("Bearer at-r", "u");
+      if (who === "u1") return { status: 200, body: JSON.stringify({ devices: [PHONE] }) };
+      return { status: 500, body: "" }; // the other account is rate-limited
+    }
+    return { status: 404, body: "" };
+  };
+
+  const r = await api.findBoxAccount();
+  assert.equal(r.account, null);
+  assert.equal(r.complete, false, "not every account answered");
+  assert.equal(r.answered, true, "but one did, and it did not have the box");
 });
 
 // LAST: it removes an account, and the module's list is process-wide.

@@ -36,7 +36,12 @@ const SCOPES = [
   "playlist-read-private",
   "playlist-read-collaborative",
   "user-library-read",
-  "streaming", // lets librespot sign the box into this account with our access token (the "adopt" step)
+  // Asked for because a Spotify app that controls playback is expected to hold
+  // it. It does NOT let librespot sign the box in with our token: login5 refuses
+  // a third-party client at Connect registration with this scope present, and
+  // with `app-remote-control` too - measured. The box signs itself in from its
+  // own saved login instead.
+  "streaming",
 ].join(" ");
 
 // Loopback redirect (the only http redirect Spotify allows). Must be registered
@@ -668,18 +673,31 @@ async function boxDeviceOn(acc) {
   return dev ? dev.id : "";
 }
 // Which linked account currently sees the box in its device list (preferring the
-// active one), or null. The box (librespot) follows whoever last held its session.
+// active one). The box (librespot) follows whoever last held its session.
+//
+// `complete` is the second answer and it is not cosmetic: "every account said no"
+// and "we could not ask" look identical from an empty result, and they call for
+// opposite things. The first is a box with no Connect registration, which the
+// plugin fixes by restarting the daemon; the second is a listing that failed (an
+// outage, a 429, a refresh that did not come back) behind which the box may be
+// perfectly fine and playing, and restarting there takes the music off somebody
+// for a reason that was never established. Carried in the result rather than kept
+// as module state because a sweep is a chain of awaits and the /player poll runs
+// one of its own every twenty seconds.
 async function findBoxAccount() {
   const ordered = [activeAccount(), ...accounts.list.filter((a) => a && a.id !== accounts.active)].filter(Boolean);
+  let complete = ordered.length > 0; // no linked account at all is not a completed sweep
+  let answered = false; // …and `answered` is the weaker question: did ANY of them reply?
   for (const a of ordered) {
     try {
       const id = await boxDeviceOn(a);
-      if (id) return { account: a, devId: id };
+      answered = true;
+      if (id) return { account: a, devId: id, complete: true, answered: true };
     } catch (e) {
-      /* try next account */
+      complete = false; // this account never answered, so its silence means nothing
     }
   }
-  return null;
+  return { account: null, devId: "", complete, answered };
 }
 
 // The box's device id within one account's list, cached: a transport press must
@@ -708,9 +726,11 @@ async function boxDeviceIdFor(acc) {
   rememberBoxDevice(acc, id);
   return id;
 }
-// A restart hands the box a NEW device id under the same name, so a cached one
-// would address a device that no longer exists — and Spotify accepts that id and
-// does nothing with it.
+// Drop the cached id. librespot derives it from the device NAME (verified: it is
+// sha1 of that name, so it survives a restart, a reboot and a credential change
+// and moves only on a rename, which boxDevKey already keys on) - so this is not
+// about the id going out of date. It is about the DEVICE: a daemon that has gone
+// leaves an id Spotify still accepts and silently does nothing with.
 function forgetBoxDevice() {
   boxDev = { key: "", id: "", at: 0 };
 }
@@ -744,15 +764,23 @@ function forgetBoxDevice() {
 async function boxOwner(needDevice) {
   const user = spotifyBridge.sessionUser();
   const named = user ? accounts.list.find((x) => x.id === user) : null;
+  // Whether the NAMED owner's own listing answered, as opposed to throwing. It is
+  // the strongest evidence there is about the box: that account is the one
+  // librespot says holds it, so an empty answer from it means the registration is
+  // gone whatever another linked account's listing did. Without this, a 429 on an
+  // unrelated family account made the whole recovery unreachable - and /player
+  // sweeps every account every twenty seconds, so meeting one is routine.
+  let namedAnswered = false;
   if (named) {
-    if (!needDevice) return { state: "ours", account: named, devId: "" };
+    if (!needDevice) return { state: "ours", account: named, devId: "", swept: false };
     let devId = "";
     try {
       devId = await boxDeviceIdFor(named);
+      namedAnswered = true;
     } catch (e) {
       devId = "";
     }
-    if (devId) return { state: "ours", account: named, devId };
+    if (devId) return { state: "ours", account: named, devId, swept: true };
   }
   // Nobody named, but a recent read already paid for a listing. Without this the
   // sweep below runs on every /player poll — one listing per linked account,
@@ -760,29 +788,36 @@ async function boxOwner(needDevice) {
   //
   // Reads only. A handover whose event was lost (the hook swallows a failed post)
   // leaves this pointing at the previous account for up to the TTL, and a
-  // COMMAND sent there goes to a device id that no longer exists — which Spotify
-  // accepts and quietly does nothing with, i.e. a button that reports success.
+  // COMMAND sent there goes out as an account that no longer holds the box —
+  // which Spotify accepts and quietly does nothing with, i.e. a button that
+  // reports success.
   // A press is a human-paced event and can afford to ask.
   const cached = !named && !needDevice && cachedBoxOwner();
-  if (cached) return cached;
-  let found = null;
+  if (cached) return { ...cached, swept: true };
+  let found = { account: null, devId: "", complete: false };
   try {
     found = await findBoxAccount();
   } catch (e) {
-    found = null;
+    found = { account: null, devId: "", complete: false };
   }
-  if (found) {
+  if (found.account) {
     rememberBoxDevice(found.account, found.devId); // paid for once, not again next press
-    return { state: "ours", account: found.account, devId: found.devId };
+    return { state: "ours", account: found.account, devId: found.devId, swept: true };
   }
-  if (named) return { state: "unreachable", account: named, devId: "" };
+  // `swept` says the empty answer was actually established, and EVERY shape below
+  // carries it: a caller that acts on "the box is not addressable" needs it,
+  // because the alternative - nobody answered - is not a fact about the box at
+  // all. Set on all of them rather than only where it is read, so that which
+  // refusal wins never depends on the order the states are checked in.
+  const swept = !!found.complete;
+  if (named) return { state: "unreachable", account: named, devId: "", swept: swept || namedAnswered };
   // A name we cannot use only means "somebody else is on the box" while their
   // session is UP. A guest who cast once and went home leaves their name behind,
   // and reading that as an owner refused every press and every play from the TV
-  // until the daemon was restarted — adoption included, since that is gated on
-  // the box being free.
-  if (user && spotifyBridge.sessionActive()) return { state: "other", account: null, devId: "" };
-  return { state: "none", account: null, devId: "" };
+  // until the daemon was restarted — the recovery included, since that is gated
+  // on the box being free.
+  if (user && spotifyBridge.sessionActive()) return { state: "other", account: null, devId: "", swept };
+  return { state: "none", account: null, devId: "", swept };
 }
 // The device cache read back as an owner: same TTL, same key, and the account has
 // to still be linked - removing an account must not leave the box addressed as it.
@@ -878,16 +913,11 @@ async function boxPlayerState() {
   }
 }
 
-// A fresh access token for the ACTIVE account (for handing the box's librespot
-// this account's session — the play path's "adopt" step in the Spotify plugin).
-function activeAccessToken() {
-  return tokenFor(activeAccount());
-}
 // Play a playlist (context_uri) or track uris ON THE BOX. Find whichever
 // connected account currently owns the box device and play there; then switch
 // active to it so the transport controls target the same session. If no linked
-// account can see the box, report it — the caller (plugin) may then adopt the
-// box into the active account and retry.
+// account can see the box, report which of the two it is — the caller (plugin)
+// signs the daemon back in from its saved login and retries.
 // Spotify refuses a very large `uris` array, and a flat copy of a playlist is not
 // the playlist anyway: `next` runs off the end of the copy, and shuffle and repeat
 // only ever see the tracks that were copied. So anything with a context of its own
@@ -911,12 +941,12 @@ async function play({ contextUri, uris, offset, collection, keepActive }) {
   // continuation nobody asked for still repointed the household's library.
   if (keepActive) suppressFollowUntil = Date.now() + FOLLOW_SUPPRESS_MS;
   const found = await boxOwner(true);
-  // `box_not_found` is the answer that lets the caller ADOPT — restart librespot
-  // signed into the active account, which tears down whatever session the box is
-  // holding. So only a box nobody holds may answer it. A box held by an account
-  // we cannot address (a listing that failed, a 429) or by one we have not linked
-  // says so instead: neither is a reason to take the box off somebody, and the
-  // paused-cast case slips past adoption's is_playing guard.
+  // `box_not_found` and `box_unreachable` both say the device cannot be
+  // addressed, and both let the caller restart the daemon to sign it back in;
+  // they differ only in whether librespot has named an owner since this shell
+  // started. `box_other_account` must NOT be one of them: an account we have not
+  // linked is holding the box, so a restart would take it off a person, and
+  // nothing we send could reach that playback anyway.
   // A refusal is not a play, so it must not go on suppressing the follow: a
   // continuation that never started would otherwise keep the launcher off a real
   // cast for the rest of the window.
@@ -924,9 +954,20 @@ async function play({ contextUri, uris, offset, collection, keepActive }) {
     if (keepActive) suppressFollowUntil = 0;
     return { ok: false, error };
   };
+  // An account this box has not linked is holding it: nothing we send could reach
+  // that playback, and it is never a reason to restart the daemon. Judged on the
+  // state and not on `swept`, because it is a fact about a LIVE session rather
+  // than about a listing.
   if (found.state === "other") return refuse("box_other_account");
-  if (found.state === "unreachable" || (found.account && !found.devId)) return refuse("box_unreachable");
-  if (!found.account) return refuse("box_not_found");
+  if (found.state === "unreachable" || found.state === "none") {
+    // Nothing about the box was established, so it must not reach the caller as
+    // either answer below - both of those are read as "the box has no Connect
+    // registration" and answered by restarting the daemon, which would be taking
+    // it off somebody on the strength of a listing that never came back.
+    if (!found.swept) return refuse("box_lookup_failed");
+    return refuse(found.state === "unreachable" ? "box_unreachable" : "box_not_found");
+  }
+  if (!found.account || !found.devId) return refuse("box_unreachable");
   const { account: target, devId } = found;
   const q = `?device_id=${encodeURIComponent(devId)}`;
   const pos = Number(offset) > 0 ? Math.floor(Number(offset)) : 0;
@@ -1332,5 +1373,4 @@ module.exports = {
   boxSignedInAs,
   followBox,
   forgetBoxDevice,
-  activeAccessToken,
 };

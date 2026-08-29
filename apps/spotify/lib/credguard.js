@@ -24,12 +24,17 @@
 //
 // Four bounds, and each one is a way of being wrong that costs more than the bug:
 //
-//   - A start that carried --access-token is IGNORED. The adopt path (playing
-//     from the TV with no prior cast) starts librespot with a one-shot token, and
-//     librespot then uses the token INSTEAD of the cached credentials - so the
-//     denial is about the token, and throwing away a perfectly good saved login
-//     for it would cost the user the account features they were trying to use.
-//     Measured in the same incident: three token starts were refused in a row.
+//   - A start that carried --access-token is IGNORED: librespot uses the token
+//     INSTEAD of the cached credentials, so the denial is about the token and
+//     throwing away a good saved login for it would cost the user the account
+//     features they were trying to use. Nothing passes `withToken: true` any
+//     more - the start that did was the "adopt" step, removed once it was
+//     measured to be the CAUSE of this failure rather than a bystander: a
+//     third-party app's token is always refused at Connect registration, and
+//     librespot writes the token-derived credential into credentials.json before
+//     being refused, which is what turned a working login into a rejected one.
+//     The bound stays because the option does, and a poisoned file from an older
+//     build is exactly what this module still has to clean up.
 //   - TWO consecutive denials, not one. A single denial could be Spotify's own
 //     answer to a bad moment; two, seconds apart, with the same blob, is the blob.
 //     The wait costs about six seconds.
@@ -45,6 +50,20 @@
 
 const REJECTION = "INVALID_CREDENTIALS";
 const PUBLISHED = "Published zeroconf service";
+// The supervisor's own line for a child that has gone (service_supervisor.js
+// prints "exited code <n> sig <s>"), matched WHOLE rather than by prefix.
+//
+// It lives here because this is already the module that reads the daemon's
+// output, and because it needs to be checkable offline: the plugin acts on it by
+// clearing the box's now-playing claim and its cached device id.
+//
+// A daemon line normally cannot be mistaken for it - env_logger prefixes each
+// with "[<ts> LEVEL target]" - but "normally" is doing work there, and the shape
+// of the exception is worth naming: the supervisor splits the child's stderr on
+// newlines and trims each fragment, so a multi-line record can produce one with
+// no prefix at all. Hence the exact form, which a librespot line cannot take
+// without also carrying a plausible exit code and signal.
+const SUPERVISOR_EXIT = /^exited code (\d+|null) sig (\S+)$/;
 
 // The saved login was refused. Narrow on purpose - see the bounds above.
 function isCredentialRejection(line) {
@@ -55,6 +74,11 @@ function isCredentialRejection(line) {
 // a logged-in one, which is what makes it a usable "we are past the login" mark.
 function isUp(line) {
   return String(line || "").includes(PUBLISHED);
+}
+
+// The daemon has gone, by any route the supervisor reports.
+function isSupervisorExit(line) {
+  return SUPERVISOR_EXIT.test(String(line || "").trim());
 }
 
 // deps: { fs, path, cacheDir, log, threshold, maxHeals }
@@ -131,4 +155,4 @@ function createCredGuard(deps) {
   return { note, stats: () => ({ strikes, heals }) };
 }
 
-module.exports = { createCredGuard, isCredentialRejection, isUp };
+module.exports = { createCredGuard, isCredentialRejection, isUp, isSupervisorExit };

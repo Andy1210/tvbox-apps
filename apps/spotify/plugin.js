@@ -26,7 +26,7 @@ const { execFile } = require("child_process");
 const spotify = require("./lib/spotify"); // cast-only bridge: librespot events -> SSE state
 const spotifyApi = require("./lib/spotify_api"); // OPTIONAL Spotify Web API (account features)
 const { createAutoplay } = require("./lib/autoplay"); // what plays when a playlist runs out
-const { createCredGuard } = require("./lib/credguard"); // a saved login Spotify no longer accepts
+const { createCredGuard, isSupervisorExit } = require("./lib/credguard"); // reads the daemon's own output
 
 const SPOTIFY_HOOK = path.join(__dirname, "spotify_event_hook.sh"); // librespot --onevent target
 // Where librespot keeps the saved session credentials (and the Connect volume).
@@ -229,15 +229,6 @@ module.exports = (host) => {
   // box runs exactly one Connect device — ours. Supervision (backoff + give-up)
   // is host.spawnService's job.
   let librespotLog = null; // append fd, opened once and reused across respawns
-  // One-shot OAuth token for the next librespot start: logs the Connect device
-  // into the launcher's ACTIVE Web API account (the play path's "adopt" step), so
-  // playback from the TV needs no prior phone cast. librespot caches the session
-  // credentials, so this sticks across restarts; zeroconf stays on, so any phone
-  // can still cast and take the box over as usual.
-  let adoptToken = "";
-  // Whether the live librespot instance was started with that token (set by
-  // librespotArgv, read by the credential guard below).
-  let startUsedToken = false;
   // Reads the daemon's own output and clears a saved login Spotify has started
   // refusing — the one failure that never recovers on its own, not even across a
   // reboot. Its module header has the incident and the bounds.
@@ -302,13 +293,22 @@ module.exports = (host) => {
     // exposes as the sink name; it's set before start() runs.
     const sink = host.audioSink();
     if (sink) args.push("--device", sink);
-    if (adoptToken) args.push("--access-token", adoptToken);
-    // Recorded HERE rather than read off adoptToken when a log line arrives: the
-    // token is one-shot and cleared as soon as the adoption stops polling, while
-    // the output of the instance it started keeps coming. The credential guard
-    // must know which kind of start it is watching. argv() is called once per
-    // (re)start, so this tracks the LIVE instance.
-    startUsedToken = !!adoptToken;
+    // NO --access-token here, deliberately. librespot accepts one and the AP
+    // handshake even succeeds with it ("Authenticated as '<id>'"), but Connect
+    // registration a step later is refused - `could not initialize spirc: Invalid
+    // state { Login request was denied: INVALID_CREDENTIALS }` - because login5
+    // registers a device for Spotify's own client, not for a third-party app's
+    // token. The scopes are not the reason: measured refused with `streaming` and
+    // `app-remote-control` both present on the token.
+    //
+    // It is not merely useless but destructive: librespot writes the
+    // token-derived credential into <cache>/credentials.json BEFORE that refusal,
+    // overwriting the box's working saved login with one that can never register.
+    // The next start then fails on the poisoned file, the credential guard moves
+    // it aside, and the box is left signed out - discoverable, but in no
+    // account's device list, which is the one state only a phone cast can undo.
+    // The box signs itself back in from its CACHED credentials instead; see
+    // reRegisterBox.
     return args;
   }
   // Spotify Connect is opt-in (config.spotify.enabled): this gate — not the
@@ -337,8 +337,9 @@ module.exports = (host) => {
     // lines and the daemon's ERRORs, never the per-track INFO chatter.
     const logLine = (m) => {
       // Redact FIRST, for every sink: the supervisor's spawn line carries the
-      // whole argv, and that includes the one-shot --access-token. It used to
-      // reach only the shell log (redacted there); it now reaches a file too.
+      // whole argv. Nothing here passes a credential on the command line any more
+      // - and it must not, because argv is readable from /proc long before it
+      // reaches a log - so this is belt and braces against that coming back.
       const line = String(m).replace(/(--access-token)\s+\S+/, "$1 ***");
       if (out !== "ignore") {
         try {
@@ -355,7 +356,33 @@ module.exports = (host) => {
       // does not guard it: anything thrown here would surface as an unhandled
       // exception in the shell's main process rather than as a log line.
       try {
-        if (credGuard.note(line, { withToken: startUsedToken })) {
+        // The daemon has gone. A supervisor respawn - a crash, or the reap of a
+        // leftover - goes through neither stopLibrespot nor restartLibrespot,
+        // which are the only other places this happens, so both of the claims a
+        // dead daemon leaves behind used to stand until something else cleared
+        // them:
+        //   • the cached device id, for up to its 30s TTL. The id itself does NOT
+        //     change across a restart - librespot derives it from the device name
+        //     - so this is about the device being down, not about the id being
+        //     wrong. It does not remove every symptom either: Spotify keeps
+        //     LISTING a departed daemon for seconds afterwards, so a play in that
+        //     window still meets a 404 or 502 from Spotify's own side, which no
+        //     cache of ours can shorten.
+        //   • the now-playing claim, which keeps ADVANCING: measured after a
+        //     kill -9 mid-track, position_ms climbed past four minutes with
+        //     nothing audible, and that claim feeds the box's media_player in
+        //     Home Assistant and the HOME sound card.
+        // Hooked on the exit rather than on the next start because that is when
+        // both stop being true, and because no line on the start side reliably
+        // marks the moment the box becomes addressable: `Published zeroconf
+        // service` is the LAN advert, not the Connect registration, and it lands
+        // after authentication on a warm respawn but 19 s before it on a cold
+        // start. An exit is unambiguous.
+        if (isSupervisorExit(line)) {
+          spotify.clear(); // also drops the owner: the daemon that held the session is the one that died
+          spotifyApi.forgetBoxDevice();
+        }
+        if (credGuard.note(line, { withToken: false })) {
           // The box has just been signed out, so the same two things a deliberate
           // teardown does have to happen: the now-playing claim is no longer true
           // (it feeds the HOME sound card and the box's media_player, both of
@@ -383,9 +410,10 @@ module.exports = (host) => {
     });
   }
   // Killing the process emits no disconnect event, so reset now-playing to idle
-  // whenever we tear it down ourselves. The new instance registers as a NEW
-  // Connect device under the same name, so the id commands are addressed to has
-  // to be looked up again — Spotify accepts a stale one and does nothing.
+  // whenever we tear it down ourselves. The cached device id goes too: it is
+  // still the right id (librespot derives it from the device name) but there is
+  // no daemon behind it, and Spotify accepts a command addressed to a departed
+  // device and silently does nothing with it.
   function stopLibrespot() {
     host.stopService("librespot");
     spotifyApi.forgetBoxDevice();
@@ -583,45 +611,145 @@ module.exports = (host) => {
     }
   }
 
-  // ---- play with adoption ----
-  // If no linked account can see the box, the box's librespot is signed into
-  // someone else's (or no) account. Instead of asking the user to cast first,
-  // ADOPT: restart librespot with a fresh --access-token for the active account,
-  // wait until the box shows up in that account's device list, then retry the
-  // play. Skipped while a cast is actively playing (don't steal a live session).
+  // ---- play, and signing the box back in when it is not addressable ----
+  // A play from the TV is addressed to the box by Connect device id, and the box
+  // only HAS one while librespot holds a session with Spotify. That session is
+  // what the saved login in <cache>/credentials.json buys, and it does not last
+  // forever: `Connection to server closed.` is a normal line in this daemon's log
+  // and librespot can take tens of minutes to notice and reconnect (measured on
+  // this fleet: gaps of 4 to 41 minutes). While it is down the box is in no
+  // account's device list, every play is refused, and casting from a phone is
+  // what put it back - which is the complaint this exists to answer.
+  //
+  // Restarting the daemon signs it in again from the SAME cached file, in about
+  // two seconds, so the cast is not needed. That is the whole recovery; the box
+  // is not being taken off anyone and no new credential is minted.
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const REREGISTER_COOLDOWN_MS = 60000;
+  let lastReRegister = 0;
+  // A recovery IN FLIGHT. Separate from the cooldown because they bound different
+  // things and the cooldown cannot do this job: it is read before an eighteen
+  // second poll and armed after it, so two presses two seconds apart both passed
+  // it and both restarted the daemon - the second one SIGTERMing the instance the
+  // first was waiting for. Measured on the box, and a twenty second spinner is
+  // exactly when somebody presses again. `starting` in the browser cannot cover
+  // it either: it is per-component, and the voice path is a second call site.
+  let recovering = false;
+  // Whether there is anything to sign back in WITH. Only a real ENOENT counts as
+  // "no": `existsSync` answers false for a cache directory it cannot READ too,
+  // and taking that as an absent login makes the one claim this file is careful
+  // not to make - it tells the user the box is signed out, on the strength of a
+  // permissions problem, and sends them to cast over a login that is fine.
+  const savedLoginExists = () => {
+    try {
+      fs.accessSync(path.join(LIBRESPOT_CACHE, "credentials.json"), fs.constants.F_OK);
+      return true;
+    } catch (e) {
+      return e.code !== "ENOENT";
+    }
+  };
   async function playOnBox(body) {
     let r = await spotifyApi.play(body);
-    if (r.error !== "box_not_found") return r;
-    if (spotify.getState().is_playing) return { ok: false, error: "in_use" };
-    let token = "";
+    // Both answers mean the same thing about the DEVICE - no linked account can
+    // address it - and differ only in whether librespot has named an owner since
+    // this shell started. `box_unreachable` is the commoner one by far, because
+    // naming an owner is what a cast does, so the old code healed only the state
+    // a user who had never cast could reach.
+    // Neither is reached unless every linked account was actually asked and none
+    // of them lists the box: a listing that failed says `box_lookup_failed`
+    // instead, and is never healed. That is what makes the two guards below
+    // decidable at all.
+    if (r.error !== "box_not_found" && r.error !== "box_unreachable") return r;
+    // What the box last told us about itself is NOT evidence here, and this is
+    // the trap that has to be stated. `is_playing` and the session flag are set
+    // by librespot's own events and cleared by events that a dying session never
+    // sends - measured: a daemon killed mid-track leaves `is_playing` true, with
+    // position_ms still advancing past four minutes, for as long as the shell
+    // lives. Read literally they say "somebody is listening" on a box Spotify has
+    // just told us is not one of its devices, so the state that outlives a silent
+    // drop is exactly the state that would veto the recovery for it.
+    //
+    // Dropping them on `box_unreachable` is a BET, not a proof, and it is worth
+    // stating as one. It rests on Spotify's device listing being consistent: if
+    // the account holding the box ever answers 200 with the box missing WHILE
+    // somebody is playing on it, this restarts the daemon under them. Two things
+    // bound that. The state is only reached when a listing actually answered
+    // (`box_lookup_failed` covers the rest), and `named` is a linked account
+    // whose id came from a key-gated `session_connected` - a forged event cannot
+    // manufacture one, and an UNLINKED account holding the box is a different
+    // answer (`box_other_account`) which is never healed. So the blast radius is
+    // one household member's playback, on a press by somebody at the TV who is
+    // taking the box anyway.
+    //
+    // `box_not_found` keeps the guards, because there they are not stale: boxOwner
+    // reaches that state with `casting` true only when a guest's
+    // session_connected was lost (the hook swallows a failed post), and
+    // restarting there ends a cast nobody could see was happening.
+    if (r.error === "box_not_found") {
+      if (spotify.getState().is_playing) return { ok: false, error: "in_use" };
+      if (spotify.sessionActive()) return r;
+    }
+    // Connect is switched off for this box, so there is no daemon to sign in and
+    // restartLibrespot() would stop one rather than start it - measured before
+    // this check: the press hung for 19.5 s polling for a daemon it had
+    // deliberately not started, then blamed the login. Nothing here can fix it and
+    // a cast cannot either: with Connect off the box advertises nothing.
+    if (!enabled()) return { ok: false, error: "connect_off" };
+    // Nothing cached to sign in with: the box has never been signed in, or the
+    // credential guard cleared a login Spotify refused. A restart cannot invent
+    // one, and a phone cast is genuinely the only way back.
+    if (!savedLoginExists()) return { ok: false, error: "box_signed_out" };
+    // A press must not become a restart loop when the box cannot come back: the
+    // supervisor has its own ceiling, but this is what keeps a person leaning on
+    // the button from spending it - and every restart takes down whatever cast is
+    // live at that moment. The window has its OWN answer rather than the refusal
+    // that opened it: an attempt has just been made and failed, so repeating
+    // "try again shortly" invites the one thing that cannot work for a minute.
+    if (recovering || Date.now() - lastReRegister < REREGISTER_COOLDOWN_MS) {
+      return { ok: false, error: "recovery_cooling" };
+    }
+    host.log("spotify: box is not addressable (" + r.error + ") - signing it back in from its saved login");
+    recovering = true;
     try {
-      token = await spotifyApi.activeAccessToken();
-    } catch (e) {
-      /* not connected */
-    }
-    if (!token) return r;
-    host.log("spotify: adopting box into the active account");
-    adoptToken = token;
-    restartLibrespot();
-    let seen = false;
-    for (let i = 0; i < 12 && !seen; i++) {
-      // librespot login + Connect registration can take a few seconds
-      await sleep(1500);
-      try {
-        seen = !!(await spotifyApi.findBoxAccount());
-      } catch (e) {
-        /* keep polling */
-      }
-    }
-    adoptToken = ""; // one-shot: after a successful login librespot's cached credentials take over
-    if (!seen) {
-      // token login failed (or too slow) — restore plain zeroconf so casting keeps working
-      host.log("spotify: adoption failed; restoring discovery-only librespot");
       restartLibrespot();
-      return { ok: false, error: "adopt_failed" };
+      let seen = false;
+      let answered = false; // did any listing actually come back?
+      for (let i = 0; i < 12 && !seen; i++) {
+        // login + Connect registration is ~2s on a healthy box; the rest of the
+        // budget is for a slow access point, and a miss is never cached.
+        await sleep(1500);
+        try {
+          const found = await spotifyApi.findBoxAccount();
+          seen = !!found.account;
+          // `answered`, NOT `complete`: complete means EVERY linked account
+          // replied, so one family account rate-limited for the whole poll would
+          // turn a real "it did not come back" into "Spotify is unreachable" -
+          // the same mistake boxOwner was just taught not to make, one function
+          // along.
+          answered = answered || found.answered;
+        } catch (e) {
+          /* keep polling */
+        }
+      }
+      if (!seen) {
+        lastReRegister = Date.now();
+        host.log("spotify: the box did not come back as a Connect device");
+        // Same distinction the refusals above turn on: with nothing having come
+        // back from Spotify, "it did not come back" is not something we know.
+        // Saying the saved login is bad - and asking for a cast - would be a
+        // claim about a credential that was never tested.
+        return { ok: false, error: answered ? "recovery_failed" : "box_lookup_failed" };
+      }
+      // The box IS back, so the restart did its job - but the play can still be
+      // refused (a 429, a 502, an account without Premium), and arming the
+      // cooldown only on the branch above left that case with no rate limit at
+      // all: every press restarted the daemon, which is what this exists to stop.
+      const out = await spotifyApi.play(body);
+      if (!out.ok) lastReRegister = Date.now();
+      return out;
+    } finally {
+      recovering = false;
     }
-    return spotifyApi.play(body);
   }
 
   // ---- autoplay ----
@@ -632,15 +760,14 @@ module.exports = (host) => {
   const autoplayEnabled = () => !!(host.config.rawSpotify() || {}).autoplay;
   const autoplay = createAutoplay({
     api: spotifyApi,
-    // spotifyApi.play, NOT playOnBox: autoplay must never ADOPT. Adoption
-    // restarts librespot signed into the active account, and the guard that
-    // normally protects a live cast (`spotify.getState().is_playing`) is false by
-    // construction here, because end_of_track is what sets it false. So a guest
-    // casting from an unlinked account, whose own playlist happened to end, would
-    // have their session torn down and the box signed into the owner's. With a
-    // plain play, a box no linked account can see answers `box_not_found` and
-    // autoplay simply stays quiet - which is the right answer to "somebody else
-    // is using this".
+    // spotifyApi.play, NOT playOnBox: autoplay must never restart the daemon.
+    // The guard that normally protects a live cast
+    // (`spotify.getState().is_playing`) is false by construction here, because
+    // end_of_track is what sets it false - so a guest casting from an unlinked
+    // account, whose own playlist happened to end, would have the box taken out
+    // from under them by a timer nobody set. With a plain play, a box no linked
+    // account can see answers `box_not_found` and autoplay simply stays quiet,
+    // which is the right answer to "somebody else is using this".
     play: (body) => spotifyApi.play(body),
     isEnabled: autoplayEnabled,
     log: (m) => host.log(m),

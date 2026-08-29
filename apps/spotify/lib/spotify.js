@@ -199,9 +199,11 @@ function handleEvent(ev, trusted) {
     // event arrives here stripped of it, and taking that as "nobody owns the box"
     // would hand the forger the same denial by the other door.
     //
-    // Fired even when the name has not changed, because the DEVICE has: an
-    // activation follows a respawn, and the respawned daemon is a new device id
-    // under the same name — one Spotify accepts and quietly does nothing with.
+    // Fired even when the name has not changed, because the DEVICE may have gone
+    // and come back: an activation follows a respawn, and a cached id belonging
+    // to the instance that died is one Spotify accepts and quietly does nothing
+    // with. (The id itself is derived from the device name and survives a
+    // restart; it is the daemon behind it that does not.)
     case "session_connected":
       if (!trusted || !ev.user_name) return;
       sessionLive = true; // somebody's session is up, whoever they are
@@ -216,8 +218,8 @@ function handleEvent(ev, trusted) {
       // session, and that is what decides whether a name we cannot use may hold
       // the TV's buttons — so it is lowered only by the daemon. Anyone on this
       // origin can post one of these, and a forged one would say a box somebody
-      // is casting to is free: the play path adopts a free box, i.e. restarts
-      // librespot into the household's account, and the guest's session is gone.
+      // is casting to is free: the play path restarts the daemon on a free box to
+      // sign it back in, and the guest's session goes with it.
       if (e === "session_disconnected" && trusted) sessionLive = false;
       reset();
       casting = false;
@@ -269,7 +271,7 @@ function pushState() {
 //
 // The owner goes with it, and only here: the daemon that was signed in is the one
 // being killed, and the next one comes up naming nobody until somebody casts to
-// it. Kept, it would address commands to a device id that no longer exists -
+// it. Kept, it would address commands to a device nothing is behind any more -
 // which Spotify accepts and silently does nothing with.
 function clear() {
   reset();

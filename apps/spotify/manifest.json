@@ -2,8 +2,12 @@
   "id": "spotify",
   "manifestVersion": 1,
   "name": "Spotify",
-  "version": "1.5.3",
+  "version": "1.6.0",
   "changelog": [
+    {
+      "version": "1.6.0",
+      "notes": "Playing from the TV no longer needs a cast from your phone first. If the box has dropped off Spotify, it signs itself back in and starts the music in a few seconds — before, it could end up signed out until somebody cast to it from a phone. And when something really is wrong, the screen says what, instead of showing an error code."
+    },
     {
       "version": "1.5.3",
       "notes": "If Spotify stops accepting the login saved on the box, the box now clears it by itself and comes back as a Connect speaker within seconds — instead of vanishing from every phone's device list until someone notices. Cast to it once and it is signed in again."
