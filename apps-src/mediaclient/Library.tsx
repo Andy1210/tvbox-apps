@@ -313,7 +313,17 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
 
   // Changing letter, order or filter is a new list: drop what was there rather
   // than let old items show through while the first page arrives.
-  const firstList = useRef(true);
+  /**
+   * Which list this last ran for, as the three things that define one.
+   *
+   * Not a "has this run before" flag. The effect is keyed on `loadPage`, whose
+   * identity also moves for reasons that are not a new list, and a run counter
+   * reads any of those as one: React's Strict Mode sets an effect up twice on
+   * mount, which would drop the resume AND delete the stored cursor with it.
+   * `view` is compared by reference on purpose - `setView` is the only thing
+   * that replaces it, so identity is exactly "a different list".
+   */
+  const list = useRef<{ id: string; view: LibraryView; mode: string } | null>(null);
   useEffect(() => {
     generation.current += 1;
     pending.current.clear();
@@ -325,19 +335,30 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     // A different list, not a move within one: there is nothing to follow from
     // the old position to the new one.
     mover.to(0, false);
-    // Every run but the mount is a new order, filter or mode, which renumbers
-    // the whole grid - so the cell an index names is a different title. Dropped
-    // here rather than left for the next focus event to overwrite: pressing
-    // Back before the cursor lands anywhere would otherwise file a position
-    // from the old list under the new one's view.
-    if (firstList.current) firstList.current = false;
-    else {
+    // A new order, filter or mode renumbers the whole grid, so the cell an index
+    // names is a different title. Dropped here rather than left for the next
+    // focus event to overwrite: pressing Back before the cursor lands anywhere
+    // would otherwise file a position from the old list under the new one's
+    // view. `libraryId` is safe to name here only because `MediaClient` mounts
+    // this screen with `key={screen.libraryId}` - without that remount, opening
+    // another library would delete the cursor of the one just arrived at.
+    const before = list.current;
+    list.current = { id: libraryId, view, mode };
+    if (before && (before.id !== libraryId || before.view !== view || before.mode !== mode)) {
       resume.current = undefined;
       setStartCell(0);
       forgetLibraryCursor(libraryId);
     }
     void loadPage(0);
-  }, [loadPage, libraryId, mover]);
+    // Page 0 is what answers with the total, but the resumed cell is usually on
+    // another page - and asking for that one only once the grid has moved costs
+    // a whole extra round trip. For that round trip the screen is a grid of
+    // blank placeholders whose `onEnter` does nothing, so the Back-then-OK that
+    // people actually do after leaving a film lands on the right tile and is
+    // swallowed. Both in flight together instead.
+    const back = resume.current;
+    if (back) void loadPage(Math.floor(back.index / PAGE));
+  }, [loadPage, libraryId, view, mode, mover]);
 
   const rows = Math.ceil((total ?? items.length) / COLUMNS) || 0;
   /**
@@ -378,13 +399,18 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
    * the top of the library is painted first and the grid then jumps, which on a
    * television reads as the screen having opened in the wrong place.
    *
-   * Not before `total` arrives - the screen is showing "Loading" until then and
-   * there is no grid to move - and the viewport is read off the element rather
-   * than taken from the state beside it, because the commit that first renders
-   * the grid measures it in a ref callback: this effect runs in that same
-   * commit, where the state still holds the height from before there was a
-   * grid, and clamping the last screenful against that leaves the grid short of
-   * where it was.
+   * Not before `total` arrives: the screen is showing "Loading" until then and
+   * there is no grid to move.
+   *
+   * The viewport is read off the element rather than taken from the state
+   * beside it, because the commit that first renders the grid measures it in a
+   * ref callback and this effect runs in that same commit, where the state
+   * still holds the height from before there was a grid - on this box that is
+   * 406 px out, measured. It buys the FIRST FRAME, not the resting place: once
+   * the cell takes the cursor, `holdCursor` runs `showRow` with the height by
+   * then in the state and corrects any clamp. So the cost of dropping this read
+   * is a visible settle on entry, which is the thing a layout effect is here to
+   * avoid, rather than a grid left in the wrong place.
    *
    * `nearest` rather than the offset verbatim so a window that changed size in
    * between - a display-mode switch, which this box does per film - still puts
@@ -642,16 +668,21 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
    * letter pressed looks exactly like the other twenty-eight and nothing on
    * screen says the press did anything.
    *
-   * The letter pressed wins until the cursor moves, for two reasons. The row
-   * this reads is the first MOUNTED one, which is a row of overscan above the
-   * first visible one, so every item before the letter's own belongs to the
-   * letter before it - the mark was always one early. And in a library that
-   * fits on screen the grid cannot move at all, so the mark is the whole of the
-   * feedback: without this, pressing Z there changed nothing anywhere.
+   * The row read is the first VISIBLE one rather than the first MOUNTED one,
+   * which is a row of overscan above it: reading THAT marks the letter of items
+   * that are off the top of the screen, so at a boundary the mark was one
+   * letter early. It used to show only while somebody scrolled by hand, where
+   * the letter they pressed masks it; a library now opens where it was left, so
+   * the mark is on screen from the first frame with nothing to mask it.
+   *
+   * The letter pressed still wins until the cursor moves, because in a library
+   * that fits on screen the grid cannot move at all - there the mark is the
+   * whole of the feedback, and without this pressing Z changed nothing
+   * anywhere.
    */
   const activeLetter = ((): string | null => {
     if (pressedLetter) return pressedLetter;
-    const first = items[firstRow * COLUMNS];
+    const first = items[Math.floor(scrollTop / rowHeight) * COLUMNS];
     const t = (first?.sortTitle ?? first?.title ?? "").trim();
     if (!t) return null;
     const ch = t[0].toUpperCase();

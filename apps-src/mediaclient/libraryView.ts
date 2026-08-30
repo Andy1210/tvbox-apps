@@ -69,7 +69,13 @@ export function forgetLibraryCursor(libraryId: string): void {
   cursors.delete(libraryId);
 }
 
-/** Forgotten on sign-out and on a profile switch. */
+/**
+ * Everything this module holds, forgotten on sign-out and on a profile switch.
+ *
+ * Both maps, and anything added beside them: a filter label carries a genre or
+ * an age rating, and a cursor is a record of what somebody was looking at. This
+ * box is shared, so the boundary is the session rather than the window.
+ */
 export function clearLibraryViews(): void {
   kept.clear();
   cursors.clear();

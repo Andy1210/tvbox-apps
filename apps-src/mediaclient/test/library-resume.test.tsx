@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { act, render, waitFor } from "@testing-library/react";
 import { configureI18n } from "@sdk";
@@ -38,6 +39,8 @@ const TILE_VH = 26;
 const ROW_GAP_VH = 8;
 const COLUMNS = 7;
 const ITEMS = 259;
+/** Must match Library.tsx: how many items one request brings back. */
+const PAGE = 100;
 /** More than the library has films, so the deep cell exists in this list too. */
 const COLLECTIONS = 300;
 
@@ -57,17 +60,33 @@ const DEEP = 240;
 /** The last letter's first item sits inside the final screenful. */
 const LAST_LETTER_OFFSET = ITEMS - 3;
 
+/**
+ * Where the alphabet turns over, at the start of a row.
+ *
+ * The A-Z strip's mark is read off a row of the grid, and which row it reads is
+ * the difference between marking the letter on screen and the one above it. A
+ * boundary flush with a row start is what makes those two answers differ.
+ */
+const Z_FROM = 231;
+
 function item(n: number): MediaItem {
-  return { id: `i${n}`, kind: "movie", title: `Film ${n}`, thumb: `/t/${n}` };
+  const title = n < Z_FROM ? `Alfa ${n}` : `Zeta ${n}`;
+  return { id: `i${n}`, kind: "movie", title, thumb: `/t/${n}` };
 }
+
+/** Every page the screen asked for, newest last. Reset per test. */
+let asked: number[] = [];
 
 function stubBackend(total = ITEMS): MediaBackend {
   return {
     kind: "plex",
-    libraryPage: async (_id: string, q: { offset: number; limit: number }) => ({
-      total,
-      items: Array.from({ length: Math.max(0, Math.min(q.limit, total - q.offset)) }, (_, i) => item(q.offset + i)),
-    }),
+    libraryPage: async (_id: string, q: { offset: number; limit: number }) => {
+      asked.push(q.offset);
+      return {
+        total,
+        items: Array.from({ length: Math.max(0, Math.min(q.limit, total - q.offset)) }, (_, i) => item(q.offset + i)),
+      };
+    },
     // A different list, and a LONGER one: with fewer collections than films the
     // deep cell would be out of range anyway, and the test would hold on a build
     // that never forgot anything.
@@ -108,12 +127,16 @@ function offsetOf(container: HTMLElement): number {
  * had already been put in the wrong place.
  */
 let clientHeight: PropertyDescriptor | undefined;
+/** Mutable, so a test can change the grid's height and make it re-measure. */
+let gridH = GRID_H;
 
 beforeEach(async () => {
+  gridH = GRID_H;
+  asked = [];
   clientHeight = Object.getOwnPropertyDescriptor(window.HTMLElement.prototype, "clientHeight");
   Object.defineProperty(window.HTMLElement.prototype, "clientHeight", {
     configurable: true,
-    get: () => GRID_H,
+    get: () => gridH,
   });
   // The grid moves itself with a Web Animations keyframe pair, which happy-dom
   // has none of. Only the destination matters here - the mover writes that to
@@ -157,6 +180,20 @@ function letterEl(container: HTMLElement, key: string): HTMLElement | undefined 
 }
 
 /**
+ * Which letters the strip is marking.
+ *
+ * `font-bold` is the mark and `text-fg-dim` is every other letter; matching
+ * `text-fg` would accept both, which is how this assertion passes against the
+ * bug it is written for.
+ */
+function marked(container: HTMLElement): (string | undefined)[] {
+  return Array.from(container.querySelectorAll<HTMLElement>("div"))
+    .filter((d) => d.children.length === 0 && /^[A-Z#]$/.test(d.textContent?.trim() ?? ""))
+    .filter((d) => /font-bold/.test(d.className))
+    .map((d) => d.textContent?.trim());
+}
+
+/**
  * Take the grid to the end of the list.
  *
  * Through the strip rather than by pressing Down 34 times: the cells this test
@@ -191,6 +228,129 @@ describe("returning to a library", () => {
     // The bug: an alphabetical list at the top, with the title just opened off
     // the bottom of the screen.
     expect(offsetOf(again.container)).not.toBe(0);
+    // And the cell is really THERE. `getCurrentFocusKey` is spatial navigation's
+    // own bookkeeping and `offsetOf` reads the transform, so both hold on a build
+    // that moves the layer and leaves the rendered window at the top - a grid
+    // translated 12,000 px with only its first rows mounted, i.e. a black screen.
+    // Measured: without `setScrollTop` the ring count here is 0.
+    expect(again.container.querySelectorAll(".ring-white").length).toBe(1);
+  });
+
+  it("asks for the resumed page without waiting for the first one to answer", async () => {
+    const first = await open();
+    await jumpToEnd(first.container);
+    await setFocus(`cell-${DEEP}`);
+    await flushFocus();
+    first.unmount();
+    await act(async () => setFocus(""));
+
+    // Page 0 held open, so "asked in the same commit" and "asked a round trip
+    // later" are two different observations rather than the same end state.
+    // Both orders end with the page loaded, which is why the timing has to be
+    // what is measured.
+    let answer = (): void => {};
+    const held = new Promise<void>((r) => (answer = r));
+    const base = stubBackend();
+    asked = [];
+    useApp.setState({
+      backend: {
+        ...base,
+        libraryPage: async (id: string, q: { offset: number; limit: number }) => {
+          if (q.offset === 0) await held;
+          return base.libraryPage(id, q);
+        },
+      } as unknown as MediaBackend,
+    });
+
+    const again = render(<Library libraryId="1" title="Movies" />);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // The resumed cell is on another page. Waiting for the grid to move before
+    // asking for that one costs a whole extra round trip, and for it the tile
+    // under the cursor is a blank placeholder whose OK does nothing: the
+    // Back-then-OK everybody does after leaving a film would be swallowed.
+    expect(asked).toContain(Math.floor(DEEP / PAGE) * PAGE);
+
+    answer();
+    await settle();
+    // And when the cursor lands it is on a real title, so OK opens something.
+    const ring = again.container.querySelector(".ring-white")?.parentElement;
+    expect(ring?.textContent).toContain(`${DEEP}`);
+  });
+
+  it("marks the letter the top of the screen is showing, not the row above it", async () => {
+    const first = await open();
+    await jumpToEnd(first.container);
+    await setFocus(`cell-${DEEP}`);
+    await flushFocus();
+    first.unmount();
+    await act(async () => setFocus(""));
+
+    const again = await open();
+    // The strip reads a row of the grid. One row of overscan sits above the top
+    // visible one, and reading THAT marks the letter of items that are off the
+    // screen: the boundary here is flush with a row start, so the two answers
+    // differ. It only ever showed while somebody scrolled by hand, where the
+    // letter they pressed masks it; a library that opens where it was left has
+    // nothing to mask it, and the mark is on screen from the first frame.
+    expect(marked(again.container)).toEqual(["Z"]);
+  });
+
+  it("survives an effect being set up twice, as Strict Mode does it", async () => {
+    const first = await open();
+    await jumpToEnd(first.container);
+    await setFocus(`cell-${DEEP}`);
+    await flushFocus();
+    const left = offsetOf(first.container);
+    first.unmount();
+    await act(async () => setFocus(""));
+
+    // The reset that forgets the cursor keys on "is this the same list", not on
+    // "has this run before": Strict Mode sets an effect up twice on mount, and a
+    // run counter reads the second setup as a new order or filter - which drops
+    // the resume and deletes the stored cursor with it, so the NEXT entry opens
+    // at the top too.
+    //
+    // The offset is what this pins, not the cursor. `useInitialFocus` has a
+    // Strict Mode gap of its own that predates this and is not addressed here:
+    // its cleanup cancels the focus timeout that its second setup then declines
+    // to reschedule. The app renders without Strict Mode (`main.tsx`).
+    const again = render(
+      <StrictMode>
+        <Library libraryId="1" title="Movies" />
+      </StrictMode>,
+    );
+    await waitFor(() => expect(again.container.querySelector("[style*='will-change']")).toBeTruthy());
+    await settle();
+    expect(offsetOf(again.container)).toBe(left);
+  });
+
+  it("does not put the grid back a second time when the screen is re-measured", async () => {
+    const first = await open();
+    await jumpToEnd(first.container);
+    await setFocus(`cell-${DEEP}`);
+    await flushFocus();
+    first.unmount();
+    await act(async () => setFocus(""));
+
+    const again = await open();
+    // Step off the resumed cell, the way anybody would.
+    await setFocus(`cell-${DEEP - 7}`);
+    await flushFocus();
+    const moved = offsetOf(again.container);
+    expect(moved).not.toBe(0);
+
+    // A television that changes output mode re-measures the grid, and the
+    // resume effect watches those numbers. It has to be spent, or the grid
+    // jumps back to where the person came in - with the cursor left behind.
+    gridH = GRID_H - 120;
+    await act(async () => {
+      window.dispatchEvent(new Event("resize"));
+    });
+    await flushFocus();
+    expect(getCurrentFocusKey()).toBe(`cell-${DEEP - 7}`);
+    expect(offsetOf(again.container)).toBe(moved);
   });
 
   it("clamps the last row against the grid's height, not the window's", async () => {
@@ -206,9 +366,12 @@ describe("returning to a library", () => {
 
     const again = await open();
     expect(offsetOf(again.container)).toBe(rows * rowHeight - VIEWPORT);
-    // What the window's own height would clamp to, 97 px short of the end. The
-    // grid is the flex child below the header, and the resume runs in the commit
-    // that first measures it - before the state beside it has caught up.
+    // Not what the window's own height would clamp to, which is 97 px short of
+    // the end. Honest about what this pins: the resting place is the same
+    // either way, because the cell taking the cursor re-runs `nearest` with the
+    // height that has by then reached the state. What the measured read buys is
+    // the FIRST frame, which is the whole reason the resume is a layout effect,
+    // and no assertion here can see a frame.
     expect(offsetOf(again.container)).not.toBe(rows * rowHeight - WINDOW_H);
   });
 
@@ -258,7 +421,14 @@ describe("returning to a library", () => {
 
     // A grid position is not a genre, but it is still a record of what somebody
     // was looking at, and it goes with everything else the session held.
-    clearLibraryViews();
+    //
+    // Through the store action rather than by calling `clearLibraryViews`
+    // directly: the claim is that signing out forgets it, and a test of the
+    // primitive holds even if nothing calls it.
+    await act(async () => {
+      await useApp.getState().signOut();
+    });
+    useApp.setState({ backend: stubBackend() });
     const again = await open();
     expect(getCurrentFocusKey()).toBe("cell-0");
     expect(offsetOf(again.container)).toBe(0);
