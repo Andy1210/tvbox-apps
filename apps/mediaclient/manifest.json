@@ -5,8 +5,12 @@
     "hu": "M\u00e9dia",
     "en": "Media"
   },
-  "version": "0.62.5",
+  "version": "0.62.6",
   "changelog": [
+    {
+      "version": "0.62.6",
+      "notes": "Coming back out of a film or a series now leaves you where you were in the library. Before, the grid jumped back to the top of the list every time and the cursor sat on the first poster, so after watching something from halfway down you had to scroll all the way there again. The film you came back from is the one highlighted, and the row is in the same place on screen as when you left it. Moving the cursor somewhere else before you leave the library is remembered too - it is where you were standing that comes back, not what you last played. Changing the order, a filter, or switching to the collections starts the grid at the top again, as it should: it is a different list."
+    },
     {
       "version": "0.62.5",
       "notes": "Back leaves a film in one press. With nothing on screen over the picture, Back stops the film - playing or paused - and puts you back on the film's or the series' own page, and where you were is not lost: the position is saved on the way out, so Play carries on from the same second. Before, the first press paused the film and brought the controls up, the second only closed the controls, and it took a third to get out. Pausing is still one press away: OK brings the controls up with the pause button already selected. The screen goes dark for about a second while the film winds down, so pressing Back again - or just leaning on it - is easy to do: those extra presses now leave you on that page instead of carrying on out of the app behind it."
