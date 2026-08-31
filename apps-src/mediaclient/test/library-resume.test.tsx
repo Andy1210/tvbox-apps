@@ -61,13 +61,16 @@ const DEEP = 240;
 const LAST_LETTER_OFFSET = ITEMS - 3;
 
 /**
- * Where the alphabet turns over, at the start of a row.
+ * Where the alphabet turns over, at the start of the CURSOR's own row.
  *
  * The A-Z strip's mark is read off a row of the grid, and which row it reads is
- * the difference between marking the letter on screen and the one above it. A
- * boundary flush with a row start is what makes those two answers differ.
+ * the difference between marking the letter on screen and the one above it. The
+ * resume rests a pad above the cursor's row, so the row before it has 43 px of a
+ * caption showing and nothing else: putting the turnover here is what makes the
+ * two readings differ, where a boundary one row earlier reads the same either
+ * way and the assertion cannot fail.
  */
-const Z_FROM = 231;
+const Z_FROM = 238;
 
 function item(n: number): MediaItem {
   const title = n < Z_FROM ? `Alfa ${n}` : `Zeta ${n}`;
@@ -102,8 +105,15 @@ function stubBackend(total = ITEMS): MediaBackend {
     ],
     letterOffset: async (_id: string, key: string) => (key === "Z" ? LAST_LETTER_OFFSET : 0),
     sorts: async () => [],
-    sortOptions: async () => [],
+    // One order beside the default, so the arrange panel has a chip to press:
+    // that is the one gesture that changes the list without also changing the
+    // mode, and the two clauses of the reset would otherwise cover for one
+    // another.
+    sortOptions: async () => [{ key: "addedAt", title: "Recently added" }],
     filterOptions: async () => [],
+    switchProfile: async () => ({ kind: "plex", token: "t2", profileId: "p2", profileName: "Other" }),
+    listProfiles: async () => [{ id: "p2", name: "Other" }],
+    revokeSession: async () => {},
     posterUrl: () => undefined,
     imageHeaders: () => ({}),
   } as unknown as MediaBackend;
@@ -144,7 +154,16 @@ beforeEach(async () => {
   (window.HTMLElement.prototype as unknown as { animate: unknown }).animate = () =>
     ({ cancel: () => {}, commitStyles: () => {} }) as unknown as Animation;
   clearLibraryViews();
-  useApp.setState({ backend: stubBackend(), screen: { name: "home" }, history: [], failure: null });
+  // A session and an identity, because two of these go through the store's own
+  // sign-out and profile-switch rather than through the module they clear.
+  useApp.setState({
+    backend: stubBackend(),
+    screen: { name: "home" },
+    history: [],
+    failure: null,
+    identity: { clientId: "c1", host: "box", fresh: false },
+    session: { kind: "plex", token: "t1", accountToken: "t1", profileId: "p1", profileName: "One" } as never,
+  });
   window.innerHeight = WINDOW_H;
   // Focus is library-global and survives an unmount, so a leftover from the
   // previous test would let the next one pass without the screen doing anything.
@@ -270,11 +289,20 @@ describe("returning to a library", () => {
     // asking for that one costs a whole extra round trip, and for it the tile
     // under the cursor is a blank placeholder whose OK does nothing: the
     // Back-then-OK everybody does after leaving a film would be swallowed.
-    expect(asked).toContain(Math.floor(DEEP / PAGE) * PAGE);
+    //
+    // The exact set, not just "the right one is in it": asking for every page up
+    // to the cursor's is a plausible wrong fix that fetches 83 of them on this
+    // library, and it would pass a `toContain`. Six rows are fewer cells than a
+    // page, so the arrival window is one page or two.
+    expect(asked).toEqual([Math.floor(DEEP / PAGE) * PAGE]);
+
+    // And with page 0 still held, the screen is already right: the total came
+    // from the resumed page, the grid rendered from it, and the tile under the
+    // cursor carries a title rather than being a blank placeholder.
+    expect(again.container.textContent).toContain(`Zeta ${DEEP}`);
 
     answer();
     await settle();
-    // And when the cursor lands it is on a real title, so OK opens something.
     const ring = again.container.querySelector(".ring-white")?.parentElement;
     expect(ring?.textContent).toContain(`${DEEP}`);
   });
@@ -297,7 +325,7 @@ describe("returning to a library", () => {
     expect(marked(again.container)).toEqual(["Z"]);
   });
 
-  it("survives an effect being set up twice, as Strict Mode does it", async () => {
+  it("does not forget the cursor when the reset is set up twice", async () => {
     const first = await open();
     await jumpToEnd(first.container);
     await setFocus(`cell-${DEEP}`);
@@ -353,7 +381,7 @@ describe("returning to a library", () => {
     expect(offsetOf(again.container)).toBe(moved);
   });
 
-  it("clamps the last row against the grid's height, not the window's", async () => {
+  it("puts the last row back against the end of the list", async () => {
     const first = await open();
     await jumpToEnd(first.container);
     await setFocus(`cell-${LAST}`);
@@ -409,6 +437,96 @@ describe("returning to a library", () => {
     const again = await open();
     expect(getCurrentFocusKey()).toBe("cell-0");
     expect(offsetOf(again.container)).toBe(0);
+  });
+
+  it("forgets where the cursor was when the order changes", async () => {
+    const first = await open();
+    await jumpToEnd(first.container);
+    await setFocus(`cell-${DEEP}`);
+    await flushFocus();
+
+    // Through the arrange panel, which is the one gesture that renumbers the
+    // list without also changing the mode: the mode toggle happens to call
+    // `setView` too, so a test that only presses that would hold even if the
+    // reset stopped looking at the order at all.
+    await setFocus("lib-arrange");
+    await remote.ok();
+    await settle();
+    await setFocus("lf-sort-0");
+    await remote.ok();
+    await settle();
+
+    first.unmount();
+    await act(async () => setFocus(""));
+
+    const again = await open();
+    expect(getCurrentFocusKey()).toBe("cell-0");
+    expect(offsetOf(again.container)).toBe(0);
+  });
+
+  it("forgets it when somebody else takes over the box", async () => {
+    const first = await open();
+    await jumpToEnd(first.container);
+    await setFocus(`cell-${DEEP}`);
+    await flushFocus();
+    first.unmount();
+    await act(async () => setFocus(""));
+
+    // The PIN pad is a boundary between two people in one household, and where
+    // somebody had got to in a library is a record of what they were looking
+    // at. Through the store action rather than the module it clears, so this
+    // holds the WIRING rather than the primitive.
+    await act(async () => {
+      await useApp.getState().chooseProfile("p2", undefined, "Other");
+    });
+    useApp.setState({ backend: stubBackend() });
+    const again = await open();
+    expect(getCurrentFocusKey()).toBe("cell-0");
+    expect(offsetOf(again.container)).toBe(0);
+  });
+
+  it("leaves the cursor on the failure screen when a page does not answer", async () => {
+    const first = await open();
+    await jumpToEnd(first.container);
+    await setFocus(`cell-${DEEP}`);
+    await flushFocus();
+    first.unmount();
+    await act(async () => setFocus(""));
+
+    // The resumed page fails while the first one is fine. That is the server's
+    // least healthy moment - it has just been streaming a film - and it is only
+    // ordinary at all because the resume asks for a second page on the way in.
+    const base = stubBackend();
+    useApp.setState({
+      backend: {
+        ...base,
+        libraryPage: async (id: string, q: { offset: number; limit: number }) => {
+          if (q.offset !== 0) throw Object.assign(new Error("no"), { status: 500 });
+          return base.libraryPage(id, q);
+        },
+      } as unknown as MediaBackend,
+    });
+
+    const again = render(<Library libraryId="1" title="Movies" />);
+    // The failure screen first, THEN the deferred focus: the two arrive on
+    // different turns, and settling once before the screen is up measures a
+    // screen that has not decided yet. That was flaky one run in six.
+    await waitFor(() => expect(again.container.textContent).toContain("Try again"));
+    await settle();
+    // The failure screen replaces the grid and focuses its own button. The
+    // resume settles `startCell` after that, so without a guard it fires
+    // afterwards and aims at a cell that is not mounted: measured, the error
+    // text on screen with its button unhighlighted, and neither OK nor an arrow
+    // doing anything, because the fallback's target is not mounted there
+    // either. Two of the remote's three buttons dead.
+    //
+    // Read off the SCREEN rather than from `getCurrentFocusKey`, which is
+    // spatial navigation's own bookkeeping and survives an unmount: a leftover
+    // from an earlier test can satisfy it either way. What matters is which
+    // control is lit.
+    const lit = again.container.querySelector('[data-sfocus][class*="!bg-white"]');
+    expect(lit?.getAttribute("data-sfocus")).toBe("msg-retry");
+    expect(again.container.textContent).toContain("Try again");
   });
 
   it("forgets it on sign-out", async () => {

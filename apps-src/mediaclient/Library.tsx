@@ -356,8 +356,19 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     // blank placeholders whose `onEnter` does nothing, so the Back-then-OK that
     // people actually do after leaving a film lands on the right tile and is
     // swallowed. Both in flight together instead.
+    //
+    // The WINDOW rather than the cursor's own cell: the grid arrives with about
+    // six rows mounted, and over the possible cursor positions 41% of them
+    // straddle a page boundary - worst case 27 of the 42 tiles on screen, and
+    // one press of Down lands on one of them. Six rows is fewer cells than a
+    // page, so this is one request or two, never more.
     const back = resume.current;
-    if (back) void loadPage(Math.floor(back.index / PAGE));
+    if (back && back.index >= 0) {
+      const row = Math.floor(back.index / COLUMNS);
+      const first = Math.max(0, (row - OVERSCAN) * COLUMNS);
+      const last = (row + 5) * COLUMNS - 1;
+      for (let p = Math.floor(first / PAGE); p <= Math.floor(last / PAGE); p += 1) void loadPage(p);
+    }
   }, [loadPage, libraryId, view, mode, mover]);
 
   const rows = Math.ceil((total ?? items.length) / COLUMNS) || 0;
@@ -535,7 +546,18 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   // `startCell` is the first cell, except on a library being returned to, where
   // it is the one the cursor was left on - and null until that is settled, so
   // the cursor cannot land on the first tile and pull the grid back to the top.
-  useInitialFocus(total === 0 ? "lib-arrange" : `cell-${startCell ?? 0}`, total !== null && startCell !== null);
+  //
+  // Never while the failure screen is up. It replaces this whole screen, and it
+  // focuses its own button - but `startCell` goes null to a value LATER, on the
+  // resume, so this would fire afterwards and aim the cursor at a grid cell that
+  // is not mounted. Measured: the error text on screen, its Try again button
+  // unhighlighted, and neither OK nor an arrow doing anything, because the
+  // fallback's own target is not mounted there either. Only a page other than
+  // the first can fail this way, which is what the resumed page made ordinary.
+  useInitialFocus(
+    total === 0 ? "lib-arrange" : `cell-${startCell ?? 0}`,
+    total !== null && startCell !== null && !failure,
+  );
   // Every key this screen owns has to be listed. A focusable the guard does not
   // recognise is treated as gone and focus is yanked back to the grid - so the
   // sort-and-filter button could be reached and then lost between the press
@@ -668,12 +690,20 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
    * letter pressed looks exactly like the other twenty-eight and nothing on
    * screen says the press did anything.
    *
-   * The row read is the first VISIBLE one rather than the first MOUNTED one,
-   * which is a row of overscan above it: reading THAT marks the letter of items
-   * that are off the top of the screen, so at a boundary the mark was one
-   * letter early. It used to show only while somebody scrolled by hand, where
-   * the letter they pressed masks it; a library now opens where it was left, so
-   * the mark is on screen from the first frame with nothing to mask it.
+   * The row read is the first one a person can READ, and getting there is two
+   * corrections rather than one. It used to read the first MOUNTED row, which
+   * is a row of overscan above the screen; and the row the top edge merely
+   * falls INSIDE is not on screen either, because `nearest` parks the grid a
+   * pad above the row it is bringing in - so after every upward move, and after
+   * the resume, which lands through that same branch, the row above shows 43 px
+   * of a caption and nothing else. Measured on a box: the strip marking R with
+   * 17 px of an R row visible and every readable row an S. Adding the pad back
+   * before the divide names the row whose posters are there, at the top, at a
+   * letter jump, at the pad rest and at the end clamp alike.
+   *
+   * That only ever showed while somebody scrolled by hand, where the letter
+   * they pressed masks it; a library now opens where it was left, so the mark
+   * is on screen from the first frame with nothing to mask it.
    *
    * The letter pressed still wins until the cursor moves, because in a library
    * that fits on screen the grid cannot move at all - there the mark is the
@@ -682,7 +712,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
    */
   const activeLetter = ((): string | null => {
     if (pressedLetter) return pressedLetter;
-    const first = items[Math.floor(scrollTop / rowHeight) * COLUMNS];
+    const first = items[Math.floor((scrollTop + padPx(4, windowH)) / rowHeight) * COLUMNS];
     const t = (first?.sortTitle ?? first?.title ?? "").trim();
     if (!t) return null;
     const ch = t[0].toUpperCase();
