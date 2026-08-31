@@ -140,10 +140,11 @@ describe("a screen's focus guard", () => {
     // copy would keep passing after the predicate changed.
     const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Library.tsx"), "utf8");
     // The predicate itself, by name. It used to be matched as an inline argument
-    // to `useFocusFallback`; lifting it out to be shared with the guard that
-    // runs when the failure screen goes away broke that match, and the
-    // assertion below it failed loudly, which is what a test is for. Two guards
-    // read it now, so the one definition is the right thing to hold.
+    // to `useFocusFallback`; lifting it out broke that match, and the assertion
+    // below it failed loudly, which is what a test is for. Named rather than
+    // inline because what it lists is the whole of this screen, and that is the
+    // thing to hold - a key it misses is treated as gone and the cursor is
+    // yanked off it.
     const guard = /function ownsKey\(key: string\): boolean \{([\s\S]*?)\n\}/.exec(src) ?? [];
     const body = (guard[1] ?? "") as string;
     expect(body, "Library.tsx no longer defines ownsKey").toBeTruthy();

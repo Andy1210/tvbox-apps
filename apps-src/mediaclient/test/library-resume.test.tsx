@@ -605,16 +605,17 @@ describe("returning to a library", () => {
     await waitFor(() => expect(again.container.textContent).toContain(`Zeta ${DEEP}`));
     expect(again.container.textContent).not.toContain("Try again");
     // And the press that dismissed the error must not start anything if it
-    // repeats. Here the deferred focus had NEVER fired - the guard held it back
-    // for the whole of the failure - so without the second half of that guard
-    // it would fire now, on the resumed poster, a millisecond after the OK.
-    // This is the failure the arrival requests made ordinary.
+    // repeats. This is the path that needs it: the deferred focus had NEVER
+    // fired, because the guard held it back for the whole of the failure, so
+    // without the second half of that guard it fires now - on the resumed
+    // poster, a millisecond after the OK, in time for a held button's repeat.
+    // The arrival requests are what make this failure ordinary.
     await remote.ok();
     await settle();
     expect(useApp.getState().screen.name).not.toBe("item");
   });
 
-  it("does not start a film when the press that dismissed an error repeats", async () => {
+  it("comes back from an error with the grid where it was", async () => {
     const first = await open();
     await jumpToEnd(first.container);
     await setFocus(`cell-${DEEP}`);
@@ -628,24 +629,24 @@ describe("returning to a library", () => {
     // own button.
     const again = await open();
     expect(again.container.querySelectorAll(".ring-white").length).toBe(1);
+    const where = offsetOf(again.container);
     await act(async () => {
       useApp.getState().fail({ kind: "unreachable" });
     });
     await settle();
     expect(again.container.textContent).toContain("Try again");
 
-    // Try again is dismissed with OK, and a held button or anyone who taps
-    // twice at an error screen sends that press again about a millisecond
-    // later. It must not land on a poster: measured on a box, that started a
-    // film nobody chose, which here means the shared player, a display-mode
-    // switch and a second of wind-down to get out of. The cursor stays where
-    // the failure screen left it and the recovery guard puts it back on the
-    // next arrow, which costs one press and starts nothing.
+    // The deferred focus was spent when the screen first opened, so this is
+    // the ordinary recovery: the error goes, the grid comes back where it was,
+    // and the cursor is left where the failure screen put it for the recovery
+    // guard to pick up on the next press. The guard against a REPEATED press is
+    // the test above, which reaches this screen by the other route.
     asked = [];
     await setFocus("msg-retry");
     await remote.ok();
     await settle();
     expect(again.container.textContent).not.toContain("Try again");
+    expect(offsetOf(again.container)).toBe(where);
     await remote.ok();
     await settle();
     expect(useApp.getState().screen.name).not.toBe("item");

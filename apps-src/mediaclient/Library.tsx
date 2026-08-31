@@ -199,10 +199,18 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
    * then lands there: measured on a box, it started a film nobody chose, which
    * here means the shared mpv, a display-mode switch and a second of wind-down
    * to get out of. An entry failure is exactly what the arrival requests made
-   * ordinary, so this closes it by leaving the cursor where the failure screen
-   * left it, the way the screen behaved before any of this.
+   * ordinary, so this leaves the cursor where the failure screen left it and
+   * the repeat lands on the recovery guard's own target instead.
    *
-   * What that costs is one press: the recovery guard below puts the cursor back
+   * The window it protects is the REPEAT, and only that. Spatial navigation
+   * restores a child of the grid by itself 300 ms after the error screen's
+   * button unmounts, so a deliberate press seconds later does land on a poster
+   * - which is what this screen has always done, and by then it is a choice
+   * rather than the tail of one press. Measured at repeat cadence, 110 ms
+   * apart: the sort panel, one Back away, where the same probe against the
+   * build without this opened a film.
+   *
+   * What it costs is one press: the recovery guard below puts the cursor back
    * on the next arrow or OK. Three attempts at spending that press instead each
    * ended somewhere worse - a film, a cursor behind an open panel, and an error
    * screen whose own button could not be reached after a retry that failed
@@ -686,8 +694,9 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     // Always in the same place, unlike cell-0: that is only near the top of the
     // grid, so recovering focus while scrolled down aimed at nothing and the
     // remote went dead. It is not mounted on the failure or loading screens,
-    // which render only the panel and the message - but those focus their own
-    // button, and a key parked while it is away lights when it comes back.
+    // which render only the panel and the message - the failure screen focuses
+    // its own button, the loading one has none to focus, and a key parked while
+    // it is away lights when it comes back.
     "lib-arrange",
     ownsKey,
     // Not while the panel is open: this is a window listener, and it stays armed
@@ -811,9 +820,9 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
    * is a row of overscan above the screen; and the row the top edge merely
    * falls INSIDE is not on screen either, because `nearest` parks the grid a
    * pad above the row it is bringing in - so after every upward move, and after
-   * the resume, which lands through that same branch, the row above shows 43 px
-   * of a caption and nothing else. Measured on a box: the strip marking R with
-   * 17 px of an R row visible and every readable row an S. Adding the pad back
+   * the resume, which lands through that same branch, the row above shows a
+   * sliver of a caption and nothing else. Measured on a box: the strip marking
+   * R with 26 px of an R row visible and every readable row an S. Adding the pad back
    * before the divide names the row whose posters are there, at the top, at a
    * letter jump, at the pad rest and at the end clamp alike.
    *
