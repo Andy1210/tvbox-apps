@@ -97,6 +97,16 @@ function padPx(vh: number, windowH: number): number {
 }
 
 /**
+ * How far a row is kept from the top and the bottom of the screen.
+ *
+ * One pair of numbers rather than three copies, because the A-Z strip's mark is
+ * only right while it reads the SAME top pad that `nearest` parks with: change
+ * one and the strip silently starts naming the row above the screen again.
+ */
+const PAD_TOP_VH = 4;
+const PAD_BOTTOM_VH = 6;
+
+/**
  * Whether two scroll positions produce the same set of rendered rows.
  *
  * Both edges, not just the top: the bottom edge crosses a row boundary at a
@@ -360,13 +370,23 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     // The WINDOW rather than the cursor's own cell: the grid arrives with about
     // six rows mounted, and over the possible cursor positions 41% of them
     // straddle a page boundary - worst case 27 of the 42 tiles on screen, and
-    // one press of Down lands on one of them. Six rows is fewer cells than a
-    // page, so this is one request or two, never more.
+    // one press of Down lands on one of them.
+    //
+    // The cursor's row is NOT the top of that window. `nearest` guarantees only
+    // that the row sits between the two pads, so the window runs from two rows
+    // above it to four below - and the commonest arrival is the one where it is
+    // near the BOTTOM, because that is where a Down press leaves a row. Anchored
+    // at the cursor's row instead, the top two rows of the screen went
+    // unrequested for 7% of positions: measured, a whole row of posters blank at
+    // the top of the screen and the A-Z strip marking nothing, for 47 ms. Eight
+    // rows is 56 cells, fewer than a page, so this is one request or two.
     const back = resume.current;
     if (back && back.index >= 0) {
       const row = Math.floor(back.index / COLUMNS);
-      const first = Math.max(0, (row - OVERSCAN) * COLUMNS);
-      const last = (row + 5) * COLUMNS - 1;
+      const first = Math.max(0, (row - 2 - OVERSCAN) * COLUMNS);
+      const last = (row + 4) * COLUMNS - 1;
+      // A page past the end costs one request and answers with no items, which
+      // is cheaper than carrying a total nobody knows yet in order to avoid it.
       for (let p = Math.floor(first / PAGE); p <= Math.floor(last / PAGE); p += 1) void loadPage(p);
     }
   }, [loadPage, libraryId, view, mode, mover]);
@@ -391,8 +411,8 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
         viewport,
         start: row * rowHeight,
         size: rowHeight,
-        padStart: padPx(4, windowH),
-        padEnd: padPx(6, windowH),
+        padStart: padPx(PAD_TOP_VH, windowH),
+        padEnd: padPx(PAD_BOTTOM_VH, windowH),
         max: rows * rowHeight,
       });
       mover.to(to, true);
@@ -440,15 +460,15 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     // The library can be shorter than it was - something removed, a section
     // refreshed - and a cell past its end never mounts, which is the dead
     // remote `useFocusFallback` exists for. The top is the honest answer.
-    const index = at.index < total ? at.index : 0;
+    const index = at.index >= 0 && at.index < total ? at.index : 0;
     const row = Math.floor(index / COLUMNS);
     const to = nearest({
       at: at.offset,
       viewport: vp,
       start: row * rowHeight,
       size: rowHeight,
-      padStart: padPx(4, windowH),
-      padEnd: padPx(6, windowH),
+      padStart: padPx(PAD_TOP_VH, windowH),
+      padEnd: padPx(PAD_BOTTOM_VH, windowH),
       max: rows * rowHeight,
     });
     mover.to(to, false);
@@ -483,18 +503,47 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   const firstRow = Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN);
   const lastRow = Math.min(rows, Math.ceil((scrollTop + viewport) / rowHeight) + OVERSCAN);
 
+  /**
+   * Ask for the pages a band of rows needs.
+   *
+   * Both ends of every row: a row that straddles a page boundary would
+   * otherwise only ever ask for the first of the two, and on the last row there
+   * is no following row to ask for the second.
+   */
+  const loadRows = useCallback(
+    (from: number, to: number) => {
+      for (let r = from; r < to; r += 1) {
+        const first = Math.floor((r * COLUMNS) / PAGE);
+        const last = Math.floor(((r + 1) * COLUMNS - 1) / PAGE);
+        for (let p = first; p <= last; p += 1) void loadPage(p);
+      }
+    },
+    [loadPage],
+  );
+
   // Fetch whatever the visible window needs. Pages already in flight are skipped,
   // so a fast scroll does not queue the same request repeatedly.
   useEffect(() => {
-    for (let r = firstRow; r < lastRow; r += 1) {
-      // Both ends of the row: a row that straddles a page boundary would
-      // otherwise only ever ask for the first of the two, and on the last row
-      // there is no following row to ask for the second.
-      const first = Math.floor((r * COLUMNS) / PAGE);
-      const last = Math.floor(((r + 1) * COLUMNS - 1) / PAGE);
-      for (let p = first; p <= last; p += 1) void loadPage(p);
-    }
-  }, [firstRow, lastRow, items, loadPage]);
+    loadRows(firstRow, lastRow);
+  }, [firstRow, lastRow, items, loadRows]);
+
+  /**
+   * What Try again does.
+   *
+   * Not `loadPage(0)`, which is what it was: the page that failed is not
+   * necessarily the first one, and once page 0 has answered it sits in
+   * `answered` and that call returns at its own first line. Clearing the failure
+   * then re-renders a grid whose window effect has no changed dependency, so
+   * nothing is requested at all - measured on a box, 42 blank tiles and zero
+   * requests, recovering only on the second press, the one that happened to move
+   * the grid. A page other than the first can only fail on the way in because
+   * the resume asks for one, so this is the button's ordinary case now.
+   */
+  const retry = useCallback(() => {
+    pending.current.clear();
+    answered.current.clear();
+    loadRows(firstRow, lastRow);
+  }, [loadRows, firstRow, lastRow]);
 
   // Not a place the arrows may land while the failure screen is up.
   // `useFocusable` registers on the hook call, which is above the early return
@@ -605,7 +654,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     return (
       <FocusContext.Provider value={focusKey}>
         {panel}
-        <Message failure={failure} onRetry={() => void loadPage(0)} />
+        <Message failure={failure} onRetry={retry} />
       </FocusContext.Provider>
     );
   // `total === null` is "not asked yet"; a total of zero is an answer, and an
@@ -712,7 +761,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
    */
   const activeLetter = ((): string | null => {
     if (pressedLetter) return pressedLetter;
-    const first = items[Math.floor((scrollTop + padPx(4, windowH)) / rowHeight) * COLUMNS];
+    const first = items[Math.floor((scrollTop + padPx(PAD_TOP_VH, windowH)) / rowHeight) * COLUMNS];
     const t = (first?.sortTitle ?? first?.title ?? "").trim();
     if (!t) return null;
     const ch = t[0].toUpperCase();

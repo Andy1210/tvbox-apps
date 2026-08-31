@@ -38,11 +38,18 @@ const GRID_H = 983;
 const TILE_VH = 26;
 const ROW_GAP_VH = 8;
 const COLUMNS = 7;
-const ITEMS = 259;
-/** Must match Library.tsx: how many items one request brings back. */
-const PAGE = 100;
+/**
+ * Sized so the interesting geometry is reachable, not for realism.
+ *
+ * `DEEP` has to be inside the last screenful, because that is where the letter
+ * jump can put the cursor - and its arrival window has to STRADDLE a page
+ * boundary, or a prefetch that asks only for the cursor's own page passes every
+ * assertion here. With 320 items the jump mounts rows 42-45, and the window
+ * around cell 300 runs 273 to 321, i.e. pages 2 and 3.
+ */
+const ITEMS = 320;
 /** More than the library has films, so the deep cell exists in this list too. */
-const COLLECTIONS = 300;
+const COLLECTIONS = 400;
 
 const rowHeight = Math.round(WINDOW_H * ((TILE_VH + ROW_GAP_VH) / 100));
 const rows = Math.ceil(ITEMS / COLUMNS);
@@ -55,22 +62,38 @@ const rows = Math.ceil(ITEMS / COLUMNS);
 const VIEWPORT = GRID_H;
 /** The last item, i.e. the last row - where the end clamp decides the offset. */
 const LAST = ITEMS - 1;
-/** A cell well inside the last screenful, reachable once the grid has jumped. */
-const DEEP = 240;
+/**
+ * A cell well inside the last screenful, reachable once the grid has jumped.
+ *
+ * Row 44, chosen so its arrival window straddles a page boundary AT THE TOP:
+ * rows 41-48 hold cells 287-342, i.e. pages 2 and 3, while the two rows above
+ * the cursor's own are what carry the boundary. A window anchored at the
+ * cursor's row instead covers only page 3 - which is what the top of the screen
+ * arriving blank looks like from here.
+ */
+const DEEP = 308;
+/** The pages its arrival window needs, which is the point of the number above. */
+const DEEP_PAGES = [200, 300];
+/**
+ * A cell one row above `DEEP`, for the A-Z mark.
+ *
+ * The mark only differs from the old reading at the up-park rest, which is where
+ * `nearest` puts a row it has to bring DOWN to - so the test has to move the
+ * cursor up a row rather than sideways.
+ */
+const MARK_CELL = 301;
 /** The last letter's first item sits inside the final screenful. */
 const LAST_LETTER_OFFSET = ITEMS - 3;
 
 /**
- * Where the alphabet turns over, at the start of the CURSOR's own row.
+ * Where the alphabet turns over: the start of the row the mark test parks on.
  *
- * The A-Z strip's mark is read off a row of the grid, and which row it reads is
- * the difference between marking the letter on screen and the one above it. The
- * resume rests a pad above the cursor's row, so the row before it has 43 px of a
- * caption showing and nothing else: putting the turnover here is what makes the
- * two readings differ, where a boundary one row earlier reads the same either
- * way and the assertion cannot fail.
+ * The resume rests a pad above that row, so the row before it has a sliver of a
+ * caption showing and nothing else. Putting the turnover here is what makes the
+ * two readings differ; a boundary one row either side reads the same both ways
+ * and the assertion cannot fail.
  */
-const Z_FROM = 238;
+const Z_FROM = MARK_CELL;
 
 function item(n: number): MediaItem {
   const title = n < Z_FROM ? `Alfa ${n}` : `Zeta ${n}`;
@@ -294,7 +317,7 @@ describe("returning to a library", () => {
     // to the cursor's is a plausible wrong fix that fetches 83 of them on this
     // library, and it would pass a `toContain`. Six rows are fewer cells than a
     // page, so the arrival window is one page or two.
-    expect(asked).toEqual([Math.floor(DEEP / PAGE) * PAGE]);
+    expect(asked).toEqual(DEEP_PAGES);
 
     // And with page 0 still held, the screen is already right: the total came
     // from the resumed page, the grid rendered from it, and the tile under the
@@ -310,7 +333,7 @@ describe("returning to a library", () => {
   it("marks the letter the top of the screen is showing, not the row above it", async () => {
     const first = await open();
     await jumpToEnd(first.container);
-    await setFocus(`cell-${DEEP}`);
+    await setFocus(`cell-${MARK_CELL}`);
     await flushFocus();
     first.unmount();
     await act(async () => setFocus(""));
@@ -496,12 +519,18 @@ describe("returning to a library", () => {
     // The resumed page fails while the first one is fine. That is the server's
     // least healthy moment - it has just been streaming a film - and it is only
     // ordinary at all because the resume asks for a second page on the way in.
+    //
+    // A flag rather than a second backend object: swapping the backend moves
+    // `loadPage`'s identity, which is a new list to the reset effect, and the
+    // grid would go back to the top for a reason that has nothing to do with
+    // what is being tested.
+    let refuse = true;
     const base = stubBackend();
     useApp.setState({
       backend: {
         ...base,
         libraryPage: async (id: string, q: { offset: number; limit: number }) => {
-          if (q.offset !== 0) throw Object.assign(new Error("no"), { status: 500 });
+          if (refuse && q.offset !== 0) throw Object.assign(new Error("no"), { status: 500 });
           return base.libraryPage(id, q);
         },
       } as unknown as MediaBackend,
@@ -527,6 +556,21 @@ describe("returning to a library", () => {
     const lit = again.container.querySelector('[data-sfocus][class*="!bg-white"]');
     expect(lit?.getAttribute("data-sfocus")).toBe("msg-retry");
     expect(again.container.textContent).toContain("Try again");
+
+    // And the button has to DO something, which is the press this test used to
+    // stop one short of. `loadPage(0)` was a no-op here - page 0 answered, so it
+    // sits in `answered` - and clearing the failure re-renders a grid whose
+    // window effect has no changed dependency: measured on a box, 42 blank
+    // tiles, zero requests, and a cursor on a placeholder that answers no OK.
+    // Recovery came only on the second press, the one that moved the grid.
+    refuse = false;
+    asked = [];
+    await setFocus("msg-retry");
+    await remote.ok();
+    await settle();
+    expect(asked).toEqual(expect.arrayContaining(DEEP_PAGES));
+    await waitFor(() => expect(again.container.textContent).toContain(`Zeta ${DEEP}`));
+    expect(again.container.textContent).not.toContain("Try again");
   });
 
   it("forgets it on sign-out", async () => {
