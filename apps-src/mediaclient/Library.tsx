@@ -471,11 +471,13 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
    * beside it, because the commit that first renders the grid measures it in a
    * ref callback and this effect runs in that same commit, where the state
    * still holds the height from before there was a grid - measured on the
-   * gaming box, whose window is 768 px tall, that is 406 px out. It buys the FIRST FRAME, not the resting place: once
-   * the cell takes the cursor, `holdCursor` runs `showRow` with the height by
-   * then in the state and corrects any clamp. So the cost of dropping this read
-   * is a visible settle on entry, which is the thing a layout effect is here to
-   * avoid, rather than a grid left in the wrong place.
+   * gaming box, whose window is 768 px tall, that is 406 px out.
+   *
+   * It buys the FIRST FRAME, not the resting place: once the cell takes the
+   * cursor, `holdCursor` runs `showRow` with the height by then in the state
+   * and corrects any clamp. So the cost of dropping this read is a visible
+   * settle on entry, which is the thing a layout effect is here to avoid,
+   * rather than a grid left in the wrong place.
    *
    * `nearest` rather than the offset verbatim so a window that changed size in
    * between - a display-mode switch, which this box does per film - still puts
@@ -657,9 +659,24 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   // it takes the cursor for its own button, and when Try again succeeds that
   // button unmounts with the cursor on it. Measured: the grid back with the
   // right content and nothing highlighted, the next press spent on the fallback
-  // and the one after it landing on a header button. Same shape as leaving a
-  // film, which is what this hook was written for.
-  useFocusOnReveal(startKey, ownsKey, !failure);
+  // and the one after it landing on a header button.
+  //
+  // The arrange button rather than a poster, and that is the whole decision.
+  // Try again is dismissed with OK, and the cursor arrives at its new home
+  // about a millisecond later - so the SAME press, repeated by a held button or
+  // by anyone who taps twice at an error screen, lands on whatever is there.
+  // Measured on a tile: it started a film nobody chose, which on this box means
+  // the shared mpv, a display-mode switch and a second of wind-down to get back
+  // out. On this button it opens the sort panel, which one Back closes. It is
+  // also the one control mounted in every state this screen has, which is why
+  // the press-recovery guard below aims at it for its own reasons - a poster
+  // would have to be the one the cursor is on NOW, and `startCell` is frozen at
+  // the cell the screen opened on.
+  //
+  // Panel keys count as this screen's here, unlike below: the panel stays
+  // mounted through the failure screen, and a cursor inside it is one the
+  // person put there.
+  useFocusOnReveal("lib-arrange", (key) => ownsKey(key) || key.startsWith("lf"), !failure);
   // Every key this screen owns has to be listed. A focusable the guard does not
   // recognise is treated as gone and focus is yanked back to the grid - so the
   // sort-and-filter button could be reached and then lost between the press

@@ -213,6 +213,16 @@ async function settle(): Promise<void> {
   await flushFocus();
 }
 
+/**
+ * Which control is lit, read off the screen.
+ *
+ * `getCurrentFocusKey` is spatial navigation's own bookkeeping and survives an
+ * unmount, so a leftover from an earlier test can satisfy it either way.
+ */
+function litKey(container: HTMLElement): string | null | undefined {
+  return container.querySelector('[data-sfocus][class*="!bg-white"]')?.getAttribute("data-sfocus");
+}
+
 /** A letter in the strip, once the strip has arrived. */
 function letterEl(container: HTMLElement, key: string): HTMLElement | undefined {
   return Array.from(container.querySelectorAll<HTMLElement>("div")).find(
@@ -574,8 +584,7 @@ describe("returning to a library", () => {
     // spatial navigation's own bookkeeping and survives an unmount: a leftover
     // from an earlier test can satisfy it either way. What matters is which
     // control is lit.
-    const lit = again.container.querySelector('[data-sfocus][class*="!bg-white"]');
-    expect(lit?.getAttribute("data-sfocus")).toBe("msg-retry");
+    expect(litKey(again.container)).toBe("msg-retry");
     expect(again.container.textContent).toContain("Try again");
 
     // And the button has to DO something, which is the press this test used to
@@ -589,17 +598,21 @@ describe("returning to a library", () => {
     await setFocus("msg-retry");
     await remote.ok();
     await settle();
-    expect(asked).toEqual(expect.arrayContaining(DEEP_PAGES));
+    // Exactly these: page 0 answered, so it is in `answered` and is not asked
+    // again. Clearing that set would re-request pages whose posters are on
+    // screen, and a second refusal there replaces a good screen with the error.
+    expect(asked).toEqual(DEEP_PAGES);
     await waitFor(() => expect(again.container.textContent).toContain(`Zeta ${DEEP}`));
     expect(again.container.textContent).not.toContain("Try again");
-    // Something is highlighted on the screen that comes back. Here the deferred
+    // A poster is highlighted on the screen that comes back. Here the deferred
     // focus had never fired - the guard above held it back for the whole of the
     // failure - so this holds that the guard hands it over rather than
-    // swallowing it. The case where it HAS fired is the test above.
+    // swallowing it, and it is the resumed cell that gets it. The case where it
+    // HAS fired is the test below.
     expect(again.container.querySelectorAll(".ring-white").length).toBe(1);
   });
 
-  it("puts the cursor back on a library that comes back from an error", async () => {
+  it("leaves something safe highlighted on a library that comes back from an error", async () => {
     const first = await open();
     await jumpToEnd(first.container);
     await setFocus(`cell-${DEEP}`);
@@ -623,12 +636,25 @@ describe("returning to a library", () => {
     // initial focus fires once per mount and has already gone. Measured, the
     // grid came back with the right content and no highlight anywhere, one
     // press eaten by the fallback and the next landing on a header button.
+    //
+    // On the arrange button rather than a poster, because Try again is
+    // dismissed with OK and the cursor arrives at its new home a millisecond
+    // later: a held button, or anyone who taps twice at an error screen,
+    // presses whatever is there. Measured on a poster, the second press started
+    // a film nobody chose.
     asked = [];
     await setFocus("msg-retry");
     await remote.ok();
     await settle();
     expect(again.container.textContent).not.toContain("Try again");
-    expect(again.container.querySelectorAll(".ring-white").length).toBe(1);
+    expect(litKey(again.container)).toBe("lib-arrange");
+
+    // And that second press is harmless: the panel it opens is one Back away,
+    // where a film is the shared player, a display-mode switch and a second of
+    // wind-down.
+    await remote.ok();
+    await settle();
+    expect(useApp.getState().screen.name).not.toBe("item");
   });
 
   it("brings the library back when the first page is the one that failed", async () => {
