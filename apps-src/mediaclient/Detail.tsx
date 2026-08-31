@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { FocusContext, doesFocusableExist, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
+import {
+  FocusContext,
+  doesFocusableExist,
+  getCurrentFocusKey,
+  setFocus,
+  useFocusable,
+} from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, useBackspace, useI18n } from "@sdk";
 import { Row } from "./Row";
 import { episodeNumber } from "./Tile";
@@ -14,7 +20,7 @@ import { LanguagePicker } from "./LanguagePicker";
 import { Confirm } from "./Confirm";
 import { SeasonStrip, SEASONS_KEY } from "./SeasonStrip";
 import { Backdrop } from "./Backdrop";
-import { useTheme } from "./theme";
+import { themeItem, useTheme } from "./theme";
 import { useFocusFallback, useFocusOnReveal, useInitialFocus, useScrollToTopOnFirst } from "./focus";
 import { usePlayer, useShowingPlayer } from "./playback/player";
 import { rememberedVersion, useChosenVersion } from "./chosenVersion";
@@ -37,10 +43,6 @@ type ViewState = Pick<MediaItem, "viewCount" | "viewOffsetMs">;
 
 /** Two presses closer together than this are one press that bounced. */
 const PRESS_GAP_MS = 400;
-
-/** How long the cursor of a screen opened from the season strip waits for the
- *  season list before going where it would have gone anyway. */
-const SEASONS_WAIT_MS = 3000;
 
 /**
  * Which focus keys belong to this screen.
@@ -145,9 +147,6 @@ export function Detail({
   const [children, setChildren] = useState<MediaItem[]>([]);
   /** The other seasons of this series, on a season screen. Empty everywhere else. */
   const [seasons, setSeasons] = useState<MediaItem[]>([]);
-  /** Whether the season list has answered, either way. Nothing waits on it but
-   *  the cursor of a screen opened FROM the strip. */
-  const [seasonsSettled, setSeasonsSettled] = useState(false);
   /**
    * Whether the screen knows what it holds.
    *
@@ -276,17 +275,8 @@ export function Detail({
     // item has even arrived would put its cursor back on the play button.
     if (!known) return;
     setSeasons([]);
-    if (!backend || !showId) {
-      setSeasonsSettled(true);
-      return;
-    }
+    if (!backend || !showId) return;
     let live = true;
-    // Nothing here has a timeout of its own, and the CURSOR of a screen opened
-    // from the strip waits on this answer: a connection that stalls rather than
-    // fails would leave that screen with nothing highlighted for as long as it
-    // is up. After this the cursor goes where it always went, and the strip
-    // still appears if the answer arrives later.
-    const gaveUp = setTimeout(() => live && setSeasonsSettled(true), SEASONS_WAIT_MS);
     void (async () => {
       try {
         const kids = await backend.children(showId);
@@ -296,13 +286,10 @@ export function Detail({
         if (live) setSeasons(kids.filter((k) => k.kind === "season" && k.id));
       } catch (e) {
         log.warn("could not list the seasons", e);
-      } finally {
-        if (live) setSeasonsSettled(true);
       }
     })();
     return () => {
       live = false;
-      clearTimeout(gaveUp);
     };
     // `known` rather than `detail`, which is replaced whole by the refetch after
     // playback: keying on the object would clear the strip and ask again every
@@ -568,8 +555,32 @@ export function Detail({
    * not a chip - the container always exists while the strip is drawn, and it
    * is the one thing that knows which chip the season being shown is.
    */
-  const startOnStrip = Boolean(focusSeasons) && seasons.length > 1;
-  useInitialFocus(startOnStrip ? SEASONS_KEY : first, settled && (!focusSeasons || seasonsSettled));
+  useInitialFocus(first, settled);
+
+  /**
+   * The strip, for a screen opened from another season's.
+   *
+   * Separate from the cursor above, and always later than it, because the
+   * season list is a second request that may answer either side of the
+   * episodes. Making the cursor WAIT for it was the first attempt and it was
+   * worse in both directions: the screen had nothing highlighted until the list
+   * answered, and a slow one then moved the cursor out from under a press. So
+   * the cursor goes where it always goes, and this lifts it onto the strip only
+   * while it is still standing where this screen put it - anyone who has
+   * pressed anything keeps what they pressed.
+   */
+  const lifted = useRef(false);
+  useEffect(() => {
+    if (!focusSeasons || lifted.current || !settled || seasons.length <= 1) return;
+    if (!doesFocusableExist(SEASONS_KEY)) return;
+    lifted.current = true;
+    // A timer, like the one-shot above and after it: both are armed in source
+    // order, so this reads a cursor that has already been placed.
+    const id = setTimeout(() => {
+      if (getCurrentFocusKey() === first) setFocus(SEASONS_KEY);
+    }, 0);
+    return () => clearTimeout(id);
+  }, [focusSeasons, seasons, first, settled]);
 
   // A countdown arrives on a screen that never unmounted - the browse tree is
   // hidden during playback, not thrown away - so the one-shot initial focus has
@@ -640,10 +651,10 @@ export function Detail({
 
   // Before the early returns, as hooks must be. `detail` is null while loading,
   // which is simply no theme yet.
-  // `undefined` while the item is still on its way, which is a different answer
-  // from `null`: switching seasons replaces this screen with another of the same
+  // Three answers rather than two - the item, nothing, or not known yet. See
+  // themeItem: switching seasons replaces this screen with another of the same
   // series, and the theme must survive the gap rather than start again.
-  useTheme(detail ? (detail.kind === "season" || detail.kind === "show" ? detail : null) : undefined);
+  useTheme(themeItem(detail, Boolean(failure)));
 
   if (failure) return <Message failure={failure} onRetry={() => setReload((n) => n + 1)} />;
   if (!detail) return <Message loading />;

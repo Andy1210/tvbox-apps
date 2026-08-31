@@ -39,8 +39,20 @@ const FADE_MS = 600;
  */
 const LEVEL = 0.42;
 
+/**
+ * The ramp each element is on, so a second one replaces it rather than joining it.
+ *
+ * Two ramps on one element do not average out, they fight: a fade-out computes
+ * its step ONCE, so a stop that lands while the fade-in is still at zero gets a
+ * step of zero and can never lower a volume the fade-in keeps raising. Measured
+ * before this: the theme sat at full level over a film, `pause()` never ran, and
+ * a 20 Hz interval spun for the life of the page.
+ */
+const ramps = new WeakMap<HTMLAudioElement, () => void>();
+
 /** Walk an element's volume to `to`, and run `done` when it arrives. */
 function fade(a: HTMLAudioElement, to: number, done?: () => void): () => void {
+  ramps.get(a)?.();
   const step = Math.abs(to - a.volume) / (FADE_MS / 50);
   const timer = setInterval(() => {
     const at = a.volume;
@@ -48,11 +60,16 @@ function fade(a: HTMLAudioElement, to: number, done?: () => void): () => void {
     a.volume = next;
     if (Math.abs(next - to) <= 0.01) {
       a.volume = to;
-      clearInterval(timer);
+      cancel();
       done?.();
     }
   }, 50);
-  return () => clearInterval(timer);
+  const cancel = (): void => {
+    clearInterval(timer);
+    if (ramps.get(a) === cancel) ramps.delete(a);
+  };
+  ramps.set(a, cancel);
+  return cancel;
 }
 
 /**
@@ -107,6 +124,22 @@ function stop(): void {
  * - Fetched with the credential as a header, like artwork, so the URL never
  *   carries it - which is why it becomes a blob rather than an <audio src>.
  */
+/**
+ * What a detail screen tells the theme player, from what it has.
+ *
+ * Three answers, not two. `null` is "nothing to play here", which stops the
+ * theme; `undefined` is "not known yet", which keeps it - a screen replaced by
+ * another season of the same series arrives with its item a round trip away,
+ * and treating that as nothing restarts the sting from its first bar on every
+ * switch. A screen that FAILED has the same empty item as one that is loading
+ * and must not be confused with it: the theme would play on under "something
+ * went wrong", for as long as it is up.
+ */
+export function themeItem(item: MediaItem | null, failed: boolean): MediaItem | null | undefined {
+  if (item) return item.kind === "season" || item.kind === "show" ? item : null;
+  return failed ? null : undefined;
+}
+
 export function useTheme(item: MediaItem | null | undefined): void {
   const backend = useApp((s) => s.backend);
   const playing = useShowingPlayer();
@@ -205,6 +238,15 @@ export function useTheme(item: MediaItem | null | undefined): void {
   useEffect(
     () => () => {
       silencedByPlayback = null;
+      // Nothing to keep alive: the fetch this screen started dies with it (its
+      // own `live` flag), so leaving `playingUrl` set would tell the next screen
+      // a theme is playing that nobody will ever start - measured, the series
+      // then stayed silent for the rest of the visit, which is the ordinary
+      // gesture of opening a series and pressing two seasons.
+      if (!audio) {
+        stop();
+        return;
+      }
       // A tick, not now: the next screen gets to say whether it wants the same
       // theme. Nothing else is deferred, so a screen that is really being left
       // falls silent in the same frame a person would notice.

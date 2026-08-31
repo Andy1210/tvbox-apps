@@ -59,6 +59,8 @@ interface Harness extends Fixture {
   /** The season the screen is on: the middle one, so both ends are reachable. */
   current: MediaItem;
   childrenFor: string[];
+  /** Lets a held season list answer, for the tests about a slow one. */
+  releaseSeasons?: () => void;
 }
 
 async function open(opts?: {
@@ -94,7 +96,7 @@ async function open(opts?: {
         h.childrenFor.push(id);
         if (id === f.showId) {
           if (opts?.failSeasons) throw new Error("no");
-          if (opts?.holdSeasons) await new Promise(() => {});
+          if (opts?.holdSeasons) await new Promise<void>((r) => (h.releaseSeasons = r));
           return opts?.showChildren ?? f.seasons;
         }
         return f.episodes;
@@ -300,25 +302,26 @@ describe("the season strip on an episode list", () => {
     expect(chip(0)!.querySelector("span.bg-current")).toBeNull();
   });
 
-  it("stops waiting for a season list that never answers", async () => {
-    // A stalled connection is not a failed one: nothing in the client times a
-    // request out, and the cursor of a screen opened from the strip waits on
-    // this answer.
-    const { act } = await import("@testing-library/react");
-    vi.useFakeTimers();
-    try {
-      await open({ focusSeasons: true, holdSeasons: true });
-      // Still nothing: the screen is waiting for the strip it was opened onto.
-      expect(getCurrentFocusKey()).toBeNull();
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(3100);
-      });
-      // The wait ends in a state update, so the cursor it releases is placed a
-      // turn later - the same one-shot timer every arrival here uses.
-      await settle();
-      expect(getCurrentFocusKey()).toBe("detail-play");
-    } finally {
-      vi.useRealTimers();
-    }
+  it("places its cursor without waiting for the season list", async () => {
+    // The list is a second request. Waiting for it left the screen with nothing
+    // highlighted, which on a television is a remote that does nothing.
+    const h = await open({ focusSeasons: true, holdSeasons: true });
+    expect(getCurrentFocusKey()).toBe("detail-play");
+    expect(chips()).toEqual([]);
+    h.releaseSeasons?.();
+    await settle();
+    // ...and once it answers, the strip takes the cursor, since nobody moved it.
+    expect(getCurrentFocusKey()).toBe(chipKey(h.seasons.indexOf(h.current)));
+  });
+
+  it("leaves a late season list where the cursor was put by a press", async () => {
+    const h = await open({ focusSeasons: true, holdSeasons: true });
+    layout(h);
+    // Somebody is already reading the episodes when the list answers.
+    await setFocus(`children-${h.current.id}-${h.episodes[1]!.id}`);
+    await settle();
+    h.releaseSeasons?.();
+    await settle();
+    expect(getCurrentFocusKey()).toBe(`children-${h.current.id}-${h.episodes[1]!.id}`);
   });
 });
