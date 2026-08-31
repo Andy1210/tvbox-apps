@@ -604,12 +604,54 @@ describe("returning to a library", () => {
     expect(asked).toEqual(DEEP_PAGES);
     await waitFor(() => expect(again.container.textContent).toContain(`Zeta ${DEEP}`));
     expect(again.container.textContent).not.toContain("Try again");
-    // A poster is highlighted on the screen that comes back. Here the deferred
-    // focus had never fired - the guard above held it back for the whole of the
-    // failure - so this holds that the guard hands it over rather than
-    // swallowing it, and it is the resumed cell that gets it. The case where it
-    // HAS fired is the test below.
-    expect(again.container.querySelectorAll(".ring-white").length).toBe(1);
+    // The same safe landing place as the test below, and this is the path that
+    // needs saying: here the deferred focus had NEVER fired - the guard held it
+    // back for the whole of the failure - so it would have fired now, on the
+    // resumed poster, and the second half of a held OK would have started that
+    // film. Measured on a box: harmless after a mid-browse failure, a film
+    // after an entry one, which is the failure the arrival requests made
+    // ordinary. Once an error has been shown, the landing place is one decision
+    // rather than two.
+    expect(litKey(again.container)).toBe("lib-arrange");
+    await remote.ok();
+    await settle();
+    expect(useApp.getState().screen.name).not.toBe("item");
+  });
+
+  it("keeps the cursor in the arrange panel when an error clears underneath it", async () => {
+    const first = await open();
+    await jumpToEnd(first.container);
+    await setFocus(`cell-${DEEP}`);
+    await flushFocus();
+
+    // The panel is a surface OVER the screen, and it stays mounted through the
+    // failure screen - so a cursor inside it is one the person put there, and
+    // the reveal must leave it alone. Without that, clearing the failure parks
+    // the cursor on the arrange button BEHIND the open panel and the next press
+    // is spent going back into it.
+    await setFocus("lib-arrange");
+    await remote.ok();
+    await settle();
+    await settle();
+    // The panel focuses its own first chip; nothing here has to place the cursor.
+    expect(litKey(first.container)).toBe("lf-sort-0");
+
+    await act(async () => {
+      useApp.getState().fail({ kind: "unreachable" });
+    });
+    await settle();
+    // The failure screen pulls the cursor onto its own button as it mounts, and
+    // on a box the panel's capture-phase guard takes it straight back on the
+    // very press that dismisses the error - the panel is still the surface in
+    // front. Placed by hand here because that guard and spatial navigation's
+    // own handler run in registration order under happy-dom, which is not the
+    // order a browser gives them.
+    await setFocus("lf-sort-0");
+    await act(async () => {
+      useApp.getState().fail(null);
+    });
+    await settle();
+    expect(litKey(first.container)).toBe("lf-sort-0");
   });
 
   it("leaves something safe highlighted on a library that comes back from an error", async () => {

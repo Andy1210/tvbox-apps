@@ -132,9 +132,14 @@ export function arrivalCells(index: number): [first: number, last: number] {
  * Every focus key this screen can own, in any of its states.
  *
  * A predicate over names rather than over anything live, so the two guards that
- * ask it - the one that recovers a dead cursor on a press, and the one that puts
- * it back when the failure screen goes away - cannot disagree about what belongs
- * here. A key either misses is treated as gone, and focus is yanked off it.
+ * ask it - the one that recovers a dead cursor on a press, and the one that
+ * decides where it lands when the failure screen goes away - share one list. A
+ * key either misses is treated as gone, and focus is yanked off it.
+ *
+ * The reveal adds the arrange panel's keys on top of this and the press guard
+ * does not, deliberately: the panel is a surface over the screen, so a cursor
+ * inside it must be left alone when a failure clears underneath, and must not
+ * be somewhere a press can be recovered TO.
  */
 function ownsKey(key: string): boolean {
   return (
@@ -188,6 +193,22 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   const [sortNames, setSortNames] = useState<Record<string, string>>({});
   /** Which (library, mode, sort) the names have been asked for. See below. */
   const asked = useRef(new Set<string>());
+  /**
+   * Whether an error has been on this screen at all.
+   *
+   * Two hooks decide where the cursor lands when a failure clears, and they
+   * schedule on the same commit: the deferred initial focus is declared first,
+   * so its timer wins - and on the one path where it has NOT already fired, a
+   * failure during the resume, it puts the cursor on a poster and the reveal
+   * below stands down. Measured on a box: the second OK press that is harmless
+   * after a mid-browse failure starts a film after an entry one, and an entry
+   * failure is exactly what the arrival requests made ordinary. So once an
+   * error has been shown, where the cursor lands is the reveal's to decide.
+   */
+  const sawFailure = useRef(false);
+  useEffect(() => {
+    if (failure) sawFailure.current = true;
+  }, [failure]);
   /** How the films were arranged, kept for the way back out of the collections. */
   const saved = useRef<LibraryView | null>(kept.current?.saved ?? null);
   // Opening anything from here unmounts this screen, so what was chosen is
@@ -653,7 +674,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   // fallback's own target is not mounted there either. Only a page other than
   // the first can fail this way, which is what the resumed page made ordinary.
   const startKey = total === 0 ? "lib-arrange" : `cell-${startCell ?? 0}`;
-  useInitialFocus(startKey, total !== null && startCell !== null && !failure);
+  useInitialFocus(startKey, total !== null && startCell !== null && !failure && !sawFailure.current);
   // And once the failure screen goes away again, because the hook above has
   // fired and will not fire twice. The failure screen is a surface of its own:
   // it takes the cursor for its own button, and when Try again succeeds that
@@ -665,26 +686,35 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   // Try again is dismissed with OK, and the cursor arrives at its new home
   // about a millisecond later - so the SAME press, repeated by a held button or
   // by anyone who taps twice at an error screen, lands on whatever is there.
-  // Measured on a tile: it started a film nobody chose, which on this box means
-  // the shared mpv, a display-mode switch and a second of wind-down to get back
-  // out. On this button it opens the sort panel, which one Back closes. It is
-  // also the one control mounted in every state this screen has, which is why
-  // the press-recovery guard below aims at it for its own reasons - a poster
-  // would have to be the one the cursor is on NOW, and `startCell` is frozen at
-  // the cell the screen opened on.
+  // Measured on a box: on a tile it started a film nobody chose, which here
+  // means the shared mpv, a display-mode switch and a second of wind-down to
+  // get back out; on this button it opens the sort panel, which one Back
+  // closes. It is the button the press-recovery guard below aims at too, for
+  // its own reasons - and a poster would have to be the one the cursor is on
+  // NOW, where `startCell` is frozen at the cell the screen opened on.
   //
-  // Panel keys count as this screen's here, unlike below: the panel stays
-  // mounted through the failure screen, and a cursor inside it is one the
-  // person put there.
+  // It is not mounted while the failure or loading screens are up, and that is
+  // fine: parking on a key that has not mounted yet is what `focusOnPresetKey`
+  // is for, and it lights the moment the grid comes back. What it must not be
+  // is a key that will NEVER mount, which is the whole of the difference.
+  //
+  // Panel keys count as this screen's here, unlike below, because the panel
+  // stays mounted through the failure screen: without this the cursor lands on
+  // the arrange button BEHIND an open panel, and the next press is spent going
+  // back into it. `lf` without a hyphen on purpose - the panel's own container
+  // keys are `libfilters` and `lfvalues`, and the first of those is already
+  // caught by the `lib-` clause.
   useFocusOnReveal("lib-arrange", (key) => ownsKey(key) || key.startsWith("lf"), !failure);
   // Every key this screen owns has to be listed. A focusable the guard does not
   // recognise is treated as gone and focus is yanked back to the grid - so the
   // sort-and-filter button could be reached and then lost between the press
   // landing on it and OK arriving, which opened the first film instead.
   useFocusFallback(
-    // Always mounted, unlike cell-0: that is only near the top of the grid, so
-    // recovering focus while scrolled down aimed at nothing and the remote went
-    // dead. The button is on screen in every state this screen has.
+    // Always in the same place, unlike cell-0: that is only near the top of the
+    // grid, so recovering focus while scrolled down aimed at nothing and the
+    // remote went dead. The button is not mounted while the failure or loading
+    // screens are up, which is what `focusOnPresetKey` covers - it is a key
+    // that comes back, not one that never arrives.
     "lib-arrange",
     ownsKey,
     // Not while the panel is open: this is a window listener, and it stays armed
