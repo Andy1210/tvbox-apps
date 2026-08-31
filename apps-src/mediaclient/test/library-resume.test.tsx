@@ -604,57 +604,17 @@ describe("returning to a library", () => {
     expect(asked).toEqual(DEEP_PAGES);
     await waitFor(() => expect(again.container.textContent).toContain(`Zeta ${DEEP}`));
     expect(again.container.textContent).not.toContain("Try again");
-    // The same safe landing place as the test below, and this is the path that
-    // needs saying: here the deferred focus had NEVER fired - the guard held it
-    // back for the whole of the failure - so it would have fired now, on the
-    // resumed poster, and the second half of a held OK would have started that
-    // film. Measured on a box: harmless after a mid-browse failure, a film
-    // after an entry one, which is the failure the arrival requests made
-    // ordinary. Once an error has been shown, the landing place is one decision
-    // rather than two.
-    expect(litKey(again.container)).toBe("lib-arrange");
+    // And the press that dismissed the error must not start anything if it
+    // repeats. Here the deferred focus had NEVER fired - the guard held it back
+    // for the whole of the failure - so without the second half of that guard
+    // it would fire now, on the resumed poster, a millisecond after the OK.
+    // This is the failure the arrival requests made ordinary.
     await remote.ok();
     await settle();
     expect(useApp.getState().screen.name).not.toBe("item");
   });
 
-  it("keeps the cursor in the arrange panel when an error clears underneath it", async () => {
-    const first = await open();
-    await jumpToEnd(first.container);
-    await setFocus(`cell-${DEEP}`);
-    await flushFocus();
-
-    // The panel is a surface OVER the screen, and it stays mounted through the
-    // failure screen - so a cursor inside it is one the person put there, and
-    // the reveal must leave it alone. Without that, clearing the failure parks
-    // the cursor on the arrange button BEHIND the open panel and the next press
-    // is spent going back into it.
-    await setFocus("lib-arrange");
-    await remote.ok();
-    await settle();
-    await settle();
-    // The panel focuses its own first chip; nothing here has to place the cursor.
-    expect(litKey(first.container)).toBe("lf-sort-0");
-
-    await act(async () => {
-      useApp.getState().fail({ kind: "unreachable" });
-    });
-    await settle();
-    // The failure screen pulls the cursor onto its own button as it mounts, and
-    // on a box the panel's capture-phase guard takes it straight back on the
-    // very press that dismisses the error - the panel is still the surface in
-    // front. Placed by hand here because that guard and spatial navigation's
-    // own handler run in registration order under happy-dom, which is not the
-    // order a browser gives them.
-    await setFocus("lf-sort-0");
-    await act(async () => {
-      useApp.getState().fail(null);
-    });
-    await settle();
-    expect(litKey(first.container)).toBe("lf-sort-0");
-  });
-
-  it("leaves something safe highlighted on a library that comes back from an error", async () => {
+  it("does not start a film when the press that dismissed an error repeats", async () => {
     const first = await open();
     await jumpToEnd(first.container);
     await setFocus(`cell-${DEEP}`);
@@ -674,26 +634,18 @@ describe("returning to a library", () => {
     await settle();
     expect(again.container.textContent).toContain("Try again");
 
-    // That button then unmounts under the cursor. Nothing re-aims it: the
-    // initial focus fires once per mount and has already gone. Measured, the
-    // grid came back with the right content and no highlight anywhere, one
-    // press eaten by the fallback and the next landing on a header button.
-    //
-    // On the arrange button rather than a poster, because Try again is
-    // dismissed with OK and the cursor arrives at its new home a millisecond
-    // later: a held button, or anyone who taps twice at an error screen,
-    // presses whatever is there. Measured on a poster, the second press started
-    // a film nobody chose.
+    // Try again is dismissed with OK, and a held button or anyone who taps
+    // twice at an error screen sends that press again about a millisecond
+    // later. It must not land on a poster: measured on a box, that started a
+    // film nobody chose, which here means the shared player, a display-mode
+    // switch and a second of wind-down to get out of. The cursor stays where
+    // the failure screen left it and the recovery guard puts it back on the
+    // next arrow, which costs one press and starts nothing.
     asked = [];
     await setFocus("msg-retry");
     await remote.ok();
     await settle();
     expect(again.container.textContent).not.toContain("Try again");
-    expect(litKey(again.container)).toBe("lib-arrange");
-
-    // And that second press is harmless: the panel it opens is one Back away,
-    // where a film is the shared player, a display-mode switch and a second of
-    // wind-down.
     await remote.ok();
     await settle();
     expect(useApp.getState().screen.name).not.toBe("item");
