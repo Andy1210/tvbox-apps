@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { act, render, waitFor } from "@testing-library/react";
 import { configureI18n } from "@sdk";
-import { Library } from "../Library";
+import { Library, arrivalCells } from "../Library";
 import { useApp } from "../state";
 import { clearLibraryViews } from "../libraryView";
 import { setupRemote, setFocus, getCurrentFocusKey, flushFocus, remote } from "./remote";
@@ -44,8 +44,7 @@ const COLUMNS = 7;
  * `DEEP` has to be inside the last screenful, because that is where the letter
  * jump can put the cursor - and its arrival window has to STRADDLE a page
  * boundary, or a prefetch that asks only for the cursor's own page passes every
- * assertion here. With 320 items the jump mounts rows 42-45, and the window
- * around cell 300 runs 273 to 321, i.e. pages 2 and 3.
+ * assertion here. With 320 items the jump mounts rows 42-45.
  */
 const ITEMS = 320;
 /** More than the library has films, so the deep cell exists in this list too. */
@@ -66,10 +65,10 @@ const LAST = ITEMS - 1;
  * A cell well inside the last screenful, reachable once the grid has jumped.
  *
  * Row 44, chosen so its arrival window straddles a page boundary AT THE TOP:
- * rows 41-48 hold cells 287-342, i.e. pages 2 and 3, while the two rows above
- * the cursor's own are what carry the boundary. A window anchored at the
- * cursor's row instead covers only page 3 - which is what the top of the screen
- * arriving blank looks like from here.
+ * rows 41-47 hold cells 287-335, i.e. pages 2 and 3, and it is the rows ABOVE
+ * the cursor's own that carry the boundary. A window anchored at the cursor's
+ * row instead covers only page 3 - which is what the top of the screen arriving
+ * blank looks like from here.
  */
 const DEEP = 308;
 /** The pages its arrival window needs, which is the point of the number above. */
@@ -249,6 +248,28 @@ async function jumpToEnd(container: HTMLElement): Promise<void> {
   await waitFor(() => expect(offsetOf(container)).toBeGreaterThan(0));
 }
 
+describe("the band a resumed grid arrives with", () => {
+  // The screen tests can only drive the cursor to cells the letter jump makes
+  // reachable, so they pin one position each. The band has to be right at every
+  // position, and it is what decides whether the tiles somebody is looking at
+  // are posters or grey rectangles.
+  it("covers three rows either side of the cursor, and never more than two pages", () => {
+    for (const index of [0, 6, 7, 20, 21, 100, 137, 300, 308, 699, 1400, 8281]) {
+      const row = Math.floor(index / COLUMNS);
+      const [first, last] = arrivalCells(index);
+      // `nearest` only promises the cursor's row sits between the two pads, so
+      // it can be the third row on screen or the third from the bottom: the
+      // band is the union, and either end short of it leaves a row of the
+      // arriving screen blank for a round trip.
+      expect(first).toBe(Math.max(0, (row - 3) * COLUMNS));
+      expect(last).toBe((row + 4) * COLUMNS - 1);
+      // Which is what keeps the cost at one request or two.
+      expect(last - first).toBeLessThan(100);
+      expect(Math.floor(last / 100) - Math.floor(first / 100)).toBeLessThanOrEqual(1);
+    }
+  });
+});
+
 describe("returning to a library", () => {
   it("puts the cursor back on the tile it was left on, and the grid back under it", async () => {
     const first = await open();
@@ -315,8 +336,8 @@ describe("returning to a library", () => {
     //
     // The exact set, not just "the right one is in it": asking for every page up
     // to the cursor's is a plausible wrong fix that fetches 83 of them on this
-    // library, and it would pass a `toContain`. Six rows are fewer cells than a
-    // page, so the arrival window is one page or two.
+    // library, and it would pass a `toContain`. The band is 49 cells, fewer than
+    // a page, so it is one page or two.
     expect(asked).toEqual(DEEP_PAGES);
 
     // And with page 0 still held, the screen is already right: the total came
@@ -571,6 +592,76 @@ describe("returning to a library", () => {
     expect(asked).toEqual(expect.arrayContaining(DEEP_PAGES));
     await waitFor(() => expect(again.container.textContent).toContain(`Zeta ${DEEP}`));
     expect(again.container.textContent).not.toContain("Try again");
+    // Something is highlighted on the screen that comes back. Here the deferred
+    // focus had never fired - the guard above held it back for the whole of the
+    // failure - so this holds that the guard hands it over rather than
+    // swallowing it. The case where it HAS fired is the test above.
+    expect(again.container.querySelectorAll(".ring-white").length).toBe(1);
+  });
+
+  it("puts the cursor back on a library that comes back from an error", async () => {
+    const first = await open();
+    await jumpToEnd(first.container);
+    await setFocus(`cell-${DEEP}`);
+    await flushFocus();
+    first.unmount();
+    await act(async () => setFocus(""));
+
+    // The grid comes up first and the cursor lands, so the deferred focus is
+    // spent. THEN something fails - a page a scroll asked for, a server that
+    // went away mid-browse - and the failure screen takes the cursor for its
+    // own button.
+    const again = await open();
+    expect(again.container.querySelectorAll(".ring-white").length).toBe(1);
+    await act(async () => {
+      useApp.getState().fail({ kind: "unreachable" });
+    });
+    await settle();
+    expect(again.container.textContent).toContain("Try again");
+
+    // That button then unmounts under the cursor. Nothing re-aims it: the
+    // initial focus fires once per mount and has already gone. Measured, the
+    // grid came back with the right content and no highlight anywhere, one
+    // press eaten by the fallback and the next landing on a header button.
+    asked = [];
+    await setFocus("msg-retry");
+    await remote.ok();
+    await settle();
+    expect(again.container.textContent).not.toContain("Try again");
+    expect(again.container.querySelectorAll(".ring-white").length).toBe(1);
+  });
+
+  it("brings the library back when the first page is the one that failed", async () => {
+    // Nothing to resume: this is a library opening for the first time against a
+    // server that is down, which is the ordinary way a whole library fails.
+    let refuse = true;
+    const base = stubBackend();
+    useApp.setState({
+      backend: {
+        ...base,
+        libraryPage: async (id: string, q: { offset: number; limit: number }) => {
+          if (refuse) throw Object.assign(new Error("no"), { status: 500 });
+          return base.libraryPage(id, q);
+        },
+      } as unknown as MediaBackend,
+    });
+
+    const screen = render(<Library libraryId="1" title="Movies" />);
+    await waitFor(() => expect(screen.container.textContent).toContain("Try again"));
+    await settle();
+
+    // With no total there are no rows, so a Try again that asks only for the
+    // rows on screen asks for nothing at all: measured on a box, zero requests
+    // and a spinner that never resolves, with nothing on it to press. Page 0 is
+    // what carries the total, so it has to be asked for by name.
+    refuse = false;
+    asked = [];
+    await setFocus("msg-retry");
+    await remote.ok();
+    await settle();
+    expect(asked).toContain(0);
+    await waitFor(() => expect(screen.container.textContent).toContain("Alfa 0"));
+    expect(screen.container.textContent).not.toContain("Try again");
   });
 
   it("forgets it on sign-out", async () => {

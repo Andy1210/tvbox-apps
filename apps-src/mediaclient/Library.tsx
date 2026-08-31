@@ -12,7 +12,7 @@ import { FocusButton, useI18n } from "@sdk";
 import { Tile } from "./Tile";
 import { Message } from "./Message";
 import { artworkScale } from "./posters";
-import { useFocusFallback, useInitialFocus } from "./focus";
+import { useFocusFallback, useFocusOnReveal, useInitialFocus } from "./focus";
 import { useShowingPlayer } from "./playback/player";
 import { classify, useApp } from "./state";
 import { createMover, nearest, pinScroll } from "@sdk/moveTo";
@@ -100,11 +100,52 @@ function padPx(vh: number, windowH: number): number {
  * How far a row is kept from the top and the bottom of the screen.
  *
  * One pair of numbers rather than three copies, because the A-Z strip's mark is
- * only right while it reads the SAME top pad that `nearest` parks with: change
- * one and the strip silently starts naming the row above the screen again.
+ * only right while it reads the SAME top pad that `nearest` parks with: with two
+ * literals, changing one has the strip silently naming the row above the screen
+ * again. No test can see that - at every rest position the grid can reach, any
+ * pad from 43 px up to a row's height marks the same letter - so a shared
+ * constant is the whole of the guarantee.
  */
 const PAD_TOP_VH = 4;
 const PAD_BOTTOM_VH = 6;
+
+/**
+ * The cells the grid will have mounted when it opens on `index`.
+ *
+ * The cursor's row is NOT the top of that window: `nearest` only promises the
+ * row sits between the two pads, so depending on which side it was brought in
+ * from it can be as high as the third row on screen or as low as the third from
+ * the bottom. The union of the two is three rows either side, which is seven
+ * rows and 49 cells - fewer than a page, so it can straddle at most one
+ * boundary and cost at most two requests.
+ *
+ * A function rather than four lines inside the effect because the band is the
+ * whole of the fix: anchored at the cursor's row instead, the top of the screen
+ * arrived blank.
+ */
+export function arrivalCells(index: number): [first: number, last: number] {
+  const row = Math.floor(index / COLUMNS);
+  return [Math.max(0, (row - 2 - OVERSCAN) * COLUMNS), (row + 4) * COLUMNS - 1];
+}
+
+/**
+ * Every focus key this screen can own, in any of its states.
+ *
+ * A predicate over names rather than over anything live, so the two guards that
+ * ask it - the one that recovers a dead cursor on a press, and the one that puts
+ * it back when the failure screen goes away - cannot disagree about what belongs
+ * here. A key either misses is treated as gone, and focus is yanked off it.
+ */
+function ownsKey(key: string): boolean {
+  return (
+    key.startsWith("cell-") ||
+    key.startsWith("letter-") ||
+    key.startsWith("lib-") ||
+    // The failure screen replaces this one entirely, so its button is the only
+    // key on it.
+    key.startsWith("msg-")
+  );
+}
 
 /**
  * Whether two scroll positions produce the same set of rendered rows.
@@ -367,26 +408,19 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     // people actually do after leaving a film lands on the right tile and is
     // swallowed. Both in flight together instead.
     //
-    // The WINDOW rather than the cursor's own cell: the grid arrives with about
-    // six rows mounted, and over the possible cursor positions 41% of them
-    // straddle a page boundary - worst case 27 of the 42 tiles on screen, and
-    // one press of Down lands on one of them.
+    // The WINDOW rather than the cursor's own cell: the grid arrives with four
+    // to six rows mounted, and a page boundary falls inside that band for about
+    // two cursor positions in five - worst case 27 of the 42 tiles on screen,
+    // and one press of Down lands on one of them. `arrivalCells` says which
+    // band; a narrower one left a whole row of posters blank at the TOP of the
+    // screen with the A-Z strip marking nothing, for 47 ms, and then fetched it
+    // 99 ms late.
     //
-    // The cursor's row is NOT the top of that window. `nearest` guarantees only
-    // that the row sits between the two pads, so the window runs from two rows
-    // above it to four below - and the commonest arrival is the one where it is
-    // near the BOTTOM, because that is where a Down press leaves a row. Anchored
-    // at the cursor's row instead, the top two rows of the screen went
-    // unrequested for 7% of positions: measured, a whole row of posters blank at
-    // the top of the screen and the A-Z strip marking nothing, for 47 ms. Eight
-    // rows is 56 cells, fewer than a page, so this is one request or two.
+    // A page past the end costs one request and answers with no items, which is
+    // cheaper than carrying a total nobody knows yet in order to avoid it.
     const back = resume.current;
     if (back && back.index >= 0) {
-      const row = Math.floor(back.index / COLUMNS);
-      const first = Math.max(0, (row - 2 - OVERSCAN) * COLUMNS);
-      const last = (row + 4) * COLUMNS - 1;
-      // A page past the end costs one request and answers with no items, which
-      // is cheaper than carrying a total nobody knows yet in order to avoid it.
+      const [first, last] = arrivalCells(back.index);
       for (let p = Math.floor(first / PAGE); p <= Math.floor(last / PAGE); p += 1) void loadPage(p);
     }
   }, [loadPage, libraryId, view, mode, mover]);
@@ -436,8 +470,8 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
    * The viewport is read off the element rather than taken from the state
    * beside it, because the commit that first renders the grid measures it in a
    * ref callback and this effect runs in that same commit, where the state
-   * still holds the height from before there was a grid - on this box that is
-   * 406 px out, measured. It buys the FIRST FRAME, not the resting place: once
+   * still holds the height from before there was a grid - measured on the
+   * gaming box, whose window is 768 px tall, that is 406 px out. It buys the FIRST FRAME, not the resting place: once
    * the cell takes the cursor, `holdCursor` runs `showRow` with the height by
    * then in the state and corrects any clamp. So the cost of dropping this read
    * is a visible settle on entry, which is the thing a layout effect is here to
@@ -450,6 +484,10 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   useLayoutEffect(() => {
     const at = resume.current;
     if (!at || total === null) return;
+    // Spent here, and the failure screen does not hold it back - `total` is set
+    // the moment page 0 answers, whether or not there is a grid on screen. So by
+    // the time Try again is pressed there is no cursor left to re-derive a
+    // window from, which is why `retry` works off the rows instead.
     const box = scroller.current;
     const seen = box ? gridViewport(box) : 0;
     // The state is the fallback rather than the source: a grid that measures as
@@ -528,22 +566,31 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   }, [firstRow, lastRow, items, loadRows]);
 
   /**
-   * What Try again does.
+   * What Try again does: both halves, because each one alone is a dead screen.
    *
-   * Not `loadPage(0)`, which is what it was: the page that failed is not
-   * necessarily the first one, and once page 0 has answered it sits in
-   * `answered` and that call returns at its own first line. Clearing the failure
-   * then re-renders a grid whose window effect has no changed dependency, so
-   * nothing is requested at all - measured on a box, 42 blank tiles and zero
-   * requests, recovering only on the second press, the one that happened to move
-   * the grid. A page other than the first can only fail on the way in because
-   * the resume asks for one, so this is the button's ordinary case now.
+   * **Page 0**, because it is the page that carries the total - and with no
+   * total there are no rows, so the window below is empty and the button asks
+   * for nothing at all. That is the ordinary way a whole library fails (the
+   * server is down, the box has just woken), and measured on a box it left the
+   * screen on a spinner that never resolves, with nothing focusable on it.
+   *
+   * **The window**, because the page that failed is not necessarily the first
+   * one: once page 0 has answered it sits in `answered` and asking for it
+   * returns at its own first line, so the button cleared the failure and
+   * requested nothing - 42 blank tiles, recovering only on the second press,
+   * the one that happened to move the grid. Only the resume asks for a second
+   * page on the way in, which is what makes that the ordinary case now.
+   *
+   * Neither set is cleared. A page that FAILED is in neither of them already -
+   * `pending` deletes in its `finally` and `answered` is only written on
+   * success - so this asks for exactly the failed ones and skips the rest.
+   * Clearing `answered` would re-request pages whose posters are on screen, and
+   * a second refusal there replaces a good screen with the error again.
    */
   const retry = useCallback(() => {
-    pending.current.clear();
-    answered.current.clear();
+    void loadPage(0);
     loadRows(firstRow, lastRow);
-  }, [loadRows, firstRow, lastRow]);
+  }, [loadPage, loadRows, firstRow, lastRow]);
 
   // Not a place the arrows may land while the failure screen is up.
   // `useFocusable` registers on the hook call, which is above the early return
@@ -603,10 +650,16 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   // unhighlighted, and neither OK nor an arrow doing anything, because the
   // fallback's own target is not mounted there either. Only a page other than
   // the first can fail this way, which is what the resumed page made ordinary.
-  useInitialFocus(
-    total === 0 ? "lib-arrange" : `cell-${startCell ?? 0}`,
-    total !== null && startCell !== null && !failure,
-  );
+  const startKey = total === 0 ? "lib-arrange" : `cell-${startCell ?? 0}`;
+  useInitialFocus(startKey, total !== null && startCell !== null && !failure);
+  // And once the failure screen goes away again, because the hook above has
+  // fired and will not fire twice. The failure screen is a surface of its own:
+  // it takes the cursor for its own button, and when Try again succeeds that
+  // button unmounts with the cursor on it. Measured: the grid back with the
+  // right content and nothing highlighted, the next press spent on the fallback
+  // and the one after it landing on a header button. Same shape as leaving a
+  // film, which is what this hook was written for.
+  useFocusOnReveal(startKey, ownsKey, !failure);
   // Every key this screen owns has to be listed. A focusable the guard does not
   // recognise is treated as gone and focus is yanked back to the grid - so the
   // sort-and-filter button could be reached and then lost between the press
@@ -616,13 +669,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     // recovering focus while scrolled down aimed at nothing and the remote went
     // dead. The button is on screen in every state this screen has.
     "lib-arrange",
-    (key) =>
-      key.startsWith("cell-") ||
-      key.startsWith("letter-") ||
-      key.startsWith("lib-") ||
-      // The failure screen replaces this one entirely, so its button is the
-      // only key on it.
-      key.startsWith("msg-"),
+    ownsKey,
     // Not while the panel is open: this is a window listener, and it stays armed
     // behind the panel. Its predicate rejects every panel key, so any press the
     // panel could not resolve - a row edge, and it wraps twenty-seven chips -
