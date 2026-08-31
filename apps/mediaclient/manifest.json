@@ -9,7 +9,7 @@
   "changelog": [
     {
       "version": "0.63.0",
-      "notes": "The other seasons of a series are now on the episode list itself. Above the episodes there is a row of seasons with the one you are looking at marked, so switching is Up and then left or right, instead of going back to the series and in again. Pressing a season swaps the episodes underneath and leaves the highlight on the row, so looking through four seasons is four presses. Down goes back into the episodes, Up goes on to the play button, and a series with only one season has no row at all."
+      "notes": "The other seasons of a series are now on the episode list itself. Above the episodes there is a row of seasons with the one you are looking at marked, so getting to another one is Up, then left or right, then OK, instead of going back to the series and in again. The episodes underneath change and the highlight stays on the row, so each next season is two presses and you never lose your place. Down goes back into the episodes and Up goes on to the play button. The seasons are numbered here, so a series that gives its seasons names shows \"Season 2\" on this row and the name on the series page. A series with only one season has no row at all."
     },
     {
       "version": "0.62.6",

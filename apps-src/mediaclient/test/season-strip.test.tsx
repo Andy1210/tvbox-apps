@@ -67,6 +67,8 @@ async function open(opts?: {
   failSeasons?: boolean;
   /** What the show answers with, for the "only seasons" case. */
   showChildren?: MediaItem[];
+  /** The season list never answers, the way a stalled connection does not. */
+  holdSeasons?: boolean;
   focusSeasons?: boolean;
 }): Promise<Harness> {
   const { render, act } = await import("@testing-library/react");
@@ -92,6 +94,7 @@ async function open(opts?: {
         h.childrenFor.push(id);
         if (id === f.showId) {
           if (opts?.failSeasons) throw new Error("no");
+          if (opts?.holdSeasons) await new Promise(() => {});
           return opts?.showChildren ?? f.seasons;
         }
         return f.episodes;
@@ -111,17 +114,29 @@ async function open(opts?: {
 
   render(<Detail itemId={current.id} focusSeasons={opts?.focusSeasons} />);
   for (let i = 0; i < 5; i++) {
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
-    });
+    await act(tick);
     await flushFocus();
   }
   return h;
 }
 
-const chip = (id: string): HTMLElement | null => document.querySelector(`[data-sfocus="detail-season-${id}"]`);
+/**
+ * One turn of the event loop, under whichever clock the test is running.
+ *
+ * The screen places its cursor from a timer, so a test that fakes the clock -
+ * the one measuring how long the strip is waited for - has to advance it rather
+ * than wait on it, or the page never finishes arriving.
+ */
+async function tick(): Promise<void> {
+  if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(1);
+  else await new Promise((r) => setTimeout(r, 0));
+}
+
+/** A chip by its POSITION in the strip, which is how it is keyed. */
+const chipKey = (i: number): string => `detail-seasons-at-${i}`;
+const chip = (i: number): HTMLElement | null => document.querySelector(`[data-sfocus="${chipKey(i)}"]`);
 const chips = (): string[] =>
-  [...document.querySelectorAll('[data-sfocus^="detail-season-"]')].map((e) => e.textContent ?? "");
+  [...document.querySelectorAll('[data-sfocus^="detail-seasons-at-"]')].map((e) => e.textContent ?? "");
 
 /** Lay the screen out the way it is drawn: buttons, strip, episodes. */
 function layout(h: Harness): void {
@@ -130,16 +145,14 @@ function layout(h: Harness): void {
     if (el) place(el, x, y, w, h_);
   };
   at('[data-sfocus="detail-play"]', 100, 100, 300, 70);
-  h.seasons.forEach((s, i) => at(`[data-sfocus="detail-season-${s.id}"]`, 100 + i * 220, 300, 200, 60));
+  h.seasons.forEach((_s, i) => at(`[data-sfocus="${chipKey(i)}"]`, 100 + i * 220, 300, 200, 60));
   h.episodes.forEach((e, i) => at(`[data-sfocus="children-${h.current.id}-${e.id}"]`, 100 + i * 340, 500, 320, 200));
 }
 
 async function settle(): Promise<void> {
   const { act } = await import("@testing-library/react");
   for (let i = 0; i < 3; i++) {
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
-    });
+    await act(tick);
     await flushFocus();
   }
 }
@@ -156,8 +169,8 @@ describe("the season strip on an episode list", () => {
     expect(chips()).toEqual(["Season 1", "Season 2", "Season 3"]);
     // The current one is told apart by weight and fill, not by a glyph: a tick
     // means watched everywhere else in this app.
-    expect(chip(h.current.id)?.className).toContain("font-semibold");
-    expect(chip(h.seasons[0]!.id)?.className).toContain("text-fg-dim");
+    expect(chip(h.seasons.indexOf(h.current))?.className).toContain("font-semibold");
+    expect(chip(0)?.className).toContain("text-fg-dim");
   });
 
   it("offers nothing when there is nothing to switch to", async () => {
@@ -196,7 +209,7 @@ describe("the season strip on an episode list", () => {
     await remote.up();
     await settle();
     // Entered at the season being shown, not at the first one.
-    expect(getCurrentFocusKey()).toBe(`detail-season-${h.current.id}`);
+    expect(getCurrentFocusKey()).toBe(chipKey(h.seasons.indexOf(h.current)));
     await remote.down();
     await settle();
     expect(getCurrentFocusKey()).toBe(`children-${h.current.id}-${h.episodes[0]!.id}`);
@@ -205,7 +218,7 @@ describe("the season strip on an episode list", () => {
   it("reaches the play button above it", async () => {
     const h = await open();
     layout(h);
-    await setFocus(`detail-season-${h.current.id}`);
+    await setFocus(chipKey(h.seasons.indexOf(h.current)));
     await settle();
     await remote.up();
     await settle();
@@ -215,14 +228,14 @@ describe("the season strip on an episode list", () => {
   it("goes round at the ends rather than off the strip", async () => {
     const h = await open();
     layout(h);
-    await setFocus(`detail-season-${h.seasons[0]!.id}`);
+    await setFocus(chipKey(0));
     await settle();
     await remote.left();
     await settle();
-    expect(getCurrentFocusKey()).toBe(`detail-season-${h.seasons[2]!.id}`);
+    expect(getCurrentFocusKey()).toBe(chipKey(2));
     await remote.right();
     await settle();
-    expect(getCurrentFocusKey()).toBe(`detail-season-${h.seasons[0]!.id}`);
+    expect(getCurrentFocusKey()).toBe(chipKey(0));
   });
 
   it("switches the screen to the season pressed, without a step to go back through", async () => {
@@ -230,7 +243,7 @@ describe("the season strip on an episode list", () => {
     const { act } = await import("@testing-library/react");
     const h = await open();
     await act(async () => {
-      chip(h.seasons[2]!.id)!.click();
+      chip(2)!.click();
       await new Promise((r) => setTimeout(r, 0));
     });
     const screen = useApp.getState().screen;
@@ -245,7 +258,7 @@ describe("the season strip on an episode list", () => {
     const h = await open();
     const before = useApp.getState().screen;
     await act(async () => {
-      chip(h.current.id)!.click();
+      chip(h.seasons.indexOf(h.current))!.click();
       await new Promise((r) => setTimeout(r, 0));
     });
     expect(useApp.getState().screen).toBe(before);
@@ -253,7 +266,7 @@ describe("the season strip on an episode list", () => {
 
   it("opens on the strip when that is where it was opened from", async () => {
     const h = await open({ focusSeasons: true });
-    expect(getCurrentFocusKey()).toBe(`detail-season-${h.current.id}`);
+    expect(getCurrentFocusKey()).toBe(chipKey(h.seasons.indexOf(h.current)));
   });
 
   it("opens where it always did when there is no strip to open on", async () => {
@@ -261,5 +274,51 @@ describe("the season strip on an episode list", () => {
     // park the cursor on a key that never mounts, which is a dead remote.
     await open({ seasonCount: 1, focusSeasons: true });
     expect(getCurrentFocusKey()).toBe("detail-play");
+  });
+
+  it("opens on the strip even when the series does not list this season", async () => {
+    // The cursor names the STRIP, not a chip: a series whose children come back
+    // without the season being shown would otherwise park it on a key nothing
+    // mounted, which is one swallowed press and a screen with nothing lit.
+    await open({
+      focusSeasons: true,
+      showChildren: [
+        { id: "other-a", kind: "season", title: "Első", index: 1 },
+        { id: "other-b", kind: "season", title: "Második", index: 2 },
+      ],
+    });
+    expect(getCurrentFocusKey()).toBe(chipKey(0));
+  });
+
+  it("marks the season being shown inside the chip, where focus cannot hide it", async () => {
+    // Every way into the strip lands on this chip, and focus fills a chip white
+    // - taking the fill and the weight with it - so the mark has to be drawn in
+    // the chip and follow the text colour.
+    const h = await open();
+    const mark = chip(h.seasons.indexOf(h.current))!.querySelector("span.bg-current");
+    expect(mark, "the current season carries a mark").toBeTruthy();
+    expect(chip(0)!.querySelector("span.bg-current")).toBeNull();
+  });
+
+  it("stops waiting for a season list that never answers", async () => {
+    // A stalled connection is not a failed one: nothing in the client times a
+    // request out, and the cursor of a screen opened from the strip waits on
+    // this answer.
+    const { act } = await import("@testing-library/react");
+    vi.useFakeTimers();
+    try {
+      await open({ focusSeasons: true, holdSeasons: true });
+      // Still nothing: the screen is waiting for the strip it was opened onto.
+      expect(getCurrentFocusKey()).toBeNull();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3100);
+      });
+      // The wait ends in a state update, so the cursor it releases is placed a
+      // turn later - the same one-shot timer every arrival here uses.
+      await settle();
+      expect(getCurrentFocusKey()).toBe("detail-play");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

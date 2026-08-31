@@ -24,12 +24,17 @@ const season = (id: string): MediaItem => ({ id, kind: "season", title: `Season 
 
 let plays: string[] = [];
 
-function Season({ item }: { item: MediaItem | null }): null {
+function Season({ item }: { item: MediaItem | null | undefined }): null {
   useTheme(item);
   return null;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  // The stop a screen arms on its way out waits a tick, so it can be cancelled
+  // by another season of the same series arriving. That tick outlives the test
+  // that armed it: let it land before this one renders, or the module still
+  // believes the previous test's theme is playing.
+  await new Promise((r) => setTimeout(r, 0));
   plays = [];
   usePrefs.setState({ themeMusic: true });
   useApp.setState({
@@ -86,6 +91,41 @@ describe("a series' theme and a film started by voice", () => {
     await act(async () => usePlayer.setState({ current: null }));
     await settle();
     expect(plays, "and nothing over the countdown").toEqual([]);
+  });
+
+  it("keeps playing across a season switch of the same series", async () => {
+    // The season strip replaces this screen with another season's, which is a
+    // remount: the theme is the series', so it must carry on rather than start
+    // again from its first bar. The arriving screen does not know its item for
+    // a round trip, which is why "not known yet" is a different answer from
+    // "nothing to play".
+    const { rerender } = render(<Season key="s1" item={season("A")} />);
+    await settle();
+    expect(plays).toEqual(["http://server/t/A"]);
+
+    // Season two of the same series: a new screen, the item still on its way.
+    await act(async () => {
+      rerender(<Season key="s2" item={undefined} />);
+    });
+    await settle();
+    await act(async () => {
+      rerender(<Season key="s2" item={season("A")} />);
+    });
+    await settle();
+    expect(plays, "the same theme is not started twice").toEqual(["http://server/t/A"]);
+  });
+
+  it("stops when the screen is really left", async () => {
+    const { unmount } = render(<Season key="s1" item={season("A")} />);
+    await settle();
+    expect(plays).toEqual(["http://server/t/A"]);
+    await act(async () => unmount());
+    await settle();
+    // Nothing to assert about sound in a stub, so this asserts the state the
+    // guard reads: the same series played again means the stop really happened.
+    render(<Season key="s3" item={season("A")} />);
+    await settle();
+    expect(plays).toEqual(["http://server/t/A", "http://server/t/A"]);
   });
 
   it("stays silent when another series' theme was sounding as the cast arrived", async () => {

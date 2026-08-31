@@ -12,7 +12,7 @@ import { TitleArt } from "./TitleArt";
 import { Summary } from "./Summary";
 import { LanguagePicker } from "./LanguagePicker";
 import { Confirm } from "./Confirm";
-import { SeasonStrip, SEASONS_KEY, seasonKey } from "./SeasonStrip";
+import { SeasonStrip, SEASONS_KEY } from "./SeasonStrip";
 import { Backdrop } from "./Backdrop";
 import { useTheme } from "./theme";
 import { useFocusFallback, useFocusOnReveal, useInitialFocus, useScrollToTopOnFirst } from "./focus";
@@ -37,6 +37,10 @@ type ViewState = Pick<MediaItem, "viewCount" | "viewOffsetMs">;
 
 /** Two presses closer together than this are one press that bounced. */
 const PRESS_GAP_MS = 400;
+
+/** How long the cursor of a screen opened from the season strip waits for the
+ *  season list before going where it would have gone anyway. */
+const SEASONS_WAIT_MS = 3000;
 
 /**
  * Which focus keys belong to this screen.
@@ -277,6 +281,12 @@ export function Detail({
       return;
     }
     let live = true;
+    // Nothing here has a timeout of its own, and the CURSOR of a screen opened
+    // from the strip waits on this answer: a connection that stalls rather than
+    // fails would leave that screen with nothing highlighted for as long as it
+    // is up. After this the cursor goes where it always went, and the strip
+    // still appears if the answer arrives later.
+    const gaveUp = setTimeout(() => live && setSeasonsSettled(true), SEASONS_WAIT_MS);
     void (async () => {
       try {
         const kids = await backend.children(showId);
@@ -292,6 +302,7 @@ export function Detail({
     })();
     return () => {
       live = false;
+      clearTimeout(gaveUp);
     };
     // `known` rather than `detail`, which is replaced whole by the refetch after
     // playback: keying on the object would clear the strip and ask again every
@@ -553,10 +564,12 @@ export function Detail({
    * aims at `first`, which knows about the episode that was playing.
    *
    * Only when the strip is really there: a series with one season has none, and
-   * a key that never mounts is a remote that does nothing.
+   * a key that never mounts is a remote that does nothing. The STRIP is named,
+   * not a chip - the container always exists while the strip is drawn, and it
+   * is the one thing that knows which chip the season being shown is.
    */
   const startOnStrip = Boolean(focusSeasons) && seasons.length > 1;
-  useInitialFocus(startOnStrip ? seasonKey(itemId) : first, settled && (!focusSeasons || seasonsSettled));
+  useInitialFocus(startOnStrip ? SEASONS_KEY : first, settled && (!focusSeasons || seasonsSettled));
 
   // A countdown arrives on a screen that never unmounted - the browse tree is
   // hidden during playback, not thrown away - so the one-shot initial focus has
@@ -627,7 +640,10 @@ export function Detail({
 
   // Before the early returns, as hooks must be. `detail` is null while loading,
   // which is simply no theme yet.
-  useTheme(detail?.kind === "season" || detail?.kind === "show" ? detail : null);
+  // `undefined` while the item is still on its way, which is a different answer
+  // from `null`: switching seasons replaces this screen with another of the same
+  // series, and the theme must survive the gap rather than start again.
+  useTheme(detail ? (detail.kind === "season" || detail.kind === "show" ? detail : null) : undefined);
 
   if (failure) return <Message failure={failure} onRetry={() => setReload((n) => n + 1)} />;
   if (!detail) return <Message loading />;
