@@ -49,6 +49,16 @@ export type Screen =
        * belongs to a playlist or a collection, which are different endpoints.
        */
       queueFrom?: MediaItem[];
+      /**
+       * Opened from another season's strip, so the cursor belongs back on it.
+       *
+       * Switching seasons replaces this screen with the next season's, which is
+       * a fresh page that would otherwise open on its Play button - and looking
+       * through four seasons would be four trips back down to the strip. Only
+       * honoured when the strip is really there: a series with one season has
+       * none, and a key that never mounts is a dead remote.
+       */
+      focusSeasons?: boolean;
     }
   | { name: "person"; personId: string; personName: string }
   /**

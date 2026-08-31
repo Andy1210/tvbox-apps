@@ -373,6 +373,7 @@ export function MediaClient({ onExit }: MediaClientProps): React.JSX.Element {
               itemId={screen.itemId}
               focusChildId={screen.focusChildId}
               queueFrom={screen.queueFrom}
+              focusSeasons={screen.focusSeasons}
             />
           )}
           {screen.name === "person" && (

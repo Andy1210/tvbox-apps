@@ -86,7 +86,8 @@
     "inThis": "Tartalma",
     "emptyCollection": "Ebben a gyűjteményben nincs semmi.",
     "emptyPlaylist": "Ez a lejátszási lista üres.",
-    "upNext": "Következik"
+    "upNext": "Következik",
+    "seasonN": "{n}. évad"
   },
   "person": {
     "films": "Filmek",

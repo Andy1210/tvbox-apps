@@ -86,7 +86,8 @@
     "inThis": "In this",
     "emptyCollection": "There is nothing in this collection.",
     "emptyPlaylist": "This playlist is empty.",
-    "upNext": "Up next"
+    "upNext": "Up next",
+    "seasonN": "Season {n}"
   },
   "person": {
     "films": "Films",
