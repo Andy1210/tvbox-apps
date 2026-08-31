@@ -152,10 +152,8 @@ describe("the library's window", () => {
   });
 
   it("marks the letter that was pressed, even when the grid cannot move", async () => {
-    // The strip reads the first MOUNTED row, which is a row of overscan above
-    // the first visible one, so the mark was always a letter early. And in a
-    // library that fits on screen the grid does not move at all - there the
-    // mark is the whole of the feedback, and it stayed on the first letter
+    // In a library that fits on screen the grid does not move at all, so the
+    // mark is the whole of the feedback - and it stayed on the first letter
     // while the press appeared to do nothing.
     const { container } = render(<Library libraryId="1" title="Movies" />);
     await waitFor(() => expect(container.querySelector("[style*='will-change']")).toBeTruthy());

@@ -1,5 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { recallLibraryView, rememberLibraryView, type LibraryState } from "./libraryView";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  forgetLibraryCursor,
+  recallLibraryCursor,
+  recallLibraryView,
+  rememberLibraryCursor,
+  rememberLibraryView,
+  type LibraryState,
+} from "./libraryView";
 import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, useI18n } from "@sdk";
 import { Tile } from "./Tile";
@@ -61,6 +68,86 @@ const OVERSCAN = 1;
  * S with a D-pad is not a thing anyone will do twice.
  */
 /**
+ * The grid's visible height, read off the element.
+ *
+ * Its own vertical padding is subtracted because `overflow` clips at the
+ * PADDING box: `clientHeight` includes the room that exists for a focus ring to
+ * be drawn outside a tile, and counting it as usable moves a row that far too
+ * little at the end of the list.
+ *
+ * A function rather than only the state that holds it, because there is one
+ * moment that needs the answer before the state can carry it: the commit that
+ * first renders the grid measures it from a ref callback, so its own layout
+ * effects still see the height from before there was a grid.
+ */
+function gridViewport(box: HTMLElement): number {
+  const style = getComputedStyle(box);
+  return box.clientHeight - parseFloat(style.paddingTop || "0") - parseFloat(style.paddingBottom || "0");
+}
+
+/**
+ * A vh, in pixels.
+ *
+ * The clearance a row keeps from the edges of the screen is sized in vh like
+ * everything else here, and two places move the grid: the ordinary step, and the
+ * resume that has to land on the SAME offset the step would have chosen.
+ */
+function padPx(vh: number, windowH: number): number {
+  return Math.round((vh / 100) * windowH);
+}
+
+/**
+ * How far a row is kept from the top and the bottom of the screen.
+ *
+ * One pair of numbers rather than three copies, because the A-Z strip's mark is
+ * only right while it reads the SAME top pad that `nearest` parks with: with two
+ * literals, changing one has the strip silently naming the row above the screen
+ * again. No test can see that - at every rest position the grid can reach, any
+ * pad from 43 px up to a row's height marks the same letter - so a shared
+ * constant is the whole of the guarantee.
+ */
+const PAD_TOP_VH = 4;
+const PAD_BOTTOM_VH = 6;
+
+/**
+ * The cells the grid will have mounted when it opens on `index`.
+ *
+ * The cursor's row is NOT the top of that window: `nearest` only promises the
+ * row sits between the two pads, so depending on which side it was brought in
+ * from it can be as high as the third row on screen or as low as the third from
+ * the bottom. The union of the two is three rows either side, which is seven
+ * rows and 49 cells - fewer than a page, so it can straddle at most one
+ * boundary and cost at most two requests.
+ *
+ * A function rather than four lines inside the effect because the band is the
+ * whole of the fix: anchored at the cursor's row instead, the top of the screen
+ * arrived blank.
+ */
+export function arrivalCells(index: number): [first: number, last: number] {
+  const row = Math.floor(index / COLUMNS);
+  return [Math.max(0, (row - 2 - OVERSCAN) * COLUMNS), (row + 4) * COLUMNS - 1];
+}
+
+/**
+ * Every focus key this screen can own, in any of its states.
+ *
+ * A predicate over names rather than over anything live, so a check about
+ * whether the cursor is still somewhere this screen owns cannot drift from the
+ * list of keys it hands out. A key it misses is treated as gone, and focus is
+ * yanked off it.
+ */
+function ownsKey(key: string): boolean {
+  return (
+    key.startsWith("cell-") ||
+    key.startsWith("letter-") ||
+    key.startsWith("lib-") ||
+    // The failure screen replaces this one entirely, so its button is the only
+    // key on it.
+    key.startsWith("msg-")
+  );
+}
+
+/**
  * Whether two scroll positions produce the same set of rendered rows.
  *
  * Both edges, not just the top: the bottom edge crosses a row boundary at a
@@ -101,6 +188,38 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   const [sortNames, setSortNames] = useState<Record<string, string>>({});
   /** Which (library, mode, sort) the names have been asked for. See below. */
   const asked = useRef(new Set<string>());
+  /**
+   * Whether an error has been on this screen at all.
+   *
+   * The deferred initial focus is held back while the failure screen is up, so
+   * on a failure during the resume it has never fired - and it would then fire
+   * the moment Try again clears the error, putting the cursor on the resumed
+   * poster about a millisecond after the OK that dismissed the screen. The same
+   * press, repeated by a held button or by anyone who taps twice at an error,
+   * then lands there: measured on a box, it started a film nobody chose, which
+   * here means the shared mpv, a display-mode switch and a second of wind-down
+   * to get out of. An entry failure is exactly what the arrival requests made
+   * ordinary, so this leaves the cursor where the failure screen left it and
+   * the repeat lands on the recovery guard's own target instead.
+   *
+   * The window it protects is the REPEAT, and only that. Spatial navigation
+   * restores a child of the grid by itself 300 ms after the error screen's
+   * button unmounts, so a deliberate press seconds later does land on a poster
+   * - which is what this screen has always done, and by then it is a choice
+   * rather than the tail of one press. Measured at repeat cadence, 110 ms
+   * apart: the sort panel, one Back away, where the same probe against the
+   * build without this opened a film.
+   *
+   * What it costs is one press: the recovery guard below puts the cursor back
+   * on the next arrow or OK. Three attempts at spending that press instead each
+   * ended somewhere worse - a film, a cursor behind an open panel, and an error
+   * screen whose own button could not be reached after a retry that failed
+   * again - so the press stays spent.
+   */
+  const sawFailure = useRef(false);
+  useEffect(() => {
+    if (failure) sawFailure.current = true;
+  }, [failure]);
   /** How the films were arranged, kept for the way back out of the collections. */
   const saved = useRef<LibraryView | null>(kept.current?.saved ?? null);
   // Opening anything from here unmounts this screen, so what was chosen is
@@ -111,6 +230,28 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     rememberLibraryView(libraryId, state);
   }, [libraryId, view, mode]);
 
+  /**
+   * Where the cursor was when this library was last left, read once on mount.
+   *
+   * Opening anything from the grid unmounts this screen, so a film opened from
+   * the middle of a library came back to an alphabetical list at the top, with
+   * the title just watched somewhere off the bottom of the screen. The cursor
+   * is what is remembered rather than the film that was opened, so moving off
+   * it with the arrows and leaving by some other route is remembered too - the
+   * screen returns to where the person left it, not to what they last played.
+   *
+   * Spent by the effect below, and read during render for the cell to open on.
+   */
+  const resume = useRef(recallLibraryCursor(libraryId));
+  /**
+   * The cell to open the grid on, or null while the resume is still pending.
+   *
+   * Null is what holds `useInitialFocus` back: the first cell would otherwise
+   * take the cursor before the grid has moved, which drags the grid back to the
+   * top and undoes the resume. With nothing to resume it starts at 0 and the
+   * screen behaves exactly as it did.
+   */
+  const [startCell, setStartCell] = useState<number | null>(resume.current ? null : 0);
   /** Which letter search may still act. See jumpToLetter. */
   const jump = useRef(0);
   /** The letter last pressed, until the cursor moves off it. See activeLetter. */
@@ -155,20 +296,12 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   // window rather than be a constant.
   const rowHeight = useMemo(() => Math.round(windowH * ((TILE_VH + ROW_GAP_VH) / 100)), [windowH]);
 
-  /**
-   * The visible height of the grid, measured rather than assumed.
-   *
-   * Its own vertical padding is subtracted for the same reason the rails
-   * subtract theirs: `overflow` clips at the PADDING box, so `clientHeight`
-   * includes room that exists for the focus ring to be drawn outside a tile,
-   * and counting it as usable would move a row that far too little at the end.
-   */
+  /** The visible height of the grid, measured rather than assumed. */
   const measure = useCallback((): void => {
     setWindowH(window.innerHeight);
     const box = scroller.current;
     if (!box) return;
-    const style = getComputedStyle(box);
-    const inner = box.clientHeight - parseFloat(style.paddingTop || "0") - parseFloat(style.paddingBottom || "0");
+    const inner = gridViewport(box);
     if (inner > 0) setViewport(inner);
   }, []);
 
@@ -263,6 +396,17 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
 
   // Changing letter, order or filter is a new list: drop what was there rather
   // than let old items show through while the first page arrives.
+  /**
+   * Which list this last ran for, as the three things that define one.
+   *
+   * Not a "has this run before" flag. The effect is keyed on `loadPage`, whose
+   * identity also moves for reasons that are not a new list, and a run counter
+   * reads any of those as one: React's Strict Mode sets an effect up twice on
+   * mount, which would drop the resume AND delete the stored cursor with it.
+   * `view` is compared by reference on purpose - `setView` is the only thing
+   * that replaces it, so identity is exactly "a different list".
+   */
+  const list = useRef<{ id: string; view: LibraryView; mode: string } | null>(null);
   useEffect(() => {
     generation.current += 1;
     pending.current.clear();
@@ -274,8 +418,44 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     // A different list, not a move within one: there is nothing to follow from
     // the old position to the new one.
     mover.to(0, false);
+    // A new order, filter or mode renumbers the whole grid, so the cell an index
+    // names is a different title. Dropped here rather than left for the next
+    // focus event to overwrite: pressing Back before the cursor lands anywhere
+    // would otherwise file a position from the old list under the new one's
+    // view. `libraryId` is safe to name here only because `MediaClient` mounts
+    // this screen with `key={screen.libraryId}` - without that remount, opening
+    // another library would delete the cursor of the one just arrived at.
+    const before = list.current;
+    list.current = { id: libraryId, view, mode };
+    if (before && (before.id !== libraryId || before.view !== view || before.mode !== mode)) {
+      resume.current = undefined;
+      setStartCell(0);
+      forgetLibraryCursor(libraryId);
+    }
     void loadPage(0);
-  }, [loadPage]);
+    // Page 0 is what answers with the total, but the resumed cell is usually on
+    // another page - and asking for that one only once the grid has moved costs
+    // a whole extra round trip. For that round trip the screen is a grid of
+    // blank placeholders whose `onEnter` does nothing, so the Back-then-OK that
+    // people actually do after leaving a film lands on the right tile and is
+    // swallowed. Both in flight together instead.
+    //
+    // The WINDOW rather than the cursor's own cell: the grid arrives with four
+    // to six rows mounted, and a page boundary falls inside that band for about
+    // two cursor positions in five - worst case 27 of the 42 tiles on screen,
+    // and one press of Down lands on one of them. `arrivalCells` says which
+    // band; a narrower one left a whole row of posters blank at the TOP of the
+    // screen with the A-Z strip marking nothing, for 47 ms, and then fetched it
+    // 99 ms late.
+    //
+    // A page past the end costs one request and answers with no items, which is
+    // cheaper than carrying a total nobody knows yet in order to avoid it.
+    const back = resume.current;
+    if (back && back.index >= 0) {
+      const [first, last] = arrivalCells(back.index);
+      for (let p = Math.floor(first / PAGE); p <= Math.floor(last / PAGE); p += 1) void loadPage(p);
+    }
+  }, [loadPage, libraryId, view, mode, mover]);
 
   const rows = Math.ceil((total ?? items.length) / COLUMNS) || 0;
   /**
@@ -292,14 +472,13 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
    */
   const showRow = useCallback(
     (row: number) => {
-      const padVh = (v: number): number => Math.round((v / 100) * windowH);
       const to = nearest({
         at: mover.at,
         viewport,
         start: row * rowHeight,
         size: rowHeight,
-        padStart: padVh(4),
-        padEnd: padVh(6),
+        padStart: padPx(PAD_TOP_VH, windowH),
+        padEnd: padPx(PAD_BOTTOM_VH, windowH),
         max: rows * rowHeight,
       });
       mover.to(to, true);
@@ -310,27 +489,142 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     [mover, viewport, windowH, rowHeight, rows],
   );
 
+  /**
+   * Put the grid back where this library was left.
+   *
+   * A layout effect, so it lands before the frame is drawn: as a passive one
+   * the top of the library is painted first and the grid then jumps, which on a
+   * television reads as the screen having opened in the wrong place.
+   *
+   * Not before `total` arrives: the screen is showing "Loading" until then and
+   * there is no grid to move.
+   *
+   * The viewport is read off the element rather than taken from the state
+   * beside it, because the commit that first renders the grid measures it in a
+   * ref callback and this effect runs in that same commit, where the state
+   * still holds the height from before there was a grid - measured on the
+   * gaming box, whose window is 768 px tall, that is 406 px out.
+   *
+   * It buys the FIRST FRAME, not the resting place: once the cell takes the
+   * cursor, `holdCursor` runs `showRow` with the height by then in the state
+   * and corrects any clamp. So the cost of dropping this read is a visible
+   * settle on entry, which is the thing a layout effect is here to avoid,
+   * rather than a grid left in the wrong place.
+   *
+   * `nearest` rather than the offset verbatim so a window that changed size in
+   * between - a display-mode switch, which this box does per film - still puts
+   * the row on screen instead of somewhere past the end of a shorter grid.
+   */
+  useLayoutEffect(() => {
+    const at = resume.current;
+    if (!at || total === null) return;
+    // Spent here, and the failure screen does not hold it back - `total` is set
+    // the moment page 0 answers, whether or not there is a grid on screen. So by
+    // the time Try again is pressed there is no cursor left to re-derive a
+    // window from, which is why `retry` works off the rows instead.
+    const box = scroller.current;
+    const seen = box ? gridViewport(box) : 0;
+    // The state is the fallback rather than the source: a grid that measures as
+    // nothing is a grid that is not laid out, and any answer at all beats
+    // leaving `startCell` null, which is a screen with no cursor on it.
+    const vp = seen > 0 ? seen : viewport;
+    resume.current = undefined;
+    // The library can be shorter than it was - something removed, a section
+    // refreshed - and a cell past its end never mounts, which is the dead
+    // remote `useFocusFallback` exists for. The top is the honest answer.
+    const index = at.index >= 0 && at.index < total ? at.index : 0;
+    const row = Math.floor(index / COLUMNS);
+    const to = nearest({
+      at: at.offset,
+      viewport: vp,
+      start: row * rowHeight,
+      size: rowHeight,
+      padStart: padPx(PAD_TOP_VH, windowH),
+      padEnd: padPx(PAD_BOTTOM_VH, windowH),
+      max: rows * rowHeight,
+    });
+    mover.to(to, false);
+    setScrollTop(to);
+    setStartCell(index);
+  }, [total, rows, rowHeight, windowH, viewport, mover]);
+
   /** Where the grid may sit at the very end: past this the rows run out. */
   const maxOffset = useCallback(
     (row: number) => Math.max(0, Math.min(row * rowHeight, rows * rowHeight - viewport)),
     [rowHeight, rows, viewport],
   );
 
+  /**
+   * A cell has the cursor: bring its row into view, and file where that leaves
+   * the screen so it can be returned to.
+   *
+   * Written on every move rather than when something is opened, because the two
+   * differ and the move is the one that is true: someone who steps off a film
+   * with the arrows and leaves from there has not asked to come back to the
+   * film they played. The offset is read after the move, since `mover.at` is
+   * the destination from the moment it is asked for.
+   */
+  const holdCursor = useCallback(
+    (index: number, row: number) => {
+      showRow(row);
+      rememberLibraryCursor(libraryId, { index, offset: mover.at });
+    },
+    [showRow, libraryId, mover],
+  );
+
   const firstRow = Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN);
   const lastRow = Math.min(rows, Math.ceil((scrollTop + viewport) / rowHeight) + OVERSCAN);
+
+  /**
+   * Ask for the pages a band of rows needs.
+   *
+   * Both ends of every row: a row that straddles a page boundary would
+   * otherwise only ever ask for the first of the two, and on the last row there
+   * is no following row to ask for the second.
+   */
+  const loadRows = useCallback(
+    (from: number, to: number) => {
+      for (let r = from; r < to; r += 1) {
+        const first = Math.floor((r * COLUMNS) / PAGE);
+        const last = Math.floor(((r + 1) * COLUMNS - 1) / PAGE);
+        for (let p = first; p <= last; p += 1) void loadPage(p);
+      }
+    },
+    [loadPage],
+  );
 
   // Fetch whatever the visible window needs. Pages already in flight are skipped,
   // so a fast scroll does not queue the same request repeatedly.
   useEffect(() => {
-    for (let r = firstRow; r < lastRow; r += 1) {
-      // Both ends of the row: a row that straddles a page boundary would
-      // otherwise only ever ask for the first of the two, and on the last row
-      // there is no following row to ask for the second.
-      const first = Math.floor((r * COLUMNS) / PAGE);
-      const last = Math.floor(((r + 1) * COLUMNS - 1) / PAGE);
-      for (let p = first; p <= last; p += 1) void loadPage(p);
-    }
-  }, [firstRow, lastRow, items, loadPage]);
+    loadRows(firstRow, lastRow);
+  }, [firstRow, lastRow, items, loadRows]);
+
+  /**
+   * What Try again does: both halves, because each one alone is a dead screen.
+   *
+   * **Page 0**, because it is the page that carries the total - and with no
+   * total there are no rows, so the window below is empty and the button asks
+   * for nothing at all. That is the ordinary way a whole library fails (the
+   * server is down, the box has just woken), and measured on a box it left the
+   * screen on a spinner that never resolves, with nothing focusable on it.
+   *
+   * **The window**, because the page that failed is not necessarily the first
+   * one: once page 0 has answered it sits in `answered` and asking for it
+   * returns at its own first line, so the button cleared the failure and
+   * requested nothing - 42 blank tiles, recovering only on the second press,
+   * the one that happened to move the grid. Only the resume asks for a second
+   * page on the way in, which is what makes that the ordinary case now.
+   *
+   * Neither set is cleared. A page that FAILED is in neither of them already -
+   * `pending` deletes in its `finally` and `answered` is only written on
+   * success - so this asks for exactly the failed ones and skips the rest.
+   * Clearing `answered` would re-request pages whose posters are on screen, and
+   * a second refusal there replaces a good screen with the error again.
+   */
+  const retry = useCallback(() => {
+    void loadPage(0);
+    loadRows(firstRow, lastRow);
+  }, [loadPage, loadRows, firstRow, lastRow]);
 
   // Not a place the arrows may land while the failure screen is up.
   // `useFocusable` registers on the hook call, which is above the early return
@@ -379,23 +673,32 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
   // The button, when the grid is empty. A filter that matches nothing left the
   // screen with its own "no results" text and the button that could undo it
   // visible but unreachable - every press re-aimed at a cell that was not there.
-  useInitialFocus(total === 0 ? "lib-arrange" : "cell-0", total !== null);
+  // `startCell` is the first cell, except on a library being returned to, where
+  // it is the one the cursor was left on - and null until that is settled, so
+  // the cursor cannot land on the first tile and pull the grid back to the top.
+  //
+  // Never while the failure screen is up. It replaces this whole screen, and it
+  // focuses its own button - but `startCell` goes null to a value LATER, on the
+  // resume, so this would fire afterwards and aim the cursor at a grid cell that
+  // is not mounted. Measured: the error text on screen, its Try again button
+  // unhighlighted, and neither OK nor an arrow doing anything, because the
+  // fallback's own target is not mounted there either. Only a page other than
+  // the first can fail this way, which is what the resumed page made ordinary.
+  const startKey = total === 0 ? "lib-arrange" : `cell-${startCell ?? 0}`;
+  useInitialFocus(startKey, total !== null && startCell !== null && !failure && !sawFailure.current);
   // Every key this screen owns has to be listed. A focusable the guard does not
   // recognise is treated as gone and focus is yanked back to the grid - so the
   // sort-and-filter button could be reached and then lost between the press
   // landing on it and OK arriving, which opened the first film instead.
   useFocusFallback(
-    // Always mounted, unlike cell-0: that is only near the top of the grid, so
-    // recovering focus while scrolled down aimed at nothing and the remote went
-    // dead. The button is on screen in every state this screen has.
+    // Always in the same place, unlike cell-0: that is only near the top of the
+    // grid, so recovering focus while scrolled down aimed at nothing and the
+    // remote went dead. It is not mounted on the failure or loading screens,
+    // which render only the panel and the message - the failure screen focuses
+    // its own button, the loading one has none to focus, and a key parked while
+    // it is away lights when it comes back.
     "lib-arrange",
-    (key) =>
-      key.startsWith("cell-") ||
-      key.startsWith("letter-") ||
-      key.startsWith("lib-") ||
-      // The failure screen replaces this one entirely, so its button is the
-      // only key on it.
-      key.startsWith("msg-"),
+    ownsKey,
     // Not while the panel is open: this is a window listener, and it stays armed
     // behind the panel. Its predicate rejects every panel key, so any press the
     // panel could not resolve - a row edge, and it wraps twenty-seven chips -
@@ -427,7 +730,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
     return (
       <FocusContext.Provider value={focusKey}>
         {panel}
-        <Message failure={failure} onRetry={() => void loadPage(0)} />
+        <Message failure={failure} onRetry={retry} />
       </FocusContext.Provider>
     );
   // `total === null` is "not asked yet"; a total of zero is an answer, and an
@@ -460,7 +763,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
               heightVh={TILE_VH}
               // The grid moves itself; the browser must not also scroll it.
               selfScroll={false}
-              onFocusedEl={() => showRow(r)}
+              onFocusedEl={() => holdCursor(i, r)}
               onEnter={() => go({ name: "item", itemId: item.id })}
             />
           ) : (
@@ -473,7 +776,7 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
               focusKey={`cell-${i}`}
               heightVh={TILE_VH}
               selfScroll={false}
-              onFocusedEl={() => showRow(r)}
+              onFocusedEl={() => holdCursor(i, r)}
               onEnter={() => {}}
             />
           )}
@@ -512,16 +815,29 @@ export function Library({ libraryId, title }: { libraryId: string; title: string
    * letter pressed looks exactly like the other twenty-eight and nothing on
    * screen says the press did anything.
    *
-   * The letter pressed wins until the cursor moves, for two reasons. The row
-   * this reads is the first MOUNTED one, which is a row of overscan above the
-   * first visible one, so every item before the letter's own belongs to the
-   * letter before it - the mark was always one early. And in a library that
-   * fits on screen the grid cannot move at all, so the mark is the whole of the
-   * feedback: without this, pressing Z there changed nothing anywhere.
+   * The row read is the first one a person can READ, and getting there is two
+   * corrections rather than one. It used to read the first MOUNTED row, which
+   * is a row of overscan above the screen; and the row the top edge merely
+   * falls INSIDE is not on screen either, because `nearest` parks the grid a
+   * pad above the row it is bringing in - so after every upward move, and after
+   * the resume, which lands through that same branch, the row above shows a
+   * sliver of a caption and nothing else. Measured on a box: the strip marking
+   * R with 26 px of an R row visible and every readable row an S. Adding the pad back
+   * before the divide names the row whose posters are there, at the top, at a
+   * letter jump, at the pad rest and at the end clamp alike.
+   *
+   * That only ever showed while somebody scrolled by hand, where the letter
+   * they pressed masks it; a library now opens where it was left, so the mark
+   * is on screen from the first frame with nothing to mask it.
+   *
+   * The letter pressed still wins until the cursor moves, because in a library
+   * that fits on screen the grid cannot move at all - there the mark is the
+   * whole of the feedback, and without this pressing Z changed nothing
+   * anywhere.
    */
   const activeLetter = ((): string | null => {
     if (pressedLetter) return pressedLetter;
-    const first = items[firstRow * COLUMNS];
+    const first = items[Math.floor((scrollTop + padPx(PAD_TOP_VH, windowH)) / rowHeight) * COLUMNS];
     const t = (first?.sortTitle ?? first?.title ?? "").trim();
     if (!t) return null;
     const ch = t[0].toUpperCase();

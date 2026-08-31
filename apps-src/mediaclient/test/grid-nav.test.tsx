@@ -139,19 +139,32 @@ describe("a screen's focus guard", () => {
     // Read out of the source rather than asserted against a copy, because a
     // copy would keep passing after the predicate changed.
     const src = readFileSync(resolve(process.cwd(), "apps-src/mediaclient/Library.tsx"), "utf8");
-    // Matched on the call, not on its target: the fallback key is a choice that
-    // changes, and pinning it here made this test silently stop looking the
-    // moment it did.
-    const guard =
-      /useFocusFallback\([\s\S]*?\(key\) =>([\s\S]*?)\n\s*\/\/|useFocusFallback\([\s\S]*?\(key\) =>([\s\S]*?)\),\n/.exec(
-        src,
-      ) ?? [];
-    const body = (guard[1] ?? guard[2] ?? "") as string;
-    expect(body).toBeTruthy();
+    // The predicate itself, by name. It used to be matched as an inline argument
+    // to `useFocusFallback`; lifting it out broke that match, and the assertion
+    // below it failed loudly, which is what a test is for. Named rather than
+    // inline because what it lists is the whole of this screen, and that is the
+    // thing to hold - a key it misses is treated as gone and the cursor is
+    // yanked off it.
+    const guard = /function ownsKey\(key: string\): boolean \{([\s\S]*?)\n\}/.exec(src) ?? [];
+    const body = (guard[1] ?? "") as string;
+    expect(body, "Library.tsx no longer defines ownsKey").toBeTruthy();
 
-    // Every focusKey prefix the file hands to a focusable.
-    const prefixes = new Set([...src.matchAll(/focusKey=\{?["`]([a-z]+)-/g)].map((m) => m[1]));
-    expect(prefixes.size).toBeGreaterThan(1);
+    // Every focusKey prefix that can hold the cursor while this screen is up.
+    // The strip and the failure screen are the guard's blind spots: they are
+    // rendered inside the library's own focus context but declared in their own
+    // files, so scanning only Library.tsx compared two prefixes of four - and
+    // losing `letter-` is a dead A-Z strip, every press on a letter yanked back
+    // to the header.
+    const also = ["LetterStrip", "Message"].map((f) =>
+      readFileSync(resolve(process.cwd(), `apps-src/mediaclient/${f}.tsx`), "utf8"),
+    );
+    const prefixes = new Set(
+      [...[src, ...also].join("\n").matchAll(/(?:focusKey=\{?|key: )["`]([a-z]+)-/g)].map((m) => m[1]),
+    );
+    expect(prefixes).toContain("cell");
+    expect(prefixes).toContain("letter");
+    expect(prefixes).toContain("msg");
+    expect(prefixes).toContain("lib");
     for (const p of prefixes) {
       expect(body, `focus guard does not accept "${p}-" keys`).toContain(`"${p}-"`);
     }
