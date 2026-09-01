@@ -109,34 +109,23 @@ export function SeasonStrip({
                   }
                   return true;
                 }}
+                // The season being shown is a brighter chip in a heavier weight,
+                // and that is all: the weight survives focus filling the chip
+                // white, so the two states are still told apart on the chip the
+                // strip is always entered at.
                 className={`shrink-0 rounded-[0.9vh] px-[1.6vw] py-[0.9vh] text-[2.1vh] whitespace-nowrap ${
                   season.id === currentId ? "bg-white/15 font-semibold" : "bg-white/5 text-fg-dim"
                 }`}
               >
-                {/* The season being shown is marked INSIDE the chip, because
-                    every entry into the strip lands on it: focus fills the chip
-                    white, which takes the fill and the weight with it, and the
-                    one chip that answers OK with nothing would then look like
-                    every other. `bg-current` follows the text colour, so the
-                    mark survives the fill - the same reasoning as the tick on
-                    the version chips. */}
-                <span className="relative">
-                  {/* The NUMBER, where the season has one, rather than the name the
-                      server carries: a third of this library's series name their
-                      seasons ("Secrets Revealed", "The Final Season"), and a strip
-                      of names says nothing about which one is the third - while
-                      every episode caption beside it reads S3E1. Plex's season 0 is
-                      the specials, which have no number and keep their name. */}
-                  {Number.isInteger(season.index) && (season.index as number) > 0
-                    ? t("detail.seasonN", { n: String(season.index) })
-                    : season.title}
-                  {season.id === currentId && (
-                    <span
-                      aria-hidden="true"
-                      className="absolute -bottom-[0.5vh] left-0 h-[0.3vh] w-full rounded-full bg-current"
-                    />
-                  )}
-                </span>
+                {/* The NUMBER, where the season has one, rather than the name the
+                    server carries: a third of this library's series name their
+                    seasons ("Secrets Revealed", "The Final Season"), and a strip
+                    of names says nothing about which one is the third - while
+                    every episode caption beside it reads S3E1. Plex's season 0 is
+                    the specials, which have no number and keep their name. */}
+                {Number.isInteger(season.index) && (season.index as number) > 0
+                  ? t("detail.seasonN", { n: String(season.index) })
+                  : season.title}
               </FocusButton>
             ))}
           </div>
