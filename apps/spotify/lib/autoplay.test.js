@@ -339,10 +339,10 @@ test("a pause that lands while the play request is out stops the music again", a
 });
 
 test("the continuation is chosen for the account that will play it", async () => {
-  // autoplay plays with keepActive, so the account driving the box is
-  // deliberately not made the active one. A catalog read for the wrong account is
-  // answered for the wrong COUNTRY, which on a box with two accounts in two
-  // countries returns tracks the one actually playing cannot play.
+  // A play never makes the box's account the active one, so the account driving
+  // the box is not the one a catalog read defaults to. A read for the wrong
+  // account is answered for the wrong COUNTRY, which on a box with two accounts
+  // in two countries returns tracks the one actually playing cannot play.
   const asked = [];
   const { a } = watcher({
     api: {
@@ -357,15 +357,6 @@ test("the continuation is chosen for the account that will play it", async () =>
   a.onEvent("end_of_track", "t1");
   await tick(30);
   assert.deepEqual(asked, ["bob"], "the box's account, not whichever one is active");
-});
-
-test("a continuation never changes which account the box's screens show", async () => {
-  const { a, played } = watcher();
-  a.onEvent("playing", "t1");
-  a.onEvent("end_of_track", "t1");
-  await tick(30);
-  assert.equal(played.length, 1);
-  assert.equal(played[0].keepActive, true, "an unattended play must not switch the active account");
 });
 
 test("the unattended bound holds even when a continuation is not recognised as its own", async () => {

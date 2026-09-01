@@ -14,13 +14,18 @@ const path = require("path");
 const test = require("node:test");
 const assert = require("node:assert");
 
-const { createCredGuard, isCredentialRejection, isUp, isSupervisorExit } = require("./credguard");
+const { createCredGuard, isCredentialRejection, authenticatedAs, isUp, isSupervisorExit } = require("./credguard");
 
 // The measured lines. The denial is the one that killed the box; the AP line
 // above it is what makes the failure so misleading (the login DID work, one step
 // earlier), and is here to prove it is not itself taken for a failure.
 const DENIED =
   "[2026-08-23T09:22:59Z ERROR librespot] could not initialize spirc: Invalid state { Login request was denied: INVALID_CREDENTIALS }";
+// The other shape of the same refusal, measured on tvbox-gaming against a saved
+// login Spotify no longer accepts. Unrecognised, it leaves the box exiting 1 on
+// every start and publishing no zeroconf service, so not even a cast can reach it.
+const DENIED_BAD_CREDS =
+  "[2026-09-01T17:17:16Z ERROR librespot] could not initialize spirc: Permission denied { Login failed with reason: Bad credentials }";
 const AUTHED = "[2026-08-23T09:22:59Z INFO  librespot_core::session] Authenticated as '11124899563' !";
 const PUBLISHED = "[2026-08-23T09:27:09Z INFO  librespot_discovery] Published zeroconf service";
 const TRANSIENT =
@@ -52,6 +57,94 @@ test("two denials clear the saved login, and keep it as evidence", () => {
   assert.equal(fs.existsSync(b.cred), false, "librespot must start with no cached login");
   assert.match(fs.readFileSync(b.kept, "utf8"), /saved-blob/, "the refused blob is kept, not deleted");
   assert.match(b.logs.join("\n"), /cast to the box once/, "the log says what the user has to do");
+});
+
+test("the other refusal shape is one too, and the two count together", () => {
+  const b = box();
+  assert.equal(isCredentialRejection(DENIED_BAD_CREDS), true);
+  assert.equal(b.guard.note(DENIED_BAD_CREDS, {}), false);
+  assert.equal(b.guard.note(DENIED, {}), true, "two refusals of the same file, whichever words they came in");
+  assert.equal(fs.existsSync(b.cred), false);
+});
+
+// The whole reason the refusal is matched as a full phrase inside the daemon's own
+// ERROR line. Two of the things on this stream carry text somebody else chose: the
+// supervisor quotes the argv, which carries the Connect device NAME (settable from
+// the box's own origin), and the daemon logs every track by TITLE. Either one,
+// twice, would otherwise clear the box's login and drop its saved copy.
+test("a device name or a song title cannot pass as a refused login", () => {
+  const NAMED = "spawn: librespot --name Bad Credentials --device-type tv --backend pulseaudio";
+  const TITLE =
+    "[2026-09-01T17:43:06Z INFO  librespot_playback::player] Loading <Bad Credentials> with Spotify URI <spotify:track:x>";
+  const ANGRY = "[2026-09-01T17:43:06Z ERROR librespot_playback::player] failed on <bad credentials (live)>";
+  const b = box();
+  for (const line of [NAMED, TITLE, ANGRY]) {
+    assert.equal(isCredentialRejection(line), false, line.slice(0, 60));
+    assert.equal(b.guard.note(line, {}), false);
+  }
+  // ...and none of them may even count towards the threshold.
+  assert.equal(b.guard.note(DENIED_BAD_CREDS, {}), false);
+  assert.equal(fs.existsSync(b.cred), true);
+});
+
+test("only the daemon can say the box came up, or the self-heal can be switched off", () => {
+  // The sharpest of the three classifiers: this one CLEARS the strikes. The
+  // supervisor quotes the argv on every start and the argv carries the Connect
+  // device name, so a box named after this line reset the count at every spawn -
+  // and a box whose login has gone stale then never heals, stays out of every
+  // phone's device list, and cannot even be cast to.
+  const NAMED = "spawn: librespot --name Published zeroconf service --device-type tv";
+  assert.equal(isUp(NAMED), false);
+  assert.equal(isUp(PUBLISHED), true, "the daemon's own line still counts");
+  const b = box();
+  b.guard.note(NAMED, {}); // the spawn line of one failing start...
+  assert.equal(b.guard.note(DENIED, {}), false, "one refusal is still one");
+  b.guard.note(NAMED, {}); // ...and of the next
+  assert.equal(b.guard.note(DENIED, {}), true, "the strikes were not reset by a device name");
+  assert.equal(fs.existsSync(b.cred), false, "so the box does get out of it");
+});
+
+test("the daemon naming the account it signed in as is read from its own module", () => {
+  assert.equal(authenticatedAs(AUTHED), "11124899563");
+  // A device name or a title that copies the wording cannot claim an account: the
+  // decision "did the login bring the box back as who was asked for" hangs on it.
+  assert.equal(authenticatedAs("spawn: librespot --name Authenticated as 'somebody' !"), "");
+  assert.equal(
+    authenticatedAs("[2026-09-01T17:43:06Z INFO  librespot_playback::player] Loading <Authenticated as 'x' !>"),
+    "",
+  );
+  for (const line of [DENIED, DENIED_BAD_CREDS, PUBLISHED, SPAWN, EXITED, TRANSIENT]) {
+    assert.equal(authenticatedAs(line), "", line.slice(0, 50));
+  }
+});
+
+test("two denials of DIFFERENT files are not two denials", () => {
+  // The plugin puts another account's login in place to sign the box in as them,
+  // and the daemon it kills can still have a refusal in flight. Counted together,
+  // two of those move aside the login that was just put back - which is the one
+  // that was working. The count is about one blob, and it says so by checking.
+  const b = box();
+  assert.equal(b.guard.note(DENIED, {}), false);
+  fs.writeFileSync(b.cred, '{"username":"other","auth_type":1,"auth_data":"another-blob"}');
+
+  assert.equal(b.guard.note(DENIED, {}), false, "the second refusal is about a file that has changed");
+  assert.equal(fs.existsSync(b.cred), true, "so the new login is still in place");
+
+  // ...and two refusals of THIS file still act.
+  assert.equal(b.guard.note(DENIED, {}), true);
+  assert.equal(fs.existsSync(b.cred), false);
+});
+
+test("a file that was replaced does not inherit the strikes counted against the last one", () => {
+  // What a sign-in does: a refused login is swapped out for the one that was
+  // working. A refusal still in flight would otherwise move THAT file aside.
+  const b = box();
+  b.guard.note(DENIED, {});
+  b.guard.fileReplaced();
+
+  assert.equal(b.guard.note(DENIED, {}), false, "the count starts again with the new file");
+  assert.equal(fs.existsSync(b.cred), true);
+  assert.equal(b.guard.note(DENIED, {}), true, "and two refusals of the NEW file still act");
 });
 
 test("the lines around the denial are not denials", () => {

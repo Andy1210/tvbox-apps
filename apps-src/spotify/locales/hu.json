@@ -98,6 +98,8 @@
     "upNext": "Következik",
     "voiceSearching": "„{query}” keresése a Spotifyon…",
     "voiceNoMatch": "A Spotify nem talált semmit erre: „{query}”.",
+    "startedAsOther": "Most {name} Spotify-fiókjából szól a zene, mert a box abba van bejelentkezve. Castolj rá egyszer {mine} telefonjáról, és utána {mine} fiókjából fog szólni.",
+    "startedAsOtherPlain": "Most {name} Spotify-fiókjából szól a zene, mert a box abba van bejelentkezve. Ahhoz, hogy a most megnyitott fiókból szóljon, castolj rá egyszer annak a fióknak a telefonjáról.",
     "voiceNoAccount": "Hanggal indított zenéhez kösd be a Spotify-fiókot az app beállításaiban.",
     "recoveryFailed": "A box nem tudott visszajelentkezni a Spotify-ba. Castolj rá egyszer a telefonodról.",
     "connectOff": "A Spotify Connect ki van kapcsolva ezen a boxon. A Beállításokban kapcsold be.",

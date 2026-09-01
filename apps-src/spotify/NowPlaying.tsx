@@ -111,17 +111,31 @@ function GearIcon() {
 // going on the box.
 export function NowPlaying({
   connected,
+  account,
   note,
+  noteBad,
   lyrics,
   onLyricsDone,
-  onNoteDone,
   onSettings,
   onBrowse,
   onExit,
 }: {
   connected: boolean;
-  /** What a spoken request is doing, or why it did nothing. Empty means none. */
+  /** The linked account this app is on: its library, its player, its buttons. */
+  account?: string;
+  /**
+   * A line about the last thing that happened: what a spoken request did, or whose
+   * Spotify session a play from the library started in. Empty means none.
+   *
+   * Its CLOCK is not here. This screen unmounts whenever the library is opened, so
+   * a timer of its own dies with it and the line comes back on the way in - and it
+   * was re-armed by every unrelated re-render, which with a poll shorter than the
+   * timeout meant it never expired at all. Whoever owns the text owns the clock.
+   */
   note?: string;
+  /** Whether that line is a failure. It decides the colour, and this channel
+   *  carries both: "nothing found for …" is a note too. */
+  noteBad?: boolean;
   /**
    * A spoken lyrics request. `at` is what distinguishes the same one asked twice.
    */
@@ -129,7 +143,6 @@ export function NowPlaying({
   /** Consume it: this screen unmounts whenever the library is opened, and a
    *  request left standing re-opened the panel on the way back. */
   onLyricsDone?: () => void;
-  onNoteDone?: () => void;
   onSettings: () => void;
   onBrowse: () => void;
   onExit: () => void;
@@ -245,11 +258,6 @@ export function NowPlaying({
   }, [ctrlErr]);
   // A spoken request's answer goes away by itself too: it is a line about a press
   // nobody in the room made, so nothing here can be waiting to dismiss it.
-  useEffect(() => {
-    if (!note || !onNoteDone) return;
-    const id = setTimeout(onNoteDone, 8000);
-    return () => clearTimeout(id);
-  }, [note, onNoteDone]);
   // Shuffle and repeat are player-wide SETTINGS, and the cast metadata does not
   // carry them - so they are read back from the Web API rather than assumed from
   // what was last pressed. The phone can change either of them too, which is why
@@ -417,7 +425,24 @@ export function NowPlaying({
     seekedTo !== null && Date.now() - seekedTo.at < SEEK_SETTLE_MS && Math.abs(reported - seekedTo.ms) > 3000;
   const pos = optimistic ? seekedTo.ms : reported;
   const pct = state && state.duration_ms ? Math.min(100, (pos / state.duration_ms) * 100) : 0;
+  /**
+   * The one line at the bottom of the screen, and its three sources in priority
+   * order. A transient beats a standing condition, and the newest transient wins:
+   *   - `ctrlErr`, a press that has just failed. Nothing else may hide it, or the
+   *     button reads as dead.
+   *   - `note`, what the last play or spoken request did. It may be a failure of
+   *     its own ("nothing found for …"), which is what `noteBad` carries.
+   *   - `spotify.otherAccount`, the standing case: an account this box has not
+   *     linked is driving the music. It is true for as long as that lasts, so
+   *     giving it the slot first swallowed every answer to anything a person did.
+   */
+  const standing = !!(connected && player?.otherAccount);
+  const message = (connected && ctrlErr) || note || (standing ? t("spotify.otherAccount") : "");
+  const bad = !!((connected && ctrlErr) || (note ? noteBad : standing));
+  const messageUp = !!message;
   const hasTrack = !!state?.track_id;
+  /** Is the queue panel on the right? The message is narrowed to clear it. */
+  const panelUp = panel && !showLyrics && hasTrack && queue.length > 0;
   const device = state?.device_name || "tvbox";
 
   return (
@@ -454,13 +479,33 @@ export function NowPlaying({
           </FocusButton>
         )}
 
-        <FocusButton
-          focusKey="sp-gear"
-          onEnter={onSettings}
-          className="absolute top-[3vh] right-[3vw] z-20 w-[6vh] h-[6vh] rounded-full bg-white/10 flex items-center justify-center text-white"
-        >
-          <GearIcon />
-        </FocusButton>
+        {/* Whose account this app is on, beside the way to change it. A box can
+            have several linked and the choice is invisible otherwise: every screen
+            here - the library, the songs, the buttons - is about one account, and
+            which one was a question you had to open the settings to answer. The
+            label is not focusable: a stop on the way to the gear would cost a
+            press, and there is nothing to do to it. It shares the gear's row
+            rather than being placed beside it, so a long name cannot land on top
+            of the button. */}
+        <div className="absolute top-[3vh] right-[3vw] z-20 flex items-center gap-[1vw]">
+          {account && (
+            // Full white with its own shadow rather than dimmed: this is the one
+            // label on the top edge with no pill behind it, and the scrim is at its
+            // lightest up here - over pale artwork, dimmed grey on light grey is not
+            // readable from a sofa. A pill would read as a button it is not.
+            <div className="max-w-[20vw] truncate text-right text-[1.9vh] font-semibold text-white [text-shadow:0_0_0.2vh_rgb(0,0,0),0_0.15vh_0.5vh_rgba(0,0,0,0.9)]">
+              {account}
+            </div>
+          )}
+          <FocusButton
+            focusKey="sp-gear"
+            onEnter={onSettings}
+            label={t("settings.title")}
+            className="w-[6vh] h-[6vh] rounded-full bg-white/10 flex items-center justify-center text-white"
+          >
+            <GearIcon />
+          </FocusButton>
+        </div>
 
         {hasTrack && (
           <FocusButton
@@ -519,13 +564,27 @@ export function NowPlaying({
             the lyrics are open or not. On its own backdrop, because the layer
             underneath is somebody's album art and amber prose on a bright photo
             is not readable from a sofa. */}
-        {(note || (connected && (ctrlErr || player?.otherAccount))) && (
+        {messageUp && (
           // left+right rather than a centred max-width: a shrink-to-fit box that
           // starts at the middle of the screen has 50vw to work with, so the long
           // messages (the Development Mode one is 190 characters) wrapped to four
           // lines and grew up into the controls.
-          <div className="absolute bottom-[3vh] left-[15vw] right-[15vw] z-30 rounded-[1.4vh] bg-black/70 px-[2.4vw] py-[1.2vh] text-center text-[2.1vh] text-warn">
-            {note || ctrlErr || t("spotify.otherAccount")}
+          // A FAILURE wins the slot, and it is amber; a note about something that
+          // did happen is white. The other way round, a press that failed while a
+          // note was up said nothing at all - a dead button - and a play that had
+          // just started was announced in the colour this app uses for errors.
+          <div
+            className={[
+              "absolute bottom-[3vh] left-[15vw] z-30 rounded-[1.4vh] bg-black/70 px-[2.4vw] py-[1.2vh] text-center text-[2.1vh]",
+              // Out of the queue panel's way rather than over it: the two used to
+              // overlap by half the panel's width, and an instruction printed
+              // across the list is unreadable. Unmounting the panel instead cost
+              // "up next" for the whole life of the message.
+              panelUp ? "right-[32vw]" : "right-[15vw]",
+              bad ? "text-warn" : "text-white",
+            ].join(" ")}
+          >
+            {message}
           </div>
         )}
 
@@ -631,16 +690,12 @@ export function NowPlaying({
                 {/* Hidden while a message is up: the strip is anchored to the
                   bottom of the screen and this is the last thing above it, so the
                   two share the same few vh and the backdrop would cover it. */}
-                {connected &&
-                  onThisBox &&
-                  !ctrlErr &&
-                  !player?.otherAccount &&
-                  (repeat !== "off" || player?.shuffle) && (
-                    <div className="flex items-center gap-[1.2vw] text-[1.6vh] text-[#1DB954] mt-[0.2vh]">
-                      {player?.shuffle && <span>{t("spotify.shuffle")}</span>}
-                      {repeat !== "off" && <span>{t("spotify.repeat_" + repeat)}</span>}
-                    </div>
-                  )}
+                {connected && onThisBox && !messageUp && (repeat !== "off" || player?.shuffle) && (
+                  <div className="flex items-center gap-[1.2vw] text-[1.6vh] text-[#1DB954] mt-[0.2vh]">
+                    {player?.shuffle && <span>{t("spotify.shuffle")}</span>}
+                    {repeat !== "off" && <span>{t("spotify.repeat_" + repeat)}</span>}
+                  </div>
+                )}
                 {!connected && (
                   <div className="flex items-center gap-[0.8vw] text-[1.8vh] text-fg-dim mt-[0.5vh]">
                     <span
@@ -669,7 +724,7 @@ export function NowPlaying({
             well before this panel starts. Unmounted rather than hidden, since a
             hidden box still takes layout. Never over the lyrics, which are full
             screen. */}
-          {panel && !showLyrics && hasTrack && queue.length > 0 && (
+          {panelUp && (
             <div
               className="absolute top-0 right-0 bottom-0 z-20 flex w-[30vw] min-w-0 flex-col pt-[11vh] pb-[4vh] pr-[3vw]"
               aria-hidden="true"

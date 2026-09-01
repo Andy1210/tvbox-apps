@@ -734,6 +734,27 @@ async function boxDeviceIdFor(acc) {
 function forgetBoxDevice() {
   boxDev = { key: "", id: "", at: 0 };
 }
+// Who the launcher is browsing, for a caller outside this module. Id and name
+// only: the account row also carries the refresh token, which is the one thing in
+// this file that must not travel.
+function activeAccountInfo() {
+  const a = activeAccount();
+  return a ? { id: a.id, name: a.name || "" } : null;
+}
+// Can THIS account see the box right now? The question a sign-in has to poll,
+// and it must be asked of one named account rather than of the fleet: coming back
+// under a different account is precisely the failure being waited out. Never
+// throws - a listing that did not answer is not a box that is absent, but for a
+// poll they are the same "not yet".
+async function boxSeenBy(accId) {
+  const acc = accounts.list.find((x) => x.id === accId);
+  if (!acc) return false;
+  try {
+    return !!(await boxDeviceIdFor(acc));
+  } catch (e) {
+    return false;
+  }
+}
 
 // Who the box is playing as. Every command about the box is sent as this account
 // and addressed to this device id; nothing else may stand in for either.
@@ -834,16 +855,32 @@ function cachedBoxOwner() {
 // from a phone changes, and until it did, a second linked account could take the
 // box over and leave the screen browsing — and commanding — the first one.
 //
-// The window is autoplay's: a continuation it starts activates the box, and an
-// activation otherwise reads as somebody having chosen this room.
-// `asked` is a person having pressed something, which outranks the window and
-// ends it: they are in the room, and the screen they are looking at should be
-// about the music they are hearing.
+// The window covers the activation a play of OURS causes: both autoplay's
+// continuations and a row somebody pressed on this screen activate the box, and
+// neither is a phone claiming it. An activation outside the window reads as
+// somebody having chosen this room, which is the case this exists to follow.
+//
+// In two phases, because the window has to be armed before it can be aimed. A play
+// arms it with no account named, which suppresses ANY activation - the target is
+// not known until the device lookup comes back, and the activation can arrive
+// before that: it is one local POST against the play's two round trips. Once the
+// target IS known the window narrows to that one account, so a real cast by
+// another account inside it is still followed. Swallowing those left the library,
+// the name beside the gear and the transport buttons pointing at the wrong
+// account, and the next press then took the box off the person who had just cast.
 const FOLLOW_SUPPRESS_MS = 30000;
 let suppressFollowUntil = 0;
-function switchActiveTo(id, asked) {
-  if (asked) suppressFollowUntil = 0;
-  else if (Date.now() < suppressFollowUntil) return false;
+let suppressFollowFor = "";
+function armFollowSuppression(accId) {
+  suppressFollowUntil = Date.now() + FOLLOW_SUPPRESS_MS;
+  suppressFollowFor = accId || "";
+}
+function disarmFollowSuppression() {
+  suppressFollowUntil = 0;
+  suppressFollowFor = "";
+}
+function switchActiveTo(id) {
+  if (Date.now() < suppressFollowUntil && (!suppressFollowFor || id === suppressFollowFor)) return false;
   if (!id || id === accounts.active) return false;
   if (!accounts.list.find((x) => x.id === id)) return false;
   accounts.active = id;
@@ -914,10 +951,16 @@ async function boxPlayerState() {
 }
 
 // Play a playlist (context_uri) or track uris ON THE BOX. Find whichever
-// connected account currently owns the box device and play there; then switch
-// active to it so the transport controls target the same session. If no linked
+// connected account currently owns the box device and play there. If no linked
 // account can see the box, report which of the two it is — the caller (plugin)
 // signs the daemon back in from its saved login and retries.
+//
+// What this does NOT do is move the launcher onto the account it played as. The
+// active account is whose library the TV is showing, and it is a choice somebody
+// made on this screen; a play they started from it must not take it off them. It
+// follows a CAST instead (boxSignedInAs / followBox), which is somebody claiming
+// the box from a phone - and a play arms the same suppression autoplay uses, so
+// the activation this play itself causes does not read as one.
 // Spotify refuses a very large `uris` array, and a flat copy of a playlist is not
 // the playlist anyway: `next` runs off the end of the copy, and shuffle and repeat
 // only ever see the tracks that were copied. So anything with a context of its own
@@ -932,14 +975,14 @@ function collectionUri(acc) {
   return id && id !== "legacy" && id.indexOf("acc-") !== 0 ? `spotify:user:${id}:collection` : "";
 }
 
-async function play({ contextUri, uris, offset, collection, keepActive }) {
+async function play({ contextUri, uris, offset, collection }) {
   if (!connected()) return { ok: false, error: "not connected" };
   // Armed BEFORE the request, not after it. Starting playback activates the box,
   // and the activation event is what the launcher follows; on an idle box the
   // play takes two round trips (the 404 transfer and the retry below) while the
   // event needs one local POST, so arming afterwards armed it too late and a
   // continuation nobody asked for still repointed the household's library.
-  if (keepActive) suppressFollowUntil = Date.now() + FOLLOW_SUPPRESS_MS;
+  armFollowSuppression("");
   const found = await boxOwner(true);
   // `box_not_found` and `box_unreachable` both say the device cannot be
   // addressed, and both let the caller restart the daemon to sign it back in;
@@ -951,7 +994,7 @@ async function play({ contextUri, uris, offset, collection, keepActive }) {
   // continuation that never started would otherwise keep the launcher off a real
   // cast for the rest of the window.
   const refuse = (error) => {
-    if (keepActive) suppressFollowUntil = 0;
+    disarmFollowSuppression();
     return { ok: false, error };
   };
   // An account this box has not linked is holding it: nothing we send could reach
@@ -969,11 +1012,19 @@ async function play({ contextUri, uris, offset, collection, keepActive }) {
   }
   if (!found.account || !found.devId) return refuse("box_unreachable");
   const { account: target, devId } = found;
+  // Now that the target is known, the window is about THAT account's activation
+  // and nobody else's - a cast by another account inside it is a real handover.
+  armFollowSuppression(target.id);
   const q = `?device_id=${encodeURIComponent(devId)}`;
   const pos = Number(offset) > 0 ? Math.floor(Number(offset)) : 0;
-  // The collection uri has to name the account that actually owns the box's
-  // session, which is not necessarily the active one.
-  const ctx = contextUri || (collection ? collectionUri(target) : "");
+  // "Liked Songs" means the liked songs of the account whose library is on
+  // screen, and a collection context can only name the account the play goes out
+  // as. When the box is signed into somebody else that context is a different
+  // person's collection, which Spotify accepts - so it plays their songs and
+  // reports success. The caller sends the track uris as well for exactly this
+  // case; falling through to them keeps the songs the ones that were asked for.
+  const asked = activeAccount();
+  const ctx = contextUri || (collection && asked && target.id === asked.id ? collectionUri(target) : "");
 
   const attempt = async (payload) => {
     let r = await apiWrite(target, "PUT", "/me/player/play" + q, payload);
@@ -987,27 +1038,34 @@ async function play({ contextUri, uris, offset, collection, keepActive }) {
     return r;
   };
 
-  let r = ctx ? await attempt({ context_uri: ctx, ...(pos > 0 ? { offset: { position: pos } } : {}) }) : null;
-  if ((!r || !r.ok) && (uris || []).length) {
-    if (r) console.warn("[spotify-api] context play refused (" + r.status + "); falling back to track uris");
-    r = await attempt({ uris: (uris || []).slice(0, URIS_MAX) });
+  // The window is armed above, and a THROW leaves this function without touching it
+  // again: a timeout or a socket error would keep the launcher off a real cast for
+  // the next thirty seconds, for a play that never happened.
+  let r;
+  try {
+    r = ctx ? await attempt({ context_uri: ctx, ...(pos > 0 ? { offset: { position: pos } } : {}) }) : null;
+    if ((!r || !r.ok) && (uris || []).length) {
+      if (r) console.warn("[spotify-api] context play refused (" + r.status + "); falling back to track uris");
+      r = await attempt({ uris: (uris || []).slice(0, URIS_MAX) });
+    }
+  } catch (e) {
+    disarmFollowSuppression();
+    throw e;
   }
   if (!r) return refuse("nothing to play");
-  // Controls follow the playing account - but only when a person asked for this
-  // playback. `keepActive` is for a play that starts on its own (autoplay):
-  // switching the household's active account from a background timer would
-  // silently change whose library the TV browses, with nothing on screen having
-  // happened.
-  if (r.ok && !keepActive) switchActiveTo(target.id, true);
-  if (!r.ok && keepActive) suppressFollowUntil = 0;
+  // A refusal is not a play, so it must not go on suppressing the follow.
+  if (!r.ok) disarmFollowSuppression();
   // WHICH account this went out as. Autoplay has to be able to stop the music it
   // just started, and the account it guessed from boxPlayerState is not
   // necessarily the one resolved here - a pause sent as the wrong one is
-  // refused, and the music it was cancelling keeps playing.
+  // refused, and the music it was cancelling keeps playing. The NAME is for the
+  // screen: when this is not the account being browsed, the music is somebody
+  // else's session and the person who pressed a row is owed that sentence.
   return {
     ok: r.ok,
     error: r.ok ? "" : "HTTP " + r.status + " " + (r.body || "").slice(0, 80),
     account: target.id,
+    accountName: target.name || "",
   };
 }
 
@@ -1025,15 +1083,13 @@ async function play({ contextUri, uris, offset, collection, keepActive }) {
 //     Addressing the box by id is what keeps a press in this room.
 const REPEAT_STATES = ["off", "context", "track"];
 
-// `accId` names the account to act on, and is how autoplay commands the box
-// without making its owner the active account. Without it the box's owner is
-// resolved, and the launcher follows it — the account that is playing here is
-// the one this screen should be about.
+// `accId` names the account to act on: autoplay knows which account its own play
+// went out as, and has to be able to stop that music without resolving the owner
+// again. Without it the box's owner is resolved here.
 async function control(action, state, accId) {
   if (!connected()) return { ok: false, error: "not connected" };
   let acc = null;
   let devId = "";
-  let asked = false; // a person pressed this, as opposed to autoplay cleaning up
   if (accId) {
     // A named account is not a licence to skip the device: accountById falls back
     // to the ACTIVE account for an id it does not know (an account removed while
@@ -1059,10 +1115,9 @@ async function control(action, state, accId) {
     if (!owner.account) return { ok: false, error: "box_not_found" };
     acc = owner.account;
     devId = owner.devId;
-    asked = true;
     // Somebody is in the room, which ends the window autoplay armed - here rather
     // than after the write, because a press Spotify refuses is still a person.
-    suppressFollowUntil = 0;
+    disarmFollowSuppression();
   }
   const at = (p) => p + (p.indexOf("?") >= 0 ? "&" : "?") + "device_id=" + encodeURIComponent(devId);
   const write = (m, p, payload) => apiWrite(acc, m, at(p), payload);
@@ -1103,10 +1158,9 @@ async function control(action, state, accId) {
     if (!r) return { ok: false, error: "bad action" };
     res = await write(r[0], r[1]);
   }
-  // Only a command that landed moves the launcher: a press Spotify refused has
-  // not made that account the one playing here, and repointing the household's
-  // library on a 403 would be a change nobody caused.
-  if (res.ok && asked) switchActiveTo(acc.id, true);
+  // A press does not move the launcher either (see play): it is aimed at the box,
+  // it already resolved the account holding it, and the library on screen is
+  // somebody's choice rather than a consequence of the pause button.
   return { ok: res.ok, error: res.ok ? "" : "HTTP " + res.status };
 }
 
@@ -1214,11 +1268,11 @@ async function artistImageForTrack(trackId) {
 
 // ---- catalog reads, for the autoplay continuation ----
 // Every one of these takes the account to read AS, defaulting to the active one.
-// That parameter is not decoration: autoplay plays with `keepActive`, so the
-// account driving the box is deliberately not made the active one, and a catalog
-// read for the wrong account is answered for the wrong COUNTRY. On a box with two
-// accounts in two countries that produces recommendations the account actually
-// playing cannot play.
+// That parameter is not decoration: a play never makes the box's account the
+// active one, so the account driving the box is not the one a read defaults to,
+// and a catalog read for the wrong account is answered for the wrong COUNTRY. On a
+// box with two accounts in two countries that produces recommendations the account
+// actually playing cannot play.
 function accountById(id) {
   return (id && accounts.list.find((x) => x.id === id)) || activeAccount();
 }
@@ -1366,9 +1420,11 @@ module.exports = {
   primaryArtistId,
   artistImageForTrack,
   listAccounts,
+  activeAccountInfo,
   switchAccount,
   removeAccount,
   findBoxAccount,
+  boxSeenBy,
   boxOwner,
   boxSignedInAs,
   followBox,

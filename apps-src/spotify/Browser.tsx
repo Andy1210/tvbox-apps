@@ -78,11 +78,7 @@ function apiErrorText(t: (k: string, p?: Record<string, string>) => string, erro
 // `HTTP <status> <80 characters of Spotify's JSON body>`, which is the ugliest
 // thing this app could put in front of a sofa; the code belongs in the console,
 // where whoever is debugging can read it.
-export function playErrorText(
-  t: (k: string, p?: Record<string, string>) => string,
-  error: string,
-  log = true,
-): string {
+export function playErrorText(t: (k: string, p?: Record<string, string>) => string, error: string, log = true): string {
   const keys: Record<string, string> = {
     box_not_found: "spotify.boxNotFound",
     box_signed_out: "spotify.boxSignedOut",
@@ -99,6 +95,26 @@ export function playErrorText(
   if (key) return t(key);
   if (log) console.warn("[spotify] play failed:", error);
   return t("spotify.playError");
+}
+
+// Whose Spotify session the music started in, when it was not the account being
+// browsed. Its own exported function for the same reason playErrorText is: there
+// are three call sites (a row, play-all, and the voice request in Spotify.tsx),
+// and one of them is in another file.
+//
+// The browsed account's own name may be missing - it is resolved from Spotify and
+// a box whose /me never answered has none - and a sentence with a hole in it is
+// worse than a shorter one, so that case gets its own wording rather than an empty
+// interpolation.
+export function startedAsText(
+  t: (k: string, p?: Record<string, string>) => string,
+  startedAs: string,
+  mine: string,
+): string {
+  if (!startedAs) return "";
+  return mine
+    ? t("spotify.startedAsOther", { name: startedAs, mine })
+    : t("spotify.startedAsOtherPlain", { name: startedAs });
 }
 
 // The playlist position of a row. Falls back to the row index for a list that
@@ -171,7 +187,26 @@ function Action({
 // anybody choosing it here: the box follows whichever linked account is casting
 // to it, so the Liked Songs on this screen can be the other person's, and until
 // the name was on it nothing said so.
-export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onPlayed: () => void; account?: string }) {
+export function Browser({
+  onBack,
+  onPlayed,
+  onNote,
+  account,
+}: {
+  onBack: () => void;
+  onPlayed: () => void;
+  /**
+   * Something the player screen has to say: whose Spotify session the music
+   * actually started in, when it was not this account's. Its own channel rather
+   * than a payload on `onPlayed`, and delivered before this screen decides where
+   * to go, because the two are not the same event - somebody who presses Back
+   * during the wait still ends up on the player screen, with the music playing in
+   * a session nothing would otherwise have named. `""` clears a note left over
+   * from an earlier press.
+   */
+  onNote: (note: string) => void;
+  account?: string;
+}) {
   const { t } = useI18n();
   const { ref, focusKey } = useFocusable({ focusKey: "sp-browser" });
   // Held outside this component, so starting a track and coming back does not
@@ -237,13 +272,17 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
     return () => clearTimeout(id);
   }, [err]);
   // Say the long case out loud rather than letting the short label sit there for
-  // twenty seconds looking stuck.
+  // twenty seconds looking stuck. FOUR seconds, measured against what the waits
+  // actually are: signing the box in as another account takes three to five, so a
+  // line at three would flicker up as the screen is already changing, and the case
+  // that really needs it - a saved login that turns out to be stale, about ten
+  // seconds - is still told well before anybody doubts the press.
   useEffect(() => {
     if (!starting) {
       setSlow(false);
       return;
     }
-    const id = setTimeout(() => setSlow(true), 5000);
+    const id = setTimeout(() => setSlow(true), 4000);
     return () => clearTimeout(id);
   }, [starting]);
   // The box changed hands while this screen was up, so these rows belong to
@@ -305,6 +344,9 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
     setErr("");
     const r = await play(body);
     setStarting(false);
+    // Before the `gone` check: see `onNote`. A press that FAILED reports too, with
+    // nothing - or the sentence from an earlier press stands over the next song.
+    onNote(r.ok ? startedAsText(t, r.startedAs || "", account || "") : "");
     if (gone.current) return; // this screen is gone; nothing to show or navigate
     if (r.ok) {
       // The row that was pressed, so Back from the player lands on it rather
@@ -329,6 +371,7 @@ export function Browser({ onBack, onPlayed, account }: { onBack: () => void; onP
     setStarting(true);
     setErr("");
     const r = await play({ contextUri: p.uri, ...(at > 0 ? { offset: at } : {}) });
+    onNote(r.ok ? startedAsText(t, r.startedAs || "", account || "") : "");
     if (!r.ok) {
       setStarting(false);
       if (gone.current) return;
