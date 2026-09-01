@@ -3,7 +3,7 @@ import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spat
 import { useI18n, useBackspace, useConfigStore, FocusButton, tvbox } from "@sdk";
 import { NowPlaying } from "./NowPlaying";
 import { SpotifySettings } from "./SpotifySettings";
-import { Browser, playErrorText } from "./Browser";
+import { Browser, playErrorText, startedAsText } from "./Browser";
 import { useSpotifyStore } from "./stores/spotify";
 import { authStatus, play, search, setSpotifyEnabled, URIS_MAX, type AuthStatus } from "./api";
 
@@ -101,8 +101,27 @@ export function Spotify({ onExit }: { onExit: () => void }) {
    */
   const [fromBrowse, setFromBrowse] = useState(false);
   const [auth, setAuth] = useState<AuthStatus | null>(null);
-  /** What a spoken request did, when it did not simply start playing. */
-  const [asked, setAsked] = useState("");
+  /**
+   * The one line the player screen shows about what just happened: what a spoken
+   * request did, or whose Spotify session a play from the library started in.
+   * `bad` is whether it is a failure, which decides its colour - this channel
+   * carries both, and "nothing found for …" is as much a note as a success is.
+   *
+   * The CLOCK lives here, with the text, and keyed on the text alone. On the
+   * player screen it died with the screen (so the line came back on the way in
+   * from the library) and it was re-armed by every unrelated re-render - and with
+   * a status poll shorter than the timeout, that meant it never expired at all.
+   */
+  const [asked, setAsked] = useState<{ text: string; bad: boolean }>({ text: "", bad: false });
+  const say = (text: string, bad = false) => setAsked({ text, bad });
+  useEffect(() => {
+    if (!asked.text) return;
+    // Twelve seconds: the longest of these carries an instruction (which account
+    // to cast from), and the library screen gives its own messages the same, for
+    // the same reason.
+    const id = setTimeout(() => setAsked({ text: "", bad: false }), 12000);
+    return () => clearTimeout(id);
+  }, [asked]);
   /**
    * A spoken request for the lyrics: what was asked for, and when.
    *
@@ -133,15 +152,27 @@ export function Spotify({ onExit }: { onExit: () => void }) {
   useEffect(() => {
     if (view === "now" || view === "browse") authStatus().then(setAuth);
   }, [view]);
-  // ...and re-read it while Browse is open, because the handover happens without
-  // anybody touching this screen. Naming the account is only worth doing if the
+  // ...and re-read it while either screen is up, because the handover happens
+  // without anybody touching them. Naming the account is only worth doing if the
   // name is the one whose rows are on display: stale, it is a false claim, and
   // pressing a row would send that account's context to the new owner's player.
+  // The player screen names it too (beside the gear) and can sit up for hours, so
+  // it needs the same refresh - measured on a box: a switch made elsewhere left
+  // the old name under the gear until the screen was left and re-entered.
   useEffect(() => {
-    if (view !== "browse") return;
+    if (view !== "browse" && view !== "now") return;
     const id = setInterval(() => void authStatus().then(setAuth), 10000);
     return () => clearInterval(id);
   }, [view]);
+  // ...and at once when a new song appears, which is the moment a cast changes
+  // hands: the shell pushes that over SSE, so the name under the gear follows the
+  // music instead of trailing it by up to ten seconds. Also fires for a play
+  // started here, where it costs one loopback read and confirms the same thing.
+  const trackId = useSpotifyStore((s) => s.state?.track_id || "");
+  useEffect(() => {
+    if (!trackId || (view !== "browse" && view !== "now")) return;
+    void authStatus().then(setAuth);
+  }, [trackId, view]);
 
   // A spoken request. The listener is here rather than on the player screen
   // because that screen is not the one on display when the request arrives - the
@@ -187,19 +218,22 @@ export function Spotify({ onExit }: { onExit: () => void }) {
     if (!connected) {
       // Search and play are Web API calls; without an account this app is a
       // speaker somebody else casts to, and there is nothing here to search.
-      setAsked(t("spotify.voiceNoAccount"));
+      say(t("spotify.voiceNoAccount"), true);
       return;
     }
-    setAsked(t("spotify.voiceSearching", { query }));
+    say(t("spotify.voiceSearching", { query }));
     void search(query).then(async (r) => {
       if (!r.tracks.length) {
-        setAsked(t("spotify.voiceNoMatch", { query }));
+        say(t("spotify.voiceNoMatch", { query }), true);
         return;
       }
       // The result list is the running order, so what was asked for is followed
       // by more of the same rather than by silence.
       const out = await play({ uris: r.tracks.slice(0, URIS_MAX).map((x) => x.uri) });
-      setAsked(out.ok ? "" : playErrorText(t, out.error || ""));
+      // A spoken request lands on this screen too, so it is owed the same sentence
+      // about whose session started as a press from the library is.
+      if (out.ok) say(startedAsText(t, out.startedAs || "", auth?.user || ""));
+      else say(playErrorText(t, out.error || ""), true);
     });
   }, [wanted, auth, connected, t]);
 
@@ -258,16 +292,23 @@ export function Spotify({ onExit }: { onExit: () => void }) {
           setFromBrowse(true);
           setView("now");
         }}
+        // Whose session the music started in, when it was not this account's. The
+        // player screen is where a press from the library lands - by this callback
+        // or by Back - so that is where it has to be said, and "" clears a note
+        // left over from an earlier press rather than letting it re-appear over
+        // the next song.
+        onNote={(text) => say(text)}
         account={auth?.user || ""}
       />
     );
   return (
     <NowPlaying
       connected={connected}
-      note={asked}
+      account={auth?.user || ""}
+      note={asked.text}
+      noteBad={asked.bad}
       lyrics={lyrics}
       onLyricsDone={() => setLyrics(null)}
-      onNoteDone={() => setAsked("")}
       onSettings={() => setView("settings")}
       onBrowse={() => {
         setFromBrowse(false);

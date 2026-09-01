@@ -98,6 +98,8 @@
     "upNext": "Up next",
     "voiceSearching": "Looking for “{query}” on Spotify…",
     "voiceNoMatch": "Spotify found nothing for “{query}”.",
+    "startedAsOther": "Playing from {name}'s Spotify account, because that is the one this box is signed in to. Cast to the box once from {mine}'s phone and it will play from {mine} instead.",
+    "startedAsOtherPlain": "Playing from {name}'s Spotify account, because that is the one this box is signed in to. To play from the account you have open here, cast to the box once from that account's phone.",
     "voiceNoAccount": "Connect a Spotify account in this app's settings to start music by voice.",
     "recoveryFailed": "The box could not sign back in to Spotify. Cast to it once from your phone.",
     "connectOff": "Spotify Connect is switched off on this box. Turn it on in Settings.",

@@ -255,7 +255,7 @@ export async function play(body: {
   uris?: string[];
   offset?: number;
   collection?: boolean;
-}): Promise<{ ok: boolean; error: string }> {
+}): Promise<{ ok: boolean; error: string; startedAs?: string }> {
   try {
     const r = await fetch("/tvbox/api/spotify/play", {
       method: "POST",
@@ -263,7 +263,11 @@ export async function play(body: {
       body: JSON.stringify(body),
     });
     const j = await r.json();
-    return { ok: j.ok === true, error: String(j.error || "") };
+    // `startedAs` is set only when the music went out as an account OTHER than the
+    // one being browsed - the box holds one Spotify session and this box has no
+    // saved login for the browsed account yet, so the songs are right and the
+    // session is somebody else's. Nothing on screen could show that on its own.
+    return { ok: j.ok === true, error: String(j.error || ""), startedAs: String(j.startedAs || "") };
   } catch {
     return { ok: false, error: "network" };
   }

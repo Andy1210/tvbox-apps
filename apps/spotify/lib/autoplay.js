@@ -193,9 +193,7 @@ function createAutoplay({ api, play, isEnabled, log, graceMs }) {
       queued = new Set(uris.map((u) => String(u).split(":").pop()));
       let r;
       try {
-        // keepActive: this play was nobody's decision, so it must not change which
-        // linked account the box's screens are showing.
-        r = await play({ uris, keepActive: true });
+        r = await play({ uris });
       } catch (e) {
         queued.clear();
         throw e;

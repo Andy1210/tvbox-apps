@@ -73,6 +73,10 @@ describe("the locales", () => {
       "ctrlUnreachable",
       "ctrlError",
       "notRegistered",
+      // The two sentences about whose Spotify session a play started in. Chosen in
+      // code (startedAsText), so a rename here is only ever seen on a television.
+      "startedAsOther",
+      "startedAsOtherPlain",
     ];
     for (const k of named) {
       expect(HU["spotify." + k], k).toBeTruthy();

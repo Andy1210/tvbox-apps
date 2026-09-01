@@ -26,7 +26,8 @@ const { execFile } = require("child_process");
 const spotify = require("./lib/spotify"); // cast-only bridge: librespot events -> SSE state
 const spotifyApi = require("./lib/spotify_api"); // OPTIONAL Spotify Web API (account features)
 const { createAutoplay } = require("./lib/autoplay"); // what plays when a playlist runs out
-const { createCredGuard, isSupervisorExit } = require("./lib/credguard"); // reads the daemon's own output
+const { createCredGuard, isSupervisorExit, isCredentialRejection, authenticatedAs } = require("./lib/credguard"); // what the daemon's own output says
+const { createCredVault } = require("./lib/credvault"); // one saved login per linked account
 
 const SPOTIFY_HOOK = path.join(__dirname, "spotify_event_hook.sh"); // librespot --onevent target
 // Where librespot keeps the saved session credentials (and the Connect volume).
@@ -238,6 +239,34 @@ module.exports = (host) => {
     cacheDir: LIBRESPOT_CACHE,
     log: (m) => host.log("librespot " + m),
   });
+  // Keeps a copy of every account's saved login beside the live one, so the box
+  // can be signed in as the account whose library is on screen instead of as
+  // whoever cast to it last. Its module header has the mechanism.
+  const credVault = createCredVault({
+    fs,
+    path,
+    cacheDir: LIBRESPOT_CACHE,
+    log: (m) => host.log("spotify: " + m),
+  });
+  // What the daemon has said about signing in, counted so a sign-in can read the
+  // DIFFERENCE across its own restart. Two questions need that and no device
+  // listing can answer either:
+  //   • was the login refused - librespot exits within a second of being told so,
+  //     while a listing would have to be waited out;
+  //   • which account did it come up as. Spotify goes on listing the registration
+  //     of an instance that has died for seconds afterwards, so a listing hit
+  //     right after a restart can be about the daemon that is gone.
+  let credRefusals = 0;
+  let signIns = 0;
+  let signedInAs = "";
+  // The credentials file was deliberately replaced. Both counts are about the file
+  // that WAS there - the guard's strikes and the refusals a sign-in reads - so they
+  // move together: a refusal still draining out of the dying daemon's pipe would
+  // otherwise count towards the two this login is allowed.
+  function credentialsReplaced() {
+    credGuard.fileReplaced();
+    credRefusals = 0;
+  }
   // What makes an event's `user_name` trustworthy. The rest of an event draws a
   // screen, and /tvbox/api/spotify/event has always been reachable by anything
   // served from this box's own origin. The owner is different in kind: it decides
@@ -257,8 +286,21 @@ module.exports = (host) => {
     const b = Buffer.from(eventKey);
     return a.length === b.length && crypto.timingSafeEqual(a, b);
   }
+  // The Connect device name, as it reaches librespot's argv - and therefore the
+  // supervisor's spawn line, which is on the same stream the credential guard
+  // reads. A control character in it would end one log record and begin another,
+  // which is the one way text somebody chose can be made to look like a line the
+  // daemon wrote: the guard's three classifiers all require the daemon's own
+  // prefix, and a forged newline is what supplies one. The app's own rename route
+  // strips CR and LF, but the shell's generic config route does not, so the strip
+  // belongs here - where the value becomes argv - rather than only there.
   function spotifyDeviceName() {
-    return (host.config.rawSpotify() || {}).deviceName || "tvbox";
+    const raw = String((host.config.rawSpotify() || {}).deviceName || "");
+    const clean = raw
+      .replace(/[\u0000-\u001f\u007f]+/g, " ")
+      .trim()
+      .slice(0, 64);
+    return clean || "tvbox";
   }
   function librespotArgv() {
     const args = [
@@ -378,6 +420,12 @@ module.exports = (host) => {
         // service` is the LAN advert, not the Connect registration, and it lands
         // after authentication on a warm respawn but 19 s before it on a cold
         // start. An exit is unambiguous.
+        if (isCredentialRejection(line)) credRefusals++;
+        const authed = authenticatedAs(line);
+        if (authed) {
+          signIns++;
+          signedInAs = authed;
+        }
         if (isSupervisorExit(line)) {
           spotify.clear(); // also drops the owner: the daemon that held the session is the one that died
           spotifyApi.forgetBoxDevice();
@@ -394,6 +442,11 @@ module.exports = (host) => {
           // failure it replaces.
           spotify.clear();
           spotifyApi.forgetBoxDevice();
+          // Spotify refused that exact blob, so the vaulted copy of it is no
+          // better: kept, every later press would swap it back in and take the
+          // box down for the length of a poll before failing the same way.
+          const gone = credVault.dropRejected();
+          if (gone) host.log("spotify: Spotify refused the saved login for " + gone + " - cast from that phone once");
         }
       } catch (e) {
         host.log("librespot credential guard failed: " + e.message);
@@ -648,8 +701,220 @@ module.exports = (host) => {
       return e.code !== "ENOENT";
     }
   };
+  // ---- signing the box in as the account whose library is on screen ----
+  // The box holds ONE Spotify session and the launcher may be browsing another
+  // account. A play from the TV means "play this, from this library, in this
+  // room", so the account being browsed is the one the box should be playing as -
+  // and the only credential that can get it there is that account's own saved
+  // login, kept by credvault.js. Nothing here can mint one: a Web API token is
+  // refused at Connect registration and destroys the file it is handed to.
+  //
+  // With no vaulted login for the browsed account the play still goes out as the
+  // account holding the box, which is what this did before; the result names that
+  // account so the screen can say whose music started.
+  const accountName = (id) => (spotifyApi.listAccounts().find((a) => a.id === id) || {}).name || "";
+  // Is this account one the household has LINKED on this box? The vault must not
+  // decide that for itself, and two things turn on it: a guest who cast once has a
+  // reusable credential in `<cache>/credentials.json` like anyone else, and it must
+  // neither be kept for later nor be a candidate the box signs itself into weeks
+  // afterwards - their session, their history, their stream.
+  //
+  // Answers TRUE whenever it cannot tell, and that direction is deliberate: an
+  // account whose real id was never resolved (a `legacy` or `acc-N` row, /me
+  // unreachable when it was linked) is filed in the vault under its librespot
+  // username, which no row here carries - so a confident "not linked" would drop
+  // or refuse a login that is linked.
+  // Two questions, and they need opposite defaults, which is why they are two
+  // functions. `isLinked` gates what may be KEPT or USED, so it answers no unless
+  // a row says otherwise: a box with no linked account at all (Connect-only, which
+  // this app supports by design) would otherwise archive every guest's credential
+  // for ever, and an unresolved row would let the signed-out recovery sign the box
+  // into one of them. `knownUnlinked` gates a DELETE, so it answers no unless the
+  // row list is complete and trustworthy - a synthetic id (`legacy`, `acc-N`, from
+  // a /me that never answered) names a real account under a name the vault does
+  // not use, and reading that as "not linked" deletes a login that is.
+  function isLinked(id) {
+    if (!id) return false;
+    return spotifyApi.listAccounts().some((a) => a.id === id);
+  }
+  function knownUnlinked(id) {
+    if (!id) return false;
+    const rows = spotifyApi.listAccounts();
+    if (!rows.length) return false;
+    if (rows.some((a) => a.id === "legacy" || String(a.id).indexOf("acc-") === 0)) return false;
+    return !rows.some((a) => a.id === id);
+  }
+  // Keep a copy of the live login, unless it belongs to somebody this box has not
+  // linked. Called wherever a login may have just been written.
+  function archiveLogin() {
+    const who = credVault.owner();
+    if (who && isLinked(who)) credVault.archive();
+  }
+  // A saved login that did not bring the box back is not tried again at once:
+  // every attempt takes the daemon down for the length of a poll.
+  const SIGNIN_FAIL_COOLDOWN_MS = 60000;
+  const signInFailed = new Map(); // accountId -> when its saved login last failed to register
+  const signInCooling = (id) => Date.now() - (signInFailed.get(id) || 0) < SIGNIN_FAIL_COOLDOWN_MS;
+  // Is the box somebody's right now? Two senses, and both have to stop a restart:
+  // music is audibly playing on it, or an account this box has not linked holds a
+  // live session - a guest's cast, which nothing we send could reach anyway and
+  // which a restart would simply end. `is_playing` outlives a daemon that was
+  // killed, which is why this only gates the pre-emptive swap: once Spotify says
+  // the box is not one of its devices, the recovery below acts on that instead.
+  function boxTaken() {
+    if (spotify.getState().is_playing) return true;
+    const holder = spotify.sessionUser();
+    if (!holder || !spotify.sessionActive()) return false;
+    return !spotifyApi.listAccounts().some((a) => a.id === holder);
+  }
+  // Swap in an account's saved login, restart the daemon under it, and wait for
+  // the box to appear in THAT account's device list. Returns whether it did.
+  //
+  // The login it displaces was archived by the vault before the swap, so a blob
+  // Spotify no longer accepts costs the box nothing: it goes back and the box
+  // returns to the account it was signed into. Without that, one stale vault
+  // entry would leave the box signed out - discoverable but in no account's
+  // device list - which is the single state only a phone cast can undo.
+  const SIGNIN_TRIES = 6; // a warm respawn registers in ~2s; the rest is for a slow AP
+  const SIGNIN_STEP_MS = 1500;
+  // Wait out a restart, and say what it came back as. Four answers, because each
+  // calls for something different:
+  //
+  //   up             the daemon signed in as `id` AND that account can address it
+  //   wrong_account  it signed in as somebody else - the blob is not this
+  //                  account's, whatever the name in the file says
+  //   refused        Spotify refused the credential, twice
+  //   absent         nothing conclusive inside the budget
+  //
+  // The DAEMON's own word is what proves an account, not a device listing: Spotify
+  // lists a departed registration for seconds, so a listing hit at the first poll
+  // can be the instance that just died - which is what made a play right after a
+  // sign-in answer 502. Both are required, in that order, and neither on its own.
+  //
+  // A refusal is counted TWICE for the same reason the credential guard does: one
+  // can be Spotify's answer to a bad moment, and being wrong here deletes the only
+  // copy of a household member's login. It costs a second poll step, not a budget.
+  async function waitForBox(id, tries) {
+    const refusalsBefore = credRefusals;
+    const signInsBefore = signIns;
+    for (let i = 0; i < tries; i++) {
+      await sleep(SIGNIN_STEP_MS);
+      if (signIns > signInsBefore && signedInAs && signedInAs !== id) return "wrong_account";
+      if (signIns > signInsBefore && signedInAs === id && (await spotifyApi.boxSeenBy(id))) return "up";
+      if (credRefusals - refusalsBefore >= 2) return "refused";
+    }
+    return "absent";
+  }
+  async function signInAs(id) {
+    const swap = credVault.use(id);
+    if (!swap.ok) {
+      // Nothing was touched, but the reason will not have changed by the next
+      // press either (a slot filed under the wrong account, a login in place this
+      // cannot read, a card that cannot be written): cooled like a failure, or the
+      // vault says the same thing into the log on every press for ever. Not
+      // dropped - none of those is Spotify refusing the credential.
+      signInFailed.set(id, Date.now());
+      return false;
+    }
+    // The strikes so far were counted against the file that has just been
+    // replaced; charged to this one they would move IT aside on a single refusal.
+    credentialsReplaced();
+    host.log("spotify: signing the box in as " + id + " - the account whose library is on screen");
+    restartLibrespot();
+    const how = await waitForBox(id, SIGNIN_TRIES);
+    if (how === "up") {
+      signInFailed.delete(id);
+      // A login displaced by this one that belongs to nobody linked here is a
+      // guest's, kept only so it could be put back if this failed. It did not.
+      if (swap.displaced && swap.displaced !== id && knownUnlinked(swap.displaced)) credVault.drop(swap.displaced);
+      return true;
+    }
+    signInFailed.set(id, Date.now());
+    host.log("spotify: the saved login for " + id + " did not bring the box back (" + how + ")");
+    if (swap.displaced && swap.displaced !== id && credVault.use(swap.displaced).ok) {
+      credentialsReplaced();
+      restartLibrespot();
+      // Waited for, not fired and forgotten: the play that follows is answered by
+      // the box being addressable, and returning before it is would restart the
+      // daemon a second time for the same press.
+      await waitForBox(swap.displaced, SIGNIN_TRIES);
+    }
+    // Spotify refused this blob TWICE, the bar the credential guard holds itself
+    // to, so the copy is worth nothing: kept, every press a minute apart would
+    // take the box down to be told the same thing. Only the COPY goes - if that
+    // account is signed in anywhere else it is untouched, and one cast from its
+    // phone puts a working login back here.
+    //
+    // After the restore rather than before it: putting the previous login back
+    // archives whatever is live at that moment, which is the blob being dropped,
+    // so a drop first is undone by the copy taken a line later.
+    //
+    // `wrong_account` deliberately does NOT drop it. One "Authenticated as" naming
+    // somebody else is not proof the blob is theirs: a phone casting inside the
+    // poll window logs exactly that line, and the two strings being compared are
+    // a credential's own `username` field and login5's canonical username, which
+    // this vault already expects to exist in more than one form. Being wrong costs
+    // a household member their only login here, against a press that is slow once
+    // a minute - so it is left alone and merely cooled.
+    if (how === "refused") credVault.drop(id);
+    return false;
+  }
+  // A play, and the one thing the screen cannot work out for itself: WHOSE
+  // session started. With no vaulted login for the account being browsed the
+  // music goes out as the one holding the box, and a person who pressed a row in
+  // their own library is owed that sentence rather than left wondering whose
+  // songs these are. Only on a play that started - a refusal has its own message.
   async function playOnBox(body) {
+    const want = spotifyApi.activeAccountInfo();
+    const r = await startOnBox(want, body);
+    if (!r || !r.ok || !want || !r.account || r.account === want.id) return r;
+    // Only a NAME. This sentence is read off a television, and an account whose
+    // display name was never resolved would put a base62 id on the screen - worse
+    // than saying nothing, which is what the account label beside the gear already
+    // does in that case.
+    const named = r.accountName || accountName(r.account);
+    return named ? { ...r, startedAs: named } : r;
+  }
+  async function startOnBox(want, body) {
+    // An idle box registered under another linked account: bring it to the one
+    // being browsed before the play, so the press starts THAT account's session
+    // rather than playing its songs inside somebody else's. Refused while the box
+    // is taken, and never on a login that has just failed to register.
+    //
+    // `enabled()` FIRST, before anything is swapped or restarted. With Connect
+    // switched off, restartLibrespot() degrades to stopLibrespot(), so both of a
+    // sign-in's polls would run out against a daemon that was deliberately not
+    // started - the 19.5 s hang the refusal further down was written to stop, from
+    // the other end.
+    let signedIn = false;
+    if (
+      enabled() &&
+      want &&
+      credVault.owner() !== want.id &&
+      credVault.has(want.id) &&
+      !signInCooling(want.id) &&
+      !boxTaken() &&
+      !recovering
+    ) {
+      recovering = true;
+      try {
+        signedIn = await signInAs(want.id);
+      } finally {
+        recovering = false;
+      }
+    }
     let r = await spotifyApi.play(body);
+    // A play right after a sign-in can meet Spotify's own gateway rather than the
+    // box: the daemon has authenticated and the device is listed, and the command
+    // path is a second or so behind that (measured: HTTP 502 on 2 presses in 3
+    // before the readiness above required the daemon's own word). One retry, only
+    // on the turn that restarted the daemon, and only for a 5xx - `attempt()`
+    // retries a 404 and nothing else, and a refusal from Spotify is not a timing
+    // problem.
+    if (signedIn && !r.ok && /^HTTP 5\d\d/.test(String(r.error || ""))) {
+      await sleep(SIGNIN_STEP_MS);
+      r = await spotifyApi.play(body);
+    }
     // Both answers mean the same thing about the DEVICE - no linked account can
     // address it - and differ only in whether librespot has named an owner since
     // this shell started. `box_unreachable` is the commoner one by far, because
@@ -696,9 +961,16 @@ module.exports = (host) => {
     // a cast cannot either: with Connect off the box advertises nothing.
     if (!enabled()) return { ok: false, error: "connect_off" };
     // Nothing cached to sign in with: the box has never been signed in, or the
-    // credential guard cleared a login Spotify refused. A restart cannot invent
-    // one, and a phone cast is genuinely the only way back.
-    if (!savedLoginExists()) return { ok: false, error: "box_signed_out" };
+    // credential guard cleared a login Spotify refused. A vaulted login is the way
+    // out of that - it is a credential Spotify itself wrote on this box, so
+    // putting one back is a sign-in rather than a claim - and a phone cast is only
+    // genuinely the only way back when there is not one of those either.
+    // Only accounts this box has LINKED, and none whose login has just failed to
+    // register: a guest who cast once leaves a reusable credential here too, and
+    // signing the box into a stranger's account weeks later - their session, their
+    // history, their stream - is not a recovery.
+    const vaulted = credVault.list().filter((id) => isLinked(id) && !signInCooling(id));
+    if (!savedLoginExists() && !vaulted.length) return { ok: false, error: "box_signed_out" };
     // A press must not become a restart loop when the box cannot come back: the
     // supervisor has its own ceiling, but this is what keeps a person leaning on
     // the button from spending it - and every restart takes down whatever cast is
@@ -711,13 +983,43 @@ module.exports = (host) => {
     host.log("spotify: box is not addressable (" + r.error + ") - signing it back in from its saved login");
     recovering = true;
     try {
+      // Which login it comes back on. The daemon has to be restarted either way,
+      // so coming back as the account whose library is on screen is what the press
+      // asked for; failing that, any login this box holds beats a box that is
+      // signed out. `displaced` is the login this replaced - archived by the vault
+      // before the swap - so one that does not register can be put back below.
+      let displaced = "";
+      let broughtIn = "";
+      const pick =
+        want && credVault.has(want.id) && !signInCooling(want.id) ? want.id : savedLoginExists() ? "" : vaulted[0];
+      if (pick && credVault.owner() !== pick) {
+        const swap = credVault.use(pick);
+        if (swap.ok) {
+          displaced = swap.displaced;
+          broughtIn = pick;
+          // Same reason as in signInAs: strikes counted against the file that has
+          // just been replaced would move THIS one aside on a single refusal - and
+          // below, they would move aside the login being put BACK, which is the one
+          // that was working.
+          credentialsReplaced();
+          host.log("spotify: bringing the box back as " + pick);
+        }
+      }
       restartLibrespot();
+      const signInsBefore = signIns;
       let seen = false;
       let answered = false; // did any listing actually come back?
       for (let i = 0; i < 12 && !seen; i++) {
         // login + Connect registration is ~2s on a healthy box; the rest of the
         // budget is for a slow access point, and a miss is never cached.
         await sleep(1500);
+        // The daemon has to have signed in SINCE the restart before a listing means
+        // anything: Spotify lists a departed registration for seconds, so a hit at
+        // the first poll can be the instance that just died - and a play sent then
+        // meets Spotify's gateway rather than the box (HTTP 502). The account is
+        // not compared here, unlike in a sign-in: on this path the box may be
+        // coming back on whatever login it already had, whoever that is.
+        if (signIns === signInsBefore) continue;
         try {
           const found = await spotifyApi.findBoxAccount();
           seen = !!found.account;
@@ -734,6 +1036,18 @@ module.exports = (host) => {
       if (!seen) {
         lastReRegister = Date.now();
         host.log("spotify: the box did not come back as a Connect device");
+        if (broughtIn) {
+          // Put back what was there: the login brought in did not register, and
+          // left in place it would answer every later press the same way. Waited
+          // for, like the same restore in signInAs - the box being addressable
+          // again is what makes the NEXT press work rather than restart the daemon.
+          signInFailed.set(broughtIn, Date.now());
+          if (displaced && displaced !== broughtIn && credVault.use(displaced).ok) {
+            credentialsReplaced();
+            restartLibrespot();
+            await waitForBox(displaced, SIGNIN_TRIES);
+          }
+        }
         // Same distinction the refusals above turn on: with nothing having come
         // back from Spotify, "it did not come back" is not something we know.
         // Saying the saved login is bad - and asking for a cast - would be a
@@ -744,7 +1058,14 @@ module.exports = (host) => {
       // refused (a 429, a 502, an account without Premium), and arming the
       // cooldown only on the branch above left that case with no rate limit at
       // all: every press restarted the daemon, which is what this exists to stop.
-      const out = await spotifyApi.play(body);
+      let out = await spotifyApi.play(body);
+      // A 5xx here is the same "registered, not yet reachable" second as after a
+      // sign-in: the command path lags the registration, and nothing else retries
+      // one (`attempt()` retries a 404 and nothing more).
+      if (!out.ok && /^HTTP 5\d\d/.test(String(out.error || ""))) {
+        await sleep(SIGNIN_STEP_MS);
+        out = await spotifyApi.play(body);
+      }
       if (!out.ok) lastReRegister = Date.now();
       return out;
     } finally {
@@ -864,7 +1185,17 @@ module.exports = (host) => {
     "POST /account/switch": (req, res, ctx) =>
       host.json(res, { ok: spotifyApi.switchAccount(String((ctx.body || {}).id || "")) }),
     "POST /account/remove": (req, res, ctx) => {
-      spotifyApi.removeAccount(String((ctx.body || {}).id || ""));
+      const id = String((ctx.body || {}).id || "");
+      spotifyApi.removeAccount(id);
+      // The saved librespot login goes with the link: it is a credential for an
+      // account the household has just unlinked from this box, and a later press
+      // could otherwise sign the box back in as them. The id in the REQUEST, not a
+      // sweep of everything unlinked: a row also disappears on its own when a Web
+      // API refresh is refused (a rotated or revoked token), and that account's
+      // librespot login is a different credential which still works and which
+      // nobody asked to delete. It does not sign the box out either - the live
+      // login stays until something else replaces it.
+      credVault.drop(id);
       host.json(res, { ok: true });
     },
     "POST /control": (req, res, ctx) => {
@@ -1067,6 +1398,13 @@ module.exports = (host) => {
       spotify.onSessionUser((userId) => {
         if (spotifyApi.boxSignedInAs(userId))
           host.log("spotify: the box changed hands; following the account playing on it");
+        // A cast is how a login gets onto this box at all: librespot writes the
+        // credential it just authenticated with, and this is the first moment
+        // after that write which is certainly past it. Keeping a copy is what
+        // lets the box be signed back in as this account later without a second
+        // cast. The file names its own account, so a lost or late event costs a
+        // copy rather than filing one under the wrong person.
+        archiveLogin();
       });
       // HOME widget: the playing track as a card while a cast is active (shell
       // 1.5+ host API; older shells simply have no host.widget). Keyed so the
@@ -1094,6 +1432,10 @@ module.exports = (host) => {
           })
           .catch(() => {});
       });
+      // Whatever login the box is holding, on the way up: a box upgraded to this
+      // version has one and no copy of it, and until there is a copy the account
+      // it belongs to cannot be signed back in after another one takes the file.
+      archiveLogin();
       startLibrespot();
     },
     // The app was closed from the Running row (or by its own Exit), and the

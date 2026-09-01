@@ -48,8 +48,41 @@
 // A published zeroconf service means the daemon got past all of this, so it
 // clears the strikes: the count is about ONE bad file, not about the box's life.
 
-const REJECTION = "INVALID_CREDENTIALS";
-const PUBLISHED = "Published zeroconf service";
+// The two shapes login5 refuses a saved credential with, both measured on this
+// fleet, and both on the same line as the spirc failure:
+//
+//   [<ts> ERROR librespot] could not initialize spirc: Invalid state { Login request was denied: INVALID_CREDENTIALS }
+//   [<ts> ERROR librespot] could not initialize spirc: Permission denied { Login failed with reason: Bad credentials }
+//
+// The second is what a credential Spotify no longer accepts produces, and it was
+// not recognised here at first: the box then exits 1 on every start, never
+// publishes its zeroconf service, and so cannot even be cast to - the exact state
+// this module exists to get out of, reached through the commoner of its two doors.
+//
+// **All THREE parts have to match, and that is a security bound rather than
+// tidiness.** Everything the daemon writes goes through this, and two of those
+// things carry text somebody else chose: the supervisor's spawn line quotes the
+// whole argv, including the Connect device NAME (settable from the box's own
+// origin), and librespot logs every track it loads by title (measured: 67
+// `Loading <title>` lines in one box's log). A bare `/bad credentials/i` therefore
+// made a box name or a SONG TITLE into a login refusal - and two of those, with no
+// `Published zeroconf service` between them, clear the box's login and now drop
+// its vaulted copy too. The prefix at ERROR is the daemon's own, `spirc` is the
+// failure, and the reason phrase is quoted whole.
+const DAEMON_ERROR = /^\[[^\]]*\sERROR\s[^\]]*\]/;
+const SPIRC_FAILED = "could not initialize spirc";
+const REJECTIONS = [/Login request was denied: INVALID_CREDENTIALS/, /Login failed with reason: Bad credentials/i];
+// The daemon naming the account it just signed in as. Anchored on its own module
+// path for the same reason as above: this decides whether a saved login brought
+// the box back as the account that was asked for, and a title could otherwise
+// claim it. Measured line:
+//
+//   [<ts> INFO  librespot_core::session] Authenticated as '<account id>' !
+const AUTHED_AS = /^\[[^\]]*\sINFO\s[^\]]*librespot_core::session\]\s*Authenticated as '([^']*)'/;
+// The LAN advert, from the daemon's own discovery module. Measured line:
+//
+//   [<ts> INFO  librespot_discovery] Published zeroconf service
+const DISCOVERY_UP = /^\[[^\]]*\sINFO\s[^\]]*librespot_discovery\]\s*Published zeroconf service/;
 // The supervisor's own line for a child that has gone (service_supervisor.js
 // prints "exited code <n> sig <s>"), matched WHOLE rather than by prefix.
 //
@@ -65,15 +98,40 @@ const PUBLISHED = "Published zeroconf service";
 // without also carrying a plausible exit code and signal.
 const SUPERVISOR_EXIT = /^exited code (\d+|null) sig (\S+)$/;
 
-// The saved login was refused. Narrow on purpose - see the bounds above.
+// The saved login was refused. Narrow on purpose - see the bounds above: login5
+// also denies for transient reasons (TRY_AGAIN_LATER), and neither pattern here
+// matches one of those.
 function isCredentialRejection(line) {
-  return String(line || "").includes(REJECTION);
+  const s = String(line || "");
+  if (!DAEMON_ERROR.test(s) || !s.includes(SPIRC_FAILED)) return false;
+  return REJECTIONS.some((re) => re.test(s));
+}
+
+// Which account the daemon has just authenticated as, or "" for any other line.
+// This is the only honest answer to "did the login we put in place bring the box
+// back as the account that was asked for": a device listing can still show the
+// registration of the instance that died, so a listing alone answers a question
+// about the PREVIOUS daemon.
+function authenticatedAs(line) {
+  const m = AUTHED_AS.exec(String(line || "").trim());
+  return m ? m[1] : "";
 }
 
 // The daemon is up and discoverable. True for a discovery-only start as well as
 // a logged-in one, which is what makes it a usable "we are past the login" mark.
+//
+// Anchored on the daemon's own module for the same reason the two above are, and
+// this one is the sharpest of the three: it CLEARS the strikes, so a line that
+// merely contains these words switches the self-heal off rather than triggering
+// it. The supervisor quotes the argv on every start, the argv carries the Connect
+// device name, and a box named "Published zeroconf service" therefore reset the
+// count at every spawn - and a box whose saved login has gone stale exits 1 before
+// publishing anything, so it stays out of every phone's device list, cannot be
+// cast to, and the one mechanism that recovers it never fires. Measured: six
+// poisoned starts, zero heals.
 function isUp(line) {
-  return String(line || "").includes(PUBLISHED);
+  const s = String(line || "").trim();
+  return DISCOVERY_UP.test(s);
 }
 
 // The daemon has gone, by any route the supervisor reports.
@@ -152,7 +210,16 @@ function createCredGuard(deps) {
     return true;
   }
 
-  return { note, stats: () => ({ strikes, heals }) };
+  // The credentials file was deliberately replaced, so the strikes counted so far
+  // are about a file that is no longer there. Without this they are charged to the
+  // new one: a refusal still in flight when a different login is put in place
+  // would move THAT file aside - and it is the login the box was working on, put
+  // back because the new one failed.
+  function fileReplaced() {
+    strikes = 0;
+  }
+
+  return { note, fileReplaced, stats: () => ({ strikes, heals }) };
 }
 
-module.exports = { createCredGuard, isCredentialRejection, isUp, isSupervisorExit };
+module.exports = { createCredGuard, isCredentialRejection, authenticatedAs, isUp, isSupervisorExit };

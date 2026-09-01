@@ -160,15 +160,30 @@ test("a pause goes out as the account the box is signed into, not the active one
   );
 });
 
-test("the launcher follows the box, so the library and the buttons agree", async () => {
+test("the launcher follows a cast, so the library and the buttons agree", async () => {
+  reset("u1");
+  serve({ boxOn: "u2" });
+  bridge.onSessionUser((u) => api.boxSignedInAs(u));
+  assert.equal(api.listAccounts().find((a) => a.active).id, "u1");
+
+  castFrom("u2"); // somebody picked this box in their own Spotify app
+
+  assert.equal(api.listAccounts().find((a) => a.active).id, "u2", "the account playing here became the active one");
+  bridge.onSessionUser(null);
+});
+
+test("a press on the TV does not repoint the library at the box's account", async () => {
+  // The active account is whose library the TV is showing, and switching to it is
+  // a choice somebody made on this screen. A pause is aimed at the box - it
+  // resolves the account holding it for itself - so it must not also take the
+  // library off the person who chose it. A CAST still moves it (above).
   reset("u1");
   serve({ boxOn: "u2" });
   castFrom("u2");
-  assert.equal(api.listAccounts().find((a) => a.active).id, "u1");
 
-  await api.control("pause");
+  assert.equal((await api.control("pause")).ok, true);
 
-  assert.equal(api.listAccounts().find((a) => a.active).id, "u2", "the account playing here became the active one");
+  assert.equal(api.listAccounts().find((a) => a.active).id, "u1", "the library stayed where it was put");
 });
 
 test("an account this box has not linked is refused, and no command goes out", async () => {
@@ -464,21 +479,26 @@ test("a box that is not in the list yet is asked about again, not remembered as 
 test("the account the box moved to is on disk, not just in this process", async () => {
   reset("u1");
   serve({ boxOn: "u2" });
-  castFrom("u2");
+  bridge.onSessionUser((u) => api.boxSignedInAs(u));
 
-  await api.control("pause");
+  castFrom("u2");
 
   const onDisk = JSON.parse(fs.readFileSync(path.join(HOME, ".tvbox", "spotify-accounts.json"), "utf8"));
   assert.equal(onDisk.active, "u2", "a shell restart must not undo the handover");
   assert.equal(onDisk.list.length, 2);
+  bridge.onSessionUser(null);
 });
 
-test("a continuation nobody asked for does not repoint the library, but the next press does", async () => {
+test("a play from this screen does not repoint the library at the account it went out as", async () => {
   reset("u1");
   serve({ boxOn: "u2" });
 
-  // autoplay: plays as the box's account, deliberately without making it active
-  assert.equal((await api.play({ uris: ["spotify:track:x"], keepActive: true })).ok, true);
+  // Playing as u2 because that is who the box is signed into; the library on
+  // screen is u1's, and a row pressed in it is not a reason to leave it.
+  const r = await api.play({ uris: ["spotify:track:x"] });
+  assert.equal(r.ok, true);
+  assert.equal(r.account, "u2");
+  assert.equal(r.accountName, "Two", "the screen has to be able to name whose session started");
   assert.equal(api.listAccounts().find((a) => a.active).id, "u1");
 
   // Starting music ACTIVATES the box, and the activation event arrives here.
@@ -486,9 +506,30 @@ test("a continuation nobody asked for does not repoint the library, but the next
   assert.equal(api.boxSignedInAs("u2"), false, "an activation we caused is not somebody choosing this room");
   assert.equal(api.listAccounts().find((a) => a.active).id, "u1");
 
-  // A person pressing something is, and it outranks the window.
+  // ...and a press about that music does not move it either.
   assert.equal((await api.control("pause")).ok, true);
-  assert.equal(api.listAccounts().find((a) => a.active).id, "u2");
+  assert.equal(api.listAccounts().find((a) => a.active).id, "u1");
+});
+
+test("Liked Songs are the browsed account's, or they are not played at all", async () => {
+  // A collection context can only name the account the play goes out as, so on a
+  // box signed into somebody else it would be THEIR liked songs - which Spotify
+  // accepts, plays and reports as success. The caller sends the track uris too.
+  reset("u1");
+  serve({ boxOn: "u2" });
+
+  assert.equal((await api.play({ collection: true, uris: ["spotify:track:x"] })).ok, true);
+  const played = writes().filter((w) => w.path.indexOf("/v1/me/player/play") === 0);
+  assert.equal(played.length, 1);
+  assert.deepEqual(JSON.parse(played[0].body), { uris: ["spotify:track:x"] }, "the tracks, not another collection");
+
+  // The box signed into the account being browsed: the context is that account's
+  // own, so it is used - a playlist rather than a copy of its first hundred rows.
+  reset("u2");
+  serve({ boxOn: "u2" });
+  assert.equal((await api.play({ collection: true, uris: ["spotify:track:x"] })).ok, true);
+  const own = writes().filter((w) => w.path.indexOf("/v1/me/player/play") === 0);
+  assert.deepEqual(JSON.parse(own[0].body), { context_uri: "spotify:user:u2:collection" });
 });
 
 test("a guest who cast once and went home does not lock the TV out of its own box", async () => {
@@ -558,9 +599,10 @@ test("an activation re-reads the device id, even when the same account activates
   bridge.onSessionUser(null);
 });
 
-test("a continuation that activates the box does not repoint the library, whatever the order", async () => {
-  reset("u1");
-  bridge.onSessionUser((u) => api.boxSignedInAs(u));
+// The activation a play of ours causes, mid-flight. `activates` is the account the
+// event names, which in life is the account holding the box's session - the same
+// one the play goes out as.
+async function playActivatedBy(activates) {
   // An idle box answers the first play with 404, and the transfer that follows is
   // what ACTIVATES it - so the activation event arrives in the middle of play(),
   // before it returns.
@@ -570,23 +612,54 @@ test("a continuation that activates the box does not repoint the library, whatev
       const refresh = new URLSearchParams(body).get("refresh_token");
       return { status: 200, body: JSON.stringify({ access_token: "at-" + refresh, expires_in: 3600 }) };
     }
-    if (url === "/v1/me/player/devices") return { status: 200, body: JSON.stringify({ devices: [BOX] }) };
+    if (url === "/v1/me/player/devices") {
+      const who = String((opts.headers || {}).Authorization || "").replace("Bearer at-r", "u");
+      return { status: 200, body: JSON.stringify({ devices: who === "u2" ? [BOX] : [] }) };
+    }
     if (url.indexOf("/v1/me/player/play") === 0) {
       plays++;
       if (plays === 1) return { status: 404, body: "" };
       return { status: 204, body: "" };
     }
     if (url.indexOf("/v1/me/player?") === 0 || url === "/v1/me/player") {
-      castFrom("u2"); // the transfer activates the box
+      castFrom(activates);
       return { status: 204, body: "" };
     }
     return { status: 204, body: "" };
   };
+  return api.play({ uris: ["spotify:track:x"] });
+}
 
-  assert.equal((await api.play({ uris: ["spotify:track:x"], keepActive: true })).ok, true);
+test("a continuation that activates the box does not repoint the library, whatever the order", async () => {
+  reset("u1");
+  bridge.onSessionUser((u) => api.boxSignedInAs(u));
+  try {
+    // The box is u2's, so the play goes out as u2 and the activation it causes
+    // names u2. Nobody in the room asked for the library to move.
+    assert.equal((await playActivatedBy("u2")).ok, true);
+    assert.equal(api.listAccounts().find((a) => a.active).id, "u1", "nobody in the room asked for this");
+  } finally {
+    bridge.onSessionUser(null);
+  }
+});
 
-  assert.equal(api.listAccounts().find((a) => a.active).id, "u1", "nobody in the room asked for this");
-  bridge.onSessionUser(null);
+test("a cast by somebody else inside that window is still followed", async () => {
+  // The window suppresses ONE account - the one the play went out as. A different
+  // account activating the box is a phone claiming it, and swallowing that left the
+  // library, the account beside the gear and the transport buttons on the wrong
+  // account, with the next press taking the box off the person who had just cast.
+  reset("u2"); // browsing u2, which is also the account the box is signed into
+  bridge.onSessionUser((u) => api.boxSignedInAs(u));
+  try {
+    assert.equal((await playActivatedBy("u2")).ok, true);
+    assert.equal(api.listAccounts().find((a) => a.active).id, "u2", "its own activation changes nothing");
+
+    castFrom("u1"); // a phone on the other linked account takes the box, seconds later
+
+    assert.equal(api.listAccounts().find((a) => a.active).id, "u1", "the library followed the account that cast");
+  } finally {
+    bridge.onSessionUser(null);
+  }
 });
 
 test("an account that autoplay names but the box does not have is refused, not swapped", async () => {
