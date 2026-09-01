@@ -5,8 +5,12 @@
     "hu": "M\u00e9dia",
     "en": "Media"
   },
-  "version": "0.63.0",
+  "version": "0.63.1",
   "changelog": [
+    {
+      "version": "0.63.1",
+      "notes": "The season you are watching is no longer underlined on the row of seasons. It is still the brighter, bolder chip, which is enough to see which one it is."
+    },
     {
       "version": "0.63.0",
       "notes": "The other seasons of a series are now on the episode list itself. Above the episodes there is a row of seasons with the one you are looking at marked, so getting to another one is Up, then left or right, then OK, instead of going back to the series and in again. The episodes underneath change and the highlight stays on the row, so each next season is two presses and you never lose your place. Down goes back into the episodes and Up goes on to the play button. The seasons are numbered here, so a series that gives its seasons names shows \"Season 2\" on this row and the name on the series page. A series with only one season has no row at all."

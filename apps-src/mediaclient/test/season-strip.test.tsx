@@ -296,14 +296,13 @@ describe("the season strip on an episode list", () => {
     expect(getCurrentFocusKey()).toBe(chipKey(0));
   });
 
-  it("marks the season being shown inside the chip, where focus cannot hide it", async () => {
+  it("tells the season being shown apart by weight, which focus does not take", async () => {
     // Every way into the strip lands on this chip, and focus fills a chip white
-    // - taking the fill and the weight with it - so the mark has to be drawn in
-    // the chip and follow the text colour.
+    // - taking the fill with it, but not the weight, which is what still says
+    // which season the screen is on.
     const h = await open();
-    const mark = chip(h.seasons.indexOf(h.current))!.querySelector("span.bg-current");
-    expect(mark, "the current season carries a mark").toBeTruthy();
-    expect(chip(0)!.querySelector("span.bg-current")).toBeNull();
+    expect(chip(h.seasons.indexOf(h.current))?.className).toContain("font-semibold");
+    expect(chip(0)?.className).not.toContain("font-semibold");
   });
 
   it("places its cursor without waiting for the season list", async () => {
