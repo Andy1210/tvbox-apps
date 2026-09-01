@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n, useBackspace, useConfigStore, FocusButton, tvbox } from "@sdk";
 import { NowPlaying } from "./NowPlaying";
@@ -149,9 +149,21 @@ export function Spotify({ onExit }: { onExit: () => void }) {
   // Browse too, and not only to decide whether it is offered: the active account
   // can change while this screen is up (the box follows whoever casts to it), and
   // the library screen names the account it is showing.
+  // One reader for all three moments below, with a sequence number: three
+  // independent calls were in flight at once and the last ANSWER won rather than
+  // the last question. `status()` reaches Spotify's own API when an account's
+  // display name has never resolved, so a slow read can outlive two fast ones -
+  // and the name beside the gear is a claim about the account a press will play as.
+  const refreshSeq = useRef(0);
+  const refreshAuth = useCallback(() => {
+    const mine = ++refreshSeq.current;
+    void authStatus().then((a) => {
+      if (mine === refreshSeq.current) setAuth(a);
+    });
+  }, []);
   useEffect(() => {
-    if (view === "now" || view === "browse") authStatus().then(setAuth);
-  }, [view]);
+    if (view === "now" || view === "browse") refreshAuth();
+  }, [view, refreshAuth]);
   // ...and re-read it while either screen is up, because the handover happens
   // without anybody touching them. Naming the account is only worth doing if the
   // name is the one whose rows are on display: stale, it is a false claim, and
@@ -161,9 +173,9 @@ export function Spotify({ onExit }: { onExit: () => void }) {
   // the old name under the gear until the screen was left and re-entered.
   useEffect(() => {
     if (view !== "browse" && view !== "now") return;
-    const id = setInterval(() => void authStatus().then(setAuth), 10000);
+    const id = setInterval(refreshAuth, 10000);
     return () => clearInterval(id);
-  }, [view]);
+  }, [view, refreshAuth]);
   // ...and at once when a new song appears, which is the moment a cast changes
   // hands: the shell pushes that over SSE, so the name under the gear follows the
   // music instead of trailing it by up to ten seconds. Also fires for a play
@@ -171,8 +183,8 @@ export function Spotify({ onExit }: { onExit: () => void }) {
   const trackId = useSpotifyStore((s) => s.state?.track_id || "");
   useEffect(() => {
     if (!trackId || (view !== "browse" && view !== "now")) return;
-    void authStatus().then(setAuth);
-  }, [trackId, view]);
+    refreshAuth();
+  }, [trackId, view, refreshAuth]);
 
   // A spoken request. The listener is here rather than on the player screen
   // because that screen is not the one on display when the request arrives - the

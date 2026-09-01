@@ -831,6 +831,11 @@ module.exports = (host) => {
     }
     signInFailed.set(id, Date.now());
     host.log("spotify: the saved login for " + id + " did not bring the box back (" + how + ")");
+    // Decided HERE, acted on below. The refusals are counted per process, so what
+    // makes them this account's is that this account's blob is the one in place -
+    // true now, and not after the restore has put another login there. (Empty means
+    // the credential guard has already moved it aside, and dropped the copy with it.)
+    const refusedThisBlob = how === "refused" && credVault.owner() === id;
     if (swap.displaced && swap.displaced !== id && credVault.use(swap.displaced).ok) {
       credentialsReplaced();
       restartLibrespot();
@@ -856,7 +861,7 @@ module.exports = (host) => {
     // this vault already expects to exist in more than one form. Being wrong costs
     // a household member their only login here, against a press that is slow once
     // a minute - so it is left alone and merely cooled.
-    if (how === "refused") credVault.drop(id);
+    if (refusedThisBlob) credVault.drop(id);
     return false;
   }
   // A play, and the one thing the screen cannot work out for itself: WHOSE

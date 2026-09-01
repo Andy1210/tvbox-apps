@@ -118,6 +118,23 @@ test("the daemon naming the account it signed in as is read from its own module"
   }
 });
 
+test("two denials of DIFFERENT files are not two denials", () => {
+  // The plugin puts another account's login in place to sign the box in as them,
+  // and the daemon it kills can still have a refusal in flight. Counted together,
+  // two of those move aside the login that was just put back - which is the one
+  // that was working. The count is about one blob, and it says so by checking.
+  const b = box();
+  assert.equal(b.guard.note(DENIED, {}), false);
+  fs.writeFileSync(b.cred, '{"username":"other","auth_type":1,"auth_data":"another-blob"}');
+
+  assert.equal(b.guard.note(DENIED, {}), false, "the second refusal is about a file that has changed");
+  assert.equal(fs.existsSync(b.cred), true, "so the new login is still in place");
+
+  // ...and two refusals of THIS file still act.
+  assert.equal(b.guard.note(DENIED, {}), true);
+  assert.equal(fs.existsSync(b.cred), false);
+});
+
 test("a file that was replaced does not inherit the strikes counted against the last one", () => {
   // What a sign-in does: a refused login is swapped out for the one that was
   // working. A refusal still in flight would otherwise move THAT file aside.

@@ -1038,10 +1038,19 @@ async function play({ contextUri, uris, offset, collection }) {
     return r;
   };
 
-  let r = ctx ? await attempt({ context_uri: ctx, ...(pos > 0 ? { offset: { position: pos } } : {}) }) : null;
-  if ((!r || !r.ok) && (uris || []).length) {
-    if (r) console.warn("[spotify-api] context play refused (" + r.status + "); falling back to track uris");
-    r = await attempt({ uris: (uris || []).slice(0, URIS_MAX) });
+  // The window is armed above, and a THROW leaves this function without touching it
+  // again: a timeout or a socket error would keep the launcher off a real cast for
+  // the next thirty seconds, for a play that never happened.
+  let r;
+  try {
+    r = ctx ? await attempt({ context_uri: ctx, ...(pos > 0 ? { offset: { position: pos } } : {}) }) : null;
+    if ((!r || !r.ok) && (uris || []).length) {
+      if (r) console.warn("[spotify-api] context play refused (" + r.status + "); falling back to track uris");
+      r = await attempt({ uris: (uris || []).slice(0, URIS_MAX) });
+    }
+  } catch (e) {
+    disarmFollowSuppression();
+    throw e;
   }
   if (!r) return refuse("nothing to play");
   // A refusal is not a play, so it must not go on suppressing the follow.

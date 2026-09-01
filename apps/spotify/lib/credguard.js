@@ -154,6 +154,21 @@ function createCredGuard(deps) {
   let heals = 0; // completed resets, and nothing else - see gaveUpLogged
   let saidMissing = false;
   let gaveUpLogged = false;
+  // Which blob the strikes are about. "Two denials of the same file" is the whole
+  // bound, and a count alone cannot keep that promise: the plugin puts a different
+  // login in place to sign the box in as another account, and the daemon it kills
+  // can still have refusals in flight - charged to the new file, two of those move
+  // aside a login that was working. mtime+size rather than the contents: this runs
+  // on a log line, and the question is only "is this still the same file".
+  let strikeFile = "";
+  function fingerprint() {
+    try {
+      const st = fs.statSync(file());
+      return st.mtimeMs + ":" + st.size;
+    } catch (e) {
+      return "";
+    }
+  }
 
   // Feed every line of the daemon's output through here. `withToken` says whether
   // the instance that produced it was started with --access-token.
@@ -167,6 +182,9 @@ function createCredGuard(deps) {
     // The token was refused, not the file. Deliberately does not touch the
     // strikes either: an adoption is a separate question from a poisoned cache.
     if (opts && opts.withToken) return false;
+    const fp = fingerprint();
+    if (strikes && fp !== strikeFile) strikes = 0; // a different file: start again
+    strikeFile = fp;
     strikes++;
     if (strikes < threshold) return false;
     strikes = 0;
@@ -217,6 +235,7 @@ function createCredGuard(deps) {
   // back because the new one failed.
   function fileReplaced() {
     strikes = 0;
+    strikeFile = "";
   }
 
   return { note, fileReplaced, stats: () => ({ strikes, heals }) };
