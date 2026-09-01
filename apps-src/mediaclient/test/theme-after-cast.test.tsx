@@ -101,6 +101,9 @@ describe("what a detail screen tells the theme player", () => {
     // Failed: the same empty item, and the opposite answer - a theme playing
     // under "something went wrong" would play for as long as it is up.
     expect(themeItem(null, true)).toBeNull();
+    // A screen can fail with its item already in hand: the episode list is
+    // fetched after the item and under the same catch.
+    expect(themeItem(oneSeason, true)).toBeNull();
   });
 });
 

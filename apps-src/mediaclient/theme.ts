@@ -136,8 +136,13 @@ function stop(): void {
  * went wrong", for as long as it is up.
  */
 export function themeItem(item: MediaItem | null, failed: boolean): MediaItem | null | undefined {
+  // Failed FIRST: the screen fails as a whole, and it can fail with an item in
+  // hand - the episode list is fetched after the item and under the same catch,
+  // so a season whose children fail has both. Asking about the item first left
+  // the theme playing under "something went wrong" in exactly that case.
+  if (failed) return null;
   if (item) return item.kind === "season" || item.kind === "show" ? item : null;
-  return failed ? null : undefined;
+  return undefined;
 }
 
 export function useTheme(item: MediaItem | null | undefined): void {

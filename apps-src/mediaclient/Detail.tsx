@@ -571,7 +571,11 @@ export function Detail({
    */
   const lifted = useRef(false);
   useEffect(() => {
-    if (!focusSeasons || lifted.current || !settled || seasons.length <= 1) return;
+    // Not while a film is up, the way the other two focus hooks on this screen
+    // are gated: the player owns the cursor then, and this page is only hidden
+    // behind it. Safe without the guard today - starting a film changes `first`,
+    // so the test below already fails - but that is another component's doing.
+    if (!focusSeasons || lifted.current || !settled || playing || seasons.length <= 1) return;
     if (!doesFocusableExist(SEASONS_KEY)) return;
     lifted.current = true;
     // A timer, like the one-shot above and after it: both are armed in source
@@ -580,7 +584,7 @@ export function Detail({
       if (getCurrentFocusKey() === first) setFocus(SEASONS_KEY);
     }, 0);
     return () => clearTimeout(id);
-  }, [focusSeasons, seasons, first, settled]);
+  }, [focusSeasons, seasons, first, settled, playing]);
 
   // A countdown arrives on a screen that never unmounted - the browse tree is
   // hidden during playback, not thrown away - so the one-shot initial focus has
