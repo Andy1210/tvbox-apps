@@ -969,7 +969,17 @@ module.exports = (host) => {
     // register: a guest who cast once leaves a reusable credential here too, and
     // signing the box into a stranger's account weeks later - their session, their
     // history, their stream - is not a recovery.
-    const vaulted = credVault.list().filter((id) => isLinked(id) && !signInCooling(id));
+    // In the household's OWN order - the accounts as they were linked - rather than
+    // the vault's: which member a signed-out box comes back as must not depend on
+    // how a directory happens to enumerate, and sorting the ids is no better an
+    // answer to that question than random is. The account being BROWSED still wins
+    // over all of them; this is only the order of the fallback. Taking the ids from
+    // the account list is also what holds this to the linked accounts, so a guest's
+    // saved login is never one of the candidates.
+    const vaulted = spotifyApi
+      .listAccounts()
+      .map((a) => a.id)
+      .filter((id) => credVault.has(id) && !signInCooling(id));
     if (!savedLoginExists() && !vaulted.length) return { ok: false, error: "box_signed_out" };
     // A press must not become a restart loop when the box cannot come back: the
     // supervisor has its own ceiling, but this is what keeps a person leaning on

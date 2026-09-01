@@ -860,13 +860,14 @@ function cachedBoxOwner() {
 // neither is a phone claiming it. An activation outside the window reads as
 // somebody having chosen this room, which is the case this exists to follow.
 //
-// It suppresses ONE account, the one the play went out as, rather than the next
-// thirty seconds of everything. A real cast inside the window is by definition
-// somebody else picking this box, and swallowing it left the library, the gear's
-// label and the transport buttons pointing at the wrong account - and the next
-// press then took the box off the person who had just cast. Empty means "not
-// resolved yet": the window is armed before the target is known, because the
-// activation arrives on one local POST while the play takes two round trips.
+// In two phases, because the window has to be armed before it can be aimed. A play
+// arms it with no account named, which suppresses ANY activation - the target is
+// not known until the device lookup comes back, and the activation can arrive
+// before that: it is one local POST against the play's two round trips. Once the
+// target IS known the window narrows to that one account, so a real cast by
+// another account inside it is still followed. Swallowing those left the library,
+// the name beside the gear and the transport buttons pointing at the wrong
+// account, and the next press then took the box off the person who had just cast.
 const FOLLOW_SUPPRESS_MS = 30000;
 let suppressFollowUntil = 0;
 let suppressFollowFor = "";

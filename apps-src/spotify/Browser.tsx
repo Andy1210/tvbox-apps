@@ -272,11 +272,11 @@ export function Browser({
     return () => clearTimeout(id);
   }, [err]);
   // Say the long case out loud rather than letting the short label sit there for
-  // twenty seconds looking stuck. Four seconds: signing the box in as another
-  // account costs three to five, so at five the message could arrive as the music
-  // started, and much earlier it is a flicker in a box that is about to change.
-  // The case that really needs the line is a saved login that turns out to be
-  // stale, which takes about ten.
+  // twenty seconds looking stuck. FOUR seconds, measured against what the waits
+  // actually are: signing the box in as another account takes three to five, so a
+  // line at three would flicker up as the screen is already changing, and the case
+  // that really needs it - a saved login that turns out to be stale, about ten
+  // seconds - is still told well before anybody doubts the press.
   useEffect(() => {
     if (!starting) {
       setSlow(false);

@@ -123,7 +123,8 @@ function createCredVault(deps) {
     return names
       .filter((n) => n.endsWith(".json"))
       .map((n) => n.slice(0, -5))
-      .filter(validId);
+      .filter(validId)
+      .sort(); // readdir order is the filesystem's; a caller choosing one must not be
   }
 
   // Write `raw` to `file` so that a reader either sees the previous content or all
