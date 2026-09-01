@@ -5,8 +5,12 @@
     "hu": "M\u00e9dia",
     "en": "Media"
   },
-  "version": "0.62.6",
+  "version": "0.63.0",
   "changelog": [
+    {
+      "version": "0.63.0",
+      "notes": "The other seasons of a series are now on the episode list itself. Above the episodes there is a row of seasons with the one you are looking at marked, so getting to another one is Up, then left or right, then OK, instead of going back to the series and in again. The episodes underneath change and the highlight stays on the row, so each next season is two presses and you never lose your place. Down goes back into the episodes and Up goes on to the play button. The seasons are numbered here, so a series that gives its seasons names shows \"Season 2\" on this row and the name on the series page. A series with only one season has no row at all."
+    },
     {
       "version": "0.62.6",
       "notes": "A library now opens where you left it. Before, the grid jumped back to the top of the list every time and the cursor sat on the first poster, so after watching something from halfway down you had to scroll all the way there again. Coming back out of a film or a series puts the highlight back on it, with the row in the same place on screen; and it is where you were standing that is remembered, not what you last played, so if you move the cursor somewhere else before leaving, that is where you come back to. This is true whichever way you come back in, from the home screen as well, for as long as the app stays open, and it is forgotten when you sign out or switch to another profile. Changing the order, a filter, or switching to the collections starts the grid at the top again, as it should: it is a different list."

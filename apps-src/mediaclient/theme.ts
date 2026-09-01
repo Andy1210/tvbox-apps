@@ -39,8 +39,20 @@ const FADE_MS = 600;
  */
 const LEVEL = 0.42;
 
+/**
+ * The ramp each element is on, so a second one replaces it rather than joining it.
+ *
+ * Two ramps on one element do not average out, they fight: a fade-out computes
+ * its step ONCE, so a stop that lands while the fade-in is still at zero gets a
+ * step of zero and can never lower a volume the fade-in keeps raising. Measured
+ * before this: the theme sat at full level over a film, `pause()` never ran, and
+ * a 20 Hz interval spun for the life of the page.
+ */
+const ramps = new WeakMap<HTMLAudioElement, () => void>();
+
 /** Walk an element's volume to `to`, and run `done` when it arrives. */
 function fade(a: HTMLAudioElement, to: number, done?: () => void): () => void {
+  ramps.get(a)?.();
   const step = Math.abs(to - a.volume) / (FADE_MS / 50);
   const timer = setInterval(() => {
     const at = a.volume;
@@ -48,14 +60,39 @@ function fade(a: HTMLAudioElement, to: number, done?: () => void): () => void {
     a.volume = next;
     if (Math.abs(next - to) <= 0.01) {
       a.volume = to;
-      clearInterval(timer);
+      cancel();
       done?.();
     }
   }, 50);
-  return () => clearInterval(timer);
+  const cancel = (): void => {
+    clearInterval(timer);
+    if (ramps.get(a) === cancel) ramps.delete(a);
+  };
+  ramps.set(a, cancel);
+  return cancel;
+}
+
+/**
+ * A stop that a screen of the same series may still cancel.
+ *
+ * Leaving the detail screen stops the theme, and switching seasons IS leaving
+ * it: the screen is keyed on the item, so the strip unmounts one season's page
+ * and mounts the next one's in the same commit. Stopping there restarted the
+ * sting from its first bar on every switch, which is the movement the strip
+ * exists to make cheap. So the stop waits a tick, and a screen that wants the
+ * same theme cancels it - the same rule the guard below states for moving
+ * between episodes, one level up.
+ */
+let leaving: ReturnType<typeof setTimeout> | null = null;
+
+function keepPlaying(): void {
+  if (leaving === null) return;
+  clearTimeout(leaving);
+  leaving = null;
 }
 
 function stop(): void {
+  keepPlaying();
   const a = audio;
   // Cleared BEFORE the early return: leaving it set meant a theme whose fetch
   // was interrupted - by walking away and back quickly, which is ordinary -
@@ -87,11 +124,42 @@ function stop(): void {
  * - Fetched with the credential as a header, like artwork, so the URL never
  *   carries it - which is why it becomes a blob rather than an <audio src>.
  */
+/**
+ * What a detail screen tells the theme player, from what it has.
+ *
+ * Three answers, not two. `null` is "nothing to play here", which stops the
+ * theme; `undefined` is "not known yet", which keeps it - a screen replaced by
+ * another season of the same series arrives with its item a round trip away,
+ * and treating that as nothing restarts the sting from its first bar on every
+ * switch. A screen that FAILED has the same empty item as one that is loading
+ * and must not be confused with it: the theme would play on under "something
+ * went wrong", for as long as it is up.
+ */
+export function themeItem(item: MediaItem | null, failed: boolean): MediaItem | null | undefined {
+  // Failed FIRST: the screen fails as a whole, and it can fail with an item in
+  // hand - the episode list is fetched after the item and under the same catch,
+  // so a season whose children fail has both. Asking about the item first left
+  // the theme playing under "something went wrong" in exactly that case.
+  if (failed) return null;
+  if (item) return item.kind === "season" || item.kind === "show" ? item : null;
+  return undefined;
+}
+
 export function useTheme(item: MediaItem | null | undefined): void {
   const backend = useApp((s) => s.backend);
   const playing = useShowingPlayer();
   const on = usePrefs((s) => s.themeMusic);
   const url = item && backend && on ? backend.themeUrl(item) : undefined;
+  /**
+   * `undefined` means the screen does not know yet, which is not the same
+   * answer as `null`.
+   *
+   * A screen replaced by another of the same series arrives with its item still
+   * on its way - a round trip, far longer than the tick the stop below waits -
+   * and treating that as "nothing to play" restarts the sting from its first
+   * bar every time somebody switches season.
+   */
+  const unknown = item === undefined;
 
   // The shell HIDES an app window rather than destroying it, and audio in a
   // hidden page is not throttled - so without this, pressing Home from a season
@@ -100,18 +168,27 @@ export function useTheme(item: MediaItem | null | undefined): void {
   useEffect(() => onRelease(() => stop()), []);
 
   useEffect(() => {
+    // Whatever this screen decides, it decides it now: a stop left over from
+    // the screen this one replaced must not fire into it and silence a theme
+    // that has just been started.
+    keepPlaying();
+    if (unknown) return;
     if (!backend || !url) {
       stop();
       return;
     }
     if (playing) {
-      // What is being silenced, remembered before `stop` forgets it - and the
-      // screen's OWN theme when nothing was sounding. A film started by voice
-      // puts this screen up underneath itself, so there is nothing playing to
-      // remember, and the theme would then start over the countdown at the end
-      // of the episode: the one moment this exists to keep quiet, in a room
-      // whose volume is set for a film's dialogue.
-      silencedByPlayback = playingUrl ?? url;
+      // THIS screen's theme, which is the only one the question is ever asked
+      // about again: what comes back after a film is whatever the screen under
+      // it wants, so that is what has to be remembered as silenced. A film
+      // started by voice puts a screen up underneath itself, and its theme
+      // would otherwise start over the countdown at the end of the episode -
+      // the one moment this exists to keep quiet, in a room whose volume is set
+      // for a film's dialogue. (It used to read `playingUrl ?? url`, which came
+      // to the same answer only because leaving a screen cleared `playingUrl`
+      // before the next one asked; that stop is deferred now, so the screen
+      // says what it means instead.)
+      silencedByPlayback = url;
       stop();
       return;
     }
@@ -157,7 +234,7 @@ export function useTheme(item: MediaItem | null | undefined): void {
     return () => {
       live = false;
     };
-  }, [backend, url, playing]);
+  }, [backend, url, playing, unknown]);
 
   // Leaving the screen stops it. Without this the theme follows you into the
   // library and plays under a grid of posters - and it is also where the
@@ -166,7 +243,23 @@ export function useTheme(item: MediaItem | null | undefined): void {
   useEffect(
     () => () => {
       silencedByPlayback = null;
-      stop();
+      // Nothing to keep alive: the fetch this screen started dies with it (its
+      // own `live` flag), so leaving `playingUrl` set would tell the next screen
+      // a theme is playing that nobody will ever start - measured, the series
+      // then stayed silent for the rest of the visit, which is the ordinary
+      // gesture of opening a series and pressing two seasons.
+      if (!audio) {
+        stop();
+        return;
+      }
+      // A tick, not now: the next screen gets to say whether it wants the same
+      // theme. Nothing else is deferred, so a screen that is really being left
+      // falls silent in the same frame a person would notice.
+      keepPlaying();
+      leaving = setTimeout(() => {
+        leaving = null;
+        stop();
+      }, 0);
     },
     [],
   );

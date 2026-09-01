@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { FocusContext, doesFocusableExist, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
+import {
+  FocusContext,
+  doesFocusableExist,
+  getCurrentFocusKey,
+  setFocus,
+  useFocusable,
+} from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, useBackspace, useI18n } from "@sdk";
 import { Row } from "./Row";
 import { episodeNumber } from "./Tile";
@@ -12,8 +18,9 @@ import { TitleArt } from "./TitleArt";
 import { Summary } from "./Summary";
 import { LanguagePicker } from "./LanguagePicker";
 import { Confirm } from "./Confirm";
+import { SeasonStrip, SEASONS_KEY } from "./SeasonStrip";
 import { Backdrop } from "./Backdrop";
-import { useTheme } from "./theme";
+import { themeItem, useTheme } from "./theme";
 import { useFocusFallback, useFocusOnReveal, useInitialFocus, useScrollToTopOnFirst } from "./focus";
 import { usePlayer, useShowingPlayer } from "./playback/player";
 import { rememberedVersion, useChosenVersion } from "./chosenVersion";
@@ -59,6 +66,27 @@ function ownsDetailKey(key: string): boolean {
 }
 
 /**
+ * The buttons above the rows, in the order Up should try them.
+ *
+ * Whatever this screen actually has: aiming at a button that is not rendered
+ * leaves the app with no origin and swallows the press. A show has no Play
+ * button, a film no season button, and the arrival screen has neither.
+ */
+const ABOVE_ROWS = ["detail-play", "detail-lang", "detail-watched", "detail-watched-season", "lib-arrange"];
+
+/** Focus the first of these that exists. False when none of them does, which is
+ *  the caller's cue to leave the press to geometry rather than eat it. */
+function focusFirstOf(keys: readonly string[]): boolean {
+  for (const key of keys) {
+    if (doesFocusableExist(key)) {
+      setFocus(key);
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * One film or series.
  *
  * The cast is the point of this screen as much as the synopsis is: it is the
@@ -69,10 +97,12 @@ export function Detail({
   itemId,
   focusChildId,
   queueFrom,
+  focusSeasons,
 }: {
   itemId: string;
   focusChildId?: string;
   queueFrom?: MediaItem[];
+  focusSeasons?: boolean;
 }): React.JSX.Element {
   const { t } = useI18n();
   const backend = useApp((s) => s.backend);
@@ -115,6 +145,8 @@ export function Detail({
   const [detail, setDetail] = useState<ItemDetail | null>(null);
   const [busy, setBusy] = useState(false);
   const [children, setChildren] = useState<MediaItem[]>([]);
+  /** The other seasons of this series, on a season screen. Empty everywhere else. */
+  const [seasons, setSeasons] = useState<MediaItem[]>([]);
   /**
    * Whether the screen knows what it holds.
    *
@@ -222,6 +254,47 @@ export function Detail({
       live = false;
     };
   }, [backend, itemId, fail, reload]);
+
+  /**
+   * The series' other seasons, for the strip above the episode list.
+   *
+   * Its own request, after the screen: it is a shortcut, not part of what the
+   * page says, so nothing here may hold the episodes up or fail the screen. A
+   * series that cannot be listed simply has no strip, and Back to the series
+   * still works.
+   *
+   * Keyed on the kind and the parent rather than on `detail`, which is replaced
+   * whole by the refetch after playback - that would ask again for a list that
+   * cannot have changed.
+   */
+  const showId = detail?.kind === "season" ? detail.parentId : undefined;
+  const known = detail !== null;
+  useEffect(() => {
+    // Nothing is known yet, so nothing is settled: a screen opened from the
+    // strip waits on this flag, and answering "settled, no seasons" before the
+    // item has even arrived would put its cursor back on the play button.
+    if (!known) return;
+    setSeasons([]);
+    if (!backend || !showId) return;
+    let live = true;
+    void (async () => {
+      try {
+        const kids = await backend.children(showId);
+        // A series' children are its seasons, but the strip says so itself
+        // rather than trusting it: a chip that opens something which is not a
+        // season would put an unrelated screen one press from the episodes.
+        if (live) setSeasons(kids.filter((k) => k.kind === "season" && k.id));
+      } catch (e) {
+        log.warn("could not list the seasons", e);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+    // `known` rather than `detail`, which is replaced whole by the refetch after
+    // playback: keying on the object would clear the strip and ask again every
+    // time a film ends.
+  }, [backend, showId, known]);
 
   /**
    * What this screen last started, so coming back from playback lands on it.
@@ -469,7 +542,49 @@ export function Detail({
           : children[0]
             ? `children-${itemId}-${children[0].id}`
             : "detail-back";
+  /**
+   * Where the cursor STARTS, which is not always where it is put back.
+   *
+   * A screen opened from another season's strip opens on the strip, so looking
+   * through the seasons is one press each. Everything else about this page -
+   * coming back out of a film, a press arriving with the cursor nowhere - still
+   * aims at `first`, which knows about the episode that was playing.
+   *
+   * Only when the strip is really there: a series with one season has none, and
+   * a key that never mounts is a remote that does nothing. The STRIP is named,
+   * not a chip - the container always exists while the strip is drawn, and it
+   * is the one thing that knows which chip the season being shown is.
+   */
   useInitialFocus(first, settled);
+
+  /**
+   * The strip, for a screen opened from another season's.
+   *
+   * Separate from the cursor above, and always later than it, because the
+   * season list is a second request that may answer either side of the
+   * episodes. Making the cursor WAIT for it was the first attempt and it was
+   * worse in both directions: the screen had nothing highlighted until the list
+   * answered, and a slow one then moved the cursor out from under a press. So
+   * the cursor goes where it always goes, and this lifts it onto the strip only
+   * while it is still standing where this screen put it - anyone who has
+   * pressed anything keeps what they pressed.
+   */
+  const lifted = useRef(false);
+  useEffect(() => {
+    // Not while a film is up, the way the other two focus hooks on this screen
+    // are gated: the player owns the cursor then, and this page is only hidden
+    // behind it. Safe without the guard today - starting a film changes `first`,
+    // so the test below already fails - but that is another component's doing.
+    if (!focusSeasons || lifted.current || !settled || playing || seasons.length <= 1) return;
+    if (!doesFocusableExist(SEASONS_KEY)) return;
+    lifted.current = true;
+    // A timer, like the one-shot above and after it: both are armed in source
+    // order, so this reads a cursor that has already been placed.
+    const id = setTimeout(() => {
+      if (getCurrentFocusKey() === first) setFocus(SEASONS_KEY);
+    }, 0);
+    return () => clearTimeout(id);
+  }, [focusSeasons, seasons, first, settled, playing]);
 
   // A countdown arrives on a screen that never unmounted - the browse tree is
   // hidden during playback, not thrown away - so the one-shot initial focus has
@@ -540,7 +655,10 @@ export function Detail({
 
   // Before the early returns, as hooks must be. `detail` is null while loading,
   // which is simply no theme yet.
-  useTheme(detail?.kind === "season" || detail?.kind === "show" ? detail : null);
+  // Three answers rather than two - the item, nothing, or not known yet. See
+  // themeItem: switching seasons replaces this screen with another of the same
+  // series, and the theme must survive the gap rather than start again.
+  useTheme(themeItem(detail, Boolean(failure)));
 
   if (failure) return <Message failure={failure} onRetry={() => setReload((n) => n + 1)} />;
   if (!detail) return <Message loading />;
@@ -880,6 +998,25 @@ export function Detail({
           )}
         </header>
 
+        {/* Only where there is a choice: one season is not a switcher, it is a
+            row of one chip that says nothing and answers OK with nothing. */}
+        {detail.kind === "season" && seasons.length > 1 && (
+          <SeasonStrip
+            seasons={seasons}
+            currentId={detail.id}
+            title={t("detail.seasons")}
+            onPick={(season) => {
+              // The season being shown is not a destination: pressing it would
+              // rebuild this screen and lose where the cursor was in it.
+              if (season.id === detail.id) return;
+              // Replaced, not pushed: Back belongs to whatever opened the
+              // series, not to a trail of every season that was looked at.
+              replace({ name: "item", itemId: season.id, focusSeasons: true });
+            }}
+            onLeave={(dir) => (dir === "up" ? focusFirstOf(ABOVE_ROWS) : focusFirstOf([`row-children-${itemId}`]))}
+          />
+        )}
+
         {rowItems.length > 0 && (
           <Row
             id={`children-${itemId}`}
@@ -906,17 +1043,10 @@ export function Detail({
             // and the cursor left the screen.
             onArrowFromFirst={(dir) => {
               if (dir !== "up") return true;
-              // Whatever this screen actually has above the row. Aiming at a
-              // button that is not rendered leaves the app with no origin and
-              // swallows the press.
-              const above = ["detail-play", "detail-lang", "detail-watched", "detail-watched-season", "lib-arrange"];
-              for (const key of above) {
-                if (doesFocusableExist(key)) {
-                  setFocus(key);
-                  return false;
-                }
-              }
-              return true;
+              // The season strip first where there is one: it sits between the
+              // buttons and this row, and Up should reach the thing directly
+              // above rather than skip it.
+              return !focusFirstOf([SEASONS_KEY, ...ABOVE_ROWS]);
             }}
             countdownFor={
               upNext

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act, render } from "@testing-library/react";
-import { useTheme } from "../theme";
+import { themeItem, useTheme } from "../theme";
 import { usePlayer, resetPlayer } from "../playback/player";
 import { useApp } from "../state";
 import { usePrefs } from "../prefs";
@@ -23,13 +23,24 @@ import type { MediaItem } from "../backends/types";
 const season = (id: string): MediaItem => ({ id, kind: "season", title: `Season ${id}`, theme: `t/${id}` });
 
 let plays: string[] = [];
+/** The elements the module made, so a test can read what really happened to one. */
+interface Sounding {
+  volume: number;
+  paused: boolean;
+}
+let made: Sounding[] = [];
 
-function Season({ item }: { item: MediaItem | null }): null {
+function Season({ item }: { item: MediaItem | null | undefined }): null {
   useTheme(item);
   return null;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  // The stop a screen arms on its way out waits a tick, so it can be cancelled
+  // by another season of the same series arriving. That tick outlives the test
+  // that armed it: let it land before this one renders, or the module still
+  // believes the previous test's theme is playing.
+  await new Promise((r) => setTimeout(r, 0));
   plays = [];
   usePrefs.setState({ themeMusic: true });
   useApp.setState({
@@ -44,15 +55,22 @@ beforeEach(() => {
     createObjectURL: (b: { url: string }) => b.url,
     revokeObjectURL: () => {},
   });
+  made = [];
   class FakeAudio {
     volume = 1;
+    paused = false;
     onended: (() => void) | null = null;
-    constructor(readonly src: string) {}
+    constructor(readonly src: string) {
+      made.push(this as unknown as Sounding);
+    }
     play(): Promise<void> {
       plays.push(this.src);
+      this.paused = false;
       return Promise.resolve();
     }
-    pause(): void {}
+    pause(): void {
+      this.paused = true;
+    }
   }
   vi.stubGlobal("Audio", FakeAudio);
 });
@@ -71,7 +89,55 @@ async function settle(): Promise<void> {
 
 const playing = { item: { id: "ep" }, decision: {}, markers: [], choice: { version: 0 } } as never;
 
+describe("what a detail screen tells the theme player", () => {
+  const oneSeason = { id: "s", kind: "season", title: "1" } as MediaItem;
+  const film = { id: "f", kind: "movie", title: "F" } as MediaItem;
+
+  it("answers with the item, with nothing, or with not-known-yet", () => {
+    expect(themeItem(oneSeason, false)).toBe(oneSeason);
+    expect(themeItem(film, false)).toBeNull();
+    // Loading: the theme carries across a season switch rather than restarting.
+    expect(themeItem(null, false)).toBeUndefined();
+    // Failed: the same empty item, and the opposite answer - a theme playing
+    // under "something went wrong" would play for as long as it is up.
+    expect(themeItem(null, true)).toBeNull();
+    // A screen can fail with its item already in hand: the episode list is
+    // fetched after the item and under the same catch.
+    expect(themeItem(oneSeason, true)).toBeNull();
+  });
+});
+
 describe("a series' theme and a film started by voice", () => {
+  it("does not silence the series for good when the fetch is still in flight", async () => {
+    // Nothing has started yet, so there is nothing to keep alive: leaving the
+    // url marked as playing told the next screen a theme was on its way that
+    // nobody would ever start, and the series stayed silent for the visit.
+    let release: (() => void) | undefined;
+    vi.stubGlobal("fetch", async (url: string) => {
+      await new Promise<void>((r) => (release = r));
+      return { ok: true, blob: async () => ({ url }) };
+    });
+    const { rerender } = render(<Season key="h1" item={season("A")} />);
+    await settle();
+    expect(plays).toEqual([]);
+    await act(async () => {
+      rerender(<Season key="h2" item={undefined} />);
+    });
+    await settle();
+    // The screen that started it is gone, so its own answer is discarded.
+    release?.();
+    await settle();
+    expect(plays, "the departing screen's fetch is dead").toEqual([]);
+
+    await act(async () => {
+      rerender(<Season key="h2" item={season("A")} />);
+    });
+    await settle();
+    release?.();
+    await settle();
+    expect(plays, "the arriving screen fetches it for itself").toEqual(["http://server/t/A"]);
+  });
+
   it("stays silent when the episode ends, having never sounded", async () => {
     // The plain voice case: the app was on its home page, so no theme was
     // playing when the season screen arrived under the film.
@@ -86,6 +152,61 @@ describe("a series' theme and a film started by voice", () => {
     await act(async () => usePlayer.setState({ current: null }));
     await settle();
     expect(plays, "and nothing over the countdown").toEqual([]);
+  });
+
+  it("keeps playing across a season switch of the same series", async () => {
+    // The season strip replaces this screen with another season's, which is a
+    // remount: the theme is the series', so it must carry on rather than start
+    // again from its first bar. The arriving screen does not know its item for
+    // a round trip, which is why "not known yet" is a different answer from
+    // "nothing to play".
+    const { rerender } = render(<Season key="s1" item={season("A")} />);
+    await settle();
+    expect(plays).toEqual(["http://server/t/A"]);
+
+    // Season two of the same series: a new screen, the item still on its way.
+    await act(async () => {
+      rerender(<Season key="s2" item={undefined} />);
+    });
+    await settle();
+    await act(async () => {
+      rerender(<Season key="s2" item={season("A")} />);
+    });
+    await settle();
+    expect(plays, "the same theme is not started twice").toEqual(["http://server/t/A"]);
+  });
+
+  it("really stops one that is still fading in", async () => {
+    // Two ramps on one element do not average, they fight: a fade-out that
+    // starts while the volume is still at zero computes a step of zero and can
+    // never lower what the fade-in keeps raising. Measured before the fix: the
+    // theme sat at full level over a film with `pause()` never called.
+    const { rerender } = render(<Season key="f1" item={season("A")} />);
+    await settle();
+    const a = made[0]!;
+    expect(a.volume, "the fade starts from silence").toBe(0);
+
+    // A film starts before the ramp has moved at all, which is the window.
+    await act(async () => {
+      usePlayer.setState({ current: playing });
+      rerender(<Season key="f1" item={season("A")} />);
+    });
+    await new Promise((r) => setTimeout(r, 350));
+    expect(a.paused, "it was really paused").toBe(true);
+    expect(a.volume, "and it did not get louder on the way out").toBeLessThanOrEqual(0.01);
+  });
+
+  it("stops when the screen is really left", async () => {
+    const { unmount } = render(<Season key="s1" item={season("A")} />);
+    await settle();
+    expect(plays).toEqual(["http://server/t/A"]);
+    await act(async () => unmount());
+    await settle();
+    // Nothing to assert about sound in a stub, so this asserts the state the
+    // guard reads: the same series played again means the stop really happened.
+    render(<Season key="s3" item={season("A")} />);
+    await settle();
+    expect(plays).toEqual(["http://server/t/A", "http://server/t/A"]);
   });
 
   it("stays silent when another series' theme was sounding as the cast arrived", async () => {
