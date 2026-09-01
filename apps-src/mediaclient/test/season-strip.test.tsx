@@ -148,7 +148,11 @@ function layout(h: Harness): void {
   };
   at('[data-sfocus="detail-play"]', 100, 100, 300, 70);
   h.seasons.forEach((_s, i) => at(`[data-sfocus="${chipKey(i)}"]`, 100 + i * 220, 300, 200, 60));
-  h.episodes.forEach((e, i) => at(`[data-sfocus="children-${h.current.id}-${e.id}"]`, 100 + i * 340, 500, 320, 200));
+  // The episode tiles carry no `data-sfocus` - only FocusButton does - so there
+  // is nothing to lay out for them here. Both transitions across that boundary
+  // go through this screen's own onArrowPress handlers rather than through
+  // geometry, which is what these tests measure; the geometry half was measured
+  // on a box.
 }
 
 async function settle(): Promise<void> {

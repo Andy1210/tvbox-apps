@@ -89,7 +89,11 @@ export function SeasonStrip({
           <div className="no-scrollbar -mx-[0.8vw] -my-[3vh] flex gap-[0.8vw] overflow-x-auto scroll-px-[6vw] px-[0.8vw] py-[3vh]">
             {seasons.map((season, i) => (
               <FocusButton
-                key={season.id || i}
+                // By position, like the focus key and for the same reason: a
+                // server that lists one season twice would otherwise give two
+                // chips the same React key, and reconciliation would reuse the
+                // wrong one.
+                key={seasonKey(i)}
                 focusKey={seasonKey(i)}
                 onEnter={() => onPick(season)}
                 onArrowPress={(dir) => {
