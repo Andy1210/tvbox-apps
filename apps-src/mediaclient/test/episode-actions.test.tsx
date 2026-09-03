@@ -113,6 +113,8 @@ async function open(opts?: { inProgress?: boolean; watched?: boolean }): Promise
 const el = (key: string): HTMLElement | null => document.querySelector(`[data-sfocus="${key}"]`);
 const text = (key: string): string => el(key)?.textContent ?? "";
 const name = (key: string): string => el(key)?.getAttribute("aria-label") ?? "";
+/** The line under the row, which is what names a button drawn as a glyph. */
+const hint = (): string => document.querySelector("[data-actions-hint]")?.textContent ?? "";
 
 /** Let time pass the press-bounce guard, which is real-clock. */
 async function settleClock(): Promise<void> {
@@ -134,6 +136,22 @@ async function press(key: string): Promise<void> {
     await new Promise((r) => setTimeout(r, 0));
   });
   await flushFocus();
+}
+
+/**
+ * Let a panel finish going away.
+ *
+ * Closing one unmounts its focusables and puts the cursor back on a timeout, so
+ * a single flush reads the cursor mid-teardown.
+ */
+async function settleFocus(): Promise<void> {
+  const { act } = await import("@testing-library/react");
+  for (let i = 0; i < 3; i++) {
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flushFocus();
+  }
 }
 
 async function focusOn(key: string): Promise<void> {
@@ -189,23 +207,32 @@ describe("the marking button", () => {
     expect(el("detail-watched")?.querySelector("svg"), "the tile's own tick").toBeTruthy();
   });
 
-  it("spells itself out while it is focused, designation and all", async () => {
+  it("is named under the row while it is focused, designation and all", async () => {
+    // Under the row rather than inside the button: a label that opens inside it
+    // moves every button to its right at the moment the cursor arrives.
     const h = await open();
     await focusOn(`children-${h.season.id}-${h.episodes[1]!.id}`);
     await focusOn("detail-watched");
-    expect(text("detail-watched")).toContain("S1E2");
-    expect(text("detail-watched")).toContain("Mark as watched");
+    expect(text("detail-watched"), "the button itself stays a glyph").toBe("");
+    expect(hint()).toContain("S1E2");
+    expect(hint()).toContain("Mark as watched");
   });
 
-  it("takes its words back when the cursor leaves the row", async () => {
-    // The SDK's button reports focus and has no blur, so a label opened by one
-    // and never closed stays open behind whatever the cursor moved on to.
+  it("takes that name back when the cursor leaves the row", async () => {
+    // The SDK's button reports focus and has no blur, so a name put up by one
+    // and never taken down stays up behind whatever the cursor moved on to.
     const h = await open();
     await focusOn(`children-${h.season.id}-${h.episodes[0]!.id}`);
     await focusOn("detail-watched");
-    expect(text("detail-watched")).not.toBe("");
+    expect(hint()).not.toBe("");
     await focusOn(`children-${h.season.id}-${h.episodes[0]!.id}`);
-    expect(text("detail-watched"), "back to a glyph").toBe("");
+    expect(hint(), "nothing in the row is focused now").toBe("");
+  });
+
+  it("leaves the line empty for a button that already carries its words", async () => {
+    await open();
+    await focusOn("detail-play");
+    expect(hint(), "Play says what it is; repeating it under the row says nothing").toBe("");
   });
 });
 
@@ -218,15 +245,17 @@ describe("the overflow button", () => {
     expect(text("more-watched-season")).toContain("Mark season as watched");
   });
 
-  it("refuses the press that opened it, arriving again by itself", async () => {
-    // The remote repeats and it bounces - measured on the box, twice within
-    // 180 ms - and by then the cursor is on the first item of the menu. Without
-    // the shared guard, opening the menu opened the language panel behind it.
+  it("takes a press on an item at once, with no window that answers nothing", async () => {
+    // The bounce guard was on these items and it is deliberately not any more:
+    // it also refuses a REAL press for 400 ms, silently, which on a television
+    // reads as a remote that has stopped working. What a repeat can reach here
+    // is a panel that Back closes - nothing that has to be undone.
     const h = await open();
     await focusOn(`children-${h.season.id}-${h.episodes[0]!.id}`);
     await press("detail-more");
     await press("more-lang");
-    expect(text("more-lang"), "the menu is still what is up").toContain("Audio and subtitles");
+    expect(el("more-lang"), "the menu has gone").toBeNull();
+    expect(el("lp-close"), "and the audio panel is up").toBeTruthy();
   });
 
   it("gives the cursor back to itself when the menu is closed", async () => {
@@ -348,7 +377,7 @@ describe("where a row parks", () => {
 describe("which episode the page is about", () => {
   /** The cursor's own ring, and the fainter one that is not the cursor. */
   const cursorRings = (): number => document.querySelectorAll('div[class*="ring-[0.35vh]"]').length;
-  const subjectRings = (): number => document.querySelectorAll('div[class*="ring-white/40"]').length;
+  const subjectRings = (): number => document.querySelectorAll('div[class*="ring-white/55"]').length;
 
   it("marks nothing before an episode is highlighted", async () => {
     await open();
@@ -379,5 +408,122 @@ describe("which episode the page is about", () => {
     // Still exactly one: a mark left behind on the previous episode would make
     // the page look as though it were about two of them.
     expect(subjectRings()).toBe(1);
+  });
+});
+
+describe("closing the overflow menu", () => {
+  it("gives the cursor back to the button, not to the episode row, on Back", async () => {
+    // The menu sits directly above a row where OK means PLAY, so a cursor that
+    // lands there instead of on the button turns the next press into a film.
+    const h = await open();
+    await focusOn(`children-${h.season.id}-${h.episodes[0]!.id}`);
+    await press("detail-more");
+    await remote.back();
+    await settleFocus();
+    expect(getCurrentFocusKey()).toBe("detail-more");
+  });
+
+  it("does the same after an episode has been played", async () => {
+    // `first` follows the last episode played, so the screen's own idea of
+    // where a cursor belongs is an episode tile by then - which is exactly the
+    // state the menu must not fall back into.
+    const { act } = await import("@testing-library/react");
+    const { usePlayer } = await import("../playback/player");
+    const h = await open();
+    await act(async () => {
+      usePlayer.setState({ current: { item: h.episodes[1]! } as never });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await act(async () => {
+      usePlayer.setState({ current: null });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flushFocus();
+    await focusOn("detail-more");
+    await press("detail-more");
+    await remote.back();
+    await settleFocus();
+    expect(getCurrentFocusKey()).toBe("detail-more");
+  });
+});
+
+describe("a film screen, where geometry is the only way back up", () => {
+  /**
+   * A film with two versions, so there is a focusable BELOW the action row that
+   * carries a focus key a test can name.
+   *
+   * A season screen hides this class of bug: `Row.onArrowFromFirst` and the
+   * season strip both call `focusFirstOf(ABOVE_ROWS)` by name, so they reach
+   * the buttons whatever spatial navigation thinks. A film has no such route -
+   * every press in or out of its action row is decided by geometry.
+   */
+  async function openFilm(): Promise<void> {
+    const { render, act } = await import("@testing-library/react");
+    const { configureI18n } = await import("@sdk");
+    const { Detail } = await import("../Detail");
+    const { useApp } = await import("../state");
+    const en = (await import("../locales/en.json")).default;
+    const hu = (await import("../locales/hu.json")).default;
+    configureI18n({ hu, en }, { fallback: "en" });
+
+    n += 1;
+    const film: MediaItem = { id: `film${n}`, kind: "movie", title: "A film" };
+    useApp.setState({
+      backend: {
+        kind: "plex",
+        item: async () => ({
+          ...detailOf(film),
+          versions: [
+            { ...version(), label: "1080p" },
+            { ...version(), mediaIndex: 1, label: "2160p" },
+          ],
+        }),
+        children: async () => [],
+        setWatched: async () => {},
+        posterUrl: () => undefined,
+        artUrl: () => undefined,
+        backdropUrl: () => undefined,
+        themeUrl: () => undefined,
+        imageHeaders: () => ({}),
+        markers: async () => [],
+      } as never,
+      screen: { name: "item", itemId: film.id },
+      history: [],
+      failure: null,
+    });
+    render(<Detail itemId={film.id} />);
+    for (let i = 0; i < 5; i++) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await flushFocus();
+    }
+    // The action row above, the version chips below it.
+    place(el("detail-play")!, 100, 400, 300, 70);
+    place(el("detail-watched")!, 440, 400, 120, 70);
+    place(el("detail-more")!, 600, 400, 120, 70);
+    place(el("detail-version-0")!, 100, 560, 200, 60);
+    place(el("detail-version-1")!, 320, 560, 200, 60);
+  }
+
+  it("lets Up out of the version chips reach the buttons again", async () => {
+    // A container that is not itself focusable is never in norigin's candidate
+    // list, and its children are siblings of nothing outside it - so with that
+    // off, one press of Down put every button on this screen out of reach in
+    // both directions, with only Back to escape.
+    await openFilm();
+    await setFocus("detail-version-0");
+    await flushFocus();
+    await remote.up();
+    expect(getCurrentFocusKey()).toBe("detail-play");
+  });
+
+  it("comes back to the buttons after going down and up again", async () => {
+    await openFilm();
+    await focusOn("detail-play");
+    await remote.down();
+    expect(getCurrentFocusKey(), "down leaves the row").toBe("detail-version-0");
+    await remote.up();
+    expect(getCurrentFocusKey(), "and up returns to it").toBe("detail-play");
   });
 });

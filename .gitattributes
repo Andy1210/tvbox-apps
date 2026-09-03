@@ -1,0 +1,11 @@
+# TypeScript and TSX are text, whatever byte a string literal happens to hold.
+#
+# Row.tsx carried a NUL as a list separator, so git classified a focus-critical
+# file as binary: `git diff` said only "Binary files differ", and a review - human
+# or automated - saw none of it. The escape is fixed at the source, but the base
+# side of a diff can still carry one, and one stray control character should not
+# be able to hide a source file from review again.
+*.ts diff
+*.tsx diff
+*.js diff
+*.jsx diff

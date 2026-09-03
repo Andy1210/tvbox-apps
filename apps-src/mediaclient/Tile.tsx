@@ -174,7 +174,7 @@ export function Tile({
           // thinner: it has to be unmistakably not the cursor - there is only
           // ever one of those - while still naming the tile the rest of the
           // screen is describing.
-          !focused && describing ? "ring-[0.25vh] ring-white/40" : "",
+          !focused && describing ? "ring-[0.3vh] ring-white/55" : "",
         ].join(" ")}
         style={{ height: `${heightVh}vh` }}
       >

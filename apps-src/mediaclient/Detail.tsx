@@ -203,6 +203,10 @@ export function Detail({
     // stream at start.
     setFocused(null);
     setFirstChild(null);
+    // The third panel, cleared with the other two: a menu left standing across
+    // an item change belongs to an overflow list that has been rebuilt under
+    // it, and an empty one has nothing for the cursor to land on.
+    setMore(false);
     setAudioLang(undefined);
     setSubLang(undefined);
     setSubId(undefined);
@@ -470,6 +474,22 @@ export function Detail({
    * time backwards - and a negative elapsed reads as "too soon" for as long as
    * the step lasted, which is both buttons dead with nothing to say why.
    */
+  /**
+   * The button a panel must hand the cursor back to.
+   *
+   * Set by the panel as it closes rather than acted on there: `setFocus` inside
+   * the close handler runs while the panel is still mounted and races its
+   * unmount, and what norigin does with a focused component that goes away is
+   * to walk UP - which reaches this page's own container and restores whatever
+   * child it remembers. Observed on a box: Back out of the overflow menu left
+   * the cursor on an episode tile, one press from starting it, on a menu that
+   * sits directly above that row.
+   *
+   * Unconditional, unlike `useFocusOnReveal`'s: the tile the cursor lands on is
+   * a key this screen owns, so a guard that keeps an owned cursor keeps exactly
+   * the wrong one.
+   */
+  const [restore, setRestore] = useState<string | null>(null);
   const lastPress = useRef(0);
   /** True when this press is the tail of the last one rather than a new one. */
   const bounced = (): boolean => {
@@ -634,6 +654,26 @@ export function Detail({
     // exactly "I cannot navigate in the subtitle list".
     !playing && !picking && !confirming && !more,
   );
+
+  /**
+   * Hand the cursor back to the button a panel was opened from.
+   *
+   * After the two hooks above, and on a timeout for the same reason theirs
+   * have one: the panel's own focusables are torn down in this commit and
+   * norigin's cleanup for them runs first. `focusFirstOf` rather than a bare
+   * `setFocus`, because the overflow button is only rendered while it has
+   * something behind it - a screen that lost its last overflow item while the
+   * panel was up would otherwise be handed a key that never mounts.
+   */
+  const panelUp = picking || confirming || more;
+  useEffect(() => {
+    if (!restore || panelUp) return;
+    const id = setTimeout(() => {
+      focusFirstOf([restore, ...ABOVE_ROWS]);
+      setRestore(null);
+    }, 0);
+    return () => clearTimeout(id);
+  }, [restore, panelUp]);
 
   /**
    * The countdown on the next episode, and the press that stops it.
@@ -818,7 +858,6 @@ export function Detail({
       key: "lang",
       label: t("tracks.title"),
       onEnter: () => {
-        if (bounced()) return;
         setMore(false);
         setPicking(true);
       },
@@ -832,7 +871,6 @@ export function Detail({
       // alike and one of them moves twenty items.
       label: t(seasonWatched ? "detail.markSeasonUnwatched" : "detail.markSeasonWatched"),
       onEnter: () => {
-        if (bounced()) return;
         setMore(false);
         setConfirming(true);
       },
@@ -902,14 +940,14 @@ export function Detail({
       label: t("detail.more"),
       icon: <MoreIcon />,
       iconOnly: true,
-      // Guarded like the toggles beside it, and here it is the MENU that needs
-      // it: the press that opens one arrives again by itself - measured on the
-      // box, twice within 180 ms - and the cursor is on an item by then. The
-      // window is shared, so the repeat is refused by the item rather than by
-      // this button.
-      onEnter: () => {
-        if (!bounced()) setMore(true);
-      },
+      // The items behind this are NOT guarded, deliberately. A repeat of the
+      // press that opens the menu lands on its first item, and the guard that
+      // would refuse it also refuses a real press for 400 ms - silently, which
+      // on a television reads as a broken remote. What the repeat can reach is
+      // a panel that closes with Back, or a confirmation that opens on
+      // "Cancel"; neither does anything that has to be undone, and the audio
+      // button this replaced had no guard at all.
+      onEnter: () => setMore(true),
     });
 
   return (
@@ -925,21 +963,21 @@ export function Detail({
             void setWatchedOn(detail, !seasonWatched, children);
             // Back to the button the chain started at, which is the only one of
             // the three still on screen: the menu that asked closed behind it.
-            setFocus("detail-more");
+            setRestore("detail-more");
           }}
           onClose={() => {
             setConfirming(false);
-            setFocus("detail-more");
+            setRestore("detail-more");
           }}
         />
       )}
-      {more && (
+      {more && overflow.length > 0 && (
         <MoreMenu
           items={overflow}
           onClose={() => {
             setMore(false);
             // Back to the button that opened it, the way the two panels below do.
-            setFocus("detail-more");
+            setRestore("detail-more");
           }}
         />
       )}
@@ -960,7 +998,7 @@ export function Detail({
             // does. Without it the panel closes onto a cursor that is nowhere,
             // and whatever puts one back lands on Play - so Back out of the
             // audio menu moved the highlight to a different button entirely.
-            setFocus("detail-more");
+            setRestore("detail-more");
           }}
         />
       )}
