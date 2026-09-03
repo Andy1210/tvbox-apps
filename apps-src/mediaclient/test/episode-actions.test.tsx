@@ -527,3 +527,63 @@ describe("a film screen, where geometry is the only way back up", () => {
     expect(getCurrentFocusKey(), "and up returns to it").toBe("detail-play");
   });
 });
+
+describe("a panel closing while something else owns the screen", () => {
+  it("does not park the cursor on a button behind a film", async () => {
+    // This page does not unmount during playback, it sits behind the player -
+    // and the two focus hooks beside this one carry the same guard for a
+    // measured reason: one OK press then both paused the film and pressed the
+    // page's Play button behind it. Playback does not only start from a key
+    // press either; a spoken "next episode" reaches the app the same way.
+    const { act } = await import("@testing-library/react");
+    const { usePlayer } = await import("../playback/player");
+    const h = await open();
+    await focusOn(`children-${h.season.id}-${h.episodes[0]!.id}`);
+    await press("detail-more");
+    await act(async () => {
+      usePlayer.setState({ current: { item: h.episodes[0]! } as never });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await remote.back();
+    await settleFocus();
+    expect(getCurrentFocusKey()).not.toBe("detail-more");
+    await act(async () => {
+      usePlayer.setState({ current: null });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+  });
+});
+
+describe("an overflow menu that loses its contents", () => {
+  it("closes itself rather than leaving a flag nothing can clear", async () => {
+    // What goes in the menu is computed from the screen, so a list that empties
+    // under an open one would leave it up with nothing drawn - which switches
+    // off every focus hook on the page behind it, and takes its own Back
+    // handler down with it, so nothing is left that could close it.
+    const { render, act } = await import("@testing-library/react");
+    const { MoreMenu } = await import("../MoreMenu");
+    const { configureI18n } = await import("@sdk");
+    const en = (await import("../locales/en.json")).default;
+    const hu = (await import("../locales/hu.json")).default;
+    configureI18n({ hu, en }, { fallback: "en" });
+
+    let closed = 0;
+    const onClose = (): void => {
+      closed += 1;
+    };
+    const { rerender } = render(
+      <MoreMenu items={[{ key: "lang", label: "Audio and subtitles", onEnter: () => {} }]} onClose={onClose} />,
+    );
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(closed, "a menu with something in it stays up").toBe(0);
+
+    rerender(<MoreMenu items={[]} onClose={onClose} />);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(closed, "and one with nothing in it asks to be closed").toBe(1);
+    expect(document.querySelector('[data-sfocus="more-close"]'), "nothing of it is drawn").toBeNull();
+  });
+});

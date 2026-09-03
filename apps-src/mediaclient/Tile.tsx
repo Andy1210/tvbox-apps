@@ -170,10 +170,14 @@ export function Tile({
           //
           // On a season screen the synopsis, the cast and the marking button
           // are all about ONE episode, and moving the cursor up to the buttons
-          // took the only sign of which one with it. The same ring, dimmer and
-          // thinner: it has to be unmistakably not the cursor - there is only
-          // ever one of those - while still naming the tile the rest of the
-          // screen is describing.
+          // took the only sign of which one with it.
+          //
+          // The same ring, DIMMER - not thinner: measured on the box, 0.3vh and
+          // the cursor's 0.35vh both round to 3 px at 768 lines, so brightness
+          // is the whole of the difference (143 against 255). It carries the
+          // distinction on its own because the two never appear together: this
+          // is drawn only while the tile is not the cursor, and while it is up
+          // the cursor is a solid white button somewhere above.
           !focused && describing ? "ring-[0.3vh] ring-white/55" : "",
         ].join(" ")}
         style={{ height: `${heightVh}vh` }}

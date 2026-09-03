@@ -450,6 +450,23 @@ export function Detail({
   };
 
   /**
+   * The button a panel must hand the cursor back to.
+   *
+   * Set by the panel as it closes rather than acted on there: `setFocus` inside
+   * the close handler runs while the panel is still mounted and races its
+   * unmount, and what norigin does with a focused component that goes away is
+   * to walk UP - which reaches this page's own container and restores whatever
+   * child it remembers. Observed on a box: Back out of the overflow menu left
+   * the cursor on an episode tile, one press from starting it, on a menu that
+   * sits directly above that row.
+   *
+   * Unconditional about WHERE, unlike `useFocusOnReveal`'s: the tile the cursor
+   * lands on is a key this screen owns, so a guard that keeps an owned cursor
+   * keeps exactly the wrong one.
+   */
+  const [restore, setRestore] = useState<string | null>(null);
+
+  /**
    * A remote repeats, so a press that lands twice must not undo itself.
    *
    * Measured on the box: two presses 150 ms apart marked and then unmarked, and
@@ -464,32 +481,22 @@ export function Detail({
    * withholds a write, it can never cause one.
    *
    * It guards the PRESS, not the write, and that distinction is a bug fixed:
-   * with it inside `setWatchedOn` an answer given to the season panel within
-   * the window of the press that OPENED it was dropped silently, with the panel
-   * already closed. The panel is that press's protection - it opens on
-   * "Cancel" - so the answer needs none.
+   * with it inside `setWatchedOn` an answer given to a panel within the window
+   * of the press that OPENED it was dropped silently, with the panel already
+   * closed.
+   *
+   * One control has it: the button that marks a single episode, which is the
+   * only one here that writes on the press itself. Everything else this guarded
+   * ends at a panel - one that Back closes, or a confirmation that opens on
+   * "Cancel" - and there the guard cost more than it bought, because it also
+   * refuses a REAL press for 400 ms, silently, which from a sofa is a remote
+   * that has stopped working.
    *
    * `performance.now()` rather than the wall clock: these boxes have no
    * battery-backed clock, so the first NTP correction after a cold boot steps
    * time backwards - and a negative elapsed reads as "too soon" for as long as
-   * the step lasted, which is both buttons dead with nothing to say why.
+   * the step lasted, which is the button dead with nothing to say why.
    */
-  /**
-   * The button a panel must hand the cursor back to.
-   *
-   * Set by the panel as it closes rather than acted on there: `setFocus` inside
-   * the close handler runs while the panel is still mounted and races its
-   * unmount, and what norigin does with a focused component that goes away is
-   * to walk UP - which reaches this page's own container and restores whatever
-   * child it remembers. Observed on a box: Back out of the overflow menu left
-   * the cursor on an episode tile, one press from starting it, on a menu that
-   * sits directly above that row.
-   *
-   * Unconditional, unlike `useFocusOnReveal`'s: the tile the cursor lands on is
-   * a key this screen owns, so a guard that keeps an owned cursor keeps exactly
-   * the wrong one.
-   */
-  const [restore, setRestore] = useState<string | null>(null);
   const lastPress = useRef(0);
   /** True when this press is the tail of the last one rather than a new one. */
   const bounced = (): boolean => {
@@ -665,15 +672,19 @@ export function Detail({
    * something behind it - a screen that lost its last overflow item while the
    * panel was up would otherwise be handed a key that never mounts.
    */
+  //
+  // `!playing && !moving` for the reason the two hooks above carry it: this
+  // page sits BEHIND the player rather than unmounting, and a cursor parked on
+  // a button there is a press away from acting on the film that is running.
   const panelUp = picking || confirming || more;
   useEffect(() => {
-    if (!restore || panelUp) return;
+    if (!restore || panelUp || playing || moving) return;
     const id = setTimeout(() => {
       focusFirstOf([restore, ...ABOVE_ROWS]);
       setRestore(null);
     }, 0);
     return () => clearTimeout(id);
-  }, [restore, panelUp]);
+  }, [restore, panelUp, playing, moving]);
 
   /**
    * The countdown on the next episode, and the press that stops it.
@@ -971,7 +982,7 @@ export function Detail({
           }}
         />
       )}
-      {more && overflow.length > 0 && (
+      {more && (
         <MoreMenu
           items={overflow}
           onClose={() => {

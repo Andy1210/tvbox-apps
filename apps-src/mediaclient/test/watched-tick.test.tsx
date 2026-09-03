@@ -184,17 +184,9 @@ const label = (key = "detail-watched"): string => document.querySelector(`[data-
  */
 const name = (key = "detail-watched"): string =>
   document.querySelector(`[data-sfocus="${key}"]`)?.getAttribute("aria-label") ?? "";
-/**
- * Open the overflow menu, which is where the season-wide mark now lives.
- *
- * The wait is the press-bounce guard doing its job: the press that opens a menu
- * arrives again by itself on this remote, and by then the cursor is on the
- * first item - so an item pressed within the window of the press that opened it
- * is refused. Nobody reads a menu in 400 ms; a test can.
- */
+/** Open the overflow menu, which is where the season-wide mark now lives. */
 async function openMore(): Promise<void> {
   await press("detail-more");
-  await settle();
 }
 /** Let time pass the press-bounce guard, which is real-clock. */
 const settle = async (): Promise<void> => {

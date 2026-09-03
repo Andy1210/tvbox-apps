@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, useBackspace, useI18n } from "@sdk";
 import { useFocusFallback, useInitialFocus } from "./focus";
@@ -31,12 +32,33 @@ export function MoreMenu({
 }): React.JSX.Element | null {
   const { t } = useI18n();
   const { ref, focusKey } = useFocusable({ focusKey: "more", saveLastFocusedChild: true, isFocusBoundary: true });
+  const empty = items.length === 0;
   const first = items[0] ? itemKey(items[0].key) : "more-close";
-  useInitialFocus(first, true);
-  useFocusFallback(first, (k) => k.startsWith("more-"), true);
+  // Not while there is nothing to draw: the hooks run above the early return,
+  // and aiming the cursor at a key that never mounts is a remote that answers
+  // nothing until Back - norigin keeps an unknown focus key rather than
+  // refusing it, so every later press aborts silently inside `smartNavigate`.
+  useInitialFocus(first, !empty);
+  useFocusFallback(first, (k) => k.startsWith("more-"), !empty);
   useBackspace(onClose, true);
 
-  if (items.length === 0) return null;
+  /**
+   * A menu with nothing in it closes itself.
+   *
+   * The caller decides whether this is up, and what goes in it is computed from
+   * the screen - so a list that empties under a menu that is already open would
+   * otherwise leave the flag set with no panel drawn, which switches off every
+   * focus hook on the page behind it and leaves nothing able to clear it.
+   */
+  const close = useRef(onClose);
+  useEffect(() => {
+    close.current = onClose;
+  });
+  useEffect(() => {
+    if (empty) close.current();
+  }, [empty]);
+
+  if (empty) return null;
 
   return (
     <FocusContext.Provider value={focusKey}>

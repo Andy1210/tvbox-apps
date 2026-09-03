@@ -1,11 +1,29 @@
-# TypeScript and TSX are text, whatever byte a string literal happens to hold.
+# TypeScript, TSX and the scripts that decide what a television installs are
+# text, whatever byte a string literal happens to hold.
 #
 # Row.tsx carried a NUL as a list separator, so git classified a focus-critical
-# file as binary: `git diff` said only "Binary files differ", and a review - human
-# or automated - saw none of it. The escape is fixed at the source, but the base
-# side of a diff can still carry one, and one stray control character should not
-# be able to hide a source file from review again.
+# file as binary: `git diff` said only "Binary files differ" and `grep -r` found
+# nothing in it, so a review - human or automated - saw none of it. The escapes
+# are fixed at the source, but the base side of a diff can still carry one, and
+# one stray control character should not be able to hide a source file again.
+#
+# The build and publish scripts and the manifests are in here deliberately:
+# they compute the sha256s a box trusts and decide what it installs, so they are
+# the files it would matter most to hide.
+#
+# `.ts` is also the MPEG transport-stream extension. If a real media fixture
+# ever lands, give its directory a `*.ts -diff` of its own rather than dropping
+# this line - a stream rendered as text is noise, a hidden source file is a hole.
 *.ts diff
 *.tsx diff
 *.js diff
 *.jsx diff
+*.mjs diff
+*.cjs diff
+*.json diff
+*.css diff
+*.html diff
+*.md diff
+*.sh diff
+*.yml diff
+*.yaml diff
