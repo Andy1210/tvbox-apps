@@ -33,6 +33,14 @@ export interface TileProps {
   /** Seconds until this one starts by itself. Drawn over the poster. */
   /** Over the poster: a countdown's number, or a mark that this one is starting. */
   countdown?: number | string;
+  /**
+   * The item the screen around this row is describing.
+   *
+   * Not the cursor, and drawn differently from it: on a season screen the
+   * synopsis and the marking button follow the highlight, so moving the cursor
+   * off the row leaves the whole page about an episode nothing points at.
+   */
+  describing?: boolean;
 }
 
 /** How far through the item, 0-1, or null when it was never started. */
@@ -72,6 +80,7 @@ export function Tile({
   captionLines = 2,
   onArrowPress,
   countdown,
+  describing = false,
 }: TileProps): React.JSX.Element {
   // scrollIntoView scrolls BOTH axes - `inline` defaults to "nearest" - so a
   // row gets its vertical scrolling from here and then supersedes the horizontal
@@ -157,6 +166,15 @@ export function Tile({
         className={[
           "relative overflow-hidden rounded-[0.8vh] bg-white/5",
           focused ? "ring-[0.35vh] ring-white shadow-[0_0.6vh_2vh_rgba(0,0,0,0.55)]" : "",
+          // The page's subject, while the cursor is somewhere else.
+          //
+          // On a season screen the synopsis, the cast and the marking button
+          // are all about ONE episode, and moving the cursor up to the buttons
+          // took the only sign of which one with it. The same ring, dimmer and
+          // thinner: it has to be unmistakably not the cursor - there is only
+          // ever one of those - while still naming the tile the rest of the
+          // screen is describing.
+          !focused && describing ? "ring-[0.25vh] ring-white/40" : "",
         ].join(" ")}
         style={{ height: `${heightVh}vh` }}
       >

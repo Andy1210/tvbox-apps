@@ -175,6 +175,27 @@ async function press(key = "detail-watched"): Promise<void> {
 }
 
 const label = (key = "detail-watched"): string => document.querySelector(`[data-sfocus="${key}"]`)?.textContent ?? "";
+/**
+ * What the button is called, whether or not it is spelling itself out.
+ *
+ * The marking button draws a tick and shows its words only while it is focused,
+ * so its text content is empty for most of a session - but its NAME is what
+ * these tests are about, and that is on the element either way.
+ */
+const name = (key = "detail-watched"): string =>
+  document.querySelector(`[data-sfocus="${key}"]`)?.getAttribute("aria-label") ?? "";
+/**
+ * Open the overflow menu, which is where the season-wide mark now lives.
+ *
+ * The wait is the press-bounce guard doing its job: the press that opens a menu
+ * arrives again by itself on this remote, and by then the cursor is on the
+ * first item - so an item pressed within the window of the press that opened it
+ * is refused. Nobody reads a menu in 400 ms; a test can.
+ */
+async function openMore(): Promise<void> {
+  await press("detail-more");
+  await settle();
+}
 /** Let time pass the press-bounce guard, which is real-clock. */
 const settle = async (): Promise<void> => {
   await new Promise((r) => setTimeout(r, 450));
@@ -188,7 +209,7 @@ describe("marking an episode watched from its season screen", () => {
   it("marks the episode the page is describing, not the season", async () => {
     const h = await open();
     await highlight(h, 0);
-    expect(label(), "nothing about this episode is watched yet").toContain("Mark as watched");
+    expect(name(), "nothing about this episode is watched yet").toContain("Mark as watched");
 
     await press();
     expect(h.marks, "the highlighted episode, and only it").toEqual([{ id: h.episodes[0]!.id, watched: true }]);
@@ -203,7 +224,7 @@ describe("marking an episode watched from its season screen", () => {
     await press();
     expect(ticks(), "the tile somebody is looking at").toBe(1);
     expect(h.childrenCalls, "and the row was not refetched to get it").toBe(calls);
-    expect(label(), "the button says what it would do next").toContain("Mark as unwatched");
+    expect(name(), "the button says what it would do next").toContain("Mark as unwatched");
   });
 
   it("replaces a half-watched episode's progress bar with the tick", async () => {
@@ -225,7 +246,7 @@ describe("marking an episode watched from its season screen", () => {
     await press();
     expect(h.marks).toEqual([{ id: h.episodes[0]!.id, watched: true }]);
     expect(ticks(), "an optimistic tick that never landed must not stay").toBe(0);
-    expect(label()).toContain("Mark as watched");
+    expect(name()).toContain("Mark as watched");
   });
 
   it("offers nothing to mark before an episode is highlighted", async () => {
@@ -244,18 +265,20 @@ describe("the button says which episode it is about", () => {
     // series.
     const h = await open();
     await highlight(h, 1);
-    expect(label()).toContain("S1E2");
-    expect(label()).toContain("Mark as watched");
+    expect(name()).toContain("S1E2");
+    expect(name()).toContain("Mark as watched");
   });
 });
 
 describe("marking the whole season", () => {
   it("is offered on arrival, before anything is highlighted", async () => {
-    // This is also what the arrival screen has beside Play: with only the one
-    // button there, Right was a press that did nothing.
+    // Behind the overflow button now, but still reachable on the screen that
+    // has no episode highlighted yet - which is where a season watched on
+    // somebody else's television is put right.
     await open();
     expect(document.querySelector('[data-sfocus="detail-watched"]'), "no episode is highlighted yet").toBeNull();
-    expect(label("detail-watched-season")).toContain("Mark season as watched");
+    await openMore();
+    expect(label("more-watched-season")).toContain("Mark season as watched");
   });
 
   it("asks first, and the safe answer is the one holding the focus", async () => {
@@ -264,7 +287,8 @@ describe("marking the whole season", () => {
     // arrive again by itself - landing on "no" makes a doubled press a cancel.
     const { getCurrentFocusKey } = await import("@noriginmedia/norigin-spatial-navigation");
     const h = await open();
-    await press("detail-watched-season");
+    await openMore();
+    await press("more-watched-season");
     expect(h.marks, "nothing has been asked of the server yet").toEqual([]);
     expect(document.body.textContent).toContain("Mark the whole season as watched?");
     expect(document.body.textContent, "and it says how much it moves").toContain("Episodes affected: 2");
@@ -273,7 +297,8 @@ describe("marking the whole season", () => {
 
   it("does nothing when the answer is no", async () => {
     const h = await open();
-    await press("detail-watched-season");
+    await openMore();
+    await press("more-watched-season");
     await press("confirm-no");
     expect(h.marks).toEqual([]);
     expect(ticks()).toBe(0);
@@ -286,26 +311,32 @@ describe("marking the whole season", () => {
     // nothing at all here.
     const h = await open();
     expect(ticks()).toBe(0);
-    await press("detail-watched-season");
+    await openMore();
+    await press("more-watched-season");
     await press("confirm-yes");
     expect(h.marks, "the season, not an episode").toEqual([{ id: h.season.id, watched: true }]);
     expect(ticks(), "both episodes").toBe(2);
     expect(bars(), "and the half-watched one is finished now").toBe(0);
-    expect(label("detail-watched-season")).toContain("Mark season as unwatched");
+    await settle();
+    await openMore();
+    expect(label("more-watched-season")).toContain("Mark season as unwatched");
   });
 
   it("reads as watched only when nothing is left", async () => {
     const h = await open();
     await highlight(h, 0);
     await press();
-    expect(label("detail-watched-season"), "one of two is not the season").toContain("Mark season as watched");
+    await settle();
+    await openMore();
+    expect(label("more-watched-season"), "one of two is not the season").toContain("Mark season as watched");
   });
 
   it("cannot be confirmed by the press that opened it", async () => {
     // The bounce case end to end: the second press lands on whatever has the
     // focus, and that is "no".
     const h = await open();
-    await press("detail-watched-season");
+    await openMore();
+    await press("more-watched-season");
     await press("confirm-no");
     expect(h.marks).toEqual([]);
     expect(ticks()).toBe(0);
@@ -368,7 +399,7 @@ describe("a refetch that lands after the press", () => {
       await new Promise((r) => setTimeout(r, 0));
     });
     expect(ticks(), "the stale answer must not undo the press").toBe(1);
-    expect(label(), "and the button agrees with the tile").toContain("Mark as unwatched");
+    expect(name(), "and the button agrees with the tile").toContain("Mark as unwatched");
   });
 });
 
@@ -491,7 +522,8 @@ describe("an answer given quickly", () => {
     // write instead of on the press, answering inside the window dropped the
     // command silently, with the panel already closed.
     const h = await open();
-    await press("detail-watched-season");
+    await openMore();
+    await press("more-watched-season");
     await press("confirm-yes");
     expect(h.marks, "answered at once, and it still counted").toEqual([{ id: h.season.id, watched: true }]);
     expect(ticks()).toBe(2);
@@ -535,7 +567,8 @@ describe("a season of one episode", () => {
       });
       await flushFocus();
     }
-    await press("detail-watched-season");
+    await openMore();
+    await press("more-watched-season");
     expect(document.body.textContent).not.toContain("1 episodes");
     expect(document.body.textContent).toContain("Episodes affected: 1");
   });

@@ -87,7 +87,8 @@
     "emptyCollection": "There is nothing in this collection.",
     "emptyPlaylist": "This playlist is empty.",
     "upNext": "Up next",
-    "seasonN": "Season {n}"
+    "seasonN": "Season {n}",
+    "more": "More"
   },
   "person": {
     "films": "Films",

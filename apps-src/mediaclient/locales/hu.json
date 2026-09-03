@@ -87,7 +87,8 @@
     "emptyCollection": "Ebben a gyűjteményben nincs semmi.",
     "emptyPlaylist": "Ez a lejátszási lista üres.",
     "upNext": "Következik",
-    "seasonN": "{n}. évad"
+    "seasonN": "{n}. évad",
+    "more": "Továbbiak"
   },
   "person": {
     "films": "Filmek",
