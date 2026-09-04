@@ -9,9 +9,16 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
  * resolved it against the episode it was DESCRIBING, which on a season is
  * wherever the cursor is, while Play starts the episode in progress.
  *
- * Measured on this library: one language sits at different ordinals across the
- * episodes of 210 of 566 seasons, subtitles mostly. So choosing the Hungarian
- * subtitle and pressing Play started the English one, silently.
+ * Measured over this library's 566 seasons by the rule the code actually
+ * applies - `pick` takes the FIRST track of the language - 67 of them resolve
+ * some language to a different ordinal between two episodes. So choosing the
+ * Hungarian subtitle and pressing Play started the English one, silently.
+ *
+ * The fixture is shaped so that only a true read of the STARTED episode gives
+ * the right answer: the first child and the highlighted episode list their
+ * languages in the same order as each other, and the started episode lists them
+ * the other way round. Reading from either of the two wrong sources yields 0
+ * where 1 is right.
  */
 
 import type { ItemDetail, MediaItem, MediaVersion, Track } from "../backends/types";
@@ -40,22 +47,35 @@ function version(audio: Track[], subtitles: Track[]): MediaVersion {
   return { mediaIndex: 0, partIndex: 0, parts: 1, label: "1080p", audio, subtitles };
 }
 
+/** magyar first, then English - what the first child and the cursor's episode carry. */
+const MAGYAR_FIRST = (): MediaVersion =>
+  version([aud(0, "magyar"), aud(1, "English")], [sub(0, "magyar"), sub(1, "English")]);
+/** The other way round - what the STARTED episode carries. */
+const ENGLISH_FIRST = (): MediaVersion =>
+  version([aud(0, "English"), aud(1, "magyar")], [sub(0, "English"), sub(1, "magyar")]);
+
 interface Harness {
   season: MediaItem;
+  /** ep1 is `children[0]`, ep2 is the one in progress, ep3 is where the cursor goes. */
   episodes: MediaItem[];
   /** Every `play` this screen asked for, in order. */
   played: { id: string; audio?: number; subtitle?: number | "none" }[];
+  /** Every item id this screen fetched, in order. */
+  asked: string[];
 }
 
-/**
- * A season whose two episodes carry the same two subtitle languages in the
- * OPPOSITE order, which is the shape the server really produces.
- *
- * Episode 1 is half watched, so it is what Play starts; episode 2 is the one
- * the cursor will be on. Their orders disagree, so an ordinal read off one and
- * handed to the other names the other language.
- */
-async function open(opts?: { holdTarget?: boolean; external?: boolean }): Promise<Harness> {
+interface Options {
+  /** Nothing in progress, so Play starts `children[0]` - the shape the prefetch stands down on. */
+  noProgress?: boolean;
+  /** The started episode's own read never answers. */
+  holdTarget?: boolean;
+  /** The FIRST read of `children[0]` rejects; a second one succeeds. */
+  failFirstChild?: boolean;
+  /** The started episode carries its magyar subtitle as a sidecar, numbered -1. */
+  external?: boolean;
+}
+
+async function open(opts?: Options): Promise<Harness> {
   const { render, act } = await import("@testing-library/react");
   const { configureI18n } = await import("@sdk");
   const { Detail } = await import("../Detail");
@@ -67,35 +87,38 @@ async function open(opts?: { holdTarget?: boolean; external?: boolean }): Promis
 
   n += 1;
   const season: MediaItem = { id: `season${n}`, kind: "season", title: "1. évad", index: 1, parentId: `show${n}` };
+  const ep = (i: number, extra: Partial<MediaItem> = {}): MediaItem => ({
+    id: `ep${i}-${n}`,
+    kind: "episode",
+    title: `${i}. rész`,
+    index: i,
+    parentIndex: 1,
+    parentId: season.id,
+    durationMs: 1_800_000,
+    ...extra,
+  });
   const episodes: MediaItem[] = [
-    {
-      id: `ep1-${n}`,
-      kind: "episode",
-      title: "Első rész",
-      index: 1,
-      parentIndex: 1,
-      parentId: season.id,
-      durationMs: 1_800_000,
-      // In progress, so this is what Play starts.
-      viewOffsetMs: 600_000,
-    },
-    { id: `ep2-${n}`, kind: "episode", title: "Második rész", index: 2, parentIndex: 1, parentId: season.id },
+    ep(1),
+    // In progress, so Play starts THIS one - and it is not `children[0]`, so
+    // the prefetch really runs. `noProgress` takes that away, which is the
+    // other shape: then Play starts the first child and the prefetch stands
+    // down in favour of the read already going out for it.
+    ep(2, opts?.noProgress ? {} : { viewOffsetMs: 600_000 }),
+    ep(3),
   ];
 
+  const target = episodes[opts?.noProgress ? 0 : 1]!;
   const versions: Record<string, MediaVersion> = {
-    // English first here...
-    [episodes[0]!.id]: version(
-      [aud(0, "English"), aud(1, "magyar")],
-      // An external subtitle is numbered NEGATIVELY and per item, so an id or
-      // an ordinal from another episode means something else here.
-      opts?.external ? [sub(0, "English"), sub(-1, "magyar")] : [sub(0, "English"), sub(1, "magyar")],
-    ),
-    // ...and Hungarian first here.
-    [episodes[1]!.id]: version(
-      [aud(0, "magyar"), aud(1, "English")],
-      [sub(0, "magyar"), sub(1, "English")],
-    ),
+    [episodes[0]!.id]: MAGYAR_FIRST(),
+    [episodes[1]!.id]: ENGLISH_FIRST(),
+    [episodes[2]!.id]: MAGYAR_FIRST(),
   };
+  // Whichever episode starts is the one that disagrees with the other two.
+  if (opts?.noProgress) versions[episodes[0]!.id] = ENGLISH_FIRST();
+  if (opts?.external) {
+    const v = versions[target.id]!;
+    versions[target.id] = version(v.audio, [sub(0, "English"), sub(-1, "magyar")]);
+  }
 
   const detailOf = (item: MediaItem): ItemDetail =>
     ({
@@ -109,14 +132,19 @@ async function open(opts?: { holdTarget?: boolean; external?: boolean }): Promis
     }) as ItemDetail;
 
   const byId = new Map<string, MediaItem>([[season.id, season], ...episodes.map((e) => [e.id, e] as const)]);
-  const h: Harness = { season, episodes, played: [] };
+  const h: Harness = { season, episodes, played: [], asked: [] };
+  let firstChildReads = 0;
 
   useApp.setState({
     backend: {
       kind: "plex",
       item: async (id: string) => {
-        // A prefetch that never answers, for the window before it lands.
-        if (opts?.holdTarget && id === episodes[0]!.id) await new Promise(() => {});
+        h.asked.push(id);
+        if (opts?.holdTarget && id === target.id) await new Promise(() => {});
+        if (opts?.failFirstChild && id === episodes[0]!.id) {
+          firstChildReads += 1;
+          if (firstChildReads === 1) throw new Error("no");
+        }
         return detailOf(byId.get(id) ?? season);
       },
       children: async (id: string) => (id === season.id ? episodes : []),
@@ -136,13 +164,13 @@ async function open(opts?: { holdTarget?: boolean; external?: boolean }): Promis
   // The store's own action, replaced: what this screen HANDS to playback is the
   // whole question, and resolving a real stream would answer a different one.
   usePlayer.setState({
-    play: async (_backend: unknown, item: MediaItem, opts?: { audio?: number; subtitle?: number | "none" }) => {
-      h.played.push({ id: item.id, audio: opts?.audio, subtitle: opts?.subtitle });
+    play: async (_backend: unknown, item: MediaItem, o?: { audio?: number; subtitle?: number | "none" }) => {
+      h.played.push({ id: item.id, audio: o?.audio, subtitle: o?.subtitle });
     },
   } as never);
 
   render(<Detail itemId={season.id} />);
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 8; i++) {
     await act(async () => {
       await new Promise((r) => setTimeout(r, 0));
     });
@@ -152,6 +180,8 @@ async function open(opts?: { holdTarget?: boolean; external?: boolean }): Promis
 }
 
 const el = (key: string): HTMLElement | null => document.querySelector(`[data-sfocus="${key}"]`);
+/** The language panel's own heading, which is the only truncating h2 on screen. */
+const heading = (): string => document.querySelector("h2.truncate")?.textContent ?? "";
 
 async function press(key: string): Promise<void> {
   const { act } = await import("@testing-library/react");
@@ -179,23 +209,26 @@ async function focusOn(key: string): Promise<void> {
   }
 }
 
-/** Choose a subtitle language through the panel, the way somebody would. */
-async function chooseSubtitle(language: string): Promise<void> {
+/** Put the cursor on an episode that is NOT the one Play starts. */
+async function cursorOnOther(h: Harness): Promise<void> {
+  await focusOn(`children-${h.season.id}-${h.episodes[2]!.id}`);
+}
+
+/** Choose a subtitle through the panel, the way somebody would. */
+async function chooseSubtitle(id: string): Promise<void> {
   await press("detail-more");
   await press("more-lang");
-  // The panel lists the tracks of the episode the screen is DESCRIBING, which
-  // is the point: the language is picked off the highlighted episode.
-  await press(`lp-sub-s${language === "magyar" ? 0 : 1}-${language}`);
+  await press(`lp-sub-${id}`);
   await press("lp-close");
 }
 
 /**
  * The store's `play` is module state and outlives this file.
  *
- * Vitest isolates by file today, so replacing it is contained - but measured,
- * with isolation off this was the one file in the suite that broke others
- * (`queue.test.ts` calls the real `play` and got the stub). Restoring it costs
- * nothing and removes the dependency on a config setting.
+ * Vitest isolates by file today, so replacing it is contained - but with
+ * isolation off it reaches other files: measured, `queue.test.ts` calls the real
+ * `play` and gets the stub. Restoring costs nothing and removes the dependency
+ * on a config setting.
  */
 let realPlay: unknown;
 beforeEach(async () => {
@@ -211,103 +244,128 @@ afterEach(async () => {
 describe("a language chosen on a season screen", () => {
   it("is resolved against the episode Play starts, not the one under the cursor", async () => {
     const h = await open();
-    // The cursor on episode 2, whose subtitles read Hungarian, English.
-    await focusOn(`children-${h.season.id}-${h.episodes[1]!.id}`);
-    await chooseSubtitle("magyar");
+    await cursorOnOther(h);
+    // The cursor's episode lists magyar at 0; the started one lists it at 1.
+    await chooseSubtitle("s0-magyar");
 
     await focusOn("detail-play");
     await press("detail-play");
-
-    expect(h.played, "Play starts the half-watched episode").toEqual([
-      // Hungarian is ordinal 1 on episode 1. Reading it off episode 2 - where
-      // Hungarian is 0 - would have started English.
-      { id: h.episodes[0]!.id, audio: undefined, subtitle: 1 },
-    ]);
+    expect(h.played).toEqual([{ id: h.episodes[1]!.id, audio: undefined, subtitle: 1 }]);
   });
 
   it("does the same for the button that starts from the beginning", async () => {
-    // It only exists beside a resume, so it is exactly the button that starts
-    // an episode other than the highlighted one.
     const h = await open();
-    await focusOn(`children-${h.season.id}-${h.episodes[1]!.id}`);
-    await chooseSubtitle("magyar");
+    await cursorOnOther(h);
+    await chooseSubtitle("s0-magyar");
 
     await focusOn("detail-restart");
     await press("detail-restart");
-    expect(h.played).toEqual([{ id: h.episodes[0]!.id, audio: undefined, subtitle: 1 }]);
+    expect(h.played).toEqual([{ id: h.episodes[1]!.id, audio: undefined, subtitle: 1 }]);
   });
 
-  it("passes nothing when no language has been chosen", async () => {
-    // The common case, and it must stay untouched: with no choice the file's
-    // own default is what should play, not an ordinal this screen invented.
+  it("resolves an audio language the same way", async () => {
+    // `pick` resolves the two independently; only one of them used to be tested.
     const h = await open();
-    await focusOn(`children-${h.season.id}-${h.episodes[1]!.id}`);
-    await focusOn("detail-play");
-    await press("detail-play");
-    expect(h.played).toEqual([{ id: h.episodes[0]!.id, audio: undefined, subtitle: undefined }]);
-  });
-
-  it("still lists the highlighted episode's own tracks in the panel", async () => {
-    // The panel describes the episode the page is about. Listing the tracks of
-    // a different one would offer languages for something nobody is looking at.
-    const h = await open();
-    await focusOn(`children-${h.season.id}-${h.episodes[1]!.id}`);
+    await cursorOnOther(h);
     await press("detail-more");
     await press("more-lang");
-    expect(el("lp-sub-s0-magyar"), "episode 2 has magyar first").toBeTruthy();
-    expect(el("lp-sub-s1-English"), "and English second").toBeTruthy();
-  });
-});
-
-describe("what happens when the started episode's tracks are not known", () => {
-  it("passes no ordinal rather than one read off the wrong episode", async () => {
-    // The prefetch is one round trip wide, and the row can move under it - a
-    // mark, or a resume point landing, changes which episode Play starts. The
-    // old fallback handed over the HIGHLIGHTED episode's ordinal, which is the
-    // whole bug; losing the choice for a moment is the harmless direction.
-    const h = await open({ holdTarget: true });
-    await focusOn(`children-${h.season.id}-${h.episodes[1]!.id}`);
-    await chooseSubtitle("magyar");
-
-    await focusOn("detail-play");
-    await press("detail-play");
-    expect(h.played).toEqual([{ id: h.episodes[0]!.id, audio: undefined, subtitle: undefined }]);
-  });
-});
-
-describe("an audio language chosen on a season screen", () => {
-  it("is resolved against the episode Play starts", async () => {
-    // The same rule as the subtitles, and worth its own case: `pick` resolves
-    // the two independently and only one of them was covered.
-    const h = await open();
-    await focusOn(`children-${h.season.id}-${h.episodes[1]!.id}`);
-    await press("detail-more");
-    await press("more-lang");
-    // Episode 2 lists magyar first; episode 1 lists it second.
     await press("lp-aud-0");
     await press("lp-close");
 
     await focusOn("detail-play");
     await press("detail-play");
-    expect(h.played).toEqual([{ id: h.episodes[0]!.id, audio: 1, subtitle: undefined }]);
+    expect(h.played).toEqual([{ id: h.episodes[1]!.id, audio: 1, subtitle: undefined }]);
+  });
+
+  it("passes nothing when no language has been chosen", async () => {
+    // The common case, and it must stay untouched: with no choice the file's
+    // own default is what plays, not an ordinal this screen invented.
+    const h = await open();
+    await cursorOnOther(h);
+    await focusOn("detail-play");
+    await press("detail-play");
+    expect(h.played).toEqual([{ id: h.episodes[1]!.id, audio: undefined, subtitle: undefined }]);
+  });
+
+  it("carries an external subtitle by the started episode's own numbering", async () => {
+    // A sidecar's ordinal is negative and per item, so -1 on one episode is a
+    // different file from -1 on another. Resolving the LANGUAGE against the
+    // started episode is what gets its own file rather than a borrowed number.
+    const h = await open({ external: true });
+    await cursorOnOther(h);
+    await chooseSubtitle("s0-magyar");
+    await focusOn("detail-play");
+    await press("detail-play");
+    expect(h.played).toEqual([{ id: h.episodes[1]!.id, audio: undefined, subtitle: -1 }]);
   });
 });
 
-describe("an external subtitle", () => {
-  it("is not carried to another episode by its id", async () => {
-    // A sidecar is numbered negatively and per item, so `-1` on one episode and
-    // `-1` on another are different FILES. The choice is kept by id when the
-    // track has no language to key on, and an id only means anything inside the
-    // item it came from - so the honest answer on a different episode is none.
-    const h = await open({ external: true });
-    await focusOn(`children-${h.season.id}-${h.episodes[1]!.id}`);
-    // Episode 2's magyar subtitle is an ordinary internal one at ordinal 0;
-    // episode 1's is external, at -1. Choosing by LANGUAGE still resolves,
-    // because the language is what carries - and it resolves to -1, which is
-    // episode 1's own file rather than a number borrowed from episode 2.
-    await chooseSubtitle("magyar");
+describe("when the started episode's tracks are not known", () => {
+  it("passes no ordinal rather than one read off another episode", async () => {
+    // The read is one round trip wide, and the row can move under it - a mark,
+    // or a resume point landing, changes which episode Play starts. Handing
+    // over the highlighted episode's ordinal is the whole bug; losing the
+    // choice is the harmless direction.
+    const h = await open({ holdTarget: true });
+    await cursorOnOther(h);
+    await chooseSubtitle("s0-magyar");
     await focusOn("detail-play");
     await press("detail-play");
-    expect(h.played).toEqual([{ id: h.episodes[0]!.id, audio: undefined, subtitle: -1 }]);
+    expect(h.played).toEqual([{ id: h.episodes[1]!.id, audio: undefined, subtitle: undefined }]);
+  });
+});
+
+describe("a season nobody has started, where Play begins at the first episode", () => {
+  it("reads that episode once rather than twice", async () => {
+    // It is already being fetched for the panel, and the cache has no in-flight
+    // deduplication - so asking again is a second request for the same document
+    // rather than a cache hit.
+    const h = await open({ noProgress: true });
+    expect(h.asked.filter((id) => id === h.episodes[0]!.id)).toHaveLength(1);
+  });
+
+  it("still resolves the choice against it", async () => {
+    const h = await open({ noProgress: true });
+    await cursorOnOther(h);
+    await chooseSubtitle("s0-magyar");
+    await focusOn("detail-play");
+    await press("detail-play");
+    expect(h.played).toEqual([{ id: h.episodes[0]!.id, audio: undefined, subtitle: 1 }]);
+  });
+
+  it("asks again when that one read fails, instead of dropping the choice", async () => {
+    // Standing down in favour of another request makes that request the only
+    // source; if it fails there is nothing else coming, and the choice would be
+    // lost for as long as the screen is up.
+    const h = await open({ noProgress: true, failFirstChild: true });
+    await cursorOnOther(h);
+    await chooseSubtitle("s0-magyar");
+    await focusOn("detail-play");
+    await press("detail-play");
+    expect(h.asked.filter((id) => id === h.episodes[0]!.id).length).toBeGreaterThan(1);
+    expect(h.played).toEqual([{ id: h.episodes[0]!.id, audio: undefined, subtitle: 1 }]);
+  });
+});
+
+describe("the panel says which episode it is listing", () => {
+  it("names the highlighted episode when there is one", async () => {
+    const h = await open();
+    await cursorOnOther(h);
+    await press("detail-more");
+    await press("more-lang");
+    expect(heading()).toContain("S1E3");
+    expect(el("lp-sub-s0-magyar"), "and lists that episode's own tracks").toBeTruthy();
+  });
+
+  it("names the FIRST episode when nothing is highlighted, which is whose list it shows", async () => {
+    // The commonest way in - arrive, overflow, languages, never entering the
+    // row. The label used to ask the season, which has no designation, while
+    // the list had already fallen back to the first episode: on a real season
+    // that offered seven languages against the two the started episode had,
+    // with nothing to say whose they were.
+    await open();
+    await press("detail-more");
+    await press("more-lang");
+    expect(heading()).toContain("S1E1");
   });
 });

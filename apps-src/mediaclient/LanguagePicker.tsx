@@ -55,7 +55,7 @@ export function LanguagePicker({
       <div ref={ref} className="absolute inset-0 z-40 flex items-center justify-center bg-black/80">
         <div className="flex h-[80vh] w-[80vw] flex-col gap-[2vh] overflow-hidden rounded-[1.4vh] bg-[#0c1219]/97 p-[3vh]">
           <div className="flex items-center justify-between">
-            <h2 className="text-[2.6vh] font-semibold tracking-tight">
+            <h2 className="min-w-0 truncate text-[2.6vh] font-semibold tracking-tight">
               {[t("tracks.title"), designation].filter(Boolean).join(" \u00b7 ")}
             </h2>
             <FocusButton
