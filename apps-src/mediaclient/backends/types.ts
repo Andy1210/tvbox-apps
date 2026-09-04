@@ -217,12 +217,29 @@ export interface Track {
   language?: string;
   /** What to show: the server's own label, or something composed from the codec. */
   label: string;
-  /** Burned into the picture; cannot be turned off. */
+  /** Signs and foreign dialogue only, rather than the whole of it. */
   forced?: boolean;
+  /**
+   * Written for a viewer who cannot hear it: the dialogue plus the sounds.
+   *
+   * A THIRD kind, not a variant of `forced`. Measured on this server, 577
+   * episode and 226 film subtitles carry it, and a file routinely holds the
+   * full track and the SDH one in the same language with the same forced flag -
+   * so without it a remembered choice cannot tell those two apart.
+   */
+  hearingImpaired?: boolean;
   /** The server's current choice. */
   selected?: boolean;
-  /** A subtitle that lives beside the file rather than inside it. Its `ordinal`
-   *  is -1, because it has no position among the file's own tracks. */
+  /**
+   * A subtitle that lives beside the file rather than inside it.
+   *
+   * Its `ordinal` is NEGATIVE, because it has no position among the file's own
+   * tracks - and each sidecar gets its own: -1, -2, -3. Not a shared -1, which
+   * is what this said until a review read it and reported a bug that does not
+   * exist. The ordinal is how a choice is named on the way back down, and 9
+   * films in 200 here carry more than one sidecar, which one shared number
+   * could not tell apart. Both mappers number them this way.
+   */
   external?: boolean;
   /** Server path for an external subtitle, handed to the player as a file. */
   key?: string;

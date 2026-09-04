@@ -415,6 +415,19 @@ function Empty({ text }: { text: string }): React.JSX.Element {
  *
  * The value sits between them, so what changes is between the two things that
  * change it.
+ *
+ * The buttons live in a focusable container of their own, and that is what
+ * makes them reachable at all. norigin scores a candidate as an "adjacent
+ * slice" only when it overlaps the focused element across the axis of travel by
+ * a fifth of that element's width, and an adjacent candidate's cost is divided
+ * by five while a diagonal one's is not - and for a diagonal one the horizontal
+ * term is the one multiplied by five instead. Measured on a box: a subtitle row
+ * is 490 px wide and each of these buttons is 56, which is 11% - so they were
+ * permanently diagonal, and the full-width row BEYOND them scored 109 against
+ * their 226. The highlight jumped clean over the row in both directions and
+ * could not be reached sideways either; the feature was unusable. The container
+ * is the row's full width, so it wins the way any other row does, and the
+ * cursor then descends into it.
  */
 const STEP_SEC = 0.25;
 
@@ -428,6 +441,21 @@ function Offset({
   label: string;
 }): React.JSX.Element {
   const { locale } = useI18n();
+  // Always entered at the same end, which is not the library's default.
+  // Remembering the last button read well on paper - nudge further, one press
+  // each - but nudging never leaves the button, so it bought nothing, and it
+  // cost the row a stable landing place: seen on a box, the same Down press
+  // from the same row put the highlight at the left end one time and the right
+  // end the next.
+  const { ref, focusKey, hasFocusedChild } = useFocusable({
+    focusKey: "sub-offset",
+    saveLastFocusedChild: false,
+    trackChildren: true,
+    // Without this `hasFocusedChild` is permanently false - norigin only calls
+    // its setter for a parent that asked to track - and the lift below is dead
+    // code that no focus-key assertion can see. `Reviews` and `CastRow` in this
+    // same app already pass it.
+  });
 
   // Signed and to two places, so a change of a quarter second is visible - and
   // formatted for the locale, because a Hungarian television writes 0,25.
@@ -438,26 +466,43 @@ function Offset({
   }).format(value);
 
   return (
-    <div className="flex flex-col gap-[0.4vh] rounded-[0.8vh] bg-white/5 px-[1.2vw] py-[0.9vh]">
-      <span className="text-[2vh] text-fg-dim">{label}</span>
-      <div className="flex items-center justify-between gap-[0.6vw]">
-        <FocusButton
-          focusKey="sub-offset-down"
-          onEnter={() => onNudge(-STEP_SEC)}
-          className="rounded-[0.6vh] bg-white/10 px-[1vw] py-[0.4vh] text-[2.2vh] leading-none"
-        >
-          &#8722;
-        </FocusButton>
-        <span className="text-[2.4vh] tabular-nums">{shown}s</span>
-        <FocusButton
-          focusKey="sub-offset-up"
-          onEnter={() => onNudge(STEP_SEC)}
-          className="rounded-[0.6vh] bg-white/10 px-[1vw] py-[0.4vh] text-[2.2vh] leading-none"
-        >
-          +
-        </FocusButton>
+    <FocusContext.Provider value={focusKey}>
+      <div
+        ref={ref}
+        // The focus key in the DOM, the way the SDK's own button carries it:
+        // without a marker a navigation test cannot put a rectangle on this
+        // element, and this container's rectangle IS the fix.
+        data-sfocus={focusKey}
+        // The row lifts while the cursor is inside it. Every other row in this
+        // panel becomes a full-width white pill; here only a chip an eighth of
+        // the row's width does, so scanning down the column the highlight
+        // suddenly shrinks and jumps to an edge with nothing marking the row it
+        // belongs to. This is not the focus fill - that stays the one thing
+        // focus means - it is the row saying the cursor is in it.
+        className={`flex flex-col gap-[0.4vh] rounded-[0.8vh] px-[1.2vw] py-[0.9vh] ${
+          hasFocusedChild ? "bg-white/15" : "bg-white/5"
+        }`}
+      >
+        <span className="text-[2vh] text-fg-dim">{label}</span>
+        <div className="flex items-center justify-between gap-[0.6vw]">
+          <FocusButton
+            focusKey="sub-offset-down"
+            onEnter={() => onNudge(-STEP_SEC)}
+            className="rounded-[0.6vh] bg-white/10 px-[1vw] py-[0.4vh] text-[2.2vh] leading-none"
+          >
+            &#8722;
+          </FocusButton>
+          <span className="text-[2.4vh] tabular-nums">{shown}s</span>
+          <FocusButton
+            focusKey="sub-offset-up"
+            onEnter={() => onNudge(STEP_SEC)}
+            className="rounded-[0.6vh] bg-white/10 px-[1vw] py-[0.4vh] text-[2.2vh] leading-none"
+          >
+            +
+          </FocusButton>
+        </div>
       </div>
-    </div>
+    </FocusContext.Provider>
   );
 }
 

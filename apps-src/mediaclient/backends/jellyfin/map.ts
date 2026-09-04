@@ -232,6 +232,7 @@ export function toTracks(streams: JellyfinStream[] | undefined, type: "Audio" | 
       language: s.Language,
       label: s.DisplayTitle || s.Title || s.Language || (type === "Audio" ? "Audio" : "Subtitle"),
       forced: !!s.IsForced,
+      hearingImpaired: !!s.IsHearingImpaired,
       external: !!s.IsExternal,
       key: s.DeliveryUrl,
     }));

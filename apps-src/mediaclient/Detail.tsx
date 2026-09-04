@@ -28,6 +28,7 @@ import { useFocusFallback, useFocusOnReveal, useInitialFocus, useScrollToTopOnFi
 import { usePlayer, useShowingPlayer } from "./playback/player";
 import { rememberedVersion, useChosenVersion } from "./chosenVersion";
 import { classify, useApp } from "./state";
+import { rememberTrack, resolveTrack, type ChosenTrack } from "./tracks";
 import type { ItemDetail, MediaItem, MediaVersion } from "./backends/types";
 import { log } from "./redact";
 
@@ -118,18 +119,22 @@ export function Detail({
   const [reload, setReload] = useState(0);
   const [version, setVersion] = useState(0);
   /**
-   * The chosen tracks, kept as a LANGUAGE rather than an ordinal.
+   * The chosen tracks, kept as a description rather than as an ordinal.
    *
    * An ordinal is a position in one item's own track list, and episodes of a
    * season do not agree on it: measured, choosing Hungarian on an episode whose
    * tracks read English, Magyar and then pressing the next one - whose read
    * Magyar, English - played English. And a converted stream bakes its tracks
    * in at start, so that costs a restart to undo.
+   *
+   * Not a bare language either, which is what it used to be: 1,841 of this
+   * library's 8,234 episodes carry two subtitles in one language, and a language
+   * matched the FIRST of them - so choosing the full Hungarian subtitle on a
+   * file that also has a signs-only one left the tick where it was and played
+   * signs only. See `tracks.ts` for what is kept and how far each part travels.
    */
-  const [audioLang, setAudioLang] = useState<string | undefined>();
-  const [subLang, setSubLang] = useState<string | "none" | undefined>();
-  /** The chosen subtitle when it has no language to be remembered by. */
-  const [subId, setSubId] = useState<string | undefined>();
+  const [audioChoice, setAudioChoice] = useState<ChosenTrack | undefined>();
+  const [subChoice, setSubChoice] = useState<ChosenTrack | "none" | undefined>();
   /**
    * The episode the cursor is on, with its own tracks.
    *
@@ -225,10 +230,10 @@ export function Detail({
     // that re-run it on a LIVE mount - "try again" after a failure, and a
     // backend replaced under it - plus the day somebody drops that key.
     //
-    // `subId` is the one with teeth if that day comes: a track id is only
-    // meaningful within its own item, and on Jellyfin it is the stream's index -
-    // so "2" on the next film is a different subtitle, baked into a converted
-    // stream at start.
+    // The track choice is the one with teeth if that day comes: it holds an
+    // ordinal and an id, and both are meaningful only within their own item -
+    // on Jellyfin the id IS the stream's index, so "2" on the next film is a
+    // different subtitle, baked into a converted stream at start.
     setFocused(null);
     setFirstChild(null);
     setPlayTarget(null);
@@ -237,9 +242,8 @@ export function Detail({
     // an item change belongs to an overflow list that has been rebuilt under
     // it, and an empty one has nothing for the cursor to land on.
     setMore(false);
-    setAudioLang(undefined);
-    setSubLang(undefined);
-    setSubId(undefined);
+    setAudioChoice(undefined);
+    setSubChoice(undefined);
     setPicking(false);
     setConfirming(false);
     // Held by id, and an id is only meaningful within one library - but this is
@@ -942,9 +946,7 @@ export function Detail({
    * all only loses the choice. A film resolves against `detail` and is
    * untouched.
    */
-  const playSource = toPlay
-    ? [playTarget, focused, firstChild, detail].find((x) => x?.id === toPlay.id)
-    : undefined;
+  const playSource = toPlay ? [playTarget, focused, firstChild, detail].find((x) => x?.id === toPlay.id) : undefined;
   const playTracks = playSource?.versions[version];
 
   /**
@@ -958,16 +960,18 @@ export function Detail({
    * within the same item, which is the film case and is the honest limit -
    * a track with no language has nothing to match on in the next episode.
    */
-  const pick = (v: MediaVersion | undefined): { audio?: number; subtitle?: number | "none" } => ({
-    audio: audioLang ? v?.audio.find((a) => a.language === audioLang)?.ordinal : undefined,
-    subtitle:
-      subLang === "none"
-        ? "none"
-        : subLang
-          ? v?.subtitles.find((x) => x.language === subLang)?.ordinal
-          : subId
-            ? v?.subtitles.find((x) => x.id === subId)?.ordinal
-            : undefined,
+  /**
+   * Which list `v` is, for the id branch alone.
+   *
+   * Item AND version, because a track id is only unique within one file: on
+   * Jellyfin it is the stream's index within its media source, so the versions
+   * of one item repeat it - and the version chips change the version while the
+   * item stays put.
+   */
+  const listKey = (ownerId: string): string => `${ownerId}:${version}`;
+  const pick = (v: MediaVersion | undefined, ownerId: string): { audio?: number; subtitle?: number | "none" } => ({
+    audio: resolveTrack(v?.audio, audioChoice, listKey(ownerId)),
+    subtitle: subChoice === "none" ? "none" : resolveTrack(v?.subtitles, subChoice, listKey(ownerId)),
   });
 
   /**
@@ -1027,7 +1031,7 @@ export function Detail({
       onEnter: () =>
         backend &&
         toPlay &&
-        void usePlayer.getState().play(backend, toPlay, { version, ...pick(playTracks), queue: order }),
+        void usePlayer.getState().play(backend, toPlay, { version, ...pick(playTracks, toPlay.id), queue: order }),
     });
   if (playable && resumable)
     actions.push({
@@ -1038,7 +1042,7 @@ export function Detail({
         toPlay &&
         void usePlayer
           .getState()
-          .play(backend, toPlay, { resume: false, version, ...pick(playTracks), queue: order }),
+          .play(backend, toPlay, { resume: false, version, ...pick(playTracks, toPlay.id), queue: order }),
     });
   // Marking by hand is what a shared server needs: a film watched somewhere
   // else, or abandoned twenty minutes in and not worth resuming, has no other
@@ -1114,14 +1118,22 @@ export function Detail({
           // HIGHLIGHTED one's while Play starts another - the panel and the
           // button beside it authoritatively describe different episodes.
           designation={tracksOwner ? episodeNumber(tracksOwner) : undefined}
-          audio={pick(tracksFrom).audio}
-          subtitle={pick(tracksFrom).subtitle}
-          onAudio={(ordinal) => setAudioLang(tracksFrom?.audio.find((a) => a.ordinal === ordinal)?.language)}
-          onSubtitle={(ordinal) => {
-            const track = ordinal === "none" ? undefined : tracksFrom?.subtitles.find((x) => x.ordinal === ordinal);
-            setSubLang(ordinal === "none" ? "none" : track?.language);
-            setSubId(track?.language ? undefined : track?.id);
-          }}
+          audio={pick(tracksFrom, tracksOwner?.id ?? "").audio}
+          subtitle={pick(tracksFrom, tracksOwner?.id ?? "").subtitle}
+          onAudio={(ordinal) =>
+            tracksOwner && setAudioChoice(rememberTrack(tracksFrom?.audio, ordinal, listKey(tracksOwner.id)))
+          }
+          // "Off" is the one choice that needs no track list, so it is not
+          // gated on having one.
+          onSubtitle={(ordinal) =>
+            setSubChoice(
+              ordinal === "none"
+                ? "none"
+                : tracksOwner
+                  ? rememberTrack(tracksFrom?.subtitles, ordinal, listKey(tracksOwner.id))
+                  : undefined,
+            )
+          }
           onClose={() => {
             setPicking(false);
             // Back to the button the chain started at, the way the confirm above
@@ -1312,7 +1324,9 @@ export function Detail({
                   // a collection are one, and a season is one too. Without it
                   // an episode played from a playlist would be followed by the
                   // next episode of its SERIES, and a film by nothing at all.
-                  usePlayer.getState().play(backend, item, { version, ...pick(d.versions[version]), queue: children }),
+                  usePlayer
+                    .getState()
+                    .play(backend, item, { version, ...pick(d.versions[version], d.id), queue: children }),
                 );
                 return;
               }
