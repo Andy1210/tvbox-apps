@@ -203,6 +203,14 @@ export async function focusLands(): Promise<void> {
  * turn is not seen by this either, because both landings happen before the
  * first poll. Measured - a correction 20 ms out is caught, one on the next
  * `setTimeout(..., 0)` is not. It buys the slow correction, not every one.
+ *
+ * Deliberately NOT `doesFocusableExist`, unlike `focusLands`. A key in the
+ * group that names nothing on screen is a finding for the assertion after this
+ * to report, not something to wait past: measured on a screen that parks the
+ * cursor on a strip it never mounts and recovers 300 ms later - one swallowed
+ * press - requiring existence here waits out the park and passes, while
+ * stopping at it fails with `expected 'detail-seasons' to be 'detail-play'`.
+ * A test that wants both asserts the existence itself.
  */
 export async function focusEnters(prefix: string): Promise<void> {
   await waitFor(() => {

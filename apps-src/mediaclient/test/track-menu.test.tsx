@@ -84,8 +84,7 @@ async function openSearch(
   await focusLands();
   // From the row the press comes from, which is also the one the search view
   // does not draw - the whole reason the cursor has to be taken along.
-  await act(async () => setFocus("sub-search"));
-  await flushFocus();
+  await setFocus("sub-search");
 
   view.rerender(menu({ ...over, searchOpen: true }));
   await settle();
