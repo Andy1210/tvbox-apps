@@ -402,6 +402,7 @@ export interface PlexStream {
   codec?: string;
   channels?: number;
   forced?: boolean;
+  hearingImpaired?: boolean;
   selected?: boolean;
   key?: string;
   /**
@@ -463,6 +464,7 @@ export function toTrack(s: PlexStream, ordinal: number, kind: "audio" | "subtitl
     language,
     label: s.extendedDisplayTitle || s.displayTitle || s.title || composed || `#${ordinal + 1}`,
     forced: s.forced === true,
+    hearingImpaired: s.hearingImpaired === true,
     selected: s.selected === true,
     // An external subtitle has its own key; an embedded one is inside the file.
     external: kind === "subtitle" && Boolean(s.key),

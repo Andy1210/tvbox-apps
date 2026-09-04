@@ -230,4 +230,47 @@ describe("the subtitle offset row", () => {
     await remote.down();
     expect(getCurrentFocusKey()).toBe("sub-search");
   });
+
+  describe("crossing the menu past the offset row", () => {
+    it("lets Left out of minus reach the audio column", async () => {
+      // The direction this row's own history records breaking: an earlier design
+      // swallowed Left and Right to nudge the value, and "crossing the menu
+      // sideways was impossible". A container that kept the cursor would bring
+      // that back by another route.
+      await laid();
+      await setFocus("sub-offset-down");
+      await remote.left();
+      expect(getCurrentFocusKey()).toBe("aud-0");
+    });
+
+    it("lets Right out of plus reach the quality column", async () => {
+      await laid();
+      await setFocus("sub-offset-up");
+      await remote.right();
+      expect(getCurrentFocusKey()).toBe("q-0");
+    });
+
+    it("lets Up out of the row reach the subtitle above it", async () => {
+      await laid();
+      await setFocus("sub-offset-down");
+      await remote.up();
+      expect(getCurrentFocusKey()).toBe("sub-1");
+    });
+
+    it("enters at the same end every time", async () => {
+      // Measured on a box before this: the row remembered which button was used
+      // last, so the same press from the same row landed at the left end one time
+      // and the right end the next. Nudging never leaves the button, so there was
+      // nothing to remember for.
+      await laid();
+      await setFocus("sub-1");
+      await remote.down();
+      expect(getCurrentFocusKey()).toBe("sub-offset-down");
+      await remote.right();
+      expect(getCurrentFocusKey()).toBe("sub-offset-up");
+      await remote.down();
+      await remote.up();
+      expect(getCurrentFocusKey(), "back in at the same end as the first time").toBe("sub-offset-down");
+    });
+  });
 });

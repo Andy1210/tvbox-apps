@@ -441,9 +441,16 @@ function Offset({
   label: string;
 }): React.JSX.Element {
   const { locale } = useI18n();
-  // Entered at whichever button was used last, so nudging further in the same
-  // direction is one press each after the first.
-  const { ref, focusKey } = useFocusable({ focusKey: "sub-offset", saveLastFocusedChild: true });
+  // Always entered at the same end, which is not the library's default.
+  // Remembering the last button read well on paper - nudge further, one press
+  // each - but nudging never leaves the button, so it bought nothing, and it
+  // cost the row a stable landing place: seen on a box, the same Down press
+  // from the same row put the highlight at the left end one time and the right
+  // end the next.
+  const { ref, focusKey, hasFocusedChild } = useFocusable({
+    focusKey: "sub-offset",
+    saveLastFocusedChild: false,
+  });
 
   // Signed and to two places, so a change of a quarter second is visible - and
   // formatted for the locale, because a Hungarian television writes 0,25.
@@ -461,7 +468,15 @@ function Offset({
         // without a marker a navigation test cannot put a rectangle on this
         // element, and this container's rectangle IS the fix.
         data-sfocus={focusKey}
-        className="flex flex-col gap-[0.4vh] rounded-[0.8vh] bg-white/5 px-[1.2vw] py-[0.9vh]"
+        // The row lifts while the cursor is inside it. Every other row in this
+        // panel becomes a full-width white pill; here only a chip an eighth of
+        // the row's width does, so scanning down the column the highlight
+        // suddenly shrinks and jumps to an edge with nothing marking the row it
+        // belongs to. This is not the focus fill - that stays the one thing
+        // focus means - it is the row saying the cursor is in it.
+        className={`flex flex-col gap-[0.4vh] rounded-[0.8vh] px-[1.2vw] py-[0.9vh] ${
+          hasFocusedChild ? "bg-white/15" : "bg-white/5"
+        }`}
       >
         <span className="text-[2vh] text-fg-dim">{label}</span>
         <div className="flex items-center justify-between gap-[0.6vw]">

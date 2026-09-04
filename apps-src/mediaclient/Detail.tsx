@@ -28,7 +28,7 @@ import { useFocusFallback, useFocusOnReveal, useInitialFocus, useScrollToTopOnFi
 import { usePlayer, useShowingPlayer } from "./playback/player";
 import { rememberedVersion, useChosenVersion } from "./chosenVersion";
 import { classify, useApp } from "./state";
-import { rememberTrack, resolveTrack, type TrackChoice } from "./tracks";
+import { rememberTrack, resolveTrack, type ChosenTrack } from "./tracks";
 import type { ItemDetail, MediaItem, MediaVersion } from "./backends/types";
 import { log } from "./redact";
 
@@ -127,14 +127,14 @@ export function Detail({
    * Magyar, English - played English. And a converted stream bakes its tracks
    * in at start, so that costs a restart to undo.
    *
-   * Not a bare language either, which is what it used to be: 367 of 400
+   * Not a bare language either, which is what it used to be: 519 of 1,395
    * episodes here carry two or more subtitles in one language, and a language
    * matched the FIRST of them - so choosing the full Hungarian subtitle on a
    * file that also has a signs-only one left the tick where it was and played
    * signs only. See `tracks.ts` for what is kept and how far each part travels.
    */
-  const [audioChoice, setAudioChoice] = useState<TrackChoice | undefined>();
-  const [subChoice, setSubChoice] = useState<TrackChoice | "none" | undefined>();
+  const [audioChoice, setAudioChoice] = useState<ChosenTrack | undefined>();
+  const [subChoice, setSubChoice] = useState<ChosenTrack | "none" | undefined>();
   /**
    * The episode the cursor is on, with its own tracks.
    *
@@ -946,9 +946,7 @@ export function Detail({
    * all only loses the choice. A film resolves against `detail` and is
    * untouched.
    */
-  const playSource = toPlay
-    ? [playTarget, focused, firstChild, detail].find((x) => x?.id === toPlay.id)
-    : undefined;
+  const playSource = toPlay ? [playTarget, focused, firstChild, detail].find((x) => x?.id === toPlay.id) : undefined;
   const playTracks = playSource?.versions[version];
 
   /**
@@ -962,9 +960,13 @@ export function Detail({
    * within the same item, which is the film case and is the honest limit -
    * a track with no language has nothing to match on in the next episode.
    */
-  const pick = (v: MediaVersion | undefined): { audio?: number; subtitle?: number | "none" } => ({
-    audio: resolveTrack(v?.audio, audioChoice),
-    subtitle: subChoice === "none" ? "none" : resolveTrack(v?.subtitles, subChoice),
+  const pick = (
+    v: MediaVersion | undefined,
+    /** Whose list `v` is. Only the id branch reads it, and an id is per-item. */
+    ownerId: string,
+  ): { audio?: number; subtitle?: number | "none" } => ({
+    audio: resolveTrack(v?.audio, audioChoice, ownerId),
+    subtitle: subChoice === "none" ? "none" : resolveTrack(v?.subtitles, subChoice, ownerId),
   });
 
   /**
@@ -1024,7 +1026,7 @@ export function Detail({
       onEnter: () =>
         backend &&
         toPlay &&
-        void usePlayer.getState().play(backend, toPlay, { version, ...pick(playTracks), queue: order }),
+        void usePlayer.getState().play(backend, toPlay, { version, ...pick(playTracks, toPlay.id), queue: order }),
     });
   if (playable && resumable)
     actions.push({
@@ -1035,7 +1037,7 @@ export function Detail({
         toPlay &&
         void usePlayer
           .getState()
-          .play(backend, toPlay, { resume: false, version, ...pick(playTracks), queue: order }),
+          .play(backend, toPlay, { resume: false, version, ...pick(playTracks, toPlay.id), queue: order }),
     });
   // Marking by hand is what a shared server needs: a film watched somewhere
   // else, or abandoned twenty minutes in and not worth resuming, has no other
@@ -1111,11 +1113,18 @@ export function Detail({
           // HIGHLIGHTED one's while Play starts another - the panel and the
           // button beside it authoritatively describe different episodes.
           designation={tracksOwner ? episodeNumber(tracksOwner) : undefined}
-          audio={pick(tracksFrom).audio}
-          subtitle={pick(tracksFrom).subtitle}
-          onAudio={(ordinal) => setAudioChoice(rememberTrack(tracksFrom?.audio, ordinal))}
+          audio={pick(tracksFrom, tracksOwner?.id ?? "").audio}
+          subtitle={pick(tracksFrom, tracksOwner?.id ?? "").subtitle}
+          onAudio={(ordinal) =>
+            tracksOwner && setAudioChoice(rememberTrack(tracksOwner.versions[version]?.audio, ordinal, tracksOwner.id))
+          }
           onSubtitle={(ordinal) =>
-            setSubChoice(ordinal === "none" ? "none" : rememberTrack(tracksFrom?.subtitles, ordinal))
+            tracksOwner &&
+            setSubChoice(
+              ordinal === "none"
+                ? "none"
+                : rememberTrack(tracksOwner.versions[version]?.subtitles, ordinal, tracksOwner.id),
+            )
           }
           onClose={() => {
             setPicking(false);
@@ -1307,7 +1316,9 @@ export function Detail({
                   // a collection are one, and a season is one too. Without it
                   // an episode played from a playlist would be followed by the
                   // next episode of its SERIES, and a film by nothing at all.
-                  usePlayer.getState().play(backend, item, { version, ...pick(d.versions[version]), queue: children }),
+                  usePlayer
+                    .getState()
+                    .play(backend, item, { version, ...pick(d.versions[version], d.id), queue: children }),
                 );
                 return;
               }

@@ -217,8 +217,17 @@ export interface Track {
   language?: string;
   /** What to show: the server's own label, or something composed from the codec. */
   label: string;
-  /** Burned into the picture; cannot be turned off. */
+  /** Signs and foreign dialogue only, rather than the whole of it. */
   forced?: boolean;
+  /**
+   * Written for a viewer who cannot hear it: the dialogue plus the sounds.
+   *
+   * A THIRD kind, not a variant of `forced`. Measured on this server, 173
+   * episode and 97 film subtitles carry it, and a file routinely holds the full
+   * track and the SDH one in the same language with the same forced flag - so
+   * without it a remembered choice cannot tell those two apart.
+   */
+  hearingImpaired?: boolean;
   /** The server's current choice. */
   selected?: boolean;
   /** A subtitle that lives beside the file rather than inside it. Its `ordinal`
