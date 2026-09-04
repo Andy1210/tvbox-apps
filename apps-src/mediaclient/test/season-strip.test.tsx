@@ -165,6 +165,7 @@ async function settle(): Promise<void> {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe("the season strip on an episode list", () => {
@@ -322,11 +323,18 @@ describe("the season strip on an episode list", () => {
   it("places its cursor without waiting for the season list", async () => {
     // The list is a second request. Waiting for it left the screen with nothing
     // highlighted, which on a television is a remote that does nothing.
+    // On a LOGICAL clock, not the wall clock, and that is the whole instrument.
+    // Everywhere else in this suite a counted settle is what makes an assertion
+    // read null on a busy machine - but here the budget IS the subject, and a
+    // wait would accept any latency at all. Fake timers give the landing a fixed
+    // number of turns rather than a number of milliseconds, so a screen that
+    // takes 300 ms to light up still fails while a machine under load does not.
+    vi.useFakeTimers();
     const h = await open({ focusSeasons: true, holdSeasons: true });
-    // Waited for: the screen lands its cursor on a timer, so a counted settle
-    // reads null on a machine that is busy enough.
-    await focusBecomes("detail-play");
+    expect(getCurrentFocusKey()).toBe("detail-play");
     expect(chips()).toEqual([]);
+
+    vi.useRealTimers();
     h.releaseSeasons?.();
     await settle();
     // ...and once it answers, the strip takes the cursor, since nobody moved it.

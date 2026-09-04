@@ -386,7 +386,9 @@ describe("returning to a library", () => {
     expect(again.container.textContent).toContain(`Zeta ${DEEP}`);
 
     answer();
-    await settle();
+    // Waited for, like `open()` does: this screen was mounted by hand rather
+    // than through it, and the cursor's landing is on a timer of its own.
+    await waitFor(() => expect(litCell(again.container)).toBe(`cell-${DEEP}`));
     const ring = again.container.querySelector(".ring-white")?.parentElement;
     expect(ring?.textContent).toContain(`${DEEP}`);
   });

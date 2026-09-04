@@ -140,8 +140,11 @@ export const remote = {
  *
  * That is not hypothetical. It failed a CI run that was publishing a finished
  * release, on the first focus assertion of a test, before any press:
- * `expected null to be 'profile-u1'`. Delaying a screen's initial focus by 5 ms
- * reproduces it, and fails 19 tests across 7 files in this suite.
+ * `expected null to be 'profile-u1'`. It reproduces deterministically by
+ * pushing the landing out: delaying a screen's initial focus by 5 ms failed
+ * about twenty of these across six files, and scaling every 0 ms timer together
+ * - which keeps the order the app arms them in, and is the fairer of the two -
+ * failed fifty at 100 ms.
  *
  * So an assertion about where the cursor ARRIVES belongs here rather than
  * straight after a counted settle.
@@ -180,9 +183,10 @@ export async function focusBecomes(key: string): Promise<void> {
 export async function focusLands(): Promise<void> {
   await waitFor(() => {
     const at = getCurrentFocusKey();
-    expect(Boolean(at) && doesFocusableExist(String(at)), `nothing on the screen is lit (key: ${String(at)})`).toBe(
-      true,
-    );
+    expect(
+      Boolean(at) && doesFocusableExist(String(at)),
+      `the cursor is on nothing that exists (key: ${String(at)})`,
+    ).toBe(true);
   });
 }
 
