@@ -190,7 +190,10 @@ describe("the playback overlay", () => {
     });
 
     expect(usePlayer.getState().overlay).toBe(true);
-  });
+    // Four and a half seconds of real clock against vitest's five: the
+    // headroom is smaller than one wait, and the strip above is reached
+    // through a helper that now waits for its cursor.
+  }, 15000);
 });
 
 describe("a seek that has been committed", () => {
@@ -646,9 +649,10 @@ describe("the chapter strip", () => {
     await remote.down();
     // The strip's own cursor, waited for: the press mounts it and the focus
     // lands a timer later, so a counted settle reads the button the press came
-    // from. To the strip rather than to a named chapter - which one it opens on
-    // is the subject of the test below, and a wait for that answer would sit
-    // through a strip that opened at the start of the film and corrected.
+    // from. To the strip rather than to a named chapter, because which chapter
+    // it opens on is asserted elsewhere in this file and a wait for that answer
+    // would sit through a strip that opened at the start of the film and
+    // corrected itself.
     await focusEnters("ch-");
   };
 
@@ -767,9 +771,10 @@ describe("the chapter strip, once it is open", () => {
     await remote.down();
     // The strip's own cursor, waited for: the press mounts it and the focus
     // lands a timer later, so a counted settle reads the button the press came
-    // from. To the strip rather than to a named chapter - which one it opens on
-    // is the subject of the test below, and a wait for that answer would sit
-    // through a strip that opened at the start of the film and corrected.
+    // from. To the strip rather than to a named chapter, because which chapter
+    // it opens on is asserted elsewhere in this file and a wait for that answer
+    // would sit through a strip that opened at the start of the film and
+    // corrected itself.
     await focusEnters("ch-");
   };
 
@@ -781,8 +786,8 @@ describe("the chapter strip, once it is open", () => {
     withChapters();
     render(<Player />);
     await settle();
+    // `open` waits for exactly this, so it is the wait above that carries it.
     await open();
-    expect(String(getCurrentFocusKey()).startsWith("ch-")).toBe(true);
 
     // The playhead moves into the marker, which is what re-runs the check.
     await act(async () => usePlayer.setState({ positionMs: 720_000 }));
@@ -808,5 +813,8 @@ describe("the chapter strip, once it is open", () => {
     expect(usePlayer.getState().overlay, "the overlay stays up while the strip is out").toBe(true);
     expect(doesFocusableExist("chapters")).toBe(true);
     expect(String(getCurrentFocusKey())).toMatch(/^ch-/);
-  });
+    // Four and a half seconds of real clock against vitest's five: the
+    // headroom is smaller than one wait, and the strip above is reached
+    // through a helper that now waits for its cursor.
+  }, 15000);
 });

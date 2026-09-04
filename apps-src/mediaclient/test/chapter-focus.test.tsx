@@ -110,6 +110,9 @@ describe("opening the chapter strip", () => {
       `focus was requested for ${missing.map((m) => m.key).join(", ")}, which did not exist at the time`,
     ).toEqual([]);
     // And it did reach the strip, so the rule is not satisfied by never asking.
+    // Implied by the wait above now - nothing else in this harness can reach a
+    // chapter key, since it places no rectangles - and kept as the statement of
+    // what the rule is for.
     expect(spy.calls.some((c) => c.key === "chapters")).toBe(true);
   });
 });

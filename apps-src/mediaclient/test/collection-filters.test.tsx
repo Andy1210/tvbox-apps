@@ -233,10 +233,7 @@ describe("coming back from the collections", () => {
     expect(container.textContent, "the order chosen for the films was not the collections' to discard").toContain(
       "Date added",
     );
-    // Six sequential waits, and vitest's own limit is five seconds: a failing
-    // one still reports its own assertion in about a second, but several slow
-    // successes on a loaded runner are what this whole change is about.
-  }, 15000);
+  });
 });
 
 describe("opening something from the library", () => {
@@ -277,10 +274,7 @@ describe("opening something from the library", () => {
     const third = render(<Library libraryId="1" title="Movies" />);
     await waitFor(() => expect(third.container.textContent).toContain("Film 0"));
     expect(third.container.textContent, "the next person to sign in starts clean").not.toContain("Date added");
-    // Six sequential waits, and vitest's own limit is five seconds: a failing
-    // one still reports its own assertion in about a second, but several slow
-    // successes on a loaded runner are what this whole change is about.
-  }, 15000);
+  });
 });
 
 describe("a panel with nothing to choose from", () => {
