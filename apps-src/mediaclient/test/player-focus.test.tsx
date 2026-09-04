@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { act, render } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { configureI18n, useBackspace } from "@sdk";
 import { Player } from "../Player";
 import { usePlayer, __wirePlayerEventsForTest } from "../playback/player";
@@ -42,6 +42,23 @@ const item: MediaItem = { id: "m1", kind: "movie", title: "Film", durationMs: 3_
 const realStop = usePlayer.getState().stop;
 const slowStop = async (opts?: { handOver?: boolean }): Promise<void> => {
   await new Promise((r) => setTimeout(r, 20));
+  await realStop(opts);
+};
+
+/**
+ * The same, with the test holding the door.
+ *
+ * `slowStop`'s twenty milliseconds are a guess about how long a box takes, and
+ * a test that has to act INSIDE that window is racing it: on a machine where
+ * the presses take longer than the guess, the teardown is over before the
+ * second one arrives and the test measures nothing. Here the window opens when
+ * the stop is called and closes when the test says so.
+ */
+let releaseStop: () => void = () => {};
+const heldStop = async (opts?: { handOver?: boolean }): Promise<void> => {
+  await new Promise<void>((r) => {
+    releaseStop = r;
+  });
   await realStop(opts);
 };
 
@@ -421,7 +438,7 @@ describe("the overlay's own controls", () => {
       useBackspace(outer);
       return null;
     }
-    usePlayer.setState({ stop: slowStop });
+    usePlayer.setState({ stop: heldStop });
     render(
       <>
         <Outer />
@@ -439,12 +456,14 @@ describe("the overlay's own controls", () => {
     // Still there: the box has not finished tearing it down.
     expect(usePlayer.getState().current).not.toBe(null);
 
-    // The repeats arrive during the teardown, and after it.
+    // A repeat arrives inside the window, which is held open rather than timed.
     await remote.back();
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 60));
+      releaseStop();
+      await Promise.resolve();
     });
-    expect(usePlayer.getState().current).toBe(null);
+    await waitFor(() => expect(usePlayer.getState().current).toBe(null));
+    // And one after it has closed.
     await remote.back();
     await settle();
     expect(outer).not.toHaveBeenCalled();

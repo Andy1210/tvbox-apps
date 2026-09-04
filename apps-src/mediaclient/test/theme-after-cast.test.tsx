@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { act, render } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { themeItem, useTheme } from "../theme";
 import { usePlayer, resetPlayer } from "../playback/player";
 import { useApp } from "../state";
@@ -184,6 +184,12 @@ describe("a series' theme and a film started by voice", () => {
     const { rerender } = render(<Season key="f1" item={season("A")} />);
     await settle();
     const a = made[0]!;
+    // Exact, and it has to be: the bug is that a fade-out scaling by the
+    // current volume computes a step of ZERO from silence, so a test that
+    // started the film a little way up the ramp would be measuring a fade that
+    // can move. Which is why the suite's timer-scaling probe fails this one and
+    // must not be "fixed" here - it stretches the settle above past the window,
+    // the ramp climbs, and the premise is gone. Nothing about the app changed.
     expect(a.volume, "the fade starts from silence").toBe(0);
 
     // A film starts before the ramp has moved at all, which is the window.
@@ -191,9 +197,14 @@ describe("a series' theme and a film started by voice", () => {
       usePlayer.setState({ current: playing });
       rerender(<Season key="f1" item={season("A")} />);
     });
-    await new Promise((r) => setTimeout(r, 350));
-    expect(a.paused, "it was really paused").toBe(true);
-    expect(a.volume, "and it did not get louder on the way out").toBeLessThanOrEqual(0.01);
+    // Waited for rather than slept through: three hundred and fifty
+    // milliseconds is a guess about the machine, and the ramp this is about
+    // runs on timers. Both together, because a pause at full level is the
+    // failure as much as no pause at all is.
+    await waitFor(() => {
+      expect(a.paused, "it was really paused").toBe(true);
+      expect(a.volume, "and it did not get louder on the way out").toBeLessThanOrEqual(0.01);
+    });
   });
 
   it("stops when the screen is really left", async () => {

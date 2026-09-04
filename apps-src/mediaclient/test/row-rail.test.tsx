@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { act, render } from "@testing-library/react";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { act, render, waitFor } from "@testing-library/react";
 import { configureI18n } from "@sdk";
 import { Row } from "../Row";
 import { setupRemote, setFocus, flushFocus, placeRow } from "./remote";
@@ -22,6 +22,20 @@ import type { MediaItem } from "../backends/types";
 
 configureI18n({ hu, en }, { fallback: "en" });
 setupRemote();
+
+// The rail moves itself with a Web Animations keyframe pair, which happy-dom has
+// none of. Only the destination matters here - the mover writes that to the
+// inline transform itself - but the animated path is only taken for a move
+// within a screen, so on an unloaded machine these tests never reach it and the
+// missing method surfaces as `node.animate is not a function` under load.
+beforeEach(() => {
+  (window.HTMLElement.prototype as unknown as { animate: unknown }).animate = () =>
+    ({ cancel: () => {}, commitStyles: () => {} }) as unknown as Animation;
+});
+
+afterEach(() => {
+  delete (window.HTMLElement.prototype as unknown as { animate?: unknown }).animate;
+});
 
 const TILE_W = 200;
 const VIEWPORT = 1000;
@@ -153,18 +167,19 @@ describe("a rail whose list is replaced", () => {
     size(container, 12);
     await settle();
     await setFocus("row-deck-d11");
-    await settle();
-    expect(offsetOf(container)).toBeGreaterThan(0);
+    await waitFor(() => expect(offsetOf(container)).toBeGreaterThan(0));
 
     // Same first item, fewer behind it - a watched film leaving the deck.
     rerender(
       <Row id="row-deck" title="Continue" items={list("d", 7)} posterUrl={() => undefined} onSelect={() => {}} />,
     );
     size(container, 7);
-    await settle();
 
+    // Waited for, not counted: the rail re-clamps from an effect on a timer of
+    // its own, and a settle that has run out of turns reads the offset the
+    // rerender left rather than the one the clamp is about to write.
     // The end of the content, not past it: 7 tiles of 200 against a 1000 window.
-    expect(offsetOf(container)).toBe(7 * TILE_W - VIEWPORT);
+    await waitFor(() => expect(offsetOf(container)).toBe(7 * TILE_W - VIEWPORT));
   });
 });
 
