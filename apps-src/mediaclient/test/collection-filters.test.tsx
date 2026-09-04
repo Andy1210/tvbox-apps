@@ -4,7 +4,7 @@ import { configureI18n } from "@sdk";
 import { Library } from "../Library";
 import { LibraryFilters } from "../LibraryFilters";
 import { useApp } from "../state";
-import { setupRemote, setFocus, remote, getCurrentFocusKey, focusBecomes, focusEnters } from "./remote";
+import { setupRemote, setFocus, remote, getCurrentFocusKey, focusBecomes, focusEnters, focusLands } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import { PlexBackend } from "../backends/plex/backend";
@@ -233,7 +233,10 @@ describe("coming back from the collections", () => {
     expect(container.textContent, "the order chosen for the films was not the collections' to discard").toContain(
       "Date added",
     );
-  });
+    // Six sequential waits, and vitest's own limit is five seconds: a failing
+    // one still reports its own assertion in about a second, but several slow
+    // successes on a loaded runner are what this whole change is about.
+  }, 15000);
 });
 
 describe("opening something from the library", () => {
@@ -274,7 +277,10 @@ describe("opening something from the library", () => {
     const third = render(<Library libraryId="1" title="Movies" />);
     await waitFor(() => expect(third.container.textContent).toContain("Film 0"));
     expect(third.container.textContent, "the next person to sign in starts clean").not.toContain("Date added");
-  });
+    // Six sequential waits, and vitest's own limit is five seconds: a failing
+    // one still reports its own assertion in about a second, but several slow
+    // successes on a loaded runner are what this whole change is about.
+  }, 15000);
 });
 
 describe("a panel with nothing to choose from", () => {
@@ -338,7 +344,13 @@ describe("the fallback that catches a lost cursor", () => {
     });
     // It arrives.
     await act(async () => rerender(<Screen ready={true} />));
-    await focusBecomes("fb-late");
+    // `focusLands`, not a wait for the key: the fallback names `fb-late` while
+    // nothing is mounted under it, so the key is already this one before the
+    // rerender and a wait for it asserts nothing. What arriving buys is a
+    // button that EXISTS holding the cursor, which is the half of the title
+    // that says it lands there when it does.
+    await focusLands();
+    expect(getCurrentFocusKey()).toBe("fb-late");
   });
 });
 
@@ -379,11 +391,14 @@ describe("a panel whose options are slow, stuck or lost", () => {
     });
     expect(closed, "and an OK in that window must not close the panel").toBe(0);
 
-    // Once the orders arrive the cursor is on the first of them, by itself.
+    // Once the orders arrive the cursor is on the first of them, by itself. The
+    // key was already this one while the chip did not exist - the Down press
+    // above parked it there - so what the arrival has to buy is a chip under
+    // it, and `focusLands` is what asks for that rather than for the name.
     await act(async () => {
       answer([{ key: "titleSort", title: "Name" }]);
-      await new Promise((r) => setTimeout(r, 20));
     });
+    await focusLands();
     expect(getCurrentFocusKey()).toBe("lf-sort-0");
   });
 

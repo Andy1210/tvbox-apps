@@ -197,14 +197,19 @@ describe("a series' theme and a film started by voice", () => {
       usePlayer.setState({ current: playing });
       rerender(<Season key="f1" item={season("A")} />);
     });
-    // Waited for rather than slept through: three hundred and fifty
-    // milliseconds is a guess about the machine, and the ramp this is about
-    // runs on timers. Both together, because a pause at full level is the
-    // failure as much as no pause at all is.
-    await waitFor(() => {
-      expect(a.paused, "it was really paused").toBe(true);
-      expect(a.volume, "and it did not get louder on the way out").toBeLessThanOrEqual(0.01);
+    // The pause is waited for; the level is read AFTER a window, and the two
+    // cannot be swapped. A pause is an event, so waiting for it removes a guess
+    // about the machine and costs nothing. The level is the absence of one -
+    // that the fade-in's own interval was cancelled and is not still raising
+    // this element - and the fade-out reaches zero on its first tick, so a wait
+    // for a low level returns at the instant it is low and never sees a ramp
+    // carrying on after it. Measured: a build whose fade-out completes while
+    // the fade-in leaks passes the wait and fails this.
+    await waitFor(() => expect(a.paused, "it was really paused").toBe(true));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 300));
     });
+    expect(a.volume, "and it did not get louder on the way out").toBeLessThanOrEqual(0.01);
   });
 
   it("stops when the screen is really left", async () => {

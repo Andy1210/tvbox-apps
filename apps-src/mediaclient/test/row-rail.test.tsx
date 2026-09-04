@@ -175,9 +175,9 @@ describe("a rail whose list is replaced", () => {
     );
     size(container, 7);
 
-    // Waited for, not counted: the rail re-clamps from an effect on a timer of
-    // its own, and a settle that has run out of turns reads the offset the
-    // rerender left rather than the one the clamp is about to write.
+    // Waited for, not counted: the clamp is a passive effect, which React
+    // schedules rather than runs, so a settle that has spent its turns reads
+    // the offset the rerender left rather than the one the clamp will write.
     // The end of the content, not past it: 7 tiles of 200 against a 1000 window.
     await waitFor(() => expect(offsetOf(container)).toBe(7 * TILE_W - VIEWPORT));
   });

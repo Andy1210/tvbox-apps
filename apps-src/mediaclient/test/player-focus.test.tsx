@@ -5,7 +5,7 @@ import { Player } from "../Player";
 import { usePlayer, __wirePlayerEventsForTest } from "../playback/player";
 import { useApp } from "../state";
 import { doesFocusableExist } from "@noriginmedia/norigin-spatial-navigation";
-import { setupRemote, remote, setFocus, getCurrentFocusKey, flushFocus } from "./remote";
+import { setupRemote, remote, setFocus, getCurrentFocusKey, flushFocus, focusEnters } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaItem } from "../backends/types";
@@ -63,6 +63,7 @@ const heldStop = async (opts?: { handOver?: boolean }): Promise<void> => {
 };
 
 beforeEach(async () => {
+  releaseStop = () => {};
   usePlayer.setState({ stop: realStop });
   useApp.setState({ backend: null });
   usePlayer.setState({
@@ -643,7 +644,12 @@ describe("the chapter strip", () => {
     await act(async () => setFocus("pb-playpause"));
     await flushFocus();
     await remote.down();
-    await settle();
+    // The strip's own cursor, waited for: the press mounts it and the focus
+    // lands a timer later, so a counted settle reads the button the press came
+    // from. To the strip rather than to a named chapter - which one it opens on
+    // is the subject of the test below, and a wait for that answer would sit
+    // through a strip that opened at the start of the film and corrected.
+    await focusEnters("ch-");
   };
 
   it("is not there until Down from the buttons asks for it", async () => {
@@ -664,7 +670,7 @@ describe("the chapter strip", () => {
     expect(getCurrentFocusKey()).toBe("pb-playpause");
 
     await remote.down();
-    await settle();
+    await focusEnters("ch-");
     // 700_000 is inside the second chapter.
     expect(getCurrentFocusKey()).toBe("ch-2-600000");
   });
@@ -759,7 +765,12 @@ describe("the chapter strip, once it is open", () => {
     await act(async () => setFocus("pb-playpause"));
     await flushFocus();
     await remote.down();
-    await settle();
+    // The strip's own cursor, waited for: the press mounts it and the focus
+    // lands a timer later, so a counted settle reads the button the press came
+    // from. To the strip rather than to a named chapter - which one it opens on
+    // is the subject of the test below, and a wait for that answer would sit
+    // through a strip that opened at the start of the film and corrected.
+    await focusEnters("ch-");
   };
 
   it("keeps the cursor when a marker comes into range", async () => {
