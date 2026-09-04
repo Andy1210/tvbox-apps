@@ -28,6 +28,7 @@ import { useFocusFallback, useFocusOnReveal, useInitialFocus, useScrollToTopOnFi
 import { usePlayer, useShowingPlayer } from "./playback/player";
 import { rememberedVersion, useChosenVersion } from "./chosenVersion";
 import { classify, useApp } from "./state";
+import { rememberTrack, resolveTrack, type TrackChoice } from "./tracks";
 import type { ItemDetail, MediaItem, MediaVersion } from "./backends/types";
 import { log } from "./redact";
 
@@ -118,18 +119,22 @@ export function Detail({
   const [reload, setReload] = useState(0);
   const [version, setVersion] = useState(0);
   /**
-   * The chosen tracks, kept as a LANGUAGE rather than an ordinal.
+   * The chosen tracks, kept as a description rather than as an ordinal.
    *
    * An ordinal is a position in one item's own track list, and episodes of a
    * season do not agree on it: measured, choosing Hungarian on an episode whose
    * tracks read English, Magyar and then pressing the next one - whose read
    * Magyar, English - played English. And a converted stream bakes its tracks
    * in at start, so that costs a restart to undo.
+   *
+   * Not a bare language either, which is what it used to be: 367 of 400
+   * episodes here carry two or more subtitles in one language, and a language
+   * matched the FIRST of them - so choosing the full Hungarian subtitle on a
+   * file that also has a signs-only one left the tick where it was and played
+   * signs only. See `tracks.ts` for what is kept and how far each part travels.
    */
-  const [audioLang, setAudioLang] = useState<string | undefined>();
-  const [subLang, setSubLang] = useState<string | "none" | undefined>();
-  /** The chosen subtitle when it has no language to be remembered by. */
-  const [subId, setSubId] = useState<string | undefined>();
+  const [audioChoice, setAudioChoice] = useState<TrackChoice | undefined>();
+  const [subChoice, setSubChoice] = useState<TrackChoice | "none" | undefined>();
   /**
    * The episode the cursor is on, with its own tracks.
    *
@@ -225,10 +230,10 @@ export function Detail({
     // that re-run it on a LIVE mount - "try again" after a failure, and a
     // backend replaced under it - plus the day somebody drops that key.
     //
-    // `subId` is the one with teeth if that day comes: a track id is only
-    // meaningful within its own item, and on Jellyfin it is the stream's index -
-    // so "2" on the next film is a different subtitle, baked into a converted
-    // stream at start.
+    // The track choice is the one with teeth if that day comes: it holds an
+    // ordinal and an id, and both are meaningful only within their own item -
+    // on Jellyfin the id IS the stream's index, so "2" on the next film is a
+    // different subtitle, baked into a converted stream at start.
     setFocused(null);
     setFirstChild(null);
     setPlayTarget(null);
@@ -237,9 +242,8 @@ export function Detail({
     // an item change belongs to an overflow list that has been rebuilt under
     // it, and an empty one has nothing for the cursor to land on.
     setMore(false);
-    setAudioLang(undefined);
-    setSubLang(undefined);
-    setSubId(undefined);
+    setAudioChoice(undefined);
+    setSubChoice(undefined);
     setPicking(false);
     setConfirming(false);
     // Held by id, and an id is only meaningful within one library - but this is
@@ -959,15 +963,8 @@ export function Detail({
    * a track with no language has nothing to match on in the next episode.
    */
   const pick = (v: MediaVersion | undefined): { audio?: number; subtitle?: number | "none" } => ({
-    audio: audioLang ? v?.audio.find((a) => a.language === audioLang)?.ordinal : undefined,
-    subtitle:
-      subLang === "none"
-        ? "none"
-        : subLang
-          ? v?.subtitles.find((x) => x.language === subLang)?.ordinal
-          : subId
-            ? v?.subtitles.find((x) => x.id === subId)?.ordinal
-            : undefined,
+    audio: resolveTrack(v?.audio, audioChoice),
+    subtitle: subChoice === "none" ? "none" : resolveTrack(v?.subtitles, subChoice),
   });
 
   /**
@@ -1116,12 +1113,10 @@ export function Detail({
           designation={tracksOwner ? episodeNumber(tracksOwner) : undefined}
           audio={pick(tracksFrom).audio}
           subtitle={pick(tracksFrom).subtitle}
-          onAudio={(ordinal) => setAudioLang(tracksFrom?.audio.find((a) => a.ordinal === ordinal)?.language)}
-          onSubtitle={(ordinal) => {
-            const track = ordinal === "none" ? undefined : tracksFrom?.subtitles.find((x) => x.ordinal === ordinal);
-            setSubLang(ordinal === "none" ? "none" : track?.language);
-            setSubId(track?.language ? undefined : track?.id);
-          }}
+          onAudio={(ordinal) => setAudioChoice(rememberTrack(tracksFrom?.audio, ordinal))}
+          onSubtitle={(ordinal) =>
+            setSubChoice(ordinal === "none" ? "none" : rememberTrack(tracksFrom?.subtitles, ordinal))
+          }
           onClose={() => {
             setPicking(false);
             // Back to the button the chain started at, the way the confirm above

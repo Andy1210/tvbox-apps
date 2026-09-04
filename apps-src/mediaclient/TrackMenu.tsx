@@ -415,6 +415,19 @@ function Empty({ text }: { text: string }): React.JSX.Element {
  *
  * The value sits between them, so what changes is between the two things that
  * change it.
+ *
+ * The buttons live in a focusable container of their own, and that is what
+ * makes them reachable at all. norigin scores a candidate as an "adjacent
+ * slice" only when it overlaps the focused element across the axis of travel by
+ * a fifth of that element's width, and an adjacent candidate's cost is divided
+ * by five while a diagonal one's is not - and for a diagonal one the horizontal
+ * term is the one multiplied by five instead. Measured on a box: a subtitle row
+ * is 490 px wide and each of these buttons is 56, which is 11% - so they were
+ * permanently diagonal, and the full-width row BEYOND them scored 109 against
+ * their 226. The highlight jumped clean over the row in both directions and
+ * could not be reached sideways either; the feature was unusable. The container
+ * is the row's full width, so it wins the way any other row does, and the
+ * cursor then descends into it.
  */
 const STEP_SEC = 0.25;
 
@@ -428,6 +441,9 @@ function Offset({
   label: string;
 }): React.JSX.Element {
   const { locale } = useI18n();
+  // Entered at whichever button was used last, so nudging further in the same
+  // direction is one press each after the first.
+  const { ref, focusKey } = useFocusable({ focusKey: "sub-offset", saveLastFocusedChild: true });
 
   // Signed and to two places, so a change of a quarter second is visible - and
   // formatted for the locale, because a Hungarian television writes 0,25.
@@ -438,26 +454,35 @@ function Offset({
   }).format(value);
 
   return (
-    <div className="flex flex-col gap-[0.4vh] rounded-[0.8vh] bg-white/5 px-[1.2vw] py-[0.9vh]">
-      <span className="text-[2vh] text-fg-dim">{label}</span>
-      <div className="flex items-center justify-between gap-[0.6vw]">
-        <FocusButton
-          focusKey="sub-offset-down"
-          onEnter={() => onNudge(-STEP_SEC)}
-          className="rounded-[0.6vh] bg-white/10 px-[1vw] py-[0.4vh] text-[2.2vh] leading-none"
-        >
-          &#8722;
-        </FocusButton>
-        <span className="text-[2.4vh] tabular-nums">{shown}s</span>
-        <FocusButton
-          focusKey="sub-offset-up"
-          onEnter={() => onNudge(STEP_SEC)}
-          className="rounded-[0.6vh] bg-white/10 px-[1vw] py-[0.4vh] text-[2.2vh] leading-none"
-        >
-          +
-        </FocusButton>
+    <FocusContext.Provider value={focusKey}>
+      <div
+        ref={ref}
+        // The focus key in the DOM, the way the SDK's own button carries it:
+        // without a marker a navigation test cannot put a rectangle on this
+        // element, and this container's rectangle IS the fix.
+        data-sfocus={focusKey}
+        className="flex flex-col gap-[0.4vh] rounded-[0.8vh] bg-white/5 px-[1.2vw] py-[0.9vh]"
+      >
+        <span className="text-[2vh] text-fg-dim">{label}</span>
+        <div className="flex items-center justify-between gap-[0.6vw]">
+          <FocusButton
+            focusKey="sub-offset-down"
+            onEnter={() => onNudge(-STEP_SEC)}
+            className="rounded-[0.6vh] bg-white/10 px-[1vw] py-[0.4vh] text-[2.2vh] leading-none"
+          >
+            &#8722;
+          </FocusButton>
+          <span className="text-[2.4vh] tabular-nums">{shown}s</span>
+          <FocusButton
+            focusKey="sub-offset-up"
+            onEnter={() => onNudge(STEP_SEC)}
+            className="rounded-[0.6vh] bg-white/10 px-[1vw] py-[0.4vh] text-[2.2vh] leading-none"
+          >
+            +
+          </FocusButton>
+        </div>
       </div>
-    </div>
+    </FocusContext.Provider>
   );
 }
 

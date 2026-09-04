@@ -28,12 +28,13 @@ setupRemote();
 
 let n = 0;
 
-const sub = (ordinal: number, language: string): Track => ({
+const sub = (ordinal: number, language: string, forced = false): Track => ({
   ordinal,
   id: `s${ordinal}-${language}`,
   kind: "subtitle",
   language,
-  label: language,
+  label: forced ? `${language} forced` : language,
+  forced,
 });
 const aud = (ordinal: number, language: string): Track => ({
   ordinal,
@@ -73,6 +74,12 @@ interface Options {
   failFirstChild?: boolean;
   /** The started episode carries its magyar subtitle as a sidecar, numbered -1. */
   external?: boolean;
+  /**
+   * Every episode carries TWO magyar subtitles - signs-only first, then the
+   * whole thing - which is the shape 56 of this library's episodes have and the
+   * one a bare language cannot tell apart.
+   */
+  forcedPair?: boolean;
 }
 
 async function open(opts?: Options): Promise<Harness> {
@@ -115,6 +122,13 @@ async function open(opts?: Options): Promise<Harness> {
   };
   // Whichever episode starts is the one that disagrees with the other two.
   if (opts?.noProgress) versions[episodes[0]!.id] = ENGLISH_FIRST();
+  if (opts?.forcedPair)
+    for (const e of episodes)
+      versions[e.id] = version(versions[e.id]!.audio, [
+        sub(0, "magyar", true),
+        sub(1, "magyar"),
+        sub(2, "English"),
+      ]);
   if (opts?.external) {
     const v = versions[target.id]!;
     versions[target.id] = version(v.audio, [sub(0, "English"), sub(-1, "magyar")]);
@@ -367,5 +381,45 @@ describe("the panel says which episode it is listing", () => {
     await press("detail-more");
     await press("more-lang");
     expect(heading()).toContain("S1E1");
+  });
+});
+
+describe("two subtitles in one language", () => {
+  /** Which row the panel has ticked, by its focus key. */
+  const ticked = (): string | undefined =>
+    [...document.querySelectorAll('[data-sfocus^="lp-sub-"]')].find((e) => (e.textContent ?? "").includes("✓"))
+      ?.getAttribute("data-sfocus") ?? undefined;
+
+  it("takes the one that was pressed, and shows it as taken", async () => {
+    // Reported from the sofa: the tick refused to move and signs-only played.
+    // The choice was kept as a bare LANGUAGE, and matching a language returns
+    // the FIRST track carrying it - which here is the signs-only one.
+    const h = await open({ forcedPair: true });
+    await cursorOnOther(h);
+    await press("detail-more");
+    await press("more-lang");
+    await press("lp-sub-s1-magyar");
+    expect(ticked(), "the panel says which one is on").toBe("lp-sub-s1-magyar");
+    await press("lp-close");
+
+    await focusOn("detail-play");
+    await press("detail-play");
+    expect(h.played, "and the whole subtitle plays, not the signs-only one").toEqual([
+      { id: h.episodes[1]!.id, audio: undefined, subtitle: 1 },
+    ]);
+  });
+
+  it("still takes signs-only when signs-only is what was pressed", async () => {
+    const h = await open({ forcedPair: true });
+    await cursorOnOther(h);
+    await press("detail-more");
+    await press("more-lang");
+    await press("lp-sub-s0-magyar");
+    expect(ticked()).toBe("lp-sub-s0-magyar");
+    await press("lp-close");
+
+    await focusOn("detail-play");
+    await press("detail-play");
+    expect(h.played).toEqual([{ id: h.episodes[1]!.id, audio: undefined, subtitle: 0 }]);
   });
 });

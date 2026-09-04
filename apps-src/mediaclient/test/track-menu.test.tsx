@@ -3,7 +3,7 @@ import { act, render } from "@testing-library/react";
 import { configureI18n } from "@sdk";
 import { doesFocusableExist } from "@noriginmedia/norigin-spatial-navigation";
 import { TrackMenu } from "../TrackMenu";
-import { setupRemote, setFocus, getCurrentFocusKey, flushFocus, remote } from "./remote";
+import { setupRemote, setFocus, getCurrentFocusKey, flushFocus, remote, place } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaVersion } from "../backends/types";
@@ -145,3 +145,89 @@ function rowFor(code: string): Element | null {
   const label = Array.from(document.querySelectorAll("span")).find((e) => (e.textContent ?? "").trim() === code);
   return label?.closest("[class*='rounded-']") ?? null;
 }
+
+describe("the subtitle offset row", () => {
+  /**
+   * The boxes are the ones measured off a compositor screenshot on a box, at
+   * the renderer's real 1920x1080: a subtitle row is 490 x 58, each offset
+   * button 56 x 32.
+   *
+   * That ratio is the whole bug. norigin counts a candidate as an "adjacent
+   * slice" only when it overlaps the focused element across the axis of travel
+   * by a fifth of that element's width, and divides an adjacent candidate's
+   * cost by five while leaving a diagonal one's alone. 56 of 490 is 11%, so the
+   * buttons were permanently diagonal and the full-width row BEYOND them won by
+   * roughly two to one - the highlight jumped clean over them in both
+   * directions.
+   */
+  async function laid(): Promise<void> {
+    const subs = [
+      { ordinal: 0, id: "s0", kind: "subtitle" as const, label: "magyar", language: "magyar" },
+      { ordinal: 1, id: "s1", kind: "subtitle" as const, label: "angol", language: "English" },
+    ];
+    render(
+      menu({
+        versions: [{ ...versions[0], subtitles: subs } as unknown as MediaVersion],
+        onNudgeSubDelay: () => {},
+        subDelaySec: 0,
+        initial: "subtitles",
+      }),
+    );
+    await settle();
+    const at = (key: string, x: number, y: number, w: number, h: number): void => {
+      const node = document.querySelector(`[data-sfocus="${key}"]`);
+      if (node) place(node, x, y, w, h);
+    };
+    // The subtitle column, top to bottom.
+    at("sub-off", 715, 567, 490, 58);
+    at("sub-0", 715, 625, 490, 58);
+    at("sub-1", 715, 683, 490, 58);
+    // The container is the fix: its box is the row's full width, so it wins
+    // the way any other row does and the cursor then descends into it.
+    at("sub-offset", 715, 789, 490, 50);
+    at("sub-offset-down", 739, 798, 56, 32);
+    at("sub-offset-up", 1125, 798, 56, 32);
+    at("sub-search", 715, 849, 490, 58);
+    // The columns either side, so the losers are actually in the race.
+    at("aud-0", 180, 625, 490, 58);
+    at("q-0", 1250, 625, 400, 58);
+    at("tracks-close", 1500, 120, 195, 58);
+  }
+
+  it("is registered, which is not the same as reachable", async () => {
+    // The wrong diagnosis somebody will reach for first. The buttons were
+    // always there and always worked once focused; nothing could navigate to
+    // them.
+    await laid();
+    expect(doesFocusableExist("sub-offset-down")).toBe(true);
+    expect(doesFocusableExist("sub-offset-up")).toBe(true);
+  });
+
+  it("is where Down from the last subtitle lands", async () => {
+    await laid();
+    await setFocus("sub-1");
+    await remote.down();
+    expect(getCurrentFocusKey()).toBe("sub-offset-down");
+  });
+
+  it("is where Up from the search row lands", async () => {
+    await laid();
+    await setFocus("sub-search");
+    await remote.up();
+    expect(getCurrentFocusKey()).toBe("sub-offset-down");
+  });
+
+  it("hands Right from minus to plus, inside itself", async () => {
+    await laid();
+    await setFocus("sub-offset-down");
+    await remote.right();
+    expect(getCurrentFocusKey()).toBe("sub-offset-up");
+  });
+
+  it("lets Down out again, rather than trapping the cursor", async () => {
+    await laid();
+    await setFocus("sub-offset-up");
+    await remote.down();
+    expect(getCurrentFocusKey()).toBe("sub-search");
+  });
+});
