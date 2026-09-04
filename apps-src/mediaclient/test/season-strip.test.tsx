@@ -148,11 +148,10 @@ function layout(h: Harness): void {
   };
   at('[data-sfocus="detail-play"]', 100, 100, 300, 70);
   h.seasons.forEach((_s, i) => at(`[data-sfocus="${chipKey(i)}"]`, 100 + i * 220, 300, 200, 60));
-  // The episode tiles carry no `data-sfocus` - only FocusButton does - so there
-  // is nothing to lay out for them here. Both transitions across that boundary
-  // go through this screen's own onArrowPress handlers rather than through
-  // geometry, which is what these tests measure; the geometry half was measured
-  // on a box.
+  // The episode tiles are deliberately left unplaced. Both transitions across
+  // that boundary go through this screen's own onArrowPress handlers rather
+  // than through geometry, which is what these tests measure; the geometry half
+  // was measured on a box.
 }
 
 async function settle(): Promise<void> {
@@ -210,6 +209,9 @@ describe("the season strip on an episode list", () => {
   it("is what Up from the episodes reaches, and Down comes back", async () => {
     const h = await open();
     layout(h);
+    // The screen's own landing first: it arrives on a timer, and one that lands
+    // after the cursor is placed below takes it straight back.
+    await focusBecomes("detail-play");
     await setFocus(`children-${h.current.id}-${h.episodes[0]!.id}`);
     await settle();
     await remote.up();
@@ -224,6 +226,9 @@ describe("the season strip on an episode list", () => {
   it("reaches the play button above it", async () => {
     const h = await open();
     layout(h);
+    // The screen's own landing first: it arrives on a timer, and one that lands
+    // after the cursor is placed below takes it straight back.
+    await focusBecomes("detail-play");
     await setFocus(chipKey(h.seasons.indexOf(h.current)));
     await settle();
     await remote.up();
@@ -234,6 +239,9 @@ describe("the season strip on an episode list", () => {
   it("goes round at the ends rather than off the strip", async () => {
     const h = await open();
     layout(h);
+    // The screen's own landing first: it arrives on a timer, and one that lands
+    // after the cursor is placed below takes it straight back.
+    await focusBecomes("detail-play");
     await setFocus(chipKey(0));
     await settle();
     await remote.left();
@@ -279,7 +287,7 @@ describe("the season strip on an episode list", () => {
     // A series with one season, arrived at with the flag set: the flag must not
     // park the cursor on a key that never mounts, which is a dead remote.
     await open({ seasonCount: 1, focusSeasons: true });
-    expect(getCurrentFocusKey()).toBe("detail-play");
+    await focusBecomes("detail-play");
   });
 
   it("opens on the strip even when the series does not list this season", async () => {

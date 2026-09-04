@@ -5,7 +5,7 @@ import { configureI18n } from "@sdk";
 import { Library, arrivalCells } from "../Library";
 import { useApp } from "../state";
 import { clearLibraryViews } from "../libraryView";
-import { setupRemote, setFocus, getCurrentFocusKey, flushFocus, remote, focusBecomes } from "./remote";
+import { setupRemote, setFocus, getCurrentFocusKey, flushFocus, remote } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaBackend, MediaItem } from "../backends/types";
@@ -197,7 +197,6 @@ afterEach(() => {
   delete (window.HTMLElement.prototype as unknown as { animate?: unknown }).animate;
 });
 
-/** Mount the library and let it settle, including its deferred first focus. */
 /**
  * A library screen, open and settled.
  *
@@ -209,12 +208,17 @@ afterEach(() => {
  * itself gated on the resume having resolved - so a counted settle both reads
  * it too early AND lets it arrive after whatever the test does next, taking the
  * cursor back. That second shape is what nearly every caller here would hit.
+ *
+ * Read off THIS screen rather than from `getCurrentFocusKey`, which every
+ * caller that passes a cell would defeat: most of them mount a second library
+ * after leaving the first on that very cell, and the key outlives the unmount,
+ * so the wait would be over before the new screen had drawn anything.
  */
 async function open(startsOn: number | null = 0): Promise<{ container: HTMLElement; unmount: () => void }> {
   const { container, unmount } = render(<Library libraryId="1" title="Movies" />);
   await waitFor(() => expect(container.querySelector("[style*='will-change']")).toBeTruthy());
   await settle();
-  if (startsOn !== null) await focusBecomes(`cell-${startsOn}`);
+  if (startsOn !== null) await waitFor(() => expect(litCell(container)).toBe(`cell-${startsOn}`));
   return { container, unmount };
 }
 
@@ -234,6 +238,18 @@ async function settle(): Promise<void> {
  */
 function litKey(container: HTMLElement): string | null | undefined {
   return container.querySelector('[data-sfocus][class*="!bg-white"]')?.getAttribute("data-sfocus");
+}
+
+/**
+ * The same, for a grid cell.
+ *
+ * A tile draws the cursor as a ring on its poster rather than as a fill, and
+ * the ring sits one element inside the node that carries the key. The `~=`
+ * matches the class as a whole word, which is what keeps the dimmer
+ * `ring-white/55` a tile wears while the cursor is elsewhere out of the answer.
+ */
+function litCell(container: HTMLElement): string | null | undefined {
+  return container.querySelector('[class~="ring-white"]')?.closest("[data-sfocus]")?.getAttribute("data-sfocus");
 }
 
 /** A letter in the strip, once the strip has arrived. */

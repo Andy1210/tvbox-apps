@@ -3,7 +3,16 @@ import { act, render } from "@testing-library/react";
 import { configureI18n } from "@sdk";
 import { doesFocusableExist } from "@noriginmedia/norigin-spatial-navigation";
 import { TrackMenu } from "../TrackMenu";
-import { setupRemote, setFocus, getCurrentFocusKey, flushFocus, remote, place, focusLands } from "./remote";
+import {
+  setupRemote,
+  setFocus,
+  getCurrentFocusKey,
+  flushFocus,
+  remote,
+  place,
+  focusLands,
+  focusEnters,
+} from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaVersion } from "../backends/types";
@@ -87,11 +96,13 @@ describe("the subtitle search", () => {
 
     view.rerender(menu({ searchOpen: true }));
     await settle();
-    await focusLands();
+    // The view's own landing, not any landing: the cursor is already on a real
+    // key here, so a wait for "something is lit" is over before this screen has
+    // done anything at all.
+    await focusEnters("lang-");
 
     const at = String(getCurrentFocusKey());
     expect(doesFocusableExist(at), `the cursor was left on ${at}`).toBe(true);
-    expect(at.startsWith("lang-"), `the cursor was left on ${at}`).toBe(true);
   });
 
   it("puts the cursor back on the row it came from", async () => {
@@ -103,7 +114,10 @@ describe("the subtitle search", () => {
 
     view.rerender(menu());
     await settle();
-    await focusLands();
+    // Waited to the subtitle rows, then read: landing on a subtitle TRACK and
+    // correcting is a different screen from landing on the row that was left,
+    // and a wait for the answer itself would not tell them apart.
+    await focusEnters("sub-");
 
     expect(getCurrentFocusKey()).toBe("sub-search");
   });

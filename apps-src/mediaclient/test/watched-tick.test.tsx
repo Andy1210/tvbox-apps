@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import type { ItemDetail, MediaItem } from "../backends/types";
 
-const { setupRemote, flushFocus, setFocus, focusBecomes } = await import("./remote");
+const { setupRemote, flushFocus, setFocus, focusEnters, getCurrentFocusKey } = await import("./remote");
 setupRemote();
 
 const TICK = 'path[d="M4 12.5l5.5 5.5L20 7"]';
@@ -284,8 +284,12 @@ describe("marking the whole season", () => {
     expect(document.body.textContent).toContain("Mark the whole season as watched?");
     expect(document.body.textContent, "and it says how much it moves").toContain("Episodes affected: 2");
     // Waited for: the panel's own cursor lands on a timer, so a counted settle
-    // reads whatever was focused behind it.
-    await focusBecomes("confirm-no");
+    // reads whatever was focused behind it. The wait stops at the panel rather
+    // than at the answer, because a panel that opens on "yes" and corrects
+    // itself a moment later is exactly the failure this test is about - and a
+    // wait for "confirm-no" would sit through the correction and pass.
+    await focusEnters("confirm-");
+    expect(getCurrentFocusKey()).toBe("confirm-no");
   });
 
   it("does nothing when the answer is no", async () => {

@@ -4,7 +4,7 @@ import { configureI18n } from "@sdk";
 import { doesFocusableExist } from "@noriginmedia/norigin-spatial-navigation";
 import { Home } from "../Home";
 import { useApp } from "../state";
-import { setupRemote, setFocus, getCurrentFocusKey, flushFocus, remote, focusLands } from "./remote";
+import { setupRemote, setFocus, getCurrentFocusKey, flushFocus, remote, focusLands, focusEnters } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaBackend } from "../backends/types";
@@ -85,7 +85,10 @@ describe("the search screen when the server cannot be reached", () => {
     // The keyboard opens first and owns the screen, so Back closes it - and what
     // is behind it, with the server down, is the error.
     await remote.back();
-    await focusLands();
+    // The error taking the cursor, not merely something holding it: the
+    // keyboard is still focused when Back arrives, so "anything is lit" is
+    // already true and would wait for nothing.
+    await focusEnters("msg-");
     await act(async () => setFocus("msg-retry"));
     await flushFocus();
     expect(String(getCurrentFocusKey()), "the error's own button is what is on screen").toBe("msg-retry");

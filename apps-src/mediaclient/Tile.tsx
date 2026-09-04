@@ -152,6 +152,11 @@ export function Tile({
         ref(node);
       }}
       onClick={onEnter}
+      // Which tile the cursor is on, readable off the screen. A test that waits
+      // for `getCurrentFocusKey` is waiting on spatial navigation's own
+      // bookkeeping, which survives an unmount - so after a remount a leftover
+      // from the screen before satisfies it without anything having happened.
+      data-sfocus={focusKey}
       // No scale on focus, and this is load-bearing rather than taste. Spatial
       // navigation filters "below me" candidates with `sibling.top >=
       // current.bottom`, measured with getBoundingClientRect - which reports the

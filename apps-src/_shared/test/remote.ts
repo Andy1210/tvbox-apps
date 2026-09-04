@@ -145,10 +145,25 @@ export const remote = {
  * So an assertion about where the cursor ARRIVES belongs here rather than
  * straight after a counted settle.
  *
- * Not every focus assertion, though. A test that asserts the cursor did NOT
- * move - that a press was refused, that a panel held it, that a container did
- * not swallow it - must read the key rather than wait for it, because waiting
- * would sit there until the thing it is guarding against happened.
+ * Not every focus assertion, though. Three shapes belong elsewhere.
+ *
+ * A test that asserts the cursor did NOT move - that a press was refused, that
+ * a panel held it, that a container did not swallow it - must read the key
+ * rather than wait for it, because waiting would sit there until the thing it
+ * is guarding against happened.
+ *
+ * A test asking WHICH of several keys the cursor landed on must not wait for
+ * the answer it wants: a screen that lands on the wrong one and corrects itself
+ * a moment later satisfies the wait, and that correction is exactly the defect
+ * (a confirmation panel that opens on Yes and moves to No is a doubled press
+ * away from marking a season). Wait for the cursor to enter the REGION with
+ * `focusEnters`, then read the identity.
+ *
+ * And a wait after a REMOUNT must come off the screen, not off this key: the
+ * key is spatial navigation's own bookkeeping and survives an unmount, so the
+ * cursor the previous screen left behind satisfies `focusBecomes` before the
+ * new one has done anything. `setFocus("")` does not help - norigin returns
+ * early on a falsy key without touching it.
  */
 export async function focusBecomes(key: string): Promise<void> {
   await waitFor(() => expect(getCurrentFocusKey()).toBe(key));
@@ -156,7 +171,22 @@ export async function focusBecomes(key: string): Promise<void> {
 
 /** The same wait, where a test only cares that the screen answers at all. */
 export async function focusLands(): Promise<void> {
-  await waitFor(() => expect(getCurrentFocusKey()).toBeTruthy());
+  await waitFor(() => expect(getCurrentFocusKey(), "nothing on the screen is lit").toBeTruthy());
+}
+
+/**
+ * Wait for the cursor to reach a group of keys, so which one can be asserted.
+ *
+ * The pairing is the point: the wait is satisfied by the FIRST key of the group
+ * the cursor touches, and the assertion after it reads that key. A screen that
+ * lands on the wrong member still fails, which a wait for the right member
+ * would not.
+ */
+export async function focusEnters(prefix: string): Promise<void> {
+  await waitFor(() => {
+    const at = getCurrentFocusKey();
+    expect(String(at).startsWith(prefix), `the cursor is on ${String(at)}`).toBe(true);
+  });
 }
 
 export async function setFocus(focusKey: string): Promise<void> {
