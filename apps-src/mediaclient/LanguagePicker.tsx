@@ -22,6 +22,7 @@ export function LanguagePicker({
   onAudio,
   onSubtitle,
   onClose,
+  designation,
 }: {
   version: MediaVersion | undefined;
   audio: number | undefined;
@@ -29,6 +30,15 @@ export function LanguagePicker({
   onAudio: (ordinal: number) => void;
   onSubtitle: (ordinal: number | "none") => void;
   onClose: () => void;
+  /**
+   * Which episode these tracks belong to, where that is not obvious.
+   *
+   * On a season the panel lists the HIGHLIGHTED episode while Play starts the
+   * one in progress, so the two halves of a choice describe different items on
+   * purpose - and nothing on the panel said which one it was about. The Play
+   * button beside it carries its own designation for the same reason.
+   */
+  designation?: string;
 }): React.JSX.Element {
   const { t } = useI18n();
   const tracks = version?.audio ?? [];
@@ -45,7 +55,9 @@ export function LanguagePicker({
       <div ref={ref} className="absolute inset-0 z-40 flex items-center justify-center bg-black/80">
         <div className="flex h-[80vh] w-[80vw] flex-col gap-[2vh] overflow-hidden rounded-[1.4vh] bg-[#0c1219]/97 p-[3vh]">
           <div className="flex items-center justify-between">
-            <h2 className="text-[2.6vh] font-semibold tracking-tight">{t("tracks.title")}</h2>
+            <h2 className="min-w-0 truncate text-[2.6vh] font-semibold tracking-tight">
+              {[t("tracks.title"), designation].filter(Boolean).join(" \u00b7 ")}
+            </h2>
             <FocusButton
               focusKey="lp-close"
               onEnter={onClose}

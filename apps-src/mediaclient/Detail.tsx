@@ -138,6 +138,34 @@ export function Detail({
    */
   const [focused, setFocused] = useState<ItemDetail | null>(null);
   const [firstChild, setFirstChild] = useState<ItemDetail | null>(null);
+  /**
+   * The episode Play would start, with its own track list.
+   *
+   * A season's episodes do not agree on track ORDER - measured over this
+   * library's 566 seasons by the rule this code actually applies, 67 of them
+   * resolve a language to a different ordinal somewhere (60 subtitles, 11
+   * audio) - and the chosen language is turned into an ordinal against whatever
+   * this screen is describing, which is the HIGHLIGHTED episode. Play starts the
+   * one in progress instead, so the ordinal was read off one episode and handed
+   * to another: choosing the Hungarian subtitle and pressing Play started the
+   * English one.
+   *
+   * Fetched ahead of the press rather than during it. Resolving on the press
+   * would put a round trip in front of playback, and Play on a television has
+   * to be immediate.
+   */
+  const [playTarget, setPlayTarget] = useState<ItemDetail | null>(null);
+  /**
+   * Whether the first episode could not be read.
+   *
+   * It is the only source of the played episode's tracks on the commonest
+   * season - the one nobody has started, where Play begins at the first child -
+   * because the prefetch below stands down there rather than asking for a
+   * document that is already on its way. If that request fails there is nothing
+   * else coming, and the choice is dropped for as long as the screen is up. So
+   * a failure hands the job back to the prefetch, which has a catch of its own.
+   */
+  const [firstChildFailed, setFirstChildFailed] = useState(false);
   const upNext = usePlayer((s) => s.upNext);
   const moving = usePlayer((s) => s.moving);
   // Only to re-render while a countdown is running; the value is the clock.
@@ -203,6 +231,8 @@ export function Detail({
     // stream at start.
     setFocused(null);
     setFirstChild(null);
+    setPlayTarget(null);
+    setFirstChildFailed(false);
     // The third panel, cleared with the other two: a menu left standing across
     // an item change belongs to an overflow list that has been rebuilt under
     // it, and an empty one has nothing for the cursor to land on.
@@ -248,7 +278,18 @@ export function Detail({
         } else if (d.kind === "show" || d.kind === "season" || d.kind === "collection") {
           const kids = await backend.children(itemId);
           // Its tracks stand in until something is highlighted.
-          if (kids[0] && d.kind === "season") void backend.item(kids[0].id).then((k) => live && setFirstChild(k));
+          if (kids[0] && d.kind === "season")
+            void backend.item(kids[0].id).then(
+              (k) => live && setFirstChild(k),
+              (e) => {
+                // Answered rather than dropped: this is the only read of the
+                // played episode's tracks on a season nobody has started, and
+                // an unhandled rejection said nothing at all.
+                if (!live) return;
+                setFirstChildFailed(true);
+                log.warn("could not read the first episode's tracks", e);
+              },
+            );
           if (live) setChildren(kids);
         }
         if (live) setSettled(true);
@@ -717,6 +758,47 @@ export function Detail({
   // armed with nothing on screen to say so and nothing able to cancel it.
   useEffect(() => () => usePlayer.getState().cancelUpNext(), []);
 
+  /**
+   * Read the tracks of the episode Play would start.
+   *
+   * Only on a season: everywhere else Play starts the item this screen is
+   * already describing, so its tracks are on `detail` and there is nothing to
+   * fetch. `toPlayable` rather than a second copy of the rule - the two drifted
+   * apart once and took the D-pad with them.
+   *
+   * The id, not the item, as the dependency: `children` is rebuilt whenever a
+   * view state is patched, and the object identity changes with it while the
+   * episode Play would start usually does not.
+   */
+  const playTargetId = detail?.kind === "season" ? toPlayable(detail, children)?.id : undefined;
+  /**
+   * The first episode is already being fetched, for the tracks the buttons show
+   * before anything is highlighted - and the metadata cache has no in-flight
+   * deduplication, so asking for the same document again is a second request
+   * rather than a cache hit. On a season nobody has started, which is the
+   * commonest one there is, that is exactly the same episode.
+   */
+  const alreadyAsked = playTargetId !== undefined && playTargetId === children[0]?.id && !firstChildFailed;
+  useEffect(() => {
+    if (!backend || !playTargetId || alreadyAsked) return;
+    let live = true;
+    void backend
+      .item(playTargetId)
+      .then((item) => {
+        if (live) setPlayTarget(item);
+      })
+      .catch((e) => {
+        // Not surfaced, and the degradation is deliberate: with no answer the
+        // choice is passed on as nothing rather than as an ordinal from another
+        // episode's list, so playback falls back to the file's own default.
+        // There is no retry - leaving the screen is what asks again.
+        log.warn("could not read the tracks of the episode Play would start", e);
+      });
+    return () => {
+      live = false;
+    };
+  }, [backend, playTargetId, alreadyAsked]);
+
   // Before the early returns, as hooks must be. `detail` is null while loading,
   // which is simply no theme yet.
   // Three answers rather than two - the item, nothing, or not known yet. See
@@ -802,12 +884,7 @@ export function Detail({
    * a show the children are seasons, so there is nothing here to start: the
    * button is left off, as it is on a collection.
    */
-  const toPlay =
-    detail.kind === "season"
-      ? (children.find((c) => (c.viewOffsetMs ?? 0) > 0) ?? children.find((c) => !(c.viewCount ?? 0)) ?? children[0])
-      : detail.kind === "show"
-        ? undefined
-        : detail;
+  const toPlay = toPlayable(detail, children);
   /**
    * What the page is describing.
    *
@@ -827,10 +904,48 @@ export function Detail({
    */
   const resumable = (toPlay?.viewOffsetMs ?? 0) > 0;
   const shown = (detail.kind === "season" && focused) || detail;
-  // On a season, the highlighted episode's tracks - or the FIRST episode's
-  // before anything is highlighted, so the button exists on arrival rather than
-  // materialising only after someone has been down into the list and back.
-  const tracksFrom = shown.versions[version] ?? firstChild?.versions[version];
+  /**
+   * Whose tracks the panel lists, as an ITEM rather than a version.
+   *
+   * On a season that is the highlighted episode - or the FIRST one before
+   * anything is highlighted, so the button exists on arrival rather than
+   * materialising only after somebody has been down into the list and back.
+   *
+   * Named, because the panel has to say which episode it is offering and the
+   * two used to fall back to different things: with nothing highlighted the
+   * label asked `shown`, which is the SEASON and has no designation, while the
+   * list had already fallen back to the first episode. Measured on a box, that
+   * is the commonest way into the panel - arrive, overflow, languages, never
+   * entering the row - and on Bluey's second season it offered seven languages
+   * against the two the episode Play starts actually has, unlabelled.
+   */
+  const tracksOwner = shown.versions[version] ? shown : firstChild;
+  const tracksFrom = tracksOwner?.versions[version];
+  /**
+   * The tracks Play resolves its choice against, which are the STARTED
+   * episode's - not the highlighted one's.
+   *
+   * `tracksFrom` describes what the screen is SHOWING, and on a season that is
+   * wherever the cursor is; Play starts the episode in progress instead. An
+   * ordinal read off one and handed to the other names a different track: 67 of
+   * this library's 566 seasons resolve some language differently between two of
+   * their episodes. Counting where a language merely APPEARS at more than one
+   * ordinal is the wrong test and gives three times the number - `pick` takes
+   * the FIRST match, so a language whose first occurrence never moves is safe.
+   *
+   * Whichever copy of that episode is already in hand - the one fetched for
+   * this, the highlighted one when the cursor is on it, the first child, or the
+   * item itself on a film - and NOTHING when none of them is it. Falling back
+   * to the highlighted episode's list is what the screen used to do, and it is
+   * the bug: a stale answer is one round trip wide, but a choice resolved
+   * against the wrong list names a real, different track, while no answer at
+   * all only loses the choice. A film resolves against `detail` and is
+   * untouched.
+   */
+  const playSource = toPlay
+    ? [playTarget, focused, firstChild, detail].find((x) => x?.id === toPlay.id)
+    : undefined;
+  const playTracks = playSource?.versions[version];
 
   /**
    * The chosen tracks, resolved against whatever is about to play.
@@ -912,7 +1027,7 @@ export function Detail({
       onEnter: () =>
         backend &&
         toPlay &&
-        void usePlayer.getState().play(backend, toPlay, { version, ...pick(tracksFrom), queue: order }),
+        void usePlayer.getState().play(backend, toPlay, { version, ...pick(playTracks), queue: order }),
     });
   if (playable && resumable)
     actions.push({
@@ -923,7 +1038,7 @@ export function Detail({
         toPlay &&
         void usePlayer
           .getState()
-          .play(backend, toPlay, { resume: false, version, ...pick(tracksFrom), queue: order }),
+          .play(backend, toPlay, { resume: false, version, ...pick(playTracks), queue: order }),
     });
   // Marking by hand is what a shared server needs: a film watched somewhere
   // else, or abandoned twenty minutes in and not worth resuming, has no other
@@ -995,6 +1110,10 @@ export function Detail({
       {picking && (
         <LanguagePicker
           version={tracksFrom}
+          // Which episode these tracks are, because on a season they are the
+          // HIGHLIGHTED one's while Play starts another - the panel and the
+          // button beside it authoritatively describe different episodes.
+          designation={tracksOwner ? episodeNumber(tracksOwner) : undefined}
           audio={pick(tracksFrom).audio}
           subtitle={pick(tracksFrom).subtitle}
           onAudio={(ordinal) => setAudioLang(tracksFrom?.audio.find((a) => a.ordinal === ordinal)?.language)}
