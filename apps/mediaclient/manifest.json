@@ -5,8 +5,12 @@
     "hu": "M\u00e9dia",
     "en": "Media"
   },
-  "version": "0.64.3",
+  "version": "0.64.4",
   "changelog": [
+    {
+      "version": "0.64.4",
+      "notes": "Nothing changes on screen. The version before this one fixed a check that asked where the highlight was without waiting for it to get there; this does the rest of them, and closes a worse one underneath. The check that a library comes back with the highlight on the poster you left it on had no way to see the highlight at all - it asked the navigation library, whose answer outlives the screen it came from - so it would have passed on a version that put the highlight anywhere, or nowhere. The posters say which one is highlighted now, and the checks read that instead."
+    },
     {
       "version": "0.64.3",
       "notes": "Nothing changes on screen. One of the app's own checks asked where the highlight was without waiting for it to get there, so it read \"nowhere\" whenever the build machine was busy - which once stopped a finished release from being published at all, leaving boxes on the previous version. It waits now."
