@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { act, render } from "@testing-library/react";
 import { configureI18n } from "@sdk";
 import { doesFocusableExist } from "@noriginmedia/norigin-spatial-navigation";
@@ -67,10 +67,6 @@ async function settle(): Promise<void> {
   }
 }
 
-beforeEach(async () => {
-  await act(async () => setFocus(""));
-});
-
 /**
  * The menu with its subtitle search open, reached the way a press reaches it.
  *
@@ -80,10 +76,16 @@ beforeEach(async () => {
  * computed from the audio list whichever view is showing, then aims the cursor
  * at a row the search does not draw, with nothing to move it off.
  */
-async function openSearch(over: Partial<React.ComponentProps<typeof TrackMenu>> = {}) {
+async function openSearch(
+  over: Partial<React.ComponentProps<typeof TrackMenu>> = {},
+): Promise<ReturnType<typeof render>> {
   const view = render(menu(over));
   await settle();
   await focusLands();
+  // From the row the press comes from, which is also the one the search view
+  // does not draw - the whole reason the cursor has to be taken along.
+  await act(async () => setFocus("sub-search"));
+  await flushFocus();
 
   view.rerender(menu({ ...over, searchOpen: true }));
   await settle();

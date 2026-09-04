@@ -251,8 +251,20 @@ const config = {
  * Rebuilding the service is the only clear there is - it is what `afterEach`
  * does between tests. It drops every registered focusable with it, so this
  * belongs between an unmount and the next render, never while a screen is up.
+ *
+ * The `setFocus("")` first is not the clear, and it is not decoration either:
+ * it cannot touch the key, but it DOES cancel the auto-restore norigin arms
+ * when a focused child is removed while its parent survives - a 300 ms
+ * debounce that `destroy()` leaves running, to fire against the rebuilt service
+ * and move the cursor on its own a third of a second later. Unmounting a whole
+ * screen arms nothing, so no caller here needs it; a caller that drops one row
+ * would.
  */
-export function clearFocus(): void {
+export async function clearFocus(): Promise<void> {
+  await act(async () => {
+    noriginSetFocus("");
+    await drainScheduler();
+  });
   destroy();
   init(config);
 }
@@ -270,9 +282,9 @@ export function setupRemote(): void {
   // pressed. A test asserting where a screen opens then depends on the test above
   // it, and `--sequence.shuffle.tests` says so. `setFocus("")` does not clear it, so
   // the service itself is rebuilt between tests.
-  afterEach(() => {
+  afterEach(async () => {
     cleanup();
-    clearFocus();
+    await clearFocus();
   });
   afterAll(() => destroy());
 }

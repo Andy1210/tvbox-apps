@@ -187,9 +187,6 @@ beforeEach(async () => {
     session: { kind: "plex", token: "t1", accountToken: "t1", profileId: "p1", profileName: "One" } as never,
   });
   window.innerHeight = WINDOW_H;
-  // Focus is library-global and survives an unmount, so a leftover from the
-  // previous test would let the next one pass without the screen doing anything.
-  await act(async () => setFocus(""));
 });
 
 afterEach(() => {
@@ -323,7 +320,7 @@ describe("returning to a library", () => {
     // The library's own focus survives an unmount, and norigin re-lights a key
     // by itself when a focusable registers under it again - so without a real
     // clear the assertion below would hold on a build that restores nothing.
-    clearFocus();
+    await clearFocus();
 
     const again = await open(DEEP);
     expect(getCurrentFocusKey()).toBe(`cell-${DEEP}`);
@@ -345,7 +342,7 @@ describe("returning to a library", () => {
     await setFocus(`cell-${DEEP}`);
     await flushFocus();
     first.unmount();
-    clearFocus();
+    await clearFocus();
 
     // Page 0 held open, so "asked in the same commit" and "asked a round trip
     // later" are two different observations rather than the same end state.
@@ -399,7 +396,7 @@ describe("returning to a library", () => {
     await setFocus(`cell-${MARK_CELL}`);
     await flushFocus();
     first.unmount();
-    clearFocus();
+    await clearFocus();
 
     const again = await open(DEEP - 7);
     // The strip reads a row of the grid. One row of overscan sits above the top
@@ -418,7 +415,7 @@ describe("returning to a library", () => {
     await flushFocus();
     const left = offsetOf(first.container);
     first.unmount();
-    clearFocus();
+    await clearFocus();
 
     // The reset that forgets the cursor keys on "is this the same list", not on
     // "has this run before": Strict Mode sets an effect up twice on mount, and a
@@ -446,7 +443,7 @@ describe("returning to a library", () => {
     await setFocus(`cell-${DEEP}`);
     await flushFocus();
     first.unmount();
-    clearFocus();
+    await clearFocus();
 
     const again = await open(DEEP);
     // Step off the resumed cell, the way anybody would.
@@ -476,7 +473,7 @@ describe("returning to a library", () => {
     expect(offsetOf(first.container)).toBe(rows * rowHeight - VIEWPORT);
 
     first.unmount();
-    clearFocus();
+    await clearFocus();
 
     const again = await open(LAST);
     expect(offsetOf(again.container)).toBe(rows * rowHeight - VIEWPORT);
@@ -495,7 +492,7 @@ describe("returning to a library", () => {
     await setFocus(`cell-${DEEP}`);
     await flushFocus();
     first.unmount();
-    clearFocus();
+    await clearFocus();
 
     // Something removed, a section refreshed: the cell never mounts, and aiming
     // the cursor at it is the dead remote the focus fallback exists for.
@@ -518,7 +515,7 @@ describe("returning to a library", () => {
     await settle();
 
     first.unmount();
-    clearFocus();
+    await clearFocus();
 
     const again = await open();
     expect(getCurrentFocusKey()).toBe("cell-0");
@@ -543,7 +540,7 @@ describe("returning to a library", () => {
     await settle();
 
     first.unmount();
-    clearFocus();
+    await clearFocus();
 
     const again = await open();
     expect(getCurrentFocusKey()).toBe("cell-0");
@@ -556,7 +553,7 @@ describe("returning to a library", () => {
     await setFocus(`cell-${DEEP}`);
     await flushFocus();
     first.unmount();
-    clearFocus();
+    await clearFocus();
 
     // The PIN pad is a boundary between two people in one household, and where
     // somebody had got to in a library is a record of what they were looking
@@ -577,7 +574,7 @@ describe("returning to a library", () => {
     await setFocus(`cell-${DEEP}`);
     await flushFocus();
     first.unmount();
-    clearFocus();
+    await clearFocus();
 
     // The resumed page fails while the first one is fine. That is the server's
     // least healthy moment - it has just been streaming a film - and it is only
@@ -656,7 +653,7 @@ describe("returning to a library", () => {
     await setFocus(`cell-${DEEP}`);
     await flushFocus();
     first.unmount();
-    clearFocus();
+    await clearFocus();
 
     // The grid comes up first and the cursor lands, so the deferred focus is
     // spent. THEN something fails - a page a scroll asked for, a server that
@@ -726,7 +723,7 @@ describe("returning to a library", () => {
     await setFocus(`cell-${DEEP}`);
     await flushFocus();
     first.unmount();
-    clearFocus();
+    await clearFocus();
 
     // A grid position is not a genre, but it is still a record of what somebody
     // was looking at, and it goes with everything else the session held.
