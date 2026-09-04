@@ -3,7 +3,7 @@ import { act, render } from "@testing-library/react";
 import { configureI18n } from "@sdk";
 import { doesFocusableExist } from "@noriginmedia/norigin-spatial-navigation";
 import { TrackMenu } from "../TrackMenu";
-import { setupRemote, setFocus, getCurrentFocusKey, flushFocus, remote, place } from "./remote";
+import { setupRemote, setFocus, getCurrentFocusKey, flushFocus, remote, place, focusLands } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaVersion } from "../backends/types";
@@ -66,6 +66,7 @@ describe("the subtitle search", () => {
   it("is one row on the track menu, not a column of its own", async () => {
     render(menu());
     await settle();
+    await focusLands();
 
     expect(doesFocusableExist("sub-search"), "the way in is there").toBe(true);
     // None of what the search needs is on the menu itself.
@@ -80,11 +81,13 @@ describe("the subtitle search", () => {
     // on the screen it has just opened.
     const view = render(menu());
     await settle();
+    await focusLands();
     await act(async () => setFocus("sub-search"));
     await flushFocus();
 
     view.rerender(menu({ searchOpen: true }));
     await settle();
+    await focusLands();
 
     const at = String(getCurrentFocusKey());
     expect(doesFocusableExist(at), `the cursor was left on ${at}`).toBe(true);
@@ -94,11 +97,13 @@ describe("the subtitle search", () => {
   it("puts the cursor back on the row it came from", async () => {
     const view = render(menu({ searchOpen: true }));
     await settle();
+    await focusLands();
     await act(async () => setFocus("lang-hu"));
     await flushFocus();
 
     view.rerender(menu());
     await settle();
+    await focusLands();
 
     expect(getCurrentFocusKey()).toBe("sub-search");
   });
@@ -109,6 +114,7 @@ describe("the subtitle search", () => {
     // things claiming the same signal, and neither saying which was which.
     render(menu({ searchOpen: true, searchLanguage: "en" }));
     await settle();
+    await focusLands();
 
     const chosen = rowFor("EN");
     const other = rowFor("HU");
@@ -126,6 +132,7 @@ describe("the subtitle search", () => {
   it("answers the remote in the search view", async () => {
     render(menu({ searchOpen: true }));
     await settle();
+    await focusLands();
 
     await remote.down();
     await settle();
@@ -174,6 +181,9 @@ describe("the subtitle offset row", () => {
       }),
     );
     await settle();
+    // The menu lands its own cursor on a timer; a landing that arrives after
+    // this takes back whatever a test sets in between.
+    await focusLands();
     const at = (key: string, x: number, y: number, w: number, h: number): void => {
       const node = document.querySelector(`[data-sfocus="${key}"]`);
       if (node) place(node, x, y, w, h);
