@@ -149,8 +149,7 @@ describe("the subtitle search", () => {
     // Off both of the rows being compared. Opening the search puts the cursor
     // on the chosen language, which is the very row this test needs unfilled -
     // and the two signals being indistinguishable is what it is about.
-    await act(async () => setFocus("lang-de"));
-    await flushFocus();
+    await setFocus("lang-de");
 
     const chosen = rowFor("EN");
     const other = rowFor("HU");
