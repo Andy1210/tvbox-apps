@@ -138,6 +138,22 @@ export function Detail({
    */
   const [focused, setFocused] = useState<ItemDetail | null>(null);
   const [firstChild, setFirstChild] = useState<ItemDetail | null>(null);
+  /**
+   * The episode Play would start, with its own track list.
+   *
+   * A season's episodes do not agree on track ORDER - measured on this server,
+   * one language sits at different ordinals in 50 of 132 seasons, subtitles
+   * mostly - and the chosen language is turned into an ordinal against whatever
+   * this screen is describing, which is the HIGHLIGHTED episode. Play starts the
+   * one in progress instead, so the ordinal was read off one episode and handed
+   * to another: choosing the Hungarian subtitle and pressing Play started the
+   * English one.
+   *
+   * Fetched ahead of the press rather than during it. Resolving on the press
+   * would put a round trip in front of playback, and Play on a television has
+   * to be immediate.
+   */
+  const [playTarget, setPlayTarget] = useState<ItemDetail | null>(null);
   const upNext = usePlayer((s) => s.upNext);
   const moving = usePlayer((s) => s.moving);
   // Only to re-render while a countdown is running; the value is the clock.
@@ -203,6 +219,7 @@ export function Detail({
     // stream at start.
     setFocused(null);
     setFirstChild(null);
+    setPlayTarget(null);
     // The third panel, cleared with the other two: a menu left standing across
     // an item change belongs to an overflow list that has been rebuilt under
     // it, and an empty one has nothing for the cursor to land on.
@@ -717,6 +734,38 @@ export function Detail({
   // armed with nothing on screen to say so and nothing able to cancel it.
   useEffect(() => () => usePlayer.getState().cancelUpNext(), []);
 
+  /**
+   * Read the tracks of the episode Play would start.
+   *
+   * Only on a season: everywhere else Play starts the item this screen is
+   * already describing, so its tracks are on `detail` and there is nothing to
+   * fetch. `toPlayable` rather than a second copy of the rule - the two drifted
+   * apart once and took the D-pad with them.
+   *
+   * The id, not the item, as the dependency: `children` is rebuilt whenever a
+   * view state is patched, and the object identity changes with it while the
+   * episode Play would start usually does not.
+   */
+  const playTargetId = detail?.kind === "season" ? toPlayable(detail, children)?.id : undefined;
+  useEffect(() => {
+    if (!backend || !playTargetId) return;
+    let live = true;
+    void backend
+      .item(playTargetId)
+      .then((item) => {
+        if (live) setPlayTarget(item);
+      })
+      .catch((e) => {
+        // Not fatal, and deliberately not surfaced: with no answer the choice
+        // is resolved against the highlighted episode, which is what this
+        // screen did before it asked at all.
+        log.warn("could not read the tracks of the episode Play would start", e);
+      });
+    return () => {
+      live = false;
+    };
+  }, [backend, playTargetId]);
+
   // Before the early returns, as hooks must be. `detail` is null while loading,
   // which is simply no theme yet.
   // Three answers rather than two - the item, nothing, or not known yet. See
@@ -802,12 +851,7 @@ export function Detail({
    * a show the children are seasons, so there is nothing here to start: the
    * button is left off, as it is on a collection.
    */
-  const toPlay =
-    detail.kind === "season"
-      ? (children.find((c) => (c.viewOffsetMs ?? 0) > 0) ?? children.find((c) => !(c.viewCount ?? 0)) ?? children[0])
-      : detail.kind === "show"
-        ? undefined
-        : detail;
+  const toPlay = toPlayable(detail, children);
   /**
    * What the page is describing.
    *
@@ -831,6 +875,24 @@ export function Detail({
   // before anything is highlighted, so the button exists on arrival rather than
   // materialising only after someone has been down into the list and back.
   const tracksFrom = shown.versions[version] ?? firstChild?.versions[version];
+  /**
+   * The tracks Play resolves its choice against, which are the STARTED
+   * episode's - not the highlighted one's.
+   *
+   * `tracksFrom` describes what the screen is showing, and on a season that is
+   * wherever the cursor is; Play starts the episode in progress instead. An
+   * ordinal read off one and handed to the other names a different language:
+   * measured on this server, one language sits at different ordinals across the
+   * episodes of 50 of 132 seasons, so choosing the Hungarian subtitle and
+   * pressing Play started the English one.
+   *
+   * Guarded on the id, because the answer arrives a round trip after the
+   * episode it belongs to was decided and the row can move under it. With no
+   * answer - a film, a cold fetch, a failed one - this is the highlighted
+   * episode's, which is what the screen always used.
+   */
+  const playTracks =
+    (toPlay && playTarget?.id === toPlay.id ? playTarget.versions[version] : undefined) ?? tracksFrom;
 
   /**
    * The chosen tracks, resolved against whatever is about to play.
@@ -912,7 +974,7 @@ export function Detail({
       onEnter: () =>
         backend &&
         toPlay &&
-        void usePlayer.getState().play(backend, toPlay, { version, ...pick(tracksFrom), queue: order }),
+        void usePlayer.getState().play(backend, toPlay, { version, ...pick(playTracks), queue: order }),
     });
   if (playable && resumable)
     actions.push({
@@ -923,7 +985,7 @@ export function Detail({
         toPlay &&
         void usePlayer
           .getState()
-          .play(backend, toPlay, { resume: false, version, ...pick(tracksFrom), queue: order }),
+          .play(backend, toPlay, { resume: false, version, ...pick(playTracks), queue: order }),
     });
   // Marking by hand is what a shared server needs: a film watched somewhere
   // else, or abandoned twenty minutes in and not worth resuming, has no other
