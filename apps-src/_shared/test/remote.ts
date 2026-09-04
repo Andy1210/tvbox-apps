@@ -12,6 +12,7 @@
 import { beforeAll, afterAll, afterEach, expect } from "vitest";
 import { act, cleanup, waitFor } from "@testing-library/react";
 import {
+  doesFocusableExist,
   init,
   destroy,
   setFocus as noriginSetFocus,
@@ -169,9 +170,20 @@ export async function focusBecomes(key: string): Promise<void> {
   await waitFor(() => expect(getCurrentFocusKey()).toBe(key));
 }
 
-/** The same wait, where a test only cares that the screen answers at all. */
+/**
+ * The same wait, where a test only cares that the screen answers at all.
+ *
+ * A key on its own is not an answer: norigin holds a key aimed at a focusable
+ * that never mounted, and a cursor parked on one of those is the dead remote
+ * this suite exists to catch. So the key has to name something on screen.
+ */
 export async function focusLands(): Promise<void> {
-  await waitFor(() => expect(getCurrentFocusKey(), "nothing on the screen is lit").toBeTruthy());
+  await waitFor(() => {
+    const at = getCurrentFocusKey();
+    expect(Boolean(at) && doesFocusableExist(String(at)), `nothing on the screen is lit (key: ${String(at)})`).toBe(
+      true,
+    );
+  });
 }
 
 /**
@@ -181,6 +193,12 @@ export async function focusLands(): Promise<void> {
  * the cursor touches, and the assertion after it reads that key. A screen that
  * lands on the wrong member still fails, which a wait for the right member
  * would not.
+ *
+ * Its reach is one poll of `waitFor`, and that is worth knowing before relying
+ * on it: a screen that lands wrong and corrects itself on the very next timer
+ * turn is not seen by this either, because both landings happen before the
+ * first poll. Measured - a correction 20 ms out is caught, one on the next
+ * `setTimeout(..., 0)` is not. It buys the slow correction, not every one.
  */
 export async function focusEnters(prefix: string): Promise<void> {
   await waitFor(() => {
@@ -196,31 +214,51 @@ export async function setFocus(focusKey: string): Promise<void> {
   });
 }
 
+const config = {
+  layoutAdapter: {
+    measureLayout: async (component: FocusableComponent): Promise<FocusableComponentLayout> => {
+      const node = component.node;
+      const b = (node && rects.get(node)) ?? ZERO;
+      return {
+        node,
+        x: b.x,
+        y: b.y,
+        width: b.w,
+        height: b.h,
+        left: b.x,
+        top: b.y,
+        right: b.x + b.w,
+        bottom: b.y + b.h,
+      };
+    },
+  },
+};
+
+/**
+ * Put the cursor back to nothing, mid-test.
+ *
+ * `setFocus("")` does not do it - norigin returns early on a falsy key - and
+ * neither does unmounting the screen that held it. The key outlives its screen,
+ * and norigin re-lights it by itself once a focusable registers under that name
+ * again, with no application code involved. So a test that mounts a screen
+ * after leaving the previous one on the same key cannot otherwise tell a build
+ * that restores the cursor from one that restores nothing at all.
+ *
+ * Rebuilding the service is the only clear there is - it is what `afterEach`
+ * does between tests. It drops every registered focusable with it, so this
+ * belongs between an unmount and the next render, never while a screen is up.
+ */
+export function clearFocus(): void {
+  destroy();
+  init(config);
+}
+
 // Register the harness layoutAdapter + norigin init/teardown for a suite. Call
 // once at the top of a test file (before describe). Focusables from an unmounted
 // render are dropped by Testing Library's cleanup between tests. The partial
 // layoutAdapter object is Object.assign-ed over the library's default web
 // adapter, so key handling and DOM focus stay stock - only geometry is ours.
 export function setupRemote(): void {
-  const config = {
-    layoutAdapter: {
-      measureLayout: async (component: FocusableComponent): Promise<FocusableComponentLayout> => {
-        const node = component.node;
-        const b = (node && rects.get(node)) ?? ZERO;
-        return {
-          node,
-          x: b.x,
-          y: b.y,
-          width: b.w,
-          height: b.h,
-          left: b.x,
-          top: b.y,
-          right: b.x + b.w,
-          bottom: b.y + b.h,
-        };
-      },
-    },
-  };
   beforeAll(() => init(config));
   // Unmounting a render does not put the CURSOR back: norigin keeps its current
   // focus key, and the next test's fresh render re-registers a focusable under that
@@ -230,8 +268,7 @@ export function setupRemote(): void {
   // the service itself is rebuilt between tests.
   afterEach(() => {
     cleanup();
-    destroy();
-    init(config);
+    clearFocus();
   });
   afterAll(() => destroy());
 }

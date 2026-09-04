@@ -71,6 +71,26 @@ beforeEach(async () => {
   await act(async () => setFocus(""));
 });
 
+/**
+ * The menu with its subtitle search open, reached the way a press reaches it.
+ *
+ * Rendering straight into the search is a state the box never has. The
+ * component does not remount when the search opens, so the effect that follows
+ * the layer deliberately skips its first run - and the one-shot initial focus,
+ * computed from the audio list whichever view is showing, then aims the cursor
+ * at a row the search does not draw, with nothing to move it off.
+ */
+async function openSearch(over: Partial<React.ComponentProps<typeof TrackMenu>> = {}) {
+  const view = render(menu(over));
+  await settle();
+  await focusLands();
+
+  view.rerender(menu({ ...over, searchOpen: true }));
+  await settle();
+  await focusEnters("lang-");
+  return view;
+}
+
 describe("the subtitle search", () => {
   it("is one row on the track menu, not a column of its own", async () => {
     render(menu());
@@ -106,9 +126,7 @@ describe("the subtitle search", () => {
   });
 
   it("puts the cursor back on the row it came from", async () => {
-    const view = render(menu({ searchOpen: true }));
-    await settle();
-    await focusLands();
+    const view = await openSearch();
     await act(async () => setFocus("lang-hu"));
     await flushFocus();
 
@@ -126,9 +144,12 @@ describe("the subtitle search", () => {
     // A filled chip is exactly what focus looks like in this app - a focused row
     // turns solid white - so the chosen language read as the focused one. Two
     // things claiming the same signal, and neither saying which was which.
-    render(menu({ searchOpen: true, searchLanguage: "en" }));
-    await settle();
-    await focusLands();
+    await openSearch({ searchLanguage: "en" });
+    // Off both of the rows being compared. Opening the search puts the cursor
+    // on the chosen language, which is the very row this test needs unfilled -
+    // and the two signals being indistinguishable is what it is about.
+    await act(async () => setFocus("lang-de"));
+    await flushFocus();
 
     const chosen = rowFor("EN");
     const other = rowFor("HU");
@@ -144,9 +165,7 @@ describe("the subtitle search", () => {
   });
 
   it("answers the remote in the search view", async () => {
-    render(menu({ searchOpen: true }));
-    await settle();
-    await focusLands();
+    await openSearch();
 
     await remote.down();
     await settle();

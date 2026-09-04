@@ -12,7 +12,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import type { ItemDetail, MediaItem } from "../backends/types";
 
-const { setupRemote, flushFocus, setFocus, getCurrentFocusKey, remote, place, focusBecomes } = await import("./remote");
+const { setupRemote, flushFocus, setFocus, getCurrentFocusKey, remote, place, focusBecomes, focusEnters } =
+  await import("./remote");
 setupRemote();
 
 function detailOf(item: MediaItem): ItemDetail {
@@ -287,7 +288,12 @@ describe("the season strip on an episode list", () => {
     // A series with one season, arrived at with the flag set: the flag must not
     // park the cursor on a key that never mounts, which is a dead remote.
     await open({ seasonCount: 1, focusSeasons: true });
-    await focusBecomes("detail-play");
+    // Waited to the page's own keys, then read. A wait for the play button
+    // alone sits through the failure this guards: parking on the strip and
+    // recovering a turn later is one swallowed press, and it looks identical
+    // from here to having opened on the right thing.
+    await focusEnters("detail-");
+    expect(getCurrentFocusKey()).toBe("detail-play");
   });
 
   it("opens on the strip even when the series does not list this season", async () => {
