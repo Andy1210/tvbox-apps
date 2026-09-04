@@ -230,8 +230,16 @@ export interface Track {
   hearingImpaired?: boolean;
   /** The server's current choice. */
   selected?: boolean;
-  /** A subtitle that lives beside the file rather than inside it. Its `ordinal`
-   *  is -1, because it has no position among the file's own tracks. */
+  /**
+   * A subtitle that lives beside the file rather than inside it.
+   *
+   * Its `ordinal` is NEGATIVE, because it has no position among the file's own
+   * tracks - and each sidecar gets its own: -1, -2, -3. Not a shared -1, which
+   * is what this said until a review read it and reported a bug that does not
+   * exist. The ordinal is how a choice is named on the way back down, and 9
+   * films in 200 here carry more than one sidecar, which one shared number
+   * could not tell apart. Both mappers number them this way.
+   */
   external?: boolean;
   /** Server path for an external subtitle, handed to the player as a file. */
   key?: string;
