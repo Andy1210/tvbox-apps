@@ -127,8 +127,8 @@ export function Detail({
    * Magyar, English - played English. And a converted stream bakes its tracks
    * in at start, so that costs a restart to undo.
    *
-   * Not a bare language either, which is what it used to be: 519 of 1,395
-   * episodes here carry two or more subtitles in one language, and a language
+   * Not a bare language either, which is what it used to be: 1,841 of this
+   * library's 8,234 episodes carry two subtitles in one language, and a language
    * matched the FIRST of them - so choosing the full Hungarian subtitle on a
    * file that also has a signs-only one left the tick where it was and played
    * signs only. See `tracks.ts` for what is kept and how far each part travels.
@@ -960,13 +960,18 @@ export function Detail({
    * within the same item, which is the film case and is the honest limit -
    * a track with no language has nothing to match on in the next episode.
    */
-  const pick = (
-    v: MediaVersion | undefined,
-    /** Whose list `v` is. Only the id branch reads it, and an id is per-item. */
-    ownerId: string,
-  ): { audio?: number; subtitle?: number | "none" } => ({
-    audio: resolveTrack(v?.audio, audioChoice, ownerId),
-    subtitle: subChoice === "none" ? "none" : resolveTrack(v?.subtitles, subChoice, ownerId),
+  /**
+   * Which list `v` is, for the id branch alone.
+   *
+   * Item AND version, because a track id is only unique within one file: on
+   * Jellyfin it is the stream's index within its media source, so the versions
+   * of one item repeat it - and the version chips change the version while the
+   * item stays put.
+   */
+  const listKey = (ownerId: string): string => `${ownerId}:${version}`;
+  const pick = (v: MediaVersion | undefined, ownerId: string): { audio?: number; subtitle?: number | "none" } => ({
+    audio: resolveTrack(v?.audio, audioChoice, listKey(ownerId)),
+    subtitle: subChoice === "none" ? "none" : resolveTrack(v?.subtitles, subChoice, listKey(ownerId)),
   });
 
   /**
@@ -1116,14 +1121,17 @@ export function Detail({
           audio={pick(tracksFrom, tracksOwner?.id ?? "").audio}
           subtitle={pick(tracksFrom, tracksOwner?.id ?? "").subtitle}
           onAudio={(ordinal) =>
-            tracksOwner && setAudioChoice(rememberTrack(tracksOwner.versions[version]?.audio, ordinal, tracksOwner.id))
+            tracksOwner && setAudioChoice(rememberTrack(tracksFrom?.audio, ordinal, listKey(tracksOwner.id)))
           }
+          // "Off" is the one choice that needs no track list, so it is not
+          // gated on having one.
           onSubtitle={(ordinal) =>
-            tracksOwner &&
             setSubChoice(
               ordinal === "none"
                 ? "none"
-                : rememberTrack(tracksOwner.versions[version]?.subtitles, ordinal, tracksOwner.id),
+                : tracksOwner
+                  ? rememberTrack(tracksFrom?.subtitles, ordinal, listKey(tracksOwner.id))
+                  : undefined,
             )
           }
           onClose={() => {

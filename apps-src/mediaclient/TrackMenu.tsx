@@ -450,6 +450,11 @@ function Offset({
   const { ref, focusKey, hasFocusedChild } = useFocusable({
     focusKey: "sub-offset",
     saveLastFocusedChild: false,
+    trackChildren: true,
+    // Without this `hasFocusedChild` is permanently false - norigin only calls
+    // its setter for a parent that asked to track - and the lift below is dead
+    // code that no focus-key assertion can see. `Reviews` and `CastRow` in this
+    // same app already pass it.
   });
 
   // Signed and to two places, so a change of a quarter second is visible - and

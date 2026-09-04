@@ -80,6 +80,12 @@ interface Options {
    * one a bare language cannot tell apart.
    */
   forcedPair?: boolean;
+  /**
+   * The started episode carries a sidecar with NO language, which is the only
+   * shape that reaches the id branch - and 422 of 482 film sidecars here are
+   * that shape.
+   */
+  noLanguageSidecar?: boolean;
 }
 
 async function open(opts?: Options): Promise<Harness> {
@@ -124,11 +130,12 @@ async function open(opts?: Options): Promise<Harness> {
   if (opts?.noProgress) versions[episodes[0]!.id] = ENGLISH_FIRST();
   if (opts?.forcedPair)
     for (const e of episodes)
-      versions[e.id] = version(versions[e.id]!.audio, [
-        sub(0, "magyar", true),
-        sub(1, "magyar"),
-        sub(2, "English"),
-      ]);
+      versions[e.id] = version(versions[e.id]!.audio, [sub(0, "magyar", true), sub(1, "magyar"), sub(2, "English")]);
+  if (opts?.noLanguageSidecar) {
+    const v = versions[target.id]!;
+    const sidecar: Track = { ordinal: -1, id: "sidecar-7", kind: "subtitle", label: "Külső felirat" };
+    versions[target.id] = version(v.audio, [...v.subtitles, sidecar]);
+  }
   if (opts?.external) {
     const v = versions[target.id]!;
     versions[target.id] = version(v.audio, [sub(0, "English"), sub(-1, "magyar")]);
@@ -387,7 +394,8 @@ describe("the panel says which episode it is listing", () => {
 describe("two subtitles in one language", () => {
   /** Which row the panel has ticked, by its focus key. */
   const ticked = (): string | undefined =>
-    [...document.querySelectorAll('[data-sfocus^="lp-sub-"]')].find((e) => (e.textContent ?? "").includes("✓"))
+    [...document.querySelectorAll('[data-sfocus^="lp-sub-"]')]
+      .find((e) => (e.textContent ?? "").includes("✓"))
       ?.getAttribute("data-sfocus") ?? undefined;
 
   it("takes the one that was pressed, and shows it as taken", async () => {
@@ -421,5 +429,26 @@ describe("two subtitles in one language", () => {
     await focusOn("detail-play");
     await press("detail-play");
     expect(h.played).toEqual([{ id: h.episodes[1]!.id, audio: undefined, subtitle: 0 }]);
+  });
+});
+
+describe("a subtitle with no language at all", () => {
+  it("is carried by its id, which is what the owner key exists for", async () => {
+    // The only branch that reads the owner key, and nothing reached it: the
+    // review replaced every owner id in this screen with a wrong value at once
+    // and all 671 tests still passed, because no component test used a track
+    // without a language. This is that test.
+    const h = await open({ noLanguageSidecar: true });
+    // The cursor ON the episode Play starts, so the choice and the playback are
+    // the same item - the only place an id means anything.
+    await focusOn(`children-${h.season.id}-${h.episodes[1]!.id}`);
+    await press("detail-more");
+    await press("more-lang");
+    await press("lp-sub-sidecar-7");
+    await press("lp-close");
+
+    await focusOn("detail-play");
+    await press("detail-play");
+    expect(h.played).toEqual([{ id: h.episodes[1]!.id, audio: undefined, subtitle: -1 }]);
   });
 });

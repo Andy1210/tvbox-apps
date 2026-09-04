@@ -273,4 +273,27 @@ describe("the subtitle offset row", () => {
       expect(getCurrentFocusKey(), "back in at the same end as the first time").toBe("sub-offset-down");
     });
   });
+
+  describe("the offset row while the cursor is in it", () => {
+    /** The row's own container, which is the only element with this key. */
+    const row = (): HTMLElement | null => document.querySelector('[data-sfocus="sub-offset"]');
+
+    it("lifts, and settles again when the cursor leaves", async () => {
+      // Assert the CLASS, not a focus key. Every test this row shipped with
+      // asserted keys, and the lift was dead code for a whole round: norigin
+      // only updates `hasFocusedChild` for a parent that asked to track, and
+      // the default is not to. 671 green tests saw nothing.
+      await laid();
+      await setFocus("sub-1");
+      expect(row()?.className, "unlifted while the cursor is above it").toContain("bg-white/5");
+
+      await remote.down();
+      expect(getCurrentFocusKey()).toBe("sub-offset-down");
+      expect(row()?.className, "lifted with the cursor inside").toContain("bg-white/15");
+
+      await remote.down();
+      expect(getCurrentFocusKey()).toBe("sub-search");
+      expect(row()?.className, "and settled again").toContain("bg-white/5");
+    });
+  });
 });

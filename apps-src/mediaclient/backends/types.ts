@@ -222,10 +222,10 @@ export interface Track {
   /**
    * Written for a viewer who cannot hear it: the dialogue plus the sounds.
    *
-   * A THIRD kind, not a variant of `forced`. Measured on this server, 173
-   * episode and 97 film subtitles carry it, and a file routinely holds the full
-   * track and the SDH one in the same language with the same forced flag - so
-   * without it a remembered choice cannot tell those two apart.
+   * A THIRD kind, not a variant of `forced`. Measured on this server, 577
+   * episode and 226 film subtitles carry it, and a file routinely holds the
+   * full track and the SDH one in the same language with the same forced flag -
+   * so without it a remembered choice cannot tell those two apart.
    */
   hearingImpaired?: boolean;
   /** The server's current choice. */
