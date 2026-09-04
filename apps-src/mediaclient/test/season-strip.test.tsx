@@ -331,6 +331,14 @@ describe("the season strip on an episode list", () => {
     // takes 300 ms to light up still fails while a machine under load does not.
     vi.useFakeTimers();
     const h = await open({ focusSeasons: true, holdSeasons: true });
+    // The budget, spent explicitly. Generous against a landing that is merely
+    // late by a few turns - the suite's own repro hook pushes it out by 5 - and
+    // far under the tenth of a second at which a person notices a screen that
+    // is showing nothing to press.
+    const { act } = await import("@testing-library/react");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(40);
+    });
     expect(getCurrentFocusKey()).toBe("detail-play");
     expect(chips()).toEqual([]);
 
