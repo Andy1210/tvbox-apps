@@ -171,7 +171,8 @@ export function Profiles(): React.JSX.Element {
 }
 
 function Face({ profile, onEnter }: { profile: Profile; onEnter: () => void }): React.JSX.Element {
-  const { ref, focused } = useFocusableItem({ focusKey: `profile-${profile.id}`, onEnterPress: onEnter });
+  const focusKey = `profile-${profile.id}`;
+  const { ref, focused } = useFocusableItem({ focusKey, onEnterPress: onEnter });
   const backend = useApp((s) => s.backend);
   const [src, setSrc] = useState<string | null>(null);
   const [broken, setBroken] = useState(false);
@@ -199,6 +200,11 @@ function Face({ profile, onEnter }: { profile: Profile; onEnter: () => void }): 
     <div
       ref={ref}
       onClick={onEnter}
+      // The focus key, in the DOM, the way the SDK's own button carries it:
+      // without a marker a navigation test cannot put a rectangle on this
+      // element, and a navigation assertion with no rectangles is decided by
+      // nothing at all.
+      data-sfocus={focusKey}
       className="flex w-[16vh] flex-col items-center gap-[1vh] transition-transform duration-150"
       style={{ transform: focused ? "scale(1.08)" : undefined }}
     >

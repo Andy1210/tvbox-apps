@@ -9,8 +9,8 @@
 // Shared by every app under apps-src/, since the media client is no longer the
 // only one that walks its screens with the arrows.
 
-import { beforeAll, afterAll, afterEach } from "vitest";
-import { act, cleanup } from "@testing-library/react";
+import { beforeAll, afterAll, afterEach, expect } from "vitest";
+import { act, cleanup, waitFor } from "@testing-library/react";
 import {
   init,
   destroy,
@@ -126,6 +126,33 @@ export const remote = {
 
 // norigin's setFocus is scheduler-bound since 3.2.1 - this wrapper awaits the
 // focus actually landing (and keeps the React updates inside act()).
+/**
+ * Wait for the cursor to arrive, rather than for a fixed number of turns.
+ *
+ * A screen's focus landing is scheduled with `setTimeout(..., 0)` - that is how
+ * `useInitialFocus` and every panel's own cancel path do it - and a counted
+ * settle gives it a fixed budget. Whether React's commit AND its passive effect
+ * both land inside that budget is a scheduler question, so on a loaded machine
+ * the effect can schedule its timer after the settle has scheduled its own: the
+ * settle returns first, a microtask drain finds nothing (norigin's scheduler is
+ * promise-based and has no timers), and the assertion reads null.
+ *
+ * That is not hypothetical. It failed a CI run that was publishing a finished
+ * release, on the first focus assertion of a test, before any press:
+ * `expected null to be 'profile-u1'`. Delaying a screen's initial focus by 5 ms
+ * reproduces it, and fails 19 tests across 7 files in this suite.
+ *
+ * So: assert a focus key through this, never straight after a counted settle.
+ */
+export async function focusBecomes(key: string): Promise<void> {
+  await waitFor(() => expect(getCurrentFocusKey()).toBe(key));
+}
+
+/** The same wait, where a test only cares that the screen answers at all. */
+export async function focusLands(): Promise<void> {
+  await waitFor(() => expect(getCurrentFocusKey()).toBeTruthy());
+}
+
 export async function setFocus(focusKey: string): Promise<void> {
   await act(async () => {
     noriginSetFocus(focusKey);

@@ -4,7 +4,16 @@ import { configureI18n } from "@sdk";
 import { Profiles } from "../Profiles";
 import { useApp } from "../state";
 import { PlexBackend } from "../backends/plex/backend";
-import { setupRemote, remote, setFocus, getCurrentFocusKey, flushFocus } from "./remote";
+import {
+  setupRemote,
+  remote,
+  setFocus,
+  getCurrentFocusKey,
+  flushFocus,
+  place,
+  focusBecomes,
+  focusLands,
+} from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaBackend, Profile, Session } from "../backends/types";
@@ -45,30 +54,60 @@ async function settle2(): Promise<void> {
   await flushFocus();
 }
 
+/**
+ * Where the two faces are, side by side.
+ *
+ * Without this the whole screen measures 0x0 at the origin, so a sideways press
+ * is decided by registration order rather than by position - deterministic, but
+ * proving nothing about where anything is. Measured: with the rectangles taken
+ * away the test still passes, and with the two positions swapped it fails,
+ * which is the pair that says the assertion now rests on the layout.
+ *
+ * This is not what broke CI. That was a focus that had not landed yet, and it
+ * is fixed by waiting rather than by geometry.
+ */
+function layOut(): void {
+  const at = (key: string, x: number): void => {
+    const node = document.querySelector(`[data-sfocus="${key}"]`);
+    expect(node, `no element to place for ${key}`).toBeTruthy();
+    place(node!, x, 400, 200, 220);
+  };
+  at("profile-u1", 200);
+  at("profile-u2", 600);
+}
+
 describe("the who-is-watching screen", () => {
   it("answers the remote again after backing out of the PIN pad", async () => {
     render(<Profiles />);
     await waitFor(() => expect(screen.getByText("Anna")).toBeInTheDocument());
-    await settle2();
-    expect(getCurrentFocusKey()).toBe("profile-u1");
+    await focusBecomes("profile-u1");
+
+    // The SECOND face, deliberately. The cancel path aims at the face that was
+    // opened while `useFocusFallback` aims at the first one, so opening the
+    // first proves nothing about which of the two answered - a mutation that
+    // sends the cancel to `profiles[0]` passes if this test opens Anna.
+    await act(async () => setFocus("profile-u2"));
 
     // Open a face, then think better of it.
     await remote.ok();
-    await settle2();
-    expect(getCurrentFocusKey()).toBe("pin-1");
+    await focusBecomes("pin-1");
 
     await remote.back();
-    await settle2();
 
     // The pad's focusable is gone. Norigin's own recovery walks up to the root
     // and stops there, so without a fallback the cursor stays on a key that no
     // longer exists and every press after this is discarded.
-    const landed = getCurrentFocusKey();
-    expect(landed).toBeDefined();
-    expect(landed?.startsWith("profile-")).toBe(true);
+    //
+    // The face that was OPENED, not merely some face: `startsWith("profile-")`
+    // accepted the recovery landing on the wrong one, which is a real failure
+    // this test used to tolerate.
+    await focusBecomes("profile-u2");
 
-    await remote.right();
-    expect(getCurrentFocusKey()).toBe("profile-u2");
+    // Placed here rather than at the start: the faces are remounted when the
+    // PIN pad closes, and a rectangle belongs to a node rather than to a key.
+    layOut();
+    await remote.left();
+    expect(getCurrentFocusKey()).toBe("profile-u1");
   });
 
   it("offers a way on when the household list cannot be fetched", async () => {
@@ -84,12 +123,11 @@ describe("the who-is-watching screen", () => {
     });
     render(<Profiles />);
     await waitFor(() => expect(screen.getByText(en.profiles.continue)).toBeInTheDocument());
-    await settle2();
 
     // Something is focused, so the screen answers the remote at all - that is
     // the half that was missing, since an unreachable failure produced no
     // buttons and Back from here quits the app.
-    expect(getCurrentFocusKey()).toBeTruthy();
+    await focusLands();
 
     await act(async () => setFocus("msg-continue"));
     await remote.ok();
@@ -112,7 +150,9 @@ describe("a check that is still running when the pad is closed", () => {
 
     render(<Profiles />);
     await waitFor(() => expect(screen.getByText("Anna")).toBeInTheDocument());
-    await settle2();
+    // The press below only opens the pad once the cursor is on a face, and that
+    // landing is scheduled rather than immediate.
+    await focusBecomes("profile-u1");
 
     const typeAPin = async (): Promise<void> => {
       for (const d of ["pin-1", "pin-2", "pin-3", "pin-4"]) {
@@ -123,15 +163,15 @@ describe("a check that is still running when the pad is closed", () => {
     };
 
     await remote.ok(); // open the pad
-    await settle2();
+    await focusBecomes("pin-1");
     await typeAPin(); // attempt 1 is now in flight
     expect(pending.length).toBe(1);
 
     await remote.back(); // abandon it
-    await settle2();
+    await focusBecomes("profile-u1");
 
     await remote.ok(); // open the pad again
-    await settle2();
+    await focusBecomes("pin-1");
     await typeAPin(); // attempt 2 in flight
     expect(pending.length).toBe(2);
 
