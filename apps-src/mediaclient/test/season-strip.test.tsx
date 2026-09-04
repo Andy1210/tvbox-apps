@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import type { ItemDetail, MediaItem } from "../backends/types";
 
-const { setupRemote, flushFocus, setFocus, getCurrentFocusKey, remote, place } = await import("./remote");
+const { setupRemote, flushFocus, setFocus, getCurrentFocusKey, remote, place, focusBecomes } = await import("./remote");
 setupRemote();
 
 function detailOf(item: MediaItem): ItemDetail {
@@ -272,7 +272,7 @@ describe("the season strip on an episode list", () => {
 
   it("opens on the strip when that is where it was opened from", async () => {
     const h = await open({ focusSeasons: true });
-    expect(getCurrentFocusKey()).toBe(chipKey(h.seasons.indexOf(h.current)));
+    await focusBecomes(chipKey(h.seasons.indexOf(h.current)));
   });
 
   it("opens where it always did when there is no strip to open on", async () => {
@@ -293,7 +293,7 @@ describe("the season strip on an episode list", () => {
         { id: "other-b", kind: "season", title: "Második", index: 2 },
       ],
     });
-    expect(getCurrentFocusKey()).toBe(chipKey(0));
+    await focusBecomes(chipKey(0));
   });
 
   it("tells the season being shown apart by weight, which focus does not take", async () => {
@@ -309,17 +309,24 @@ describe("the season strip on an episode list", () => {
     // The list is a second request. Waiting for it left the screen with nothing
     // highlighted, which on a television is a remote that does nothing.
     const h = await open({ focusSeasons: true, holdSeasons: true });
-    expect(getCurrentFocusKey()).toBe("detail-play");
+    // Waited for: the screen lands its cursor on a timer, so a counted settle
+    // reads null on a machine that is busy enough.
+    await focusBecomes("detail-play");
     expect(chips()).toEqual([]);
     h.releaseSeasons?.();
     await settle();
     // ...and once it answers, the strip takes the cursor, since nobody moved it.
-    expect(getCurrentFocusKey()).toBe(chipKey(h.seasons.indexOf(h.current)));
+    await focusBecomes(chipKey(h.seasons.indexOf(h.current)));
   });
 
   it("leaves a late season list where the cursor was put by a press", async () => {
     const h = await open({ focusSeasons: true, holdSeasons: true });
     layout(h);
+    // The screen's own landing first: it arrives on a timer, and one that lands
+    // after the press below takes the cursor straight back - which would make
+    // this test pass or fail on how busy the machine is rather than on what the
+    // strip does.
+    await focusBecomes("detail-play");
     // Somebody is already reading the episodes when the list answers.
     await setFocus(`children-${h.current.id}-${h.episodes[1]!.id}`);
     await settle();
