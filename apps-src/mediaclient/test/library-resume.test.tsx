@@ -5,7 +5,7 @@ import { configureI18n } from "@sdk";
 import { Library, arrivalCells } from "../Library";
 import { useApp } from "../state";
 import { clearLibraryViews } from "../libraryView";
-import { setupRemote, setFocus, getCurrentFocusKey, flushFocus, remote } from "./remote";
+import { setupRemote, setFocus, getCurrentFocusKey, flushFocus, remote, focusBecomes } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaBackend, MediaItem } from "../backends/types";
@@ -198,14 +198,27 @@ afterEach(() => {
 });
 
 /** Mount the library and let it settle, including its deferred first focus. */
-async function open(): Promise<{ container: HTMLElement; unmount: () => void }> {
+/**
+ * A library screen, open and settled.
+ *
+ * `startsOn` is the cell it will land on: 0 with nothing remembered, the
+ * remembered one on a return, and null where the screen fails and shows no grid
+ * at all.
+ *
+ * Waited for rather than counted, because the landing is on a timer that is
+ * itself gated on the resume having resolved - so a counted settle both reads
+ * it too early AND lets it arrive after whatever the test does next, taking the
+ * cursor back. That second shape is what nearly every caller here would hit.
+ */
+async function open(startsOn: number | null = 0): Promise<{ container: HTMLElement; unmount: () => void }> {
   const { container, unmount } = render(<Library libraryId="1" title="Movies" />);
   await waitFor(() => expect(container.querySelector("[style*='will-change']")).toBeTruthy());
   await settle();
+  if (startsOn !== null) await focusBecomes(`cell-${startsOn}`);
   return { container, unmount };
 }
 
-/** The initial focus is deferred by a timeout; the scheduler resolves after it. */
+/** For everything that is not a screen arriving. */
 async function settle(): Promise<void> {
   await act(async () => {
     await new Promise((r) => setTimeout(r, 0));
@@ -295,7 +308,7 @@ describe("returning to a library", () => {
     // below would hold on a build that restores nothing at all.
     await act(async () => setFocus(""));
 
-    const again = await open();
+    const again = await open(DEEP);
     expect(getCurrentFocusKey()).toBe(`cell-${DEEP}`);
     expect(offsetOf(again.container)).toBe(left);
     // The bug: an alphabetical list at the top, with the title just opened off
@@ -369,7 +382,7 @@ describe("returning to a library", () => {
     first.unmount();
     await act(async () => setFocus(""));
 
-    const again = await open();
+    const again = await open(DEEP - 7);
     // The strip reads a row of the grid. One row of overscan sits above the top
     // visible one, and reading THAT marks the letter of items that are off the
     // screen: the boundary here is flush with a row start, so the two answers
@@ -416,7 +429,7 @@ describe("returning to a library", () => {
     first.unmount();
     await act(async () => setFocus(""));
 
-    const again = await open();
+    const again = await open(DEEP);
     // Step off the resumed cell, the way anybody would.
     await setFocus(`cell-${DEEP - 7}`);
     await flushFocus();
@@ -446,7 +459,7 @@ describe("returning to a library", () => {
     first.unmount();
     await act(async () => setFocus(""));
 
-    const again = await open();
+    const again = await open(LAST);
     expect(offsetOf(again.container)).toBe(rows * rowHeight - VIEWPORT);
     // Not what the window's own height would clamp to, which is 97 px short of
     // the end. Honest about what this pins: the resting place is the same
@@ -584,7 +597,10 @@ describe("returning to a library", () => {
     // spatial navigation's own bookkeeping and survives an unmount: a leftover
     // from an earlier test can satisfy it either way. What matters is which
     // control is lit.
-    expect(litKey(again.container)).toBe("msg-retry");
+    // Waited for: the failure screen lands its own cursor on a timer, like every
+    // other screen here, and `open(null)` deliberately does not wait for a cell
+    // there is none of.
+    await waitFor(() => expect(litKey(again.container)).toBe("msg-retry"));
     expect(again.container.textContent).toContain("Try again");
 
     // And the button has to DO something, which is the press this test used to
@@ -627,7 +643,7 @@ describe("returning to a library", () => {
     // spent. THEN something fails - a page a scroll asked for, a server that
     // went away mid-browse - and the failure screen takes the cursor for its
     // own button.
-    const again = await open();
+    const again = await open(DEEP);
     expect(again.container.querySelectorAll(".ring-white").length).toBe(1);
     const where = offsetOf(again.container);
     await act(async () => {
