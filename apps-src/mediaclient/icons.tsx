@@ -188,3 +188,42 @@ export function LyricsIcon({ className = "h-[2.6vh] w-[2.6vh]" }: { className?: 
     </svg>
   );
 }
+
+/**
+ * Watched, and not: the tile's own tick, inside a ring.
+ *
+ * The tick is the mark this app already uses for "seen" - the tiles carry it in
+ * the corner - so a second symbol for the same thing (an eye, a half-filled
+ * disc) would have to be learnt beside one that is already on screen. The ring
+ * is what gives the two states the same footprint, so the button does not
+ * change width as it is pressed.
+ *
+ * The states differ by the PRESENCE of the tick rather than by opacity or fill:
+ * at three metres a shape that is there or not there survives, and a shape that
+ * is merely dimmer does not.
+ */
+export function WatchedIcon({
+  on = false,
+  className = "h-[2.6vh] w-[2.6vh]",
+}: {
+  on?: boolean;
+  className?: string;
+}): React.JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" className={className} {...STROKE} aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      {on && <path d="M7.8 12.3l2.9 2.9 5.7-6.7" />}
+    </svg>
+  );
+}
+
+/** The rest of the actions, which are the ones nobody needs today. */
+export function MoreIcon({ className = "h-[2.6vh] w-[2.6vh]" }: { className?: string }): React.JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
+      <circle cx="5" cy="12" r="1.9" />
+      <circle cx="12" cy="12" r="1.9" />
+      <circle cx="19" cy="12" r="1.9" />
+    </svg>
+  );
+}

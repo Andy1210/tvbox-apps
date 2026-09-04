@@ -1,0 +1,175 @@
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
+import { FocusButton } from "@sdk";
+
+/** The action row itself. Nothing outside needs it by name; the page aims at
+ *  the buttons, which it names explicitly. */
+export const ACTIONS_KEY = "detail-actions";
+
+export interface Action {
+  /**
+   * The focus key, which the page also uses to put the cursor back.
+   *
+   * A literal, always. Nothing here may be built from a server string: a focus
+   * key is a namespace shared with the page's own container, and a colliding
+   * one makes the focus tree cyclic.
+   */
+  key: string;
+  /** What pressing it does, in words. The accessible name, and what the line
+   *  under an icon-only button says while it is focused. */
+  label: string;
+  /** Drawn before the label. */
+  icon?: ReactNode;
+  /**
+   * The icon carries the button on its own, and the words appear under it only
+   * while it is focused.
+   *
+   * For the controls the row has no width to spell out. Play keeps its words
+   * whatever else does: a row of glyphs with no anchor cannot be read from a
+   * sofa, and the rarely-used actions are behind the overflow button rather
+   * than shrunk into glyphs of their own.
+   */
+  iconOnly?: boolean;
+  /** The one button the eye should land on first, drawn a shade brighter. */
+  primary?: boolean;
+  onEnter: () => void;
+  onFocused?: () => void;
+}
+
+/**
+ * The buttons above the rows, on one line.
+ *
+ * They were three lines - play and marking, then audio and subtitles, then the
+ * versions - and on a season screen the synopsis describes the HIGHLIGHTED
+ * episode, so it is what somebody moving along the row is reading. Bringing the
+ * row to the top of the view took it off the screen, and the three lines were
+ * what made the distance.
+ *
+ * The empty check is HERE rather than inside, so that a screen with no buttons
+ * - a show, a collection, a playlist - registers no focusable at all. A
+ * container whose hook runs above its own early return stays registered with a
+ * null node and a zero-sized box at the page origin: norigin warns about it,
+ * and `doesFocusableExist` does not consult `focusable`, so a cursor that came
+ * to rest there would read as both owned and existing and neither focus hook
+ * on the page would rescue it.
+ */
+export function Actions({ actions }: { actions: Action[] }): React.JSX.Element | null {
+  if (actions.length === 0) return null;
+  return <ActionRow actions={actions} />;
+}
+
+/**
+ * A container of its own rather than a bare flex row, for one reason:
+ * `hasFocusedChild`. An icon-only button is named by a line under it, and
+ * without knowing that the cursor has left the row altogether that name stays
+ * up behind it - the SDK's button reports focus and has no blur.
+ */
+function ActionRow({ actions }: { actions: Action[] }): React.JSX.Element {
+  const { ref, focusKey, hasFocusedChild } = useFocusable({
+    focusKey: ACTIONS_KEY,
+    // Focusable - the default, and not a formality. norigin builds its
+    // candidate list as `parentFocusKey === parent && component.focusable`, so
+    // a container with this off is never a candidate and NOTHING can navigate
+    // into it: on a film screen - which has no `onArrowFromFirst` route back
+    // up, unlike a season - one press of Down left Play, the marking button and
+    // the overflow button unreachable in either direction.
+    trackChildren: true,
+    // Re-entered from below by name (`ABOVE_ROWS`), so a remembered child adds
+    // nothing - and would put the cursor on whatever was pressed last rather
+    // than on Play.
+    saveLastFocusedChild: false,
+  });
+  /**
+   * Which button the cursor is on, for the name an icon cannot carry.
+   *
+   * Every button in the row sets it, so it is only ever stale once focus has
+   * left the row entirely - which is what `hasFocusedChild` answers.
+   */
+  const [at, setAt] = useState<string | null>(null);
+
+  /**
+   * The handlers, held stable across renders.
+   *
+   * `FocusButton` runs its `onFocused` from an effect keyed on the callback as
+   * well as on focus, so a fresh closure per render re-fires it on every
+   * unrelated re-render of the page - and Play's is the one that scrolls the
+   * page home. Keyed on the KEYS rather than on the actions, which are rebuilt
+   * every render by design; the current action is read through a ref, the way
+   * `useFocusFallback` reads its own inputs.
+   */
+  const latest = useRef(actions);
+  useEffect(() => {
+    latest.current = actions;
+  });
+  // Serialised rather than joined on a separator. The obvious separator is a
+  // NUL, because no key can contain one - and a NUL in the source is what makes
+  // git call a file binary and hide it from every diff and every grep.
+  const signature = JSON.stringify(actions.map((a) => a.key));
+  const focusHandlers = useMemo(() => {
+    const map = new Map<string, () => void>();
+    for (const key of JSON.parse(signature) as string[])
+      map.set(key, () => {
+        setAt(key);
+        latest.current.find((a) => a.key === key)?.onFocused?.();
+      });
+    return map;
+  }, [signature]);
+
+  return (
+    <FocusContext.Provider value={focusKey}>
+      <div className="mt-[1vh] flex flex-col">
+        <div ref={ref} className="flex items-stretch gap-[1.2vw]">
+          {actions.map((a) => (
+            // Positioned, so the name below can hang off THIS button. Measured
+            // on a box, one line under the ROW sat 476 px from the glyph it
+            // named - 56 cm on that panel, better than 10 degrees of arc at
+            // three metres - flush left under the first button, where it read
+            // as a caption for Play.
+            <div key={a.key} className="relative flex">
+              <FocusButton
+                focusKey={a.key}
+                onEnter={a.onEnter}
+                onFocused={focusHandlers.get(a.key)}
+                // The words, for a button that draws a glyph. Without it the
+                // only name this control has is its shape.
+                label={a.label}
+                className={`flex min-w-0 items-center gap-[0.8vw] rounded-[1vh] py-[1.4vh] text-[2.1vh] whitespace-nowrap ${
+                  a.primary ? "bg-white/15 px-[2.4vw]" : "bg-white/10 px-[2vw]"
+                }`}
+              >
+                {a.icon}
+                {/* Capped, because part of this label is the server's: a
+                    version title is whatever the media entry says, and on
+                    Jellyfin it falls back to the FILE NAME. The row does not
+                    wrap - wrapping is what this change exists to remove - so an
+                    unbounded label ran the last button off the side of the
+                    screen. */}
+                {!a.iconOnly && <span className="max-w-[42vw] truncate">{a.label}</span>}
+              </FocusButton>
+              {/* Out of flow, which is the point. Spelling the name INSIDE the
+                  button was the first attempt, and with two glyphs in the row
+                  the one being left collapsed as the one being reached expanded
+                  - measured at 203 px, and leftwards on a press of Right. An
+                  absolutely positioned name costs the row nothing, so nothing
+                  moves and the words are still under their own button.
+
+                  `aria-hidden`, because it repeats the button's own label. */}
+              {a.iconOnly && hasFocusedChild && at === a.key && (
+                <p
+                  aria-hidden="true"
+                  data-actions-hint=""
+                  className="absolute top-full left-0 mt-[0.6vh] max-w-[40vw] truncate text-[1.9vh] leading-[2.6vh] whitespace-nowrap text-fg-dim"
+                >
+                  {a.label}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+        {/* The room that name hangs in. It is out of flow, so without this it
+            would be drawn over whatever follows the row. */}
+        <div aria-hidden="true" className="h-[3.2vh]" />
+      </div>
+    </FocusContext.Provider>
+  );
+}

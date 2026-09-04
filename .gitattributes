@@ -1,0 +1,33 @@
+# TypeScript, TSX and the scripts that decide what a television installs are
+# text, whatever byte a string literal happens to hold.
+#
+# Row.tsx carried a NUL as a list separator, and one NUL costs a source file two
+# separate things: `grep -r` skips the file as binary, and git shows "Binary
+# files differ" in place of a diff - so neither a person nor a bot reviewing a
+# change could read it.
+#
+# Escaping the byte is what fixes the first, and that is done at the source.
+# This file fixes only the second, and that half outlives the escape: the OTHER
+# side of a comparison can still carry a NUL, and a base commit is not something
+# a later change can rewrite.
+#
+# The build and publish scripts and the manifests are in here deliberately:
+# they compute the sha256s a box trusts and decide what it installs, so they are
+# the files it would matter most to hide.
+#
+# `.ts` is also the MPEG transport-stream extension. If a real media fixture
+# ever lands, give its directory a `*.ts -diff` of its own rather than dropping
+# this line - a stream rendered as text is noise, a hidden source file is a hole.
+*.ts diff
+*.tsx diff
+*.js diff
+*.jsx diff
+*.mjs diff
+*.cjs diff
+*.json diff
+*.css diff
+*.html diff
+*.md diff
+*.sh diff
+*.yml diff
+*.yaml diff

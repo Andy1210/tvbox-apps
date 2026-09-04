@@ -19,6 +19,9 @@ import { Summary } from "./Summary";
 import { LanguagePicker } from "./LanguagePicker";
 import { Confirm } from "./Confirm";
 import { SeasonStrip, SEASONS_KEY } from "./SeasonStrip";
+import { Actions, type Action } from "./Actions";
+import { MoreMenu, type MoreItem } from "./MoreMenu";
+import { MoreIcon, PlayIcon, WatchedIcon } from "./icons";
 import { Backdrop } from "./Backdrop";
 import { themeItem, useTheme } from "./theme";
 import { useFocusFallback, useFocusOnReveal, useInitialFocus, useScrollToTopOnFirst } from "./focus";
@@ -72,7 +75,7 @@ function ownsDetailKey(key: string): boolean {
  * leaves the app with no origin and swallows the press. A show has no Play
  * button, a film no season button, and the arrival screen has neither.
  */
-const ABOVE_ROWS = ["detail-play", "detail-lang", "detail-watched", "detail-watched-season", "lib-arrange"];
+const ABOVE_ROWS = ["detail-play", "detail-watched", "detail-more", "lib-arrange"];
 
 /** Focus the first of these that exists. False when none of them does, which is
  *  the caller's cue to leave the press to geometry rather than eat it. */
@@ -140,6 +143,8 @@ export function Detail({
   // Only to re-render while a countdown is running; the value is the clock.
   const [, setTick] = useState(0);
   const [picking, setPicking] = useState(false);
+  /** The rarely-used actions, behind the overflow button. */
+  const [more, setMore] = useState(false);
   /** The season-wide mark, waiting to be answered. */
   const [confirming, setConfirming] = useState(false);
   const [detail, setDetail] = useState<ItemDetail | null>(null);
@@ -198,6 +203,10 @@ export function Detail({
     // stream at start.
     setFocused(null);
     setFirstChild(null);
+    // The third panel, cleared with the other two: a menu left standing across
+    // an item change belongs to an overflow list that has been rebuilt under
+    // it, and an empty one has nothing for the cursor to land on.
+    setMore(false);
     setAudioLang(undefined);
     setSubLang(undefined);
     setSubId(undefined);
@@ -389,6 +398,14 @@ export function Detail({
   });
   // The focus container IS the scroller here, so one ref serves both.
   const toTop = useScrollToTopOnFirst(ref);
+  /**
+   * The synopsis, so the episode row can keep it on screen.
+   *
+   * On a season it describes the HIGHLIGHTED episode rather than the season, so
+   * it is what somebody moving along the row is reading - and a row brought to
+   * the top of the view took it with it.
+   */
+  const summary = useRef<HTMLDivElement | null>(null);
 
   /**
    * The item the watched button acts on, and where its state is read from.
@@ -433,6 +450,23 @@ export function Detail({
   };
 
   /**
+   * The button a panel must hand the cursor back to.
+   *
+   * Set by the panel as it closes rather than acted on there: `setFocus` inside
+   * the close handler runs while the panel is still mounted and races its
+   * unmount, and what norigin does with a focused component that goes away is
+   * to walk UP - which reaches this page's own container and restores whatever
+   * child it remembers. Observed on a box: Back out of the overflow menu left
+   * the cursor on an episode tile, one press from starting it, on a menu that
+   * sits directly above that row.
+   *
+   * Unconditional about WHERE, unlike `useFocusOnReveal`'s: the tile the cursor
+   * lands on is a key this screen owns, so a guard that keeps an owned cursor
+   * keeps exactly the wrong one.
+   */
+  const [restore, setRestore] = useState<string | null>(null);
+
+  /**
    * A remote repeats, so a press that lands twice must not undo itself.
    *
    * Measured on the box: two presses 150 ms apart marked and then unmarked, and
@@ -447,15 +481,21 @@ export function Detail({
    * withholds a write, it can never cause one.
    *
    * It guards the PRESS, not the write, and that distinction is a bug fixed:
-   * with it inside `setWatchedOn` an answer given to the season panel within
-   * the window of the press that OPENED it was dropped silently, with the panel
-   * already closed. The panel is that press's protection - it opens on
-   * "Cancel" - so the answer needs none.
+   * with it inside `setWatchedOn` an answer given to a panel within the window
+   * of the press that OPENED it was dropped silently, with the panel already
+   * closed.
+   *
+   * One control has it: the button that marks a single episode, which is the
+   * only one here that writes on the press itself. Everything else this guarded
+   * ends at a panel - one that Back closes, or a confirmation that opens on
+   * "Cancel" - and there the guard cost more than it bought, because it also
+   * refuses a REAL press for 400 ms, silently, which from a sofa is a remote
+   * that has stopped working.
    *
    * `performance.now()` rather than the wall clock: these boxes have no
    * battery-backed clock, so the first NTP correction after a cold boot steps
    * time backwards - and a negative elapsed reads as "too soon" for as long as
-   * the step lasted, which is both buttons dead with nothing to say why.
+   * the step lasted, which is the button dead with nothing to say why.
    */
   const lastPress = useRef(0);
   /** True when this press is the tail of the last one rather than a new one. */
@@ -606,7 +646,7 @@ export function Detail({
   // step, five round trips of it, so without it a step counts as this page being
   // revealed and parks the cursor on the OUTGOING episode's tile, behind a player
   // that is still up. The same guard, for the same reason, as the fallback's.
-  useFocusOnReveal(first, ownsDetailKey, !playing && !moving && !picking && !confirming);
+  useFocusOnReveal(first, ownsDetailKey, !playing && !moving && !picking && !confirming && !more);
 
   useFocusFallback(
     // The play button when there is one; otherwise the first child, which is
@@ -619,8 +659,32 @@ export function Detail({
     // armed behind it; the panel's keys are none of the above, so every press
     // it could not resolve threw focus back onto the play button - which is
     // exactly "I cannot navigate in the subtitle list".
-    !playing && !picking && !confirming,
+    !playing && !picking && !confirming && !more,
   );
+
+  /**
+   * Hand the cursor back to the button a panel was opened from.
+   *
+   * After the two hooks above, and on a timeout for the same reason theirs
+   * have one: the panel's own focusables are torn down in this commit and
+   * norigin's cleanup for them runs first. `focusFirstOf` rather than a bare
+   * `setFocus`, because the overflow button is only rendered while it has
+   * something behind it - a screen that lost its last overflow item while the
+   * panel was up would otherwise be handed a key that never mounts.
+   */
+  //
+  // `!playing && !moving` for the reason the two hooks above carry it: this
+  // page sits BEHIND the player rather than unmounting, and a cursor parked on
+  // a button there is a press away from acting on the film that is running.
+  const panelUp = picking || confirming || more;
+  useEffect(() => {
+    if (!restore || panelUp || playing || moving) return;
+    const id = setTimeout(() => {
+      focusFirstOf([restore, ...ABOVE_ROWS]);
+      setRestore(null);
+    }, 0);
+    return () => clearTimeout(id);
+  }, [restore, panelUp, playing, moving]);
 
   /**
    * The countdown on the next episode, and the press that stops it.
@@ -679,7 +743,6 @@ export function Detail({
   /** 16:9, to match the tile an extra is drawn in. */
   const wide = (item: MediaItem): string | undefined =>
     backend?.posterUrl(item, 400 * artworkScale(), 225 * artworkScale());
-  const resumable = (detail.viewOffsetMs ?? 0) > 0;
   /** A group is a list of things to play, not a thing to play. */
   // A group is a list of things to play, not a thing to play - and a show is a
   // list of seasons, which are lists too. An empty season has nothing to start
@@ -754,6 +817,15 @@ export function Detail({
    * one row missing - so the rows reload as the highlight moves, which is what
    * makes the episode list a place you can read from rather than a menu.
    */
+  /**
+   * Whether Play carries on rather than starts.
+   *
+   * Asked of the episode Play would START, not of the screen: a season carries
+   * no resume point of its own, so reading `detail` here was always false on
+   * one - the button said "Play" over a half-watched episode and the restart
+   * button, which only exists beside a resume, was never rendered at all.
+   */
+  const resumable = (toPlay?.viewOffsetMs ?? 0) > 0;
   const shown = (detail.kind === "season" && focused) || detail;
   // On a season, the highlighted episode's tracks - or the FIRST episode's
   // before anything is highlighted, so the button exists on arrival rather than
@@ -783,6 +855,112 @@ export function Detail({
             : undefined,
   });
 
+  /**
+   * The actions that are not worth a button of their own.
+   *
+   * Audio and subtitles are chosen once for a film if at all, and a whole
+   * season is marked by hand only when it was watched somewhere else. Each had
+   * a line of the header to itself, and on a season screen those lines are paid
+   * for by the synopsis - which is read on every episode.
+   */
+  const overflow: MoreItem[] = [];
+  if (tracksFrom && (tracksFrom.audio.length > 1 || tracksFrom.subtitles.length > 0))
+    overflow.push({
+      key: "lang",
+      label: t("tracks.title"),
+      onEnter: () => {
+        setMore(false);
+        setPicking(true);
+      },
+    });
+  if (detail.kind === "season" && children.length > 0)
+    overflow.push({
+      key: "watched-season",
+      // It stays reachable: a season watched on somebody else's television is
+      // otherwise sixteen trips into the row and back. What it is not is a
+      // button beside the one that marks a single episode, where the two read
+      // alike and one of them moves twenty items.
+      label: t(seasonWatched ? "detail.markSeasonUnwatched" : "detail.markSeasonWatched"),
+      onEnter: () => {
+        setMore(false);
+        setConfirming(true);
+      },
+    });
+
+  const actions: Action[] = [];
+  if (playable)
+    actions.push({
+      key: "detail-play",
+      label: [
+        resumable ? t("detail.resume") : t("detail.play"),
+        // Which episode, on a season. Play there starts the one in progress or
+        // else the first unwatched, and that is not the one the cursor is on -
+        // so without this the button is the only control on the screen whose
+        // target nothing names.
+        detail.kind === "season" && toPlay ? episodeNumber(toPlay) : "",
+        // Naming the version answers "does this chip start playback or
+        // configure it?" without anyone having to try.
+        detail.versions.length > 1 ? (detail.versions[version]?.label ?? "") : "",
+      ]
+        .filter(Boolean)
+        .join(" \u00b7 "),
+      icon: <PlayIcon className="h-[2.4vh] w-[2.4vh]" />,
+      primary: true,
+      // The first focusable on the page, so reaching it means going back to the
+      // top - the title art and synopsis above it can be reached no other way.
+      onFocused: toTop,
+      onEnter: () =>
+        backend &&
+        toPlay &&
+        void usePlayer.getState().play(backend, toPlay, { version, ...pick(tracksFrom), queue: order }),
+    });
+  if (playable && resumable)
+    actions.push({
+      key: "detail-restart",
+      label: t("detail.fromStart"),
+      onEnter: () =>
+        backend &&
+        toPlay &&
+        void usePlayer
+          .getState()
+          .play(backend, toPlay, { resume: false, version, ...pick(tracksFrom), queue: order }),
+    });
+  // Marking by hand is what a shared server needs: a film watched somewhere
+  // else, or abandoned twenty minutes in and not worth resuming, has no other
+  // way to be put right - and the carry-on row is built from exactly this state.
+  if (playable && watchTarget)
+    actions.push({
+      key: "detail-watched",
+      // Named, because on a season this is about ONE episode and nothing
+      // around it says which: the largest text on the screen is the series, the
+      // episode's own name is a guest's name at 2vh, and no tile is highlighted
+      // while the cursor is up here. The designation is what the tile captions
+      // carry, and it is why the label survives the button becoming a glyph.
+      label: [episodeNumber(watchTarget), t(watched ? "detail.markUnwatched" : "detail.markWatched")]
+        .filter(Boolean)
+        .join(" \u00b7 "),
+      icon: <WatchedIcon on={watched} />,
+      iconOnly: true,
+      onEnter: () => {
+        if (!bounced()) void setWatchedOn(watchTarget, !watched);
+      },
+    });
+  if (overflow.length > 0)
+    actions.push({
+      key: "detail-more",
+      label: t("detail.more"),
+      icon: <MoreIcon />,
+      iconOnly: true,
+      // The items behind this are NOT guarded, deliberately. A repeat of the
+      // press that opens the menu lands on its first item, and the guard that
+      // would refuse it also refuses a real press for 400 ms - silently, which
+      // on a television reads as a broken remote. What the repeat can reach is
+      // a panel that closes with Back, or a confirmation that opens on
+      // "Cancel"; neither does anything that has to be undone, and the audio
+      // button this replaced had no guard at all.
+      onEnter: () => setMore(true),
+    });
+
   return (
     <FocusContext.Provider value={focusKey}>
       <Backdrop item={shown} />
@@ -794,12 +972,23 @@ export function Detail({
           onConfirm={() => {
             setConfirming(false);
             void setWatchedOn(detail, !seasonWatched, children);
-            // Back to the button that asked, which the panel took focus from.
-            setFocus("detail-watched-season");
+            // Back to the button the chain started at, which is the only one of
+            // the three still on screen: the menu that asked closed behind it.
+            setRestore("detail-more");
           }}
           onClose={() => {
             setConfirming(false);
-            setFocus("detail-watched-season");
+            setRestore("detail-more");
+          }}
+        />
+      )}
+      {more && (
+        <MoreMenu
+          items={overflow}
+          onClose={() => {
+            setMore(false);
+            // Back to the button that opened it, the way the two panels below do.
+            setRestore("detail-more");
           }}
         />
       )}
@@ -816,11 +1005,11 @@ export function Detail({
           }}
           onClose={() => {
             setPicking(false);
-            // Back to the button that opened it, the way the confirm above does.
-            // Without it the panel closes onto a cursor that is nowhere, and
-            // whatever puts one back lands on Play - so Back out of the audio
-            // menu moved the highlight to a different button entirely.
-            setFocus("detail-lang");
+            // Back to the button the chain started at, the way the confirm above
+            // does. Without it the panel closes onto a cursor that is nowhere,
+            // and whatever puts one back lands on Play - so Back out of the
+            // audio menu moved the highlight to a different button entirely.
+            setRestore("detail-more");
           }}
         />
       )}
@@ -860,102 +1049,17 @@ export function Detail({
 
               Keyed on the item, so switching episodes builds a fresh one rather
               than carrying the previous synopsis's opened state onto it. */}
-          <Summary key={shown.id} text={shown.summary ?? ""} />
+          {/* Wrapped only to be measured: this is what the episode row keeps
+              on screen when it takes the cursor. */}
+          <div ref={summary}>
+            <Summary key={shown.id} text={shown.summary ?? ""} />
+          </div>
 
           {/* Not on a collection or a playlist: measured, resolveStream answers
               400 for both, so the button accepted OK and did nothing - and it
               was the initial focus on 461 collection screens. Their first
               child is what plays, and it is one row down. */}
-          <div className="mt-[1vh] flex gap-[1.2vw]">
-            {playable && (
-              <FocusButton
-                focusKey="detail-play"
-                // The first focusable on the page, so reaching it means going back
-                // to the top - the title art and synopsis above it can be reached
-                // no other way.
-                onFocused={toTop}
-                onEnter={() =>
-                  backend &&
-                  toPlay &&
-                  void usePlayer.getState().play(backend, toPlay, { version, ...pick(tracksFrom), queue: order })
-                }
-                className="rounded-[1vh] bg-white/15 px-[2.4vw] py-[1.4vh] text-[2.1vh]"
-              >
-                {/* Naming the version on the button answers "does this chip start
-                  playback or configure it?" without anyone having to try. */}
-                {`${resumable ? t("detail.resume") : t("detail.play")}${
-                  detail.versions.length > 1 ? ` · ${detail.versions[version]?.label ?? ""}` : ""
-                }`}
-              </FocusButton>
-            )}
-            {playable && resumable && (
-              <FocusButton
-                focusKey="detail-restart"
-                onEnter={() =>
-                  backend &&
-                  toPlay &&
-                  void usePlayer
-                    .getState()
-                    .play(backend, toPlay, { resume: false, version, ...pick(tracksFrom), queue: order })
-                }
-                className="rounded-[1vh] bg-white/10 px-[2vw] py-[1.4vh] text-[2.1vh]"
-              >
-                {t("detail.fromStart")}
-              </FocusButton>
-            )}
-            {/* Marking by hand is what a shared server needs: a film watched
-                somewhere else, or abandoned twenty minutes in and not worth
-                resuming, has no other way to be put right - and the carry-on
-                row is built from exactly this state. */}
-            {playable && watchTarget && (
-              <FocusButton
-                focusKey="detail-watched"
-                onEnter={() => {
-                  if (!bounced()) void setWatchedOn(watchTarget, !watched);
-                }}
-                className="rounded-[1vh] bg-white/10 px-[2vw] py-[1.4vh] text-[2.1vh]"
-              >
-                {/* Named, because on a season this button is about ONE episode
-                    and nothing around it says which: the largest text on the
-                    screen is the series, the episode's own name is a guest's
-                    name at 2vh, and no tile is highlighted while the cursor is
-                    up here. The designation is what the tile captions carry. */}
-                {[episodeNumber(watchTarget), t(watched ? "detail.markUnwatched" : "detail.markWatched")]
-                  .filter(Boolean)
-                  .join(" \u00b7 ")}
-              </FocusButton>
-            )}
-            {/* And the season as a whole, which is what the ONE button used to
-                do to every episode at once while reading as if it were about
-                one. It stays: a season watched on somebody else's television is
-                otherwise sixteen trips into the row and back. It is also what
-                the arrival screen has instead of a Play button and nothing else
-                - Right from Play used to be a dead press there. */}
-            {detail.kind === "season" && children.length > 0 && (
-              <FocusButton
-                focusKey="detail-watched-season"
-                onEnter={() => {
-                  if (!bounced()) setConfirming(true);
-                }}
-                className="rounded-[1vh] bg-white/10 px-[2vw] py-[1.4vh] text-[2.1vh]"
-              >
-                {t(seasonWatched ? "detail.markSeasonUnwatched" : "detail.markSeasonWatched")}
-              </FocusButton>
-            )}
-          </div>
-
-          {/* One button, not a wall. A film with fifteen embedded subtitles
-              filled the screen with them above the synopsis and the cast, for a
-              choice most people make once, if at all. */}
-          {tracksFrom && (tracksFrom.audio.length > 1 || tracksFrom.subtitles.length > 0) && (
-            <FocusButton
-              focusKey="detail-lang"
-              onEnter={() => setPicking(true)}
-              className="mt-[0.6vh] self-start rounded-[1vh] bg-white/10 px-[2vw] py-[1vh] text-[2vh]"
-            >
-              {`${t("tracks.title")} \u203a`}
-            </FocusButton>
-          )}
+          <Actions actions={actions} />
 
           {/* Only when there is a choice to make. A library keeps the same film
               in two languages as often as in two resolutions, so this is picked
@@ -1033,6 +1137,15 @@ export function Detail({
             // An episode's artwork is a frame from it, which is 16:9 - shown in
             // a poster-shaped tile it was letterboxed into a strip. A season's
             // artwork IS a poster, so only the episodes change shape.
+            // Only on a season, which is the one screen whose synopsis follows
+            // the cursor. Everywhere else it describes the page itself and has
+            // no claim on the room the row needs.
+            keepAbove={detail.kind === "season" ? summary : undefined}
+            // And the same screen is the one that has to say which episode it
+            // is describing once the cursor is up on the buttons. `shown` is
+            // the season itself until something is highlighted, which is the
+            // state where there is nothing to mark.
+            describing={shown !== detail ? shown.id : undefined}
             posterUrl={detail.kind === "season" ? wide : poster}
             aspect={detail.kind === "season" ? 16 / 9 : undefined}
             heightVh={detail.kind === "season" ? 15 : 22}

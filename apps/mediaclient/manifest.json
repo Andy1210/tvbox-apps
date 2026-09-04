@@ -5,8 +5,12 @@
     "hu": "M\u00e9dia",
     "en": "Media"
   },
-  "version": "0.63.1",
+  "version": "0.64.0",
   "changelog": [
+    {
+      "version": "0.64.0",
+      "notes": "The buttons above a film or an episode list are on one line now. Play is where it was, with the mark-as-watched button beside it as a tick you can read at a glance; audio and subtitles, and marking a whole season watched, have moved behind a \u2026 button, because neither is wanted often. A line under the row names whichever of those glyphs is selected, so nothing is left to the shape alone - it is a line rather than words inside the button, so the buttons never move as you go along them. On a series' episode list that matters twice over: the description under the title is the highlighted episode's, and with three lines of buttons above it, it scrolled off the top as soon as you moved down into the episodes - the list now stops low enough to leave it showing, so you can read about each episode as you move along them. The play button there also says \"Carry on\" when it would carry on, with \"From the start\" beside it, the way a film's page always has: before, a season had no resume point of its own to read, so it said \"Play\" even over a half-watched episode and the start-again button never appeared at all. And it names the episode it would start, which is not necessarily the one the cursor is on. The episode the page is describing now keeps a faint outline of its own while the cursor is up on the buttons, so you can see which one they are about instead of having to read it off them."
+    },
     {
       "version": "0.63.1",
       "notes": "The season you are watching is no longer underlined on the row of seasons. It is still the brighter, bolder chip, which is enough to see which one it is."
