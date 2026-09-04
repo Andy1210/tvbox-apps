@@ -142,7 +142,13 @@ export const remote = {
  * `expected null to be 'profile-u1'`. Delaying a screen's initial focus by 5 ms
  * reproduces it, and fails 19 tests across 7 files in this suite.
  *
- * So: assert a focus key through this, never straight after a counted settle.
+ * So an assertion about where the cursor ARRIVES belongs here rather than
+ * straight after a counted settle.
+ *
+ * Not every focus assertion, though. A test that asserts the cursor did NOT
+ * move - that a press was refused, that a panel held it, that a container did
+ * not swallow it - must read the key rather than wait for it, because waiting
+ * would sit there until the thing it is guarding against happened.
  */
 export async function focusBecomes(key: string): Promise<void> {
   await waitFor(() => expect(getCurrentFocusKey()).toBe(key));
