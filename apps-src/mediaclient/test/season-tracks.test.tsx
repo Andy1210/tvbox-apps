@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 
 /**
  * Which episode's track list a chosen language is resolved against.
@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
  * wherever the cursor is, while Play starts the episode in progress.
  *
  * Measured on this library: one language sits at different ordinals across the
- * episodes of 50 of 132 seasons, subtitles mostly. So choosing the Hungarian
+ * episodes of 210 of 566 seasons, subtitles mostly. So choosing the Hungarian
  * subtitle and pressing Play started the English one, silently.
  */
 
@@ -55,7 +55,7 @@ interface Harness {
  * the cursor will be on. Their orders disagree, so an ordinal read off one and
  * handed to the other names the other language.
  */
-async function open(): Promise<Harness> {
+async function open(opts?: { holdTarget?: boolean; external?: boolean }): Promise<Harness> {
   const { render, act } = await import("@testing-library/react");
   const { configureI18n } = await import("@sdk");
   const { Detail } = await import("../Detail");
@@ -85,13 +85,15 @@ async function open(): Promise<Harness> {
   const versions: Record<string, MediaVersion> = {
     // English first here...
     [episodes[0]!.id]: version(
-      [aud(0, "English"), aud(1, "Hungarian")],
-      [sub(0, "English"), sub(1, "Hungarian")],
+      [aud(0, "English"), aud(1, "magyar")],
+      // An external subtitle is numbered NEGATIVELY and per item, so an id or
+      // an ordinal from another episode means something else here.
+      opts?.external ? [sub(0, "English"), sub(-1, "magyar")] : [sub(0, "English"), sub(1, "magyar")],
     ),
     // ...and Hungarian first here.
     [episodes[1]!.id]: version(
-      [aud(0, "Hungarian"), aud(1, "English")],
-      [sub(0, "Hungarian"), sub(1, "English")],
+      [aud(0, "magyar"), aud(1, "English")],
+      [sub(0, "magyar"), sub(1, "English")],
     ),
   };
 
@@ -112,7 +114,11 @@ async function open(): Promise<Harness> {
   useApp.setState({
     backend: {
       kind: "plex",
-      item: async (id: string) => detailOf(byId.get(id) ?? season),
+      item: async (id: string) => {
+        // A prefetch that never answers, for the window before it lands.
+        if (opts?.holdTarget && id === episodes[0]!.id) await new Promise(() => {});
+        return detailOf(byId.get(id) ?? season);
+      },
       children: async (id: string) => (id === season.id ? episodes : []),
       setWatched: async () => {},
       posterUrl: () => undefined,
@@ -179,12 +185,27 @@ async function chooseSubtitle(language: string): Promise<void> {
   await press("more-lang");
   // The panel lists the tracks of the episode the screen is DESCRIBING, which
   // is the point: the language is picked off the highlighted episode.
-  await press(`lp-sub-s${language === "Hungarian" ? 0 : 1}-${language}`);
+  await press(`lp-sub-s${language === "magyar" ? 0 : 1}-${language}`);
   await press("lp-close");
 }
 
-beforeEach(() => {
+/**
+ * The store's `play` is module state and outlives this file.
+ *
+ * Vitest isolates by file today, so replacing it is contained - but measured,
+ * with isolation off this was the one file in the suite that broke others
+ * (`queue.test.ts` calls the real `play` and got the stub). Restoring it costs
+ * nothing and removes the dependency on a config setting.
+ */
+let realPlay: unknown;
+beforeEach(async () => {
   vi.restoreAllMocks();
+  const { usePlayer } = await import("../playback/player");
+  realPlay ??= usePlayer.getState().play;
+});
+afterEach(async () => {
+  const { usePlayer } = await import("../playback/player");
+  usePlayer.setState({ play: realPlay } as never);
 });
 
 describe("a language chosen on a season screen", () => {
@@ -192,7 +213,7 @@ describe("a language chosen on a season screen", () => {
     const h = await open();
     // The cursor on episode 2, whose subtitles read Hungarian, English.
     await focusOn(`children-${h.season.id}-${h.episodes[1]!.id}`);
-    await chooseSubtitle("Hungarian");
+    await chooseSubtitle("magyar");
 
     await focusOn("detail-play");
     await press("detail-play");
@@ -209,7 +230,7 @@ describe("a language chosen on a season screen", () => {
     // an episode other than the highlighted one.
     const h = await open();
     await focusOn(`children-${h.season.id}-${h.episodes[1]!.id}`);
-    await chooseSubtitle("Hungarian");
+    await chooseSubtitle("magyar");
 
     await focusOn("detail-restart");
     await press("detail-restart");
@@ -233,7 +254,60 @@ describe("a language chosen on a season screen", () => {
     await focusOn(`children-${h.season.id}-${h.episodes[1]!.id}`);
     await press("detail-more");
     await press("more-lang");
-    expect(el("lp-sub-s0-Hungarian"), "episode 2 has Hungarian first").toBeTruthy();
+    expect(el("lp-sub-s0-magyar"), "episode 2 has magyar first").toBeTruthy();
     expect(el("lp-sub-s1-English"), "and English second").toBeTruthy();
+  });
+});
+
+describe("what happens when the started episode's tracks are not known", () => {
+  it("passes no ordinal rather than one read off the wrong episode", async () => {
+    // The prefetch is one round trip wide, and the row can move under it - a
+    // mark, or a resume point landing, changes which episode Play starts. The
+    // old fallback handed over the HIGHLIGHTED episode's ordinal, which is the
+    // whole bug; losing the choice for a moment is the harmless direction.
+    const h = await open({ holdTarget: true });
+    await focusOn(`children-${h.season.id}-${h.episodes[1]!.id}`);
+    await chooseSubtitle("magyar");
+
+    await focusOn("detail-play");
+    await press("detail-play");
+    expect(h.played).toEqual([{ id: h.episodes[0]!.id, audio: undefined, subtitle: undefined }]);
+  });
+});
+
+describe("an audio language chosen on a season screen", () => {
+  it("is resolved against the episode Play starts", async () => {
+    // The same rule as the subtitles, and worth its own case: `pick` resolves
+    // the two independently and only one of them was covered.
+    const h = await open();
+    await focusOn(`children-${h.season.id}-${h.episodes[1]!.id}`);
+    await press("detail-more");
+    await press("more-lang");
+    // Episode 2 lists magyar first; episode 1 lists it second.
+    await press("lp-aud-0");
+    await press("lp-close");
+
+    await focusOn("detail-play");
+    await press("detail-play");
+    expect(h.played).toEqual([{ id: h.episodes[0]!.id, audio: 1, subtitle: undefined }]);
+  });
+});
+
+describe("an external subtitle", () => {
+  it("is not carried to another episode by its id", async () => {
+    // A sidecar is numbered negatively and per item, so `-1` on one episode and
+    // `-1` on another are different FILES. The choice is kept by id when the
+    // track has no language to key on, and an id only means anything inside the
+    // item it came from - so the honest answer on a different episode is none.
+    const h = await open({ external: true });
+    await focusOn(`children-${h.season.id}-${h.episodes[1]!.id}`);
+    // Episode 2's magyar subtitle is an ordinary internal one at ordinal 0;
+    // episode 1's is external, at -1. Choosing by LANGUAGE still resolves,
+    // because the language is what carries - and it resolves to -1, which is
+    // episode 1's own file rather than a number borrowed from episode 2.
+    await chooseSubtitle("magyar");
+    await focusOn("detail-play");
+    await press("detail-play");
+    expect(h.played).toEqual([{ id: h.episodes[0]!.id, audio: undefined, subtitle: -1 }]);
   });
 });

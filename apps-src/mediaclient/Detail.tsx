@@ -747,8 +747,16 @@ export function Detail({
    * episode Play would start usually does not.
    */
   const playTargetId = detail?.kind === "season" ? toPlayable(detail, children)?.id : undefined;
+  /**
+   * The first episode is already being fetched, for the tracks the buttons show
+   * before anything is highlighted - and the metadata cache has no in-flight
+   * deduplication, so asking for the same document again is a second request
+   * rather than a cache hit. On a season nobody has started, which is the
+   * commonest one there is, that is exactly the same episode.
+   */
+  const alreadyAsked = playTargetId !== undefined && playTargetId === children[0]?.id;
   useEffect(() => {
-    if (!backend || !playTargetId) return;
+    if (!backend || !playTargetId || alreadyAsked) return;
     let live = true;
     void backend
       .item(playTargetId)
@@ -764,7 +772,7 @@ export function Detail({
     return () => {
       live = false;
     };
-  }, [backend, playTargetId]);
+  }, [backend, playTargetId, alreadyAsked]);
 
   // Before the early returns, as hooks must be. `detail` is null while loading,
   // which is simply no theme yet.
@@ -879,20 +887,25 @@ export function Detail({
    * The tracks Play resolves its choice against, which are the STARTED
    * episode's - not the highlighted one's.
    *
-   * `tracksFrom` describes what the screen is showing, and on a season that is
+   * `tracksFrom` describes what the screen is SHOWING, and on a season that is
    * wherever the cursor is; Play starts the episode in progress instead. An
-   * ordinal read off one and handed to the other names a different language:
+   * ordinal read off one and handed to the other names a different track:
    * measured on this server, one language sits at different ordinals across the
-   * episodes of 50 of 132 seasons, so choosing the Hungarian subtitle and
-   * pressing Play started the English one.
+   * episodes of 210 of 566 seasons.
    *
-   * Guarded on the id, because the answer arrives a round trip after the
-   * episode it belongs to was decided and the row can move under it. With no
-   * answer - a film, a cold fetch, a failed one - this is the highlighted
-   * episode's, which is what the screen always used.
+   * Whichever copy of that episode is already in hand - the one fetched for
+   * this, the highlighted one when the cursor is on it, the first child, or the
+   * item itself on a film - and NOTHING when none of them is it. Falling back
+   * to the highlighted episode's list is what the screen used to do, and it is
+   * the bug: a stale answer is one round trip wide, but a choice resolved
+   * against the wrong list names a real, different track, while no answer at
+   * all only loses the choice. A film resolves against `detail` and is
+   * untouched.
    */
-  const playTracks =
-    (toPlay && playTarget?.id === toPlay.id ? playTarget.versions[version] : undefined) ?? tracksFrom;
+  const playSource = toPlay
+    ? [playTarget, focused, firstChild, detail].find((x) => x?.id === toPlay.id)
+    : undefined;
+  const playTracks = playSource?.versions[version];
 
   /**
    * The chosen tracks, resolved against whatever is about to play.
@@ -1057,6 +1070,10 @@ export function Detail({
       {picking && (
         <LanguagePicker
           version={tracksFrom}
+          // Which episode these tracks are, because on a season they are the
+          // HIGHLIGHTED one's while Play starts another - the panel and the
+          // button beside it authoritatively describe different episodes.
+          designation={episodeNumber(shown)}
           audio={pick(tracksFrom).audio}
           subtitle={pick(tracksFrom).subtitle}
           onAudio={(ordinal) => setAudioLang(tracksFrom?.audio.find((a) => a.ordinal === ordinal)?.language)}
