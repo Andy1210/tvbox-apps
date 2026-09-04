@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import type { ItemDetail, MediaItem } from "../backends/types";
 
-const { setupRemote, flushFocus, setFocus } = await import("./remote");
+const { setupRemote, flushFocus, setFocus, focusEnters, getCurrentFocusKey } = await import("./remote");
 setupRemote();
 
 const TICK = 'path[d="M4 12.5l5.5 5.5L20 7"]';
@@ -277,13 +277,18 @@ describe("marking the whole season", () => {
     // The only confirmation in this app, and the focus placement is the point:
     // a remote repeats and it bounces, so the press that opens the panel can
     // arrive again by itself - landing on "no" makes a doubled press a cancel.
-    const { getCurrentFocusKey } = await import("@noriginmedia/norigin-spatial-navigation");
     const h = await open();
     await openMore();
     await press("more-watched-season");
     expect(h.marks, "nothing has been asked of the server yet").toEqual([]);
     expect(document.body.textContent).toContain("Mark the whole season as watched?");
     expect(document.body.textContent, "and it says how much it moves").toContain("Episodes affected: 2");
+    // Waited for: the panel's own cursor lands on a timer, so a counted settle
+    // reads whatever was focused behind it. The wait stops at the panel rather
+    // than at the answer, because a panel that opens on "yes" and corrects
+    // itself a moment later is exactly the failure this test is about - and a
+    // wait for "confirm-no" would sit through the correction and pass.
+    await focusEnters("confirm-");
     expect(getCurrentFocusKey()).toBe("confirm-no");
   });
 
@@ -503,7 +508,10 @@ describe("a held OK button against a slow server", () => {
       await new Promise((r) => setTimeout(r, 120));
     }
     await new Promise((r) => setTimeout(r, 800));
-    expect(h.marks.map((m) => m.watched), "one command for the whole hold").toEqual([true]);
+    expect(
+      h.marks.map((m) => m.watched),
+      "one command for the whole hold",
+    ).toEqual([true]);
   });
 });
 
@@ -523,7 +531,7 @@ describe("an answer given quickly", () => {
 });
 
 describe("a season of one episode", () => {
-  it("does not say \"1 episodes\"", async () => {
+  it('does not say "1 episodes"', async () => {
     // The count is interpolated into one sentence, and English disagrees with
     // itself at one. The wording carries no number agreement at all now.
     const { render, act } = await import("@testing-library/react");

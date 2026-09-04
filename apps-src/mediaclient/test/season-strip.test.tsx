@@ -12,7 +12,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import type { ItemDetail, MediaItem } from "../backends/types";
 
-const { setupRemote, flushFocus, setFocus, getCurrentFocusKey, remote, place } = await import("./remote");
+const { setupRemote, flushFocus, setFocus, getCurrentFocusKey, remote, place, focusBecomes, focusEnters } =
+  await import("./remote");
 setupRemote();
 
 function detailOf(item: MediaItem): ItemDetail {
@@ -148,11 +149,10 @@ function layout(h: Harness): void {
   };
   at('[data-sfocus="detail-play"]', 100, 100, 300, 70);
   h.seasons.forEach((_s, i) => at(`[data-sfocus="${chipKey(i)}"]`, 100 + i * 220, 300, 200, 60));
-  // The episode tiles carry no `data-sfocus` - only FocusButton does - so there
-  // is nothing to lay out for them here. Both transitions across that boundary
-  // go through this screen's own onArrowPress handlers rather than through
-  // geometry, which is what these tests measure; the geometry half was measured
-  // on a box.
+  // The episode tiles are deliberately left unplaced. Both transitions across
+  // that boundary go through this screen's own onArrowPress handlers rather
+  // than through geometry, which is what these tests measure; the geometry half
+  // was measured on a box.
 }
 
 async function settle(): Promise<void> {
@@ -165,6 +165,7 @@ async function settle(): Promise<void> {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe("the season strip on an episode list", () => {
@@ -210,6 +211,9 @@ describe("the season strip on an episode list", () => {
   it("is what Up from the episodes reaches, and Down comes back", async () => {
     const h = await open();
     layout(h);
+    // The screen's own landing first: it arrives on a timer, and one that lands
+    // after the cursor is placed below takes it straight back.
+    await focusBecomes("detail-play");
     await setFocus(`children-${h.current.id}-${h.episodes[0]!.id}`);
     await settle();
     await remote.up();
@@ -224,6 +228,9 @@ describe("the season strip on an episode list", () => {
   it("reaches the play button above it", async () => {
     const h = await open();
     layout(h);
+    // The screen's own landing first: it arrives on a timer, and one that lands
+    // after the cursor is placed below takes it straight back.
+    await focusBecomes("detail-play");
     await setFocus(chipKey(h.seasons.indexOf(h.current)));
     await settle();
     await remote.up();
@@ -234,6 +241,9 @@ describe("the season strip on an episode list", () => {
   it("goes round at the ends rather than off the strip", async () => {
     const h = await open();
     layout(h);
+    // The screen's own landing first: it arrives on a timer, and one that lands
+    // after the cursor is placed below takes it straight back.
+    await focusBecomes("detail-play");
     await setFocus(chipKey(0));
     await settle();
     await remote.left();
@@ -272,13 +282,18 @@ describe("the season strip on an episode list", () => {
 
   it("opens on the strip when that is where it was opened from", async () => {
     const h = await open({ focusSeasons: true });
-    expect(getCurrentFocusKey()).toBe(chipKey(h.seasons.indexOf(h.current)));
+    await focusBecomes(chipKey(h.seasons.indexOf(h.current)));
   });
 
   it("opens where it always did when there is no strip to open on", async () => {
     // A series with one season, arrived at with the flag set: the flag must not
     // park the cursor on a key that never mounts, which is a dead remote.
     await open({ seasonCount: 1, focusSeasons: true });
+    // Waited to the page's own keys, then read. A wait for the play button
+    // alone sits through the failure this guards: parking on the strip and
+    // recovering a turn later is one swallowed press, and it looks identical
+    // from here to having opened on the right thing.
+    await focusEnters("detail-");
     expect(getCurrentFocusKey()).toBe("detail-play");
   });
 
@@ -293,7 +308,7 @@ describe("the season strip on an episode list", () => {
         { id: "other-b", kind: "season", title: "Második", index: 2 },
       ],
     });
-    expect(getCurrentFocusKey()).toBe(chipKey(0));
+    await focusBecomes(chipKey(0));
   });
 
   it("tells the season being shown apart by weight, which focus does not take", async () => {
@@ -308,18 +323,40 @@ describe("the season strip on an episode list", () => {
   it("places its cursor without waiting for the season list", async () => {
     // The list is a second request. Waiting for it left the screen with nothing
     // highlighted, which on a television is a remote that does nothing.
+    // On a LOGICAL clock, not the wall clock, and that is the whole instrument.
+    // Everywhere else in this suite a counted settle is what makes an assertion
+    // read null on a busy machine - but here the budget IS the subject, and a
+    // wait would accept any latency at all. Fake timers give the landing a fixed
+    // number of turns rather than a number of milliseconds, so a screen that
+    // takes 300 ms to light up still fails while a machine under load does not.
+    vi.useFakeTimers();
     const h = await open({ focusSeasons: true, holdSeasons: true });
+    // The budget, spent explicitly. Generous against a landing that is merely
+    // late by a few turns - the suite's own repro hook pushes it out by 5 - and
+    // far under the tenth of a second at which a person notices a screen that
+    // is showing nothing to press.
+    const { act } = await import("@testing-library/react");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(40);
+    });
     expect(getCurrentFocusKey()).toBe("detail-play");
     expect(chips()).toEqual([]);
+
+    vi.useRealTimers();
     h.releaseSeasons?.();
     await settle();
     // ...and once it answers, the strip takes the cursor, since nobody moved it.
-    expect(getCurrentFocusKey()).toBe(chipKey(h.seasons.indexOf(h.current)));
+    await focusBecomes(chipKey(h.seasons.indexOf(h.current)));
   });
 
   it("leaves a late season list where the cursor was put by a press", async () => {
     const h = await open({ focusSeasons: true, holdSeasons: true });
     layout(h);
+    // The screen's own landing first: it arrives on a timer, and one that lands
+    // after the press below takes the cursor straight back - which would make
+    // this test pass or fail on how busy the machine is rather than on what the
+    // strip does.
+    await focusBecomes("detail-play");
     // Somebody is already reading the episodes when the list answers.
     await setFocus(`children-${h.current.id}-${h.episodes[1]!.id}`);
     await settle();

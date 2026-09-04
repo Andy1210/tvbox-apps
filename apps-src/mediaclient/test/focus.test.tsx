@@ -4,7 +4,16 @@ import { configureI18n } from "@sdk";
 import { Home } from "../Home";
 import { Message } from "../Message";
 import { useApp } from "../state";
-import { setupRemote, place, remote, setFocus, getCurrentFocusKey, flushFocus } from "./remote";
+import {
+  setupRemote,
+  place,
+  remote,
+  setFocus,
+  getCurrentFocusKey,
+  flushFocus,
+  focusBecomes,
+  focusLands,
+} from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaBackend, MediaItem } from "../backends/types";
@@ -74,21 +83,18 @@ describe("the remote", () => {
     // with; the top rail is one press up from it.
     //
     // Waited for rather than asserted after a fixed settle. This failed once on
-    // CI - `expected null to be "ondeck-i1"` - on a commit whose other run of
-    // the same tree passed, and it did not reproduce locally in 8 runs under 4x
-    // CPU load, with or without this change. So this is not a proven fix: it
-    // removes the fixed-tick assumption that is the usual cause of exactly that
-    // failure, and waits for the condition the test is actually about.
-    await waitFor(async () => {
-      await flushFocus();
-      expect(getCurrentFocusKey()).toBe("ondeck-i1");
-    });
+    // CI - `expected null to be "ondeck-i1"` - and the same shape later failed a
+    // run that was publishing a release. Delaying this screen's initial focus by
+    // 5 ms reproduces it on demand.
+    await focusBecomes("ondeck-i1");
   });
 
   it("moves along a row when Right is pressed", async () => {
     render(<Home />);
     await waitFor(() => expect(screen.getByText("Film 1")).toBeInTheDocument());
-    await settle();
+    // Before the cursor is moved by hand: this screen lands its own on a timer,
+    // and a landing that arrives afterwards takes it straight back.
+    await focusLands();
 
     // happy-dom has no layout engine, so the harness supplies the geometry the
     // library resolves directions against.
@@ -110,7 +116,7 @@ describe("the remote", () => {
     // column that happened to line up.
     render(<Home />);
     await waitFor(() => expect(screen.getByText("Movies")).toBeInTheDocument());
-    await settle();
+    await focusLands();
 
     place(screen.getByText("Movies"), 0, 0, 120, 60);
     place(screen.getByText(en.home.search), 140, 0, 120, 60);
@@ -127,9 +133,8 @@ describe("the remote", () => {
     useApp.setState({ backend: stubBackend({ onDeck: async () => [] }) });
     render(<Home />);
     await waitFor(() => expect(screen.getByText("Movies")).toBeInTheDocument());
-    await settle();
 
-    expect(getCurrentFocusKey()).toBe("lib-1");
+    await focusBecomes("lib-1");
   });
 });
 
@@ -139,19 +144,17 @@ describe("failure screens", () => {
     // again", and there is no control that signs in. Back returns to a screen
     // that fails the same way, so the remote has nowhere to go at all.
     render(<Message failure={{ kind: "signed-out" }} />);
-    await settle();
 
     expect(screen.getByText(en.error.signInAgain)).toBeInTheDocument();
-    expect(getCurrentFocusKey()).toBe("msg-signin");
+    await focusBecomes("msg-signin");
   });
 
   it("retry is pressable on a reachable failure", async () => {
     const onRetry = vi.fn();
     render(<Message failure={{ kind: "unreachable" }} onRetry={onRetry} />);
     place(screen.getByText(en.error.retry), 0, 0);
-    await settle();
 
-    expect(getCurrentFocusKey()).toBe("msg-retry");
+    await focusBecomes("msg-retry");
     await remote.ok();
     expect(onRetry).toHaveBeenCalledOnce();
   });

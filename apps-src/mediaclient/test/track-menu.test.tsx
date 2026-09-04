@@ -1,9 +1,18 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { act, render } from "@testing-library/react";
 import { configureI18n } from "@sdk";
 import { doesFocusableExist } from "@noriginmedia/norigin-spatial-navigation";
 import { TrackMenu } from "../TrackMenu";
-import { setupRemote, setFocus, getCurrentFocusKey, flushFocus, remote, place } from "./remote";
+import {
+  setupRemote,
+  setFocus,
+  getCurrentFocusKey,
+  flushFocus,
+  remote,
+  place,
+  focusLands,
+  focusEnters,
+} from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaVersion } from "../backends/types";
@@ -58,14 +67,36 @@ async function settle(): Promise<void> {
   }
 }
 
-beforeEach(async () => {
-  await act(async () => setFocus(""));
-});
+/**
+ * The menu with its subtitle search open, reached the way a press reaches it.
+ *
+ * Rendering straight into the search is a state the box never has. The
+ * component does not remount when the search opens, so the effect that follows
+ * the layer deliberately skips its first run - and the one-shot initial focus,
+ * computed from the audio list whichever view is showing, then aims the cursor
+ * at a row the search does not draw, with nothing to move it off.
+ */
+async function openSearch(
+  over: Partial<React.ComponentProps<typeof TrackMenu>> = {},
+): Promise<ReturnType<typeof render>> {
+  const view = render(menu(over));
+  await settle();
+  await focusLands();
+  // From the row the press comes from, which is also the one the search view
+  // does not draw - the whole reason the cursor has to be taken along.
+  await setFocus("sub-search");
+
+  view.rerender(menu({ ...over, searchOpen: true }));
+  await settle();
+  await focusEnters("lang-");
+  return view;
+}
 
 describe("the subtitle search", () => {
   it("is one row on the track menu, not a column of its own", async () => {
     render(menu());
     await settle();
+    await focusLands();
 
     expect(doesFocusableExist("sub-search"), "the way in is there").toBe(true);
     // None of what the search needs is on the menu itself.
@@ -80,25 +111,32 @@ describe("the subtitle search", () => {
     // on the screen it has just opened.
     const view = render(menu());
     await settle();
+    await focusLands();
     await act(async () => setFocus("sub-search"));
     await flushFocus();
 
     view.rerender(menu({ searchOpen: true }));
     await settle();
+    // The view's own landing, not any landing: the cursor is already on a real
+    // key here, so a wait for "something is lit" is over before this screen has
+    // done anything at all.
+    await focusEnters("lang-");
 
     const at = String(getCurrentFocusKey());
     expect(doesFocusableExist(at), `the cursor was left on ${at}`).toBe(true);
-    expect(at.startsWith("lang-"), `the cursor was left on ${at}`).toBe(true);
   });
 
   it("puts the cursor back on the row it came from", async () => {
-    const view = render(menu({ searchOpen: true }));
-    await settle();
+    const view = await openSearch();
     await act(async () => setFocus("lang-hu"));
     await flushFocus();
 
     view.rerender(menu());
     await settle();
+    // Waited to the subtitle rows, then read: landing on a subtitle TRACK and
+    // correcting is a different screen from landing on the row that was left,
+    // and a wait for the answer itself would not tell them apart.
+    await focusEnters("sub-");
 
     expect(getCurrentFocusKey()).toBe("sub-search");
   });
@@ -107,8 +145,11 @@ describe("the subtitle search", () => {
     // A filled chip is exactly what focus looks like in this app - a focused row
     // turns solid white - so the chosen language read as the focused one. Two
     // things claiming the same signal, and neither saying which was which.
-    render(menu({ searchOpen: true, searchLanguage: "en" }));
-    await settle();
+    await openSearch({ searchLanguage: "en" });
+    // Off both of the rows being compared. Opening the search puts the cursor
+    // on the chosen language, which is the very row this test needs unfilled -
+    // and the two signals being indistinguishable is what it is about.
+    await setFocus("lang-de");
 
     const chosen = rowFor("EN");
     const other = rowFor("HU");
@@ -124,8 +165,7 @@ describe("the subtitle search", () => {
   });
 
   it("answers the remote in the search view", async () => {
-    render(menu({ searchOpen: true }));
-    await settle();
+    await openSearch();
 
     await remote.down();
     await settle();
@@ -174,6 +214,9 @@ describe("the subtitle offset row", () => {
       }),
     );
     await settle();
+    // The menu lands its own cursor on a timer; a landing that arrives after
+    // this takes back whatever a test sets in between.
+    await focusLands();
     const at = (key: string, x: number, y: number, w: number, h: number): void => {
       const node = document.querySelector(`[data-sfocus="${key}"]`);
       if (node) place(node, x, y, w, h);

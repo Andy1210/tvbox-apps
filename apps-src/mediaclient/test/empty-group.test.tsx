@@ -6,7 +6,7 @@ import { configureI18n } from "@sdk";
 import { Detail } from "../Detail";
 import { useApp } from "../state";
 import { doesFocusableExist } from "@noriginmedia/norigin-spatial-navigation";
-import { setupRemote, setFocus, getCurrentFocusKey, flushFocus, remote } from "./remote";
+import { setupRemote, setFocus, getCurrentFocusKey, flushFocus, remote, focusLands } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { ItemDetail, MediaBackend } from "../backends/types";
@@ -62,17 +62,12 @@ describe("a group with nothing in it", () => {
     });
     await flushFocus();
 
-    // The message renders on the first commit; the focus it asks for lands a
-    // macrotask later, because focusables register in their own effect.
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
-    });
-    await flushFocus();
+    // The message renders on the first commit; the focus it asks for lands on a
+    // timer, because focusables register in their own effect - so this waits
+    // for the landing rather than counting the turns it usually takes.
+    await focusLands();
 
     expect(document.body.textContent).toContain(en.detail.emptyCollection);
-
-    const key = getCurrentFocusKey();
-    expect(key, `initial focus was ${String(key)}`).toBeTruthy();
 
     // And it answers the remote rather than only Back.
     await remote.down();
@@ -112,12 +107,7 @@ describe("a series screen", () => {
     });
     await act(async () => setFocus(""));
     render(<Detail itemId="sh1" />);
-    for (let i = 0; i < 3; i++) {
-      await act(async () => {
-        await new Promise((r) => setTimeout(r, 0));
-      });
-      await flushFocus();
-    }
+    await focusLands();
 
     const key = getCurrentFocusKey();
     expect(key, "a show must not open on the play button it does not render").not.toBe("detail-play");
@@ -238,12 +228,7 @@ describe("a screen that could not load", () => {
     });
     await act(async () => setFocus(""));
     render(<Detail itemId="s1" />);
-    for (let i = 0; i < 3; i++) {
-      await act(async () => {
-        await new Promise((r) => setTimeout(r, 0));
-      });
-      await flushFocus();
-    }
+    await focusLands();
 
     const arrived = String(getCurrentFocusKey());
     expect(arrived.startsWith("msg-"), `arrived on ${arrived}`).toBe(true);

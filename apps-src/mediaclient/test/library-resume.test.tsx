@@ -5,7 +5,7 @@ import { configureI18n } from "@sdk";
 import { Library, arrivalCells } from "../Library";
 import { useApp } from "../state";
 import { clearLibraryViews } from "../libraryView";
-import { setupRemote, setFocus, getCurrentFocusKey, flushFocus, remote } from "./remote";
+import { setupRemote, setFocus, getCurrentFocusKey, flushFocus, remote, clearFocus } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaBackend, MediaItem } from "../backends/types";
@@ -187,9 +187,6 @@ beforeEach(async () => {
     session: { kind: "plex", token: "t1", accountToken: "t1", profileId: "p1", profileName: "One" } as never,
   });
   window.innerHeight = WINDOW_H;
-  // Focus is library-global and survives an unmount, so a leftover from the
-  // previous test would let the next one pass without the screen doing anything.
-  await act(async () => setFocus(""));
 });
 
 afterEach(() => {
@@ -197,15 +194,32 @@ afterEach(() => {
   delete (window.HTMLElement.prototype as unknown as { animate?: unknown }).animate;
 });
 
-/** Mount the library and let it settle, including its deferred first focus. */
-async function open(): Promise<{ container: HTMLElement; unmount: () => void }> {
+/**
+ * A library screen, open and settled.
+ *
+ * `startsOn` is the cell it will land on: 0 with nothing remembered and the
+ * remembered one on a return. A screen that fails and draws no grid at all is
+ * mounted by hand instead, since there is no cell to wait for.
+ *
+ * Waited for rather than counted, because the landing is on a timer that is
+ * itself gated on the resume having resolved - so a counted settle both reads
+ * it too early AND lets it arrive after whatever the test does next, taking the
+ * cursor back. That second shape is what nearly every caller here would hit.
+ *
+ * Read off THIS screen rather than from `getCurrentFocusKey`, which every
+ * caller that passes a cell would defeat: most of them mount a second library
+ * after leaving the first on that very cell, and the key outlives the unmount,
+ * so the wait would be over before the new screen had drawn anything.
+ */
+async function open(startsOn = 0): Promise<{ container: HTMLElement; unmount: () => void }> {
   const { container, unmount } = render(<Library libraryId="1" title="Movies" />);
   await waitFor(() => expect(container.querySelector("[style*='will-change']")).toBeTruthy());
   await settle();
+  await waitFor(() => expect(litCell(container)).toBe(`cell-${startsOn}`));
   return { container, unmount };
 }
 
-/** The initial focus is deferred by a timeout; the scheduler resolves after it. */
+/** For everything that is not a screen arriving. */
 async function settle(): Promise<void> {
   await act(async () => {
     await new Promise((r) => setTimeout(r, 0));
@@ -221,6 +235,18 @@ async function settle(): Promise<void> {
  */
 function litKey(container: HTMLElement): string | null | undefined {
   return container.querySelector('[data-sfocus][class*="!bg-white"]')?.getAttribute("data-sfocus");
+}
+
+/**
+ * The same, for a grid cell.
+ *
+ * A tile draws the cursor as a ring on its poster rather than as a fill, and
+ * the ring sits one element inside the node that carries the key. The `~=`
+ * matches the class as a whole word, which is what keeps the dimmer
+ * `ring-white/55` a tile wears while the cursor is elsewhere out of the answer.
+ */
+function litCell(container: HTMLElement): string | null | undefined {
+  return container.querySelector('[class~="ring-white"]')?.closest("[data-sfocus]")?.getAttribute("data-sfocus");
 }
 
 /** A letter in the strip, once the strip has arrived. */
@@ -291,11 +317,12 @@ describe("returning to a library", () => {
     expect(getCurrentFocusKey()).toBe(`cell-${DEEP}`);
 
     first.unmount();
-    // The library's own focus survives an unmount, so without this the assertion
-    // below would hold on a build that restores nothing at all.
-    await act(async () => setFocus(""));
+    // The library's own focus survives an unmount, and norigin re-lights a key
+    // by itself when a focusable registers under it again - so without a real
+    // clear the assertion below would hold on a build that restores nothing.
+    await clearFocus();
 
-    const again = await open();
+    const again = await open(DEEP);
     expect(getCurrentFocusKey()).toBe(`cell-${DEEP}`);
     expect(offsetOf(again.container)).toBe(left);
     // The bug: an alphabetical list at the top, with the title just opened off
@@ -315,7 +342,7 @@ describe("returning to a library", () => {
     await setFocus(`cell-${DEEP}`);
     await flushFocus();
     first.unmount();
-    await act(async () => setFocus(""));
+    await clearFocus();
 
     // Page 0 held open, so "asked in the same commit" and "asked a round trip
     // later" are two different observations rather than the same end state.
@@ -356,7 +383,9 @@ describe("returning to a library", () => {
     expect(again.container.textContent).toContain(`Zeta ${DEEP}`);
 
     answer();
-    await settle();
+    // Waited for, like `open()` does: this screen was mounted by hand rather
+    // than through it, and the cursor's landing is on a timer of its own.
+    await waitFor(() => expect(litCell(again.container)).toBe(`cell-${DEEP}`));
     const ring = again.container.querySelector(".ring-white")?.parentElement;
     expect(ring?.textContent).toContain(`${DEEP}`);
   });
@@ -367,9 +396,9 @@ describe("returning to a library", () => {
     await setFocus(`cell-${MARK_CELL}`);
     await flushFocus();
     first.unmount();
-    await act(async () => setFocus(""));
+    await clearFocus();
 
-    const again = await open();
+    const again = await open(DEEP - 7);
     // The strip reads a row of the grid. One row of overscan sits above the top
     // visible one, and reading THAT marks the letter of items that are off the
     // screen: the boundary here is flush with a row start, so the two answers
@@ -386,7 +415,7 @@ describe("returning to a library", () => {
     await flushFocus();
     const left = offsetOf(first.container);
     first.unmount();
-    await act(async () => setFocus(""));
+    await clearFocus();
 
     // The reset that forgets the cursor keys on "is this the same list", not on
     // "has this run before": Strict Mode sets an effect up twice on mount, and a
@@ -414,9 +443,9 @@ describe("returning to a library", () => {
     await setFocus(`cell-${DEEP}`);
     await flushFocus();
     first.unmount();
-    await act(async () => setFocus(""));
+    await clearFocus();
 
-    const again = await open();
+    const again = await open(DEEP);
     // Step off the resumed cell, the way anybody would.
     await setFocus(`cell-${DEEP - 7}`);
     await flushFocus();
@@ -444,9 +473,9 @@ describe("returning to a library", () => {
     expect(offsetOf(first.container)).toBe(rows * rowHeight - VIEWPORT);
 
     first.unmount();
-    await act(async () => setFocus(""));
+    await clearFocus();
 
-    const again = await open();
+    const again = await open(LAST);
     expect(offsetOf(again.container)).toBe(rows * rowHeight - VIEWPORT);
     // Not what the window's own height would clamp to, which is 97 px short of
     // the end. Honest about what this pins: the resting place is the same
@@ -463,7 +492,7 @@ describe("returning to a library", () => {
     await setFocus(`cell-${DEEP}`);
     await flushFocus();
     first.unmount();
-    await act(async () => setFocus(""));
+    await clearFocus();
 
     // Something removed, a section refreshed: the cell never mounts, and aiming
     // the cursor at it is the dead remote the focus fallback exists for.
@@ -486,7 +515,7 @@ describe("returning to a library", () => {
     await settle();
 
     first.unmount();
-    await act(async () => setFocus(""));
+    await clearFocus();
 
     const again = await open();
     expect(getCurrentFocusKey()).toBe("cell-0");
@@ -511,7 +540,7 @@ describe("returning to a library", () => {
     await settle();
 
     first.unmount();
-    await act(async () => setFocus(""));
+    await clearFocus();
 
     const again = await open();
     expect(getCurrentFocusKey()).toBe("cell-0");
@@ -524,7 +553,7 @@ describe("returning to a library", () => {
     await setFocus(`cell-${DEEP}`);
     await flushFocus();
     first.unmount();
-    await act(async () => setFocus(""));
+    await clearFocus();
 
     // The PIN pad is a boundary between two people in one household, and where
     // somebody had got to in a library is a record of what they were looking
@@ -545,7 +574,7 @@ describe("returning to a library", () => {
     await setFocus(`cell-${DEEP}`);
     await flushFocus();
     first.unmount();
-    await act(async () => setFocus(""));
+    await clearFocus();
 
     // The resumed page fails while the first one is fine. That is the server's
     // least healthy moment - it has just been streaming a film - and it is only
@@ -584,7 +613,10 @@ describe("returning to a library", () => {
     // spatial navigation's own bookkeeping and survives an unmount: a leftover
     // from an earlier test can satisfy it either way. What matters is which
     // control is lit.
-    expect(litKey(again.container)).toBe("msg-retry");
+    // Waited for: the failure screen lands its own cursor on a timer, like every
+    // other screen here. This one is mounted by hand rather than through
+    // `open()`, because there is no cell for that to wait for.
+    await waitFor(() => expect(litKey(again.container)).toBe("msg-retry"));
     expect(again.container.textContent).toContain("Try again");
 
     // And the button has to DO something, which is the press this test used to
@@ -621,13 +653,13 @@ describe("returning to a library", () => {
     await setFocus(`cell-${DEEP}`);
     await flushFocus();
     first.unmount();
-    await act(async () => setFocus(""));
+    await clearFocus();
 
     // The grid comes up first and the cursor lands, so the deferred focus is
     // spent. THEN something fails - a page a scroll asked for, a server that
     // went away mid-browse - and the failure screen takes the cursor for its
     // own button.
-    const again = await open();
+    const again = await open(DEEP);
     expect(again.container.querySelectorAll(".ring-white").length).toBe(1);
     const where = offsetOf(again.container);
     await act(async () => {
@@ -691,7 +723,7 @@ describe("returning to a library", () => {
     await setFocus(`cell-${DEEP}`);
     await flushFocus();
     first.unmount();
-    await act(async () => setFocus(""));
+    await clearFocus();
 
     // A grid position is not a genre, but it is still a record of what somebody
     // was looking at, and it goes with everything else the session held.

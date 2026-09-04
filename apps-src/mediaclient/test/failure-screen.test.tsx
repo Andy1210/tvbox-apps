@@ -4,7 +4,7 @@ import { configureI18n } from "@sdk";
 import { doesFocusableExist } from "@noriginmedia/norigin-spatial-navigation";
 import { Home } from "../Home";
 import { useApp } from "../state";
-import { setupRemote, setFocus, getCurrentFocusKey, flushFocus, remote } from "./remote";
+import { setupRemote, setFocus, getCurrentFocusKey, flushFocus, remote, focusLands, focusEnters } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaBackend } from "../backends/types";
@@ -40,12 +40,7 @@ describe("the home screen when the server cannot be reached", () => {
     });
     await act(async () => setFocus(""));
     render(<Home />);
-    for (let i = 0; i < 3; i++) {
-      await act(async () => {
-        await new Promise((r) => setTimeout(r, 0));
-      });
-      await flushFocus();
-    }
+    await focusLands();
 
     const arrived = String(getCurrentFocusKey());
     expect(arrived.startsWith("msg-"), `arrived on ${arrived}`).toBe(true);
@@ -85,22 +80,15 @@ describe("the search screen when the server cannot be reached", () => {
     });
     await act(async () => setFocus(""));
     render(<Search />);
-    for (let i = 0; i < 3; i++) {
-      await act(async () => {
-        await new Promise((r) => setTimeout(r, 0));
-      });
-      await flushFocus();
-    }
+    await focusLands();
 
     // The keyboard opens first and owns the screen, so Back closes it - and what
     // is behind it, with the server down, is the error.
     await remote.back();
-    for (let i = 0; i < 3; i++) {
-      await act(async () => {
-        await new Promise((r) => setTimeout(r, 0));
-      });
-      await flushFocus();
-    }
+    // The error taking the cursor, not merely something holding it: the
+    // keyboard is still focused when Back arrives, so "anything is lit" is
+    // already true and would wait for nothing.
+    await focusEnters("msg-");
     await act(async () => setFocus("msg-retry"));
     await flushFocus();
     expect(String(getCurrentFocusKey()), "the error's own button is what is on screen").toBe("msg-retry");

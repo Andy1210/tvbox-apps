@@ -12,6 +12,7 @@
 import { beforeAll, afterAll, afterEach, expect } from "vitest";
 import { act, cleanup, waitFor } from "@testing-library/react";
 import {
+  doesFocusableExist,
   init,
   destroy,
   setFocus as noriginSetFocus,
@@ -139,24 +140,83 @@ export const remote = {
  *
  * That is not hypothetical. It failed a CI run that was publishing a finished
  * release, on the first focus assertion of a test, before any press:
- * `expected null to be 'profile-u1'`. Delaying a screen's initial focus by 5 ms
- * reproduces it, and fails 19 tests across 7 files in this suite.
+ * `expected null to be 'profile-u1'`. It reproduces deterministically by
+ * pushing the landing out: delaying a screen's initial focus by 5 ms failed
+ * about twenty of these across six files, and scaling every 0 ms timer together
+ * - which keeps the order the app arms them in, and is the fairer of the two -
+ * failed fifty at 100 ms.
  *
  * So an assertion about where the cursor ARRIVES belongs here rather than
  * straight after a counted settle.
  *
- * Not every focus assertion, though. A test that asserts the cursor did NOT
- * move - that a press was refused, that a panel held it, that a container did
- * not swallow it - must read the key rather than wait for it, because waiting
- * would sit there until the thing it is guarding against happened.
+ * Not every focus assertion, though. Three shapes belong elsewhere.
+ *
+ * A test that asserts the cursor did NOT move - that a press was refused, that
+ * a panel held it, that a container did not swallow it - must read the key
+ * rather than wait for it, because waiting would sit there until the thing it
+ * is guarding against happened.
+ *
+ * A test asking WHICH of several keys the cursor landed on must not wait for
+ * the answer it wants: a screen that lands on the wrong one and corrects itself
+ * a moment later satisfies the wait, and that correction is exactly the defect
+ * (a confirmation panel that opens on Yes and moves to No is a doubled press
+ * away from marking a season). Wait for the cursor to enter the REGION with
+ * `focusEnters`, then read the identity.
+ *
+ * And a wait after a REMOUNT must come off the screen, not off this key: the
+ * key is spatial navigation's own bookkeeping and survives an unmount, so the
+ * cursor the previous screen left behind satisfies `focusBecomes` before the
+ * new one has done anything. `setFocus("")` does not help - norigin returns
+ * early on a falsy key without touching it.
  */
 export async function focusBecomes(key: string): Promise<void> {
   await waitFor(() => expect(getCurrentFocusKey()).toBe(key));
 }
 
-/** The same wait, where a test only cares that the screen answers at all. */
+/**
+ * The same wait, where a test only cares that the screen answers at all.
+ *
+ * A key on its own is not an answer: norigin holds a key aimed at a focusable
+ * that never mounted, and a cursor parked on one of those is the dead remote
+ * this suite exists to catch. So the key has to name something on screen.
+ */
 export async function focusLands(): Promise<void> {
-  await waitFor(() => expect(getCurrentFocusKey()).toBeTruthy());
+  await waitFor(() => {
+    const at = getCurrentFocusKey();
+    expect(
+      Boolean(at) && doesFocusableExist(String(at)),
+      `the cursor is on nothing that exists (key: ${String(at)})`,
+    ).toBe(true);
+  });
+}
+
+/**
+ * Wait for the cursor to reach a group of keys, so which one can be asserted.
+ *
+ * The pairing is the point: the wait is satisfied by the FIRST key of the group
+ * the cursor touches, and the assertion after it reads that key. A screen that
+ * lands on the wrong member still fails, which a wait for the right member
+ * would not.
+ *
+ * Its reach is one poll of `waitFor`, and that is worth knowing before relying
+ * on it: a screen that lands wrong and corrects itself on the very next timer
+ * turn is not seen by this either, because both landings happen before the
+ * first poll. Measured - a correction 20 ms out is caught, one on the next
+ * `setTimeout(..., 0)` is not. It buys the slow correction, not every one.
+ *
+ * Deliberately NOT `doesFocusableExist`, unlike `focusLands`. A key in the
+ * group that names nothing on screen is a finding for the assertion after this
+ * to report, not something to wait past: measured on a screen that parks the
+ * cursor on a strip it never mounts and recovers 300 ms later - one swallowed
+ * press - requiring existence here waits out the park and passes, while
+ * stopping at it fails with `expected 'detail-seasons' to be 'detail-play'`.
+ * A test that wants both asserts the existence itself.
+ */
+export async function focusEnters(prefix: string): Promise<void> {
+  await waitFor(() => {
+    const at = getCurrentFocusKey();
+    expect(String(at).startsWith(prefix), `the cursor is on ${String(at)}`).toBe(true);
+  });
 }
 
 export async function setFocus(focusKey: string): Promise<void> {
@@ -166,31 +226,63 @@ export async function setFocus(focusKey: string): Promise<void> {
   });
 }
 
+const config = {
+  layoutAdapter: {
+    measureLayout: async (component: FocusableComponent): Promise<FocusableComponentLayout> => {
+      const node = component.node;
+      const b = (node && rects.get(node)) ?? ZERO;
+      return {
+        node,
+        x: b.x,
+        y: b.y,
+        width: b.w,
+        height: b.h,
+        left: b.x,
+        top: b.y,
+        right: b.x + b.w,
+        bottom: b.y + b.h,
+      };
+    },
+  },
+};
+
+/**
+ * Put the cursor back to nothing, mid-test.
+ *
+ * `setFocus("")` does not do it - norigin returns early on a falsy key - and
+ * neither does unmounting the screen that held it. The key outlives its screen,
+ * and norigin re-lights it by itself once a focusable registers under that name
+ * again, with no application code involved. So a test that mounts a screen
+ * after leaving the previous one on the same key cannot otherwise tell a build
+ * that restores the cursor from one that restores nothing at all.
+ *
+ * Rebuilding the service is the only clear there is - it is what `afterEach`
+ * does between tests. It drops every registered focusable with it, so this
+ * belongs between an unmount and the next render, never while a screen is up.
+ *
+ * The `setFocus("")` first is not the clear, and it is not decoration either:
+ * it cannot touch the key, but it DOES cancel the auto-restore norigin arms
+ * when a focused child is removed while its parent survives - a 300 ms
+ * debounce that `destroy()` leaves running, to fire against the rebuilt service
+ * and move the cursor on its own a third of a second later. Unmounting a whole
+ * screen arms nothing, so no caller here needs it; a caller that drops one row
+ * would.
+ */
+export async function clearFocus(): Promise<void> {
+  await act(async () => {
+    noriginSetFocus("");
+    await drainScheduler();
+  });
+  destroy();
+  init(config);
+}
+
 // Register the harness layoutAdapter + norigin init/teardown for a suite. Call
 // once at the top of a test file (before describe). Focusables from an unmounted
 // render are dropped by Testing Library's cleanup between tests. The partial
 // layoutAdapter object is Object.assign-ed over the library's default web
 // adapter, so key handling and DOM focus stay stock - only geometry is ours.
 export function setupRemote(): void {
-  const config = {
-    layoutAdapter: {
-      measureLayout: async (component: FocusableComponent): Promise<FocusableComponentLayout> => {
-        const node = component.node;
-        const b = (node && rects.get(node)) ?? ZERO;
-        return {
-          node,
-          x: b.x,
-          y: b.y,
-          width: b.w,
-          height: b.h,
-          left: b.x,
-          top: b.y,
-          right: b.x + b.w,
-          bottom: b.y + b.h,
-        };
-      },
-    },
-  };
   beforeAll(() => init(config));
   // Unmounting a render does not put the CURSOR back: norigin keeps its current
   // focus key, and the next test's fresh render re-registers a focusable under that
@@ -198,10 +290,9 @@ export function setupRemote(): void {
   // pressed. A test asserting where a screen opens then depends on the test above
   // it, and `--sequence.shuffle.tests` says so. `setFocus("")` does not clear it, so
   // the service itself is rebuilt between tests.
-  afterEach(() => {
+  afterEach(async () => {
     cleanup();
-    destroy();
-    init(config);
+    await clearFocus();
   });
   afterAll(() => destroy());
 }
