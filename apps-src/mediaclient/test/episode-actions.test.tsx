@@ -274,9 +274,11 @@ describe("the overflow button", () => {
     //
     // Closing the menu lands the cursor TWICE on a healthy build:
     // `useFocusOnReveal` catches it as the menu goes, and the restore then
-    // moves it to the button. Both land in the same timer turn, so no wait can
-    // see the one in between - which is why the wait is for the answer here
-    // rather than paired with a read, against the rule everywhere else.
+    // moves it to the button. Both land in the same timer turn, so nothing can
+    // observe the one in between - so the group-then-read pairing the rule
+    // elsewhere asks for buys nothing here, and the wait names the key. What
+    // the pairing exists to catch is caught by the settle and the read below
+    // instead.
     //
     // But a wait returns on first ARRIVAL and never sees the cursor leave
     // again, and where it ends is the whole subject: the press that would start

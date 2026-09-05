@@ -149,11 +149,14 @@ export const remote = {
  * block-body form, which a regex for the one-liner does not match; and once
  * missing the three that never spell `setFocus` at all, landing through
  * `focusFirstOf`, `jump` and `back`. `apps-src` currently has 41 of the first
- * kind and those 3 of the second - so the media client owns thirteen in all. `app-sdk`'s `Osk.tsx` and `PinPad.tsx` carry
- * the shape and are watched but not yet raced - stubbing them fails three tests,
- * so a delay there measures something; two of the three helper landings are the
- * opposite, observed by nothing at all, and green at any delay for that reason
- * rather than for a good one.
+ * kind and 3 of the second, one helper landing per app - so the media client's
+ * count is twelve direct plus its restore, thirteen.
+ *
+ * `app-sdk`'s `Osk.tsx` and `PinPad.tsx` carry the shape and are watched but not
+ * yet raced - stubbing them fails three tests, so a delay there measures
+ * something. Two of the three helper landings are the opposite, observed by
+ * nothing at all, and green at any delay for that reason rather than a good
+ * one.
  *
  * Three things about reading the result. WHERE a landing lands decides how the
  * delay behaves, so do not expect one band: the initial-focus sites used to
