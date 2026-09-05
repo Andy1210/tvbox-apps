@@ -141,10 +141,20 @@ export const remote = {
  * That is not hypothetical. It failed a CI run that was publishing a finished
  * release, on the first focus assertion of a test, before any press:
  * `expected null to be 'profile-u1'`. It reproduces deterministically by
- * pushing the landing out: delaying a screen's initial focus by 5 ms failed
- * about twenty of these across six files, and scaling every 0 ms timer together
- * - which keeps the order the app arms them in, and is the fairer of the two -
- * failed fifty at 100 ms.
+ * pushing the landings out - and COUNT them before you do, because a sweep that
+ * patches some of them reports a clean tree and proves nothing. That mistake
+ * has been made three times here: once patching one site of eleven in the media
+ * client, which missed five chapter-strip tests; once missing the block-body
+ * form, which a regex for the one-liner does not match; and once missing the
+ * three that never spell `setFocus` at all, landing through `focusFirstOf`,
+ * `jump` and `back`. `apps-src` currently has 41 of the first kind and those 3
+ * of the second, and `app-sdk`'s `Osk.tsx` and `PinPad.tsx` carry the shape
+ * with nothing racing them yet.
+ *
+ * Two more things the sweeps taught. The band is narrow: a delay of 5 to 8 ms
+ * lands between a test's presses, while by 15 ms it lands after them and
+ * everything is green again. And a single run proves nothing either - some of
+ * these failed 2 of 8 full runs and 0 of 8 on their own.
  *
  * So an assertion about where the cursor ARRIVES belongs here rather than
  * straight after a counted settle.
