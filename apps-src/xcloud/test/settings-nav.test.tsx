@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { act } from "react";
 import { configureI18n, initSpatialNavigation } from "@sdk";
-import { getCurrentFocusKey, setFocus } from "@noriginmedia/norigin-spatial-navigation";
+import { destroy, getCurrentFocusKey, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { Settings, SETTINGS_ROWS } from "../Settings";
 import * as api from "../api";
 import hu from "../locales/hu.json";
@@ -49,6 +49,10 @@ async function focus(key: string) {
 
 beforeEach(() => {
   configureI18n({ hu, en }, { fallback: "en" });
+  // Rebuilt, not just re-inited: norigin keeps its focus key across an unmount
+  // and `init` does not clear it, so the panel below could be waited for and
+  // the wait satisfied by the cursor the test before it left in the same place.
+  destroy();
   initSpatialNavigation({ debug: false, visualDebug: false });
   vi.spyOn(api, "getSettings").mockResolvedValue({ settings: VALUES, allowed: {} });
 });
@@ -57,7 +61,13 @@ afterEach(() => vi.restoreAllMocks());
 async function openPanel() {
   render(<Settings status={null} onClose={() => {}} onSignedOut={() => {}} onRefreshed={() => {}} />);
   await waitFor(() => expect(screen.getByText("Automatic")).toBeInTheDocument());
-  await focus("set-quality-0");
+  // The panel's OWN cursor, not one set here. It lands on a timer and aims at
+  // this very row, so a test that puts the cursor there itself cannot tell the
+  // two apart - and the panel's landing then arrives a press or two into the
+  // sequence below and takes it back, which is what made these fail in a full
+  // suite and pass alone. Asserting it also covers a panel that opens with
+  // nothing lit, which nothing did before.
+  await waitFor(() => expect(getCurrentFocusKey()).toBe("set-quality-0"));
 }
 
 describe("the settings panel walks its rows", () => {

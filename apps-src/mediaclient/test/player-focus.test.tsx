@@ -5,7 +5,7 @@ import { Player } from "../Player";
 import { usePlayer, __wirePlayerEventsForTest } from "../playback/player";
 import { useApp } from "../state";
 import { doesFocusableExist } from "@noriginmedia/norigin-spatial-navigation";
-import { setupRemote, remote, setFocus, getCurrentFocusKey, flushFocus, focusEnters } from "./remote";
+import { setupRemote, remote, setFocus, getCurrentFocusKey, flushFocus, focusEnters, focusLands } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaItem } from "../backends/types";
@@ -98,7 +98,12 @@ describe("the playback overlay", () => {
     // film, and the overlay mounts underneath that focus.
     await act(async () => setFocus("detail-play"));
     render(<Player />);
-    await settle();
+    // `focusLands` and then a read, rather than a wait for the answer: the
+    // overlay takes its cursor on a timer, and until it does the key is the
+    // play button of a screen this file does not render - so what the wait is
+    // for is a key that names something on screen, and which key that is is the
+    // assertion.
+    await focusLands();
 
     // Resting, not on the bar: the arrows must jump rather than scrub, and OK
     // must not reach the play button that started the film.
@@ -123,7 +128,7 @@ describe("the playback overlay", () => {
     // a focusable it is also a candidate, so leaving the rest to geometry let
     // Up from a button land back on it instead of the bar.
     render(<Player />);
-    await settle();
+    await focusLands();
     expect(getCurrentFocusKey()).toBe("player-idle");
 
     await remote.up();
