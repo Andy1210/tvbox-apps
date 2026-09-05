@@ -4,7 +4,16 @@ import { configureI18n } from "@sdk";
 import { Library } from "../Library";
 import { LibraryFilters } from "../LibraryFilters";
 import { useApp } from "../state";
-import { setupRemote, setFocus, remote, getCurrentFocusKey, focusBecomes, focusEnters, focusLands } from "./remote";
+import {
+  setupRemote,
+  setFocus,
+  remote,
+  getCurrentFocusKey,
+  focusBecomes,
+  focusEnters,
+  focusLands,
+  clearFocus,
+} from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import { PlexBackend } from "../backends/plex/backend";
@@ -63,7 +72,7 @@ function stub(seen?: (of: string | undefined) => void): MediaBackend {
 beforeEach(async () => {
   clearLibraryViews();
   useApp.setState({ backend: stub(), screen: { name: "home" }, history: [], failure: null });
-  await act(async () => setFocus(""));
+  await clearFocus();
 });
 
 const SESSION: Session = {
@@ -192,13 +201,13 @@ describe("coming back from the collections", () => {
   it("puts the films back in the order they were left in", async () => {
     const { container } = render(<Library libraryId="1" title="Movies" />);
     await waitFor(() => expect(container.textContent).toContain("Film 0"));
+    // The grid's own cursor first: it lands on a timer, and one that arrives
+    // after the press below takes the cursor off the arrange button, so the
+    // press opens nothing at all.
     await focusLands();
 
     // An order is chosen for the films, through the panel, which is the only way
     // to a non-default one.
-    // The grid's own cursor first: it lands on a timer, and one that arrives
-    // after the line below takes the cursor off the arrange button, so the
-    // press opens nothing at all.
     await setFocus("lib-arrange");
     await act(async () => {
       await remote.ok();
@@ -249,6 +258,7 @@ describe("opening something from the library", () => {
     // only exit that kept it, which is not the exit people use.
     const first = render(<Library libraryId="1" title="Movies" />);
     await waitFor(() => expect(first.container.textContent).toContain("Film 0"));
+    // The grid's landing first, as above.
     await focusLands();
     await setFocus("lib-arrange");
     await act(async () => {

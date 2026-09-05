@@ -4,7 +4,7 @@ import { configureI18n } from "@sdk";
 import { Library } from "../Library";
 import { useApp } from "../state";
 import { clearLibraryViews } from "../libraryView";
-import { setupRemote, setFocus, remote, focusLands } from "./remote";
+import { setupRemote, setFocus, remote, focusLands, clearFocus } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaBackend, MediaItem } from "../backends/types";
@@ -109,7 +109,7 @@ beforeEach(async () => {
   clearLibraryViews();
   useApp.setState({ backend: stubBackend(), screen: { name: "home" }, history: [], failure: null });
   window.innerHeight = WINDOW_H;
-  await act(async () => setFocus(""));
+  await clearFocus();
 });
 
 describe("the library's window", () => {
