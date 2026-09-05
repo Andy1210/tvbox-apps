@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import type { ItemDetail, MediaItem, MediaVersion } from "../backends/types";
 
-const { setupRemote, flushFocus, setFocus, getCurrentFocusKey, remote, place, focusLands } =
+const { setupRemote, flushFocus, setFocus, getCurrentFocusKey, remote, place, focusLands, focusBecomes } =
   await import("./remote");
 setupRemote();
 
@@ -269,7 +269,15 @@ describe("the overflow button", () => {
     await settleClock();
     await press("more-close");
     expect(el("more-close"), "the menu is gone").toBeNull();
-    expect(getCurrentFocusKey()).toBe("detail-more");
+    // Waited for the key rather than paired with a read, which is the exception
+    // this screen earns: closing the menu lands the cursor TWICE by design -
+    // the fallback catches it so the remote is never dead, then the restore
+    // moves it to the button, on a timer. So the first landing is `detail-play`
+    // on a healthy build and pairing would fail on it. What the comment above
+    // is about is where the cursor ENDS, since the press that would start a
+    // film comes after; a build that leaves it on the row fails here on the
+    // timeout, naming the row.
+    await focusBecomes("detail-more");
   });
 
   it("is not offered when there is nothing behind it", async () => {
@@ -420,8 +428,15 @@ describe("closing the overflow menu", () => {
     await focusOn(`children-${h.season.id}-${h.episodes[0]!.id}`);
     await press("detail-more");
     await remote.back();
-    await settleFocus();
-    expect(getCurrentFocusKey()).toBe("detail-more");
+    // Waited for the key rather than paired with a read, which is the exception
+    // this screen earns: closing the menu lands the cursor TWICE by design -
+    // the fallback catches it so the remote is never dead, then the restore
+    // moves it to the button, on a timer. So the first landing is `detail-play`
+    // on a healthy build and pairing would fail on it. What the comment above
+    // is about is where the cursor ENDS, since the press that would start a
+    // film comes after; a build that leaves it on the row fails here on the
+    // timeout, naming the row.
+    await focusBecomes("detail-more");
   });
 
   it("does the same after an episode has been played", async () => {
@@ -443,8 +458,7 @@ describe("closing the overflow menu", () => {
     await focusOn("detail-more");
     await press("detail-more");
     await remote.back();
-    await settleFocus();
-    expect(getCurrentFocusKey()).toBe("detail-more");
+    await focusBecomes("detail-more");
   });
 });
 
