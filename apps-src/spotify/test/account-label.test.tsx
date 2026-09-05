@@ -9,11 +9,12 @@
 // silently is the gear itself: a remote that cannot reach the settings is a dead
 // end, and nothing on screen would say so.
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, act } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { configureI18n } from "@sdk";
 import { NowPlaying } from "../NowPlaying";
 import { useSpotifyStore } from "../stores/spotify";
-import { setupRemote, flushFocus, setFocus, getCurrentFocusKey } from "./remote";
+import { doesFocusableExist } from "@noriginmedia/norigin-spatial-navigation";
+import { setupRemote, flushFocus, setFocus, getCurrentFocusKey, focusLands, clearFocus } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 
@@ -58,13 +59,25 @@ function playing(): void {
   });
 }
 
+let showing: (() => void) | null = null;
+
 async function show(account?: string): Promise<HTMLElement> {
-  const { container } = render(
+  // The one before it goes first. A test that shows two screens in a row left
+  // both mounted, and the cursor it then set was answered by the older one -
+  // which is also why the clear below is safe here and nowhere else.
+  showing?.();
+  showing = null;
+  await clearFocus();
+
+  const { container, unmount } = render(
     <NowPlaying connected account={account} onSettings={vi.fn()} onBrowse={vi.fn()} onExit={vi.fn()} />,
   );
-  await act(async () => {
-    await Promise.resolve();
-  });
+  showing = unmount;
+  // The screen's own cursor, waited for. It lands on a timer and aims at the
+  // transport, so a test that puts the cursor on the gear and reads it back was
+  // racing that landing: it arrived after the read on a busy runner and took
+  // the cursor to the play button.
+  await focusLands();
   return container as HTMLElement;
 }
 
@@ -76,9 +89,15 @@ const topRight = (el: HTMLElement) => gearOf(el)!.parentElement as HTMLElement;
 beforeEach(async () => {
   useSpotifyStore.setState({ state: null, at: 0 });
   playing();
+  // Testing Library unmounts the root between tests, so the handle below points
+  // at a screen that is already gone. Calling it again is a no-op today and the
+  // bookkeeping should not depend on that.
+  showing = null;
   // Focus is library-global and outlives an unmount, so a leftover from the last
-  // test would make the next one pass for the wrong reason.
-  await act(async () => setFocus(""));
+  // test would make the next one pass for the wrong reason - and `setFocus("")`
+  // does not clear it, norigin returning early on a falsy key. The service is
+  // rebuilt instead.
+  await clearFocus();
 });
 
 describe("the account beside the gear", () => {
@@ -105,6 +124,12 @@ describe("the account beside the gear", () => {
       expect(gearOf(el), "the settings button exists for " + JSON.stringify(account)).not.toBeNull();
       await setFocus("sp-gear");
       await flushFocus();
+      // Both, because neither is enough. A key norigin does not know is still
+      // set by `setFocus`, so reading it back says nothing about whether the
+      // gear is in the focus tree - which is the regression named at the top of
+      // this file - and the existence check alone would not notice the cursor
+      // being taken somewhere else.
+      expect(doesFocusableExist("sp-gear"), "the gear is in the focus tree").toBe(true);
       expect(getCurrentFocusKey(), "the remote can reach it").toBe("sp-gear");
     }
   });

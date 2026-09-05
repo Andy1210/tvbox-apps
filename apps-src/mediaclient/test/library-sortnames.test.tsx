@@ -4,7 +4,7 @@ import { configureI18n } from "@sdk";
 import { Library } from "../Library";
 import { useApp } from "../state";
 import { clearLibraryViews } from "../libraryView";
-import { setupRemote, setFocus, remote } from "./remote";
+import { setupRemote, setFocus, remote, focusEnters, focusLands, clearFocus } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaBackend, MediaItem } from "../backends/types";
@@ -63,13 +63,18 @@ beforeEach(async () => {
   clearLibraryViews();
   sortCalls = 0;
   useApp.setState({ backend: stubBackend(), screen: { name: "home" }, history: [], failure: null });
-  await act(async () => setFocus(""));
+  await clearFocus();
 });
 
 describe("the word on the sort button", () => {
   it("is asked for once, even when the server does not have one for that order", async () => {
     const { container } = render(<Library libraryId="1" title="Movies" />);
     await waitFor(() => expect(container.textContent).toContain("Film 0"));
+    // The grid's own cursor first, for the same reason the panel's is waited
+    // for below: it lands on a timer, and one that arrives after the line under
+    // this takes the cursor off the arrange button - so the press that opens
+    // the panel goes to a tile instead and nothing opens at all.
+    await focusLands();
 
     // Through the panel, which is the only way to a non-default order.
     await setFocus("lib-arrange");
@@ -81,9 +86,9 @@ describe("the word on the sort button", () => {
     // The panel focuses its own first row a macrotask after it opens, so a
     // setFocus issued before that is simply overwritten - and the press then
     // lands on "Name", which IS named, and the test passes against the bug.
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 20));
-    });
+    // Waited for rather than slept through: twenty milliseconds is a guess
+    // about the machine, and this failed about one full-suite run in three.
+    await focusEnters("lf-");
 
     // The SECOND order in the list - the one the stub names - is chosen, and
     // then the screen is left with a sort whose name is missing from the next
@@ -92,13 +97,12 @@ describe("the word on the sort button", () => {
     await act(async () => {
       await remote.ok();
     });
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 50));
-    });
-
-    // The order that was actually applied, so the test cannot quietly measure
-    // the default one.
-    expect(container.textContent).toContain("Date added");
+    // The order that was actually APPLIED, which is the marker the screen puts
+    // beside the button rather than the name itself: the panel is still open
+    // and lists "Date added" as an option, so waiting for that text was
+    // satisfied by the chip and passed on a build where the press applied
+    // nothing at all. Measured both ways.
+    await waitFor(() => expect(container.textContent).toContain("\u00b7 addedAt"));
     const afterApply = sortCalls;
     // Time passes with the screen open. A looping effect shows up here and
     // nowhere else: nothing errors, the grid looks right, and the box asks the
@@ -109,7 +113,11 @@ describe("the word on the sort button", () => {
 
     expect(sortCalls).toBe(afterApply);
     expect(sortCalls, "asked once per library and order, not once per answer").toBeLessThanOrEqual(2);
-  });
+    // Five waits and a flat window against vitest's five seconds. It runs in
+    // 242 ms, but the sum of what it TOLERATES is 5.2 s, and a build that
+    // reinstates the loop this guards reaches it: measured, `Test timed out
+    // in 5000ms` with nothing to say which wait.
+  }, 15000);
 });
 
 describe("arranging a collection list", () => {

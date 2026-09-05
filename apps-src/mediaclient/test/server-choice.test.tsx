@@ -3,7 +3,7 @@ import { act, render, waitFor } from "@testing-library/react";
 import { configureI18n } from "@sdk";
 import { backendFor } from "../backends/factory";
 import { normaliseAddress } from "../backends/jellyfin/address";
-import { setupRemote, setFocus, remote, getCurrentFocusKey } from "./remote";
+import { setupRemote, setFocus, remote, getCurrentFocusKey, focusLands } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { Session } from "../backends/types";
@@ -101,6 +101,11 @@ describe("choosing a server on the sign-in screen", () => {
     const { Login } = await import("../Login");
     const { container } = render(<Login />);
     await waitFor(() => expect(container.textContent).toContain("Jellyfin"));
+    // The screen's own cursor first. It lands on a timer, and one that arrives
+    // after the line below takes the cursor to the OTHER server - so the press
+    // chose Plex and the assertion read it back, about one full-suite run in
+    // five at a 3 ms landing delay.
+    await focusLands();
 
     await setFocus("login-jellyfin");
     await act(async () => {
@@ -115,6 +120,7 @@ describe("choosing a server on the sign-in screen", () => {
     const { Login } = await import("../Login");
     const { container } = render(<Login />);
     await waitFor(() => expect(container.textContent).toContain("Jellyfin"));
+    await focusLands();
     await setFocus("login-jellyfin");
     await act(async () => {
       await remote.ok();

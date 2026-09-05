@@ -179,13 +179,18 @@ export async function focusBecomes(key: string): Promise<void> {
  * A key on its own is not an answer: norigin holds a key aimed at a focusable
  * that never mounted, and a cursor parked on one of those is the dead remote
  * this suite exists to catch. So the key has to name something on screen.
+ *
+ * `expected` is for the FAILURE MESSAGE and nothing else - it asserts nothing.
+ * Where a test goes on to read which key it is, naming it here is what puts
+ * both halves in the report when the cursor never becomes valid at all; the
+ * read on the next line is still what checks it.
  */
-export async function focusLands(): Promise<void> {
+export async function focusLands(expected?: string): Promise<void> {
   await waitFor(() => {
     const at = getCurrentFocusKey();
     expect(
       Boolean(at) && doesFocusableExist(String(at)),
-      `the cursor is on nothing that exists (key: ${String(at)})`,
+      `the cursor is on nothing that exists (key: ${String(at)})` + (expected ? `; expected ${expected}` : ""),
     ).toBe(true);
   });
 }
