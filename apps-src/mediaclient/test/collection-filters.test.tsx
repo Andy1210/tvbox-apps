@@ -192,9 +192,13 @@ describe("coming back from the collections", () => {
   it("puts the films back in the order they were left in", async () => {
     const { container } = render(<Library libraryId="1" title="Movies" />);
     await waitFor(() => expect(container.textContent).toContain("Film 0"));
+    await focusLands();
 
     // An order is chosen for the films, through the panel, which is the only way
     // to a non-default one.
+    // The grid's own cursor first: it lands on a timer, and one that arrives
+    // after the line below takes the cursor off the arrange button, so the
+    // press opens nothing at all.
     await setFocus("lib-arrange");
     await act(async () => {
       await remote.ok();
@@ -245,6 +249,7 @@ describe("opening something from the library", () => {
     // only exit that kept it, which is not the exit people use.
     const first = render(<Library libraryId="1" title="Movies" />);
     await waitFor(() => expect(first.container.textContent).toContain("Film 0"));
+    await focusLands();
     await setFocus("lib-arrange");
     await act(async () => {
       await remote.ok();

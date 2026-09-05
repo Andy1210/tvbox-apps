@@ -4,7 +4,7 @@ import { configureI18n } from "@sdk";
 import { Library } from "../Library";
 import { useApp } from "../state";
 import { clearLibraryViews } from "../libraryView";
-import { setupRemote, setFocus, remote, focusEnters, focusLands } from "./remote";
+import { setupRemote, setFocus, remote, focusEnters, focusLands, clearFocus } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaBackend, MediaItem } from "../backends/types";
@@ -63,7 +63,7 @@ beforeEach(async () => {
   clearLibraryViews();
   sortCalls = 0;
   useApp.setState({ backend: stubBackend(), screen: { name: "home" }, history: [], failure: null });
-  await act(async () => setFocus(""));
+  await clearFocus();
 });
 
 describe("the word on the sort button", () => {
@@ -97,10 +97,12 @@ describe("the word on the sort button", () => {
     await act(async () => {
       await remote.ok();
     });
-    // The order that was actually applied, so the test cannot quietly measure
-    // the default one. Waited for, since what it waits on is a screen redrawing
-    // rather than a number of milliseconds.
-    await waitFor(() => expect(container.textContent).toContain("Date added"));
+    // The order that was actually APPLIED, which is the marker the screen puts
+    // beside the button rather than the name itself: the panel is still open
+    // and lists "Date added" as an option, so waiting for that text was
+    // satisfied by the chip and passed on a build where the press applied
+    // nothing at all. Measured both ways.
+    await waitFor(() => expect(container.textContent).toContain("\u00b7 addedAt"));
     const afterApply = sortCalls;
     // Time passes with the screen open. A looping effect shows up here and
     // nowhere else: nothing errors, the grid looks right, and the box asks the
@@ -111,7 +113,11 @@ describe("the word on the sort button", () => {
 
     expect(sortCalls).toBe(afterApply);
     expect(sortCalls, "asked once per library and order, not once per answer").toBeLessThanOrEqual(2);
-  });
+    // Five waits and a flat window against vitest's five seconds. It runs in
+    // 242 ms, but the sum of what it TOLERATES is 5.2 s, and a build that
+    // reinstates the loop this guards reaches it: measured, `Test timed out
+    // in 5000ms` with nothing to say which wait.
+  }, 15000);
 });
 
 describe("arranging a collection list", () => {

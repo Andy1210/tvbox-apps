@@ -4,7 +4,7 @@ import { configureI18n } from "@sdk";
 import { Library } from "../Library";
 import { useApp } from "../state";
 import { clearLibraryViews } from "../libraryView";
-import { setupRemote, setFocus, remote } from "./remote";
+import { setupRemote, setFocus, remote, focusLands } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaBackend, MediaItem } from "../backends/types";
@@ -195,6 +195,10 @@ async function pressLetterZ(container: HTMLElement): Promise<void> {
   // the grid does. Pressing before it exists focuses nothing, and the test then
   // measures a screen that was never asked to move.
   await waitFor(() => expect(letterEl(container, "Z")).toBeTruthy());
+  // And the grid's own cursor, for the same reason: it lands on a timer, and
+  // one that arrives after the line below takes the cursor off the letter, so
+  // the press reaches a tile and the grid never jumps.
+  await focusLands();
   await setFocus("letter-Z");
   await act(async () => {
     await remote.ok();

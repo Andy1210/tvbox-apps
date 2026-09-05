@@ -180,12 +180,12 @@ export async function focusBecomes(key: string): Promise<void> {
  * that never mounted, and a cursor parked on one of those is the dead remote
  * this suite exists to catch. So the key has to name something on screen.
  */
-export async function focusLands(): Promise<void> {
+export async function focusLands(expected?: string): Promise<void> {
   await waitFor(() => {
     const at = getCurrentFocusKey();
     expect(
       Boolean(at) && doesFocusableExist(String(at)),
-      `the cursor is on nothing that exists (key: ${String(at)})`,
+      `the cursor is on nothing that exists (key: ${String(at)})` + (expected ? `; expected ${expected}` : ""),
     ).toBe(true);
   });
 }
