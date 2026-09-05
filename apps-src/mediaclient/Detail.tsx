@@ -58,7 +58,7 @@ const PRESS_GAP_MS = 400;
  * screen never renders, on the FIRST arrow press. "Something went wrong / Try
  * again", highlighted, and the remote does nothing but Back.
  */
-function ownsDetailKey(key: string): boolean {
+export function ownsDetailKey(key: string): boolean {
   return (
     key.startsWith("detail-") ||
     key.startsWith("cast-") ||

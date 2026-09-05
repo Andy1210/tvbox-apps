@@ -168,6 +168,7 @@ async function focusOn(key: string): Promise<void> {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe("what Play says on a season", () => {
@@ -563,6 +564,8 @@ describe("a panel closing while something else owns the screen", () => {
     // press either; a spoken "next episode" reaches the app the same way.
     const { act } = await import("@testing-library/react");
     const { usePlayer } = await import("../playback/player");
+    const { ownsDetailKey } = await import("../Detail");
+    const { doesFocusableExist } = await import("@noriginmedia/norigin-spatial-navigation");
     const h = await open();
     await focusOn(`children-${h.season.id}-${h.episodes[0]!.id}`);
     await press("detail-more");
@@ -570,9 +573,58 @@ describe("a panel closing while something else owns the screen", () => {
       usePlayer.setState({ current: { item: h.episodes[0]! } as never });
       await new Promise((r) => setTimeout(r, 0));
     });
+    // The clock goes fake BEFORE the press, not after it: the press is what
+    // arms the restore's timer, and a fake clock cannot fire one that was
+    // scheduled on the real one. Measured - installed after, this caught the
+    // mutation only with the timer at zero or one.
+    vi.useFakeTimers();
     await remote.back();
-    await settleFocus();
-    expect(getCurrentFocusKey()).not.toBe("detail-more");
+    // A non-event, and the only shape that fits one: nothing can be waited for
+    // here, because the thing being forbidden IS the wait's own signal - the
+    // restore's timer must not fire. So a window is observed instead. A counted
+    // settle is not a window: it spends a fixed number of turns, and a restore
+    // firing one turn later than the machine happened to allow went unseen -
+    // measured, dropping the `playing` guard was caught with the landing
+    // delayed 3 ms and missed at 4. Through the window the number below IS the
+    // reach: caught at 250, missed at 251, and the same every run, which is
+    // what a logical clock buys over a real one.
+    //
+    // On a LOGICAL clock, for the reason `season-strip`'s promptness test uses
+    // one: a quarter of a second of real sleep costs this test its headroom
+    // against vitest's five, and measured under load it was the healthy build
+    // that timed out - a flake that reads as infrastructure rather than as this
+    // guard talking.
+    //
+    // And 250 is not a round number, it is under 300, which is
+    // `AUTO_RESTORE_FOCUS_DELAY` in norigin's core package: removing a focused
+    // child debounces
+    // `setFocus(parent)` by that much, inside the library, where this page's
+    // `playing` guard cannot see it. So at 300 ms the cursor does move to
+    // `detail-play` here. On a box the player claims the cursor as it mounts
+    // and that cancels the debounce; this fixture renders no player, so what
+    // this test can honestly hold is the page's own restore, and the window
+    // says so.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    vi.useRealTimers();
+
+    // Two halves of one question: has anything the user could press taken the
+    // cursor. `ownsDetailKey` is the page's OWN list, imported rather than
+    // spelled out so the test cannot drift from it - the episode row is as
+    // wrong as the button, both being one press from acting behind the film -
+    // and the existence check covers a control this page does not own but that
+    // is nonetheless on screen. Measured, nothing in THIS fixture is such a
+    // control, so that second line catches nothing the first does not - it is
+    // there for the screen this becomes, not for the one it is.
+    //
+    // On a healthy build the cursor is still on the menu's own key, which no
+    // longer exists - so both lines would also pass on a cursor lost
+    // altogether. That is the right answer here for the same reason: what is
+    // forbidden is the page taking the cursor, and having none is not that.
+    const at = String(getCurrentFocusKey());
+    expect(ownsDetailKey(at), `the page took the cursor to ${at}`).toBe(false);
+    expect(doesFocusableExist(at), `something on screen holds the cursor: ${at}`).toBe(false);
     await act(async () => {
       usePlayer.setState({ current: null });
       await new Promise((r) => setTimeout(r, 0));
