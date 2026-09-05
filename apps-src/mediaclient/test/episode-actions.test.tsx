@@ -571,8 +571,25 @@ describe("a panel closing while something else owns the screen", () => {
       await new Promise((r) => setTimeout(r, 0));
     });
     await remote.back();
-    await settleFocus();
-    expect(getCurrentFocusKey()).not.toBe("detail-more");
+    // A non-event, and the only shape that fits one: nothing can be waited for
+    // here, because the thing being forbidden IS the wait's own signal - the
+    // restore's timer must not fire. So the window is observed instead. A
+    // counted settle is not a window: it spends a fixed number of turns, and a
+    // restore that fires one turn later than the machine happened to allow went
+    // unseen - measured, dropping the `playing` guard was caught with the
+    // landing delayed 5 ms and missed at 8. The window IS the reach, and it is
+    // the number below: the same mutation is caught out to 240 ms and missed at
+    // 300.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 250));
+    });
+    // And what must not happen is any button on THIS page taking the cursor,
+    // not one named button: the page's own keys are the ones a press would act
+    // on while the film is up, and the row is as wrong as the button. On a
+    // healthy build the cursor is still on the menu's own key, which is no
+    // longer mounted - the page deliberately does nothing at all.
+    const at = String(getCurrentFocusKey());
+    expect(at.startsWith("detail-") || at.startsWith("children-"), `the page took the cursor to ${at}`).toBe(false);
     await act(async () => {
       usePlayer.setState({ current: null });
       await new Promise((r) => setTimeout(r, 0));
