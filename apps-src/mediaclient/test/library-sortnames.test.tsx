@@ -4,7 +4,7 @@ import { configureI18n } from "@sdk";
 import { Library } from "../Library";
 import { useApp } from "../state";
 import { clearLibraryViews } from "../libraryView";
-import { setupRemote, setFocus, remote } from "./remote";
+import { setupRemote, setFocus, remote, focusEnters } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaBackend, MediaItem } from "../backends/types";
@@ -81,9 +81,9 @@ describe("the word on the sort button", () => {
     // The panel focuses its own first row a macrotask after it opens, so a
     // setFocus issued before that is simply overwritten - and the press then
     // lands on "Name", which IS named, and the test passes against the bug.
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 20));
-    });
+    // Waited for rather than slept through: twenty milliseconds is a guess
+    // about the machine, and this failed about one full-suite run in three.
+    await focusEnters("lf-");
 
     // The SECOND order in the list - the one the stub names - is chosen, and
     // then the screen is left with a sort whose name is missing from the next
@@ -92,13 +92,10 @@ describe("the word on the sort button", () => {
     await act(async () => {
       await remote.ok();
     });
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 50));
-    });
-
     // The order that was actually applied, so the test cannot quietly measure
-    // the default one.
-    expect(container.textContent).toContain("Date added");
+    // the default one. Waited for, since what it waits on is a screen redrawing
+    // rather than a number of milliseconds.
+    await waitFor(() => expect(container.textContent).toContain("Date added"));
     const afterApply = sortCalls;
     // Time passes with the screen open. A looping effect shows up here and
     // nowhere else: nothing errors, the grid looks right, and the box asks the
