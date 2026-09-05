@@ -269,15 +269,19 @@ describe("the overflow button", () => {
     await settleClock();
     await press("more-close");
     expect(el("more-close"), "the menu is gone").toBeNull();
-    // Waited for the key rather than paired with a read, which is the exception
-    // this screen earns: closing the menu lands the cursor TWICE by design -
-    // the fallback catches it so the remote is never dead, then the restore
-    // moves it to the button, on a timer. So the first landing is `detail-play`
-    // on a healthy build and pairing would fail on it. What the comment above
-    // is about is where the cursor ENDS, since the press that would start a
-    // film comes after; a build that leaves it on the row fails here on the
-    // timeout, naming the row.
+    // Arrive, then let the turns pass, then read. Closing the menu lands the
+    // cursor TWICE on a healthy build - `useFocusOnReveal` catches it as the
+    // menu goes (on `detail-play` here, on the episode row where the screen was
+    // opened from one), and the restore then moves it to the button - and both
+    // land in the same timer turn, so no wait can see the one in between. What
+    // these tests are about is where the cursor ENDS, since the press that
+    // would start a film comes after, and a wait alone cannot say that: it
+    // returns on first arrival and never sees the cursor leave again. Measured
+    // - a restore that hands the cursor back and then drops it on Play passes a
+    // bare wait and fails this.
     await focusBecomes("detail-more");
+    await settleFocus();
+    expect(getCurrentFocusKey()).toBe("detail-more");
   });
 
   it("is not offered when there is nothing behind it", async () => {
@@ -428,15 +432,19 @@ describe("closing the overflow menu", () => {
     await focusOn(`children-${h.season.id}-${h.episodes[0]!.id}`);
     await press("detail-more");
     await remote.back();
-    // Waited for the key rather than paired with a read, which is the exception
-    // this screen earns: closing the menu lands the cursor TWICE by design -
-    // the fallback catches it so the remote is never dead, then the restore
-    // moves it to the button, on a timer. So the first landing is `detail-play`
-    // on a healthy build and pairing would fail on it. What the comment above
-    // is about is where the cursor ENDS, since the press that would start a
-    // film comes after; a build that leaves it on the row fails here on the
-    // timeout, naming the row.
+    // Arrive, then let the turns pass, then read. Closing the menu lands the
+    // cursor TWICE on a healthy build - `useFocusOnReveal` catches it as the
+    // menu goes (on `detail-play` here, on the episode row where the screen was
+    // opened from one), and the restore then moves it to the button - and both
+    // land in the same timer turn, so no wait can see the one in between. What
+    // these tests are about is where the cursor ENDS, since the press that
+    // would start a film comes after, and a wait alone cannot say that: it
+    // returns on first arrival and never sees the cursor leave again. Measured
+    // - a restore that hands the cursor back and then drops it on Play passes a
+    // bare wait and fails this.
     await focusBecomes("detail-more");
+    await settleFocus();
+    expect(getCurrentFocusKey()).toBe("detail-more");
   });
 
   it("does the same after an episode has been played", async () => {
@@ -459,6 +467,8 @@ describe("closing the overflow menu", () => {
     await press("detail-more");
     await remote.back();
     await focusBecomes("detail-more");
+    await settleFocus();
+    expect(getCurrentFocusKey()).toBe("detail-more");
   });
 });
 

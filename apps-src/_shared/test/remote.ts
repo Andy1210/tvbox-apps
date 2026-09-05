@@ -143,18 +143,27 @@ export const remote = {
  * `expected null to be 'profile-u1'`. It reproduces deterministically by
  * pushing the landings out - and COUNT them before you do, because a sweep that
  * patches some of them reports a clean tree and proves nothing. That mistake
- * has been made three times here: once patching one site of eleven in the media
- * client, which missed five chapter-strip tests; once missing the block-body
- * form, which a regex for the one-liner does not match; and once missing the
- * three that never spell `setFocus` at all, landing through `focusFirstOf`,
- * `jump` and `back`. `apps-src` currently has 41 of the first kind and those 3
- * of the second, and `app-sdk`'s `Osk.tsx` and `PinPad.tsx` carry the shape
- * with nothing racing them yet.
+ * has been made three times here: once patching a single site in the media
+ * client, which has twelve, and missing five chapter-strip tests; once missing
+ * the block-body form, which a regex for the one-liner does not match; and once
+ * missing the three that never spell `setFocus` at all, landing through
+ * `focusFirstOf`, `jump` and `back`. `apps-src` currently has 41 of the first
+ * kind and those 3 of the second. `app-sdk`'s `Osk.tsx` and `PinPad.tsx` carry
+ * the shape and are watched but not yet raced - stubbing them fails three tests,
+ * so a delay there measures something; two of the three helper landings are the
+ * opposite, observed by nothing at all, and green at any delay for that reason
+ * rather than for a good one.
  *
- * Two more things the sweeps taught. The band is narrow: a delay of 5 to 8 ms
- * lands between a test's presses, while by 15 ms it lands after them and
- * everything is green again. And a single run proves nothing either - some of
- * these failed 2 of 8 full runs and 0 of 8 on their own.
+ * Three things about reading the result. WHERE a landing lands decides how the
+ * delay behaves, so there is no one band: the initial-focus sites bite between
+ * about 5 and 8 ms and go green again by 15, once the delay is long enough to
+ * land after a test's presses rather than between them, while the restore in
+ * `Detail.tsx` is monotone from 8 ms to at least 80. A single run proves nothing
+ * either, and not always in the same direction - some of these fail 2 full runs
+ * in 8 and none in 8 on their own, while the restore's three fail 6 of 6 alone
+ * and 2 of 5 in a full suite. And the instrument has a ceiling: above about
+ * 40 ms it outruns the declared budget in `season-strip`'s promptness test,
+ * which then fails on any tree and is the instrument talking, not the suite.
  *
  * So an assertion about where the cursor ARRIVES belongs here rather than
  * straight after a counted settle.
