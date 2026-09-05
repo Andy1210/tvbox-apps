@@ -141,10 +141,40 @@ export const remote = {
  * That is not hypothetical. It failed a CI run that was publishing a finished
  * release, on the first focus assertion of a test, before any press:
  * `expected null to be 'profile-u1'`. It reproduces deterministically by
- * pushing the landing out: delaying a screen's initial focus by 5 ms failed
- * about twenty of these across six files, and scaling every 0 ms timer together
- * - which keeps the order the app arms them in, and is the fairer of the two -
- * failed fifty at 100 ms.
+ * pushing the landings out - and COUNT them before you do, because a sweep that
+ * patches some of them reports a clean tree and proves nothing. That mistake
+ * has been made three times here: once patching a single site in the media
+ * client, which has twelve of them, and missing five tests in
+ * `chapter-focus.test.tsx` and `player-focus.test.tsx`; once missing the
+ * block-body form, which a regex for the one-liner does not match; and once
+ * missing the three that never spell `setFocus` at all, landing through
+ * `focusFirstOf`, `jump` and `back`. `apps-src` currently has 41 of the first
+ * kind and 3 of the second, one helper landing per app - so the media client's
+ * count is twelve direct plus its restore, thirteen.
+ *
+ * `app-sdk`'s `Osk.tsx` and `PinPad.tsx` carry the shape and are watched but not
+ * yet raced - stubbing them fails three tests, so a delay there measures
+ * something. Two of the three helper landings are the opposite, observed by
+ * nothing at all, and green at any delay for that reason rather than a good
+ * one.
+ *
+ * Three things about reading the result. WHERE a landing lands decides how the
+ * delay behaves, so do not expect one band: the initial-focus sites used to
+ * bite between about 5 and 8 ms and go green again by 15, once the delay was
+ * long enough to land after a test's presses rather than between them, while
+ * the restore in `Detail.tsx` is monotone from 8 ms to at least 80 - and those
+ * assertions are all waits now, so that first band is history rather than
+ * something to go looking for.
+ *
+ * A single run can mislead in either direction, so say which you measured.
+ * Running one file alone was the more sensitive of the two for the restore
+ * (6 failures in 6, against a full suite that still failed every run but with
+ * two of the three tests rather than three); for the earlier sites it was the
+ * other way round, 2 full runs in 8 and none in 8 alone.
+ *
+ * And the instrument has a ceiling: above about 40 ms it outruns the declared
+ * budget in `season-strip`'s promptness test, which then fails on any tree and
+ * is the instrument talking, not the suite.
  *
  * So an assertion about where the cursor ARRIVES belongs here rather than
  * straight after a counted settle.

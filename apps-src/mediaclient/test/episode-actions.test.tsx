@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import type { ItemDetail, MediaItem, MediaVersion } from "../backends/types";
 
-const { setupRemote, flushFocus, setFocus, getCurrentFocusKey, remote, place, focusLands } =
+const { setupRemote, flushFocus, setFocus, getCurrentFocusKey, remote, place, focusLands, focusBecomes } =
   await import("./remote");
 setupRemote();
 
@@ -269,6 +269,26 @@ describe("the overflow button", () => {
     await settleClock();
     await press("more-close");
     expect(el("more-close"), "the menu is gone").toBeNull();
+    // Arrive, then let the turns pass, then read - all three of these need the
+    // three lines, and each one earns its place.
+    //
+    // Closing the menu lands the cursor TWICE on a healthy build:
+    // `useFocusOnReveal` catches it as the menu goes, and the restore then
+    // moves it to the button. Both land in the same timer turn, so nothing can
+    // observe the one in between - so the group-then-read pairing the rule
+    // elsewhere asks for buys nothing here, and the wait names the key. What
+    // the pairing exists to catch is caught by the settle and the read below
+    // instead.
+    //
+    // But a wait returns on first ARRIVAL and never sees the cursor leave
+    // again, and where it ends is the whole subject: the press that would start
+    // a film comes after. Measured - a restore that hands the cursor back and
+    // then drops it on Play passes a bare wait on two of these three and fails
+    // all three here. The settle is what gives the read its reach, and the
+    // reach is that helper's turn count: three turns sees a drop up to about
+    // 5 ms out, and past that nothing here would.
+    await focusBecomes("detail-more");
+    await settleFocus();
     expect(getCurrentFocusKey()).toBe("detail-more");
   });
 
@@ -420,6 +440,8 @@ describe("closing the overflow menu", () => {
     await focusOn(`children-${h.season.id}-${h.episodes[0]!.id}`);
     await press("detail-more");
     await remote.back();
+    // Arrive, settle, read - see the first of these three, above.
+    await focusBecomes("detail-more");
     await settleFocus();
     expect(getCurrentFocusKey()).toBe("detail-more");
   });
@@ -443,6 +465,11 @@ describe("closing the overflow menu", () => {
     await focusOn("detail-more");
     await press("detail-more");
     await remote.back();
+    // Arrive, settle, read, as above - and here the cursor's first landing is
+    // the episode row rather than Play, because `first` follows the episode
+    // that was played. That is the row these tests exist to keep it off, which
+    // is exactly why the read after the settle is the assertion.
+    await focusBecomes("detail-more");
     await settleFocus();
     expect(getCurrentFocusKey()).toBe("detail-more");
   });
