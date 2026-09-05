@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { act, render } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { configureI18n, useBackspace } from "@sdk";
 import { Player } from "../Player";
 import { usePlayer, __wirePlayerEventsForTest } from "../playback/player";
 import { useApp } from "../state";
 import { doesFocusableExist } from "@noriginmedia/norigin-spatial-navigation";
-import { setupRemote, remote, setFocus, getCurrentFocusKey, flushFocus } from "./remote";
+import { setupRemote, remote, setFocus, getCurrentFocusKey, flushFocus, focusEnters } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaItem } from "../backends/types";
@@ -45,7 +45,25 @@ const slowStop = async (opts?: { handOver?: boolean }): Promise<void> => {
   await realStop(opts);
 };
 
+/**
+ * The same, with the test holding the door.
+ *
+ * `slowStop`'s twenty milliseconds are a guess about how long a box takes, and
+ * a test that has to act INSIDE that window is racing it: on a machine where
+ * the presses take longer than the guess, the teardown is over before the
+ * second one arrives and the test measures nothing. Here the window opens when
+ * the stop is called and closes when the test says so.
+ */
+let releaseStop: () => void = () => {};
+const heldStop = async (opts?: { handOver?: boolean }): Promise<void> => {
+  await new Promise<void>((r) => {
+    releaseStop = r;
+  });
+  await realStop(opts);
+};
+
 beforeEach(async () => {
+  releaseStop = () => {};
   usePlayer.setState({ stop: realStop });
   useApp.setState({ backend: null });
   usePlayer.setState({
@@ -172,7 +190,10 @@ describe("the playback overlay", () => {
     });
 
     expect(usePlayer.getState().overlay).toBe(true);
-  });
+    // Four and a half seconds of real clock against vitest's five: the
+    // headroom is smaller than one wait, and the strip above is reached
+    // through a helper that now waits for its cursor.
+  }, 15000);
 });
 
 describe("a seek that has been committed", () => {
@@ -421,7 +442,7 @@ describe("the overlay's own controls", () => {
       useBackspace(outer);
       return null;
     }
-    usePlayer.setState({ stop: slowStop });
+    usePlayer.setState({ stop: heldStop });
     render(
       <>
         <Outer />
@@ -439,12 +460,14 @@ describe("the overlay's own controls", () => {
     // Still there: the box has not finished tearing it down.
     expect(usePlayer.getState().current).not.toBe(null);
 
-    // The repeats arrive during the teardown, and after it.
+    // A repeat arrives inside the window, which is held open rather than timed.
     await remote.back();
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 60));
+      releaseStop();
+      await Promise.resolve();
     });
-    expect(usePlayer.getState().current).toBe(null);
+    await waitFor(() => expect(usePlayer.getState().current).toBe(null));
+    // And one after it has closed.
     await remote.back();
     await settle();
     expect(outer).not.toHaveBeenCalled();
@@ -624,7 +647,13 @@ describe("the chapter strip", () => {
     await act(async () => setFocus("pb-playpause"));
     await flushFocus();
     await remote.down();
-    await settle();
+    // The strip's own cursor, waited for: the press mounts it and the focus
+    // lands a timer later, so a counted settle reads the button the press came
+    // from. To the strip rather than to a named chapter, because which chapter
+    // it opens on is asserted elsewhere in this file and a wait for that answer
+    // would sit through a strip that opened at the start of the film and
+    // corrected itself.
+    await focusEnters("ch-");
   };
 
   it("is not there until Down from the buttons asks for it", async () => {
@@ -645,7 +674,7 @@ describe("the chapter strip", () => {
     expect(getCurrentFocusKey()).toBe("pb-playpause");
 
     await remote.down();
-    await settle();
+    await focusEnters("ch-");
     // 700_000 is inside the second chapter.
     expect(getCurrentFocusKey()).toBe("ch-2-600000");
   });
@@ -740,7 +769,13 @@ describe("the chapter strip, once it is open", () => {
     await act(async () => setFocus("pb-playpause"));
     await flushFocus();
     await remote.down();
-    await settle();
+    // The strip's own cursor, waited for: the press mounts it and the focus
+    // lands a timer later, so a counted settle reads the button the press came
+    // from. To the strip rather than to a named chapter, because which chapter
+    // it opens on is asserted elsewhere in this file and a wait for that answer
+    // would sit through a strip that opened at the start of the film and
+    // corrected itself.
+    await focusEnters("ch-");
   };
 
   it("keeps the cursor when a marker comes into range", async () => {
@@ -751,8 +786,8 @@ describe("the chapter strip, once it is open", () => {
     withChapters();
     render(<Player />);
     await settle();
+    // `open` waits for exactly this, so it is the wait above that carries it.
     await open();
-    expect(String(getCurrentFocusKey()).startsWith("ch-")).toBe(true);
 
     // The playhead moves into the marker, which is what re-runs the check.
     await act(async () => usePlayer.setState({ positionMs: 720_000 }));
@@ -778,5 +813,8 @@ describe("the chapter strip, once it is open", () => {
     expect(usePlayer.getState().overlay, "the overlay stays up while the strip is out").toBe(true);
     expect(doesFocusableExist("chapters")).toBe(true);
     expect(String(getCurrentFocusKey())).toMatch(/^ch-/);
-  });
+    // Four and a half seconds of real clock against vitest's five: the
+    // headroom is smaller than one wait, and the strip above is reached
+    // through a helper that now waits for its cursor.
+  }, 15000);
 });

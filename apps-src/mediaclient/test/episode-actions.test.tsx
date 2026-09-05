@@ -12,7 +12,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import type { ItemDetail, MediaItem, MediaVersion } from "../backends/types";
 
-const { setupRemote, flushFocus, setFocus, getCurrentFocusKey, remote, place } = await import("./remote");
+const { setupRemote, flushFocus, setFocus, getCurrentFocusKey, remote, place, focusLands } =
+  await import("./remote");
 setupRemote();
 
 let n = 0;
@@ -56,7 +57,7 @@ interface Harness {
  * episodes under it.
  */
 async function open(opts?: { inProgress?: boolean; watched?: boolean }): Promise<Harness> {
-  const { render, act } = await import("@testing-library/react");
+  const { render } = await import("@testing-library/react");
   const { configureI18n } = await import("@sdk");
   const { Detail } = await import("../Detail");
   const { useApp } = await import("../state");
@@ -101,12 +102,12 @@ async function open(opts?: { inProgress?: boolean; watched?: boolean }): Promise
   });
 
   render(<Detail itemId={season.id} />);
-  for (let i = 0; i < 5; i++) {
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
-    });
-    await flushFocus();
-  }
+  await settleFocus();
+  // The screen's own cursor, waited for rather than counted. It lands on a
+  // timer, and one that arrives after a test has put the cursor somewhere takes
+  // it straight back - which makes what the test measures a question about how
+  // busy the machine is.
+  await focusLands();
   return { season, episodes };
 }
 
@@ -458,7 +459,7 @@ describe("a film screen, where geometry is the only way back up", () => {
    * every press in or out of its action row is decided by geometry.
    */
   async function openFilm(): Promise<void> {
-    const { render, act } = await import("@testing-library/react");
+    const { render } = await import("@testing-library/react");
     const { configureI18n } = await import("@sdk");
     const { Detail } = await import("../Detail");
     const { useApp } = await import("../state");
@@ -492,12 +493,10 @@ describe("a film screen, where geometry is the only way back up", () => {
       failure: null,
     });
     render(<Detail itemId={film.id} />);
-    for (let i = 0; i < 5; i++) {
-      await act(async () => {
-        await new Promise((r) => setTimeout(r, 0));
-      });
-      await flushFocus();
-    }
+    await settleFocus();
+    // Waited for, like `open()`: a landing that arrives after a test has moved
+    // the cursor takes it back.
+    await focusLands();
     // The action row above, the version chips below it.
     place(el("detail-play")!, 100, 400, 300, 70);
     place(el("detail-watched")!, 440, 400, 120, 70);

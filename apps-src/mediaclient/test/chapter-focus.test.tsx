@@ -43,7 +43,7 @@ vi.mock("@noriginmedia/norigin-spatial-navigation", async () => {
 const { Player } = await import("../Player");
 const { usePlayer } = await import("../playback/player");
 const { useApp } = await import("../state");
-const { setupRemote, remote, setFocus, flushFocus } = await import("./remote");
+const { setupRemote, remote, setFocus, flushFocus, focusEnters } = await import("./remote");
 
 configureI18n({ hu, en }, { fallback: "en" });
 setupRemote();
@@ -98,10 +98,11 @@ describe("opening the chapter strip", () => {
     spy.calls.length = 0;
 
     await remote.down();
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
-    });
-    await flushFocus();
+    // Waited for: the strip is mounted by the press and asks for its own cursor
+    // a timer later, so a counted settle can read this before the request it is
+    // watching for has been made - and the assertion below would then hold on a
+    // build that asks for a key nothing has mounted.
+    await focusEnters("ch-");
 
     const missing = spy.calls.filter((c) => !c.existed && c.key !== "");
     expect(
@@ -109,6 +110,9 @@ describe("opening the chapter strip", () => {
       `focus was requested for ${missing.map((m) => m.key).join(", ")}, which did not exist at the time`,
     ).toEqual([]);
     // And it did reach the strip, so the rule is not satisfied by never asking.
+    // Implied by the wait above now - nothing else in this harness can reach a
+    // chapter key, since it places no rectangles - and kept as the statement of
+    // what the rule is for.
     expect(spy.calls.some((c) => c.key === "chapters")).toBe(true);
   });
 });

@@ -280,6 +280,11 @@ describe("the season strip on an episode list", () => {
     expect(useApp.getState().screen).toBe(before);
   });
 
+  // The two tests below fail under the suite's repro hook - the one that delays
+  // `useInitialFocus`'s landing - and neither is weak. The lift arms its own
+  // `setTimeout(..., 0)` to read the cursor that landing placed, in source order
+  // after it, so holding one of the two back makes the lift fire first and find
+  // nothing to lift. Delayed equally, this file is whole. Nothing to fix here.
   it("opens on the strip when that is where it was opened from", async () => {
     const h = await open({ focusSeasons: true });
     await focusBecomes(chipKey(h.seasons.indexOf(h.current)));

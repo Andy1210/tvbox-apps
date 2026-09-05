@@ -4,7 +4,7 @@ import { configureI18n } from "@sdk";
 import { Library } from "../Library";
 import { LibraryFilters } from "../LibraryFilters";
 import { useApp } from "../state";
-import { setupRemote, setFocus, remote, getCurrentFocusKey } from "./remote";
+import { setupRemote, setFocus, remote, getCurrentFocusKey, focusBecomes, focusEnters, focusLands } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import { PlexBackend } from "../backends/plex/backend";
@@ -176,9 +176,9 @@ describe("the filter half of the panel", () => {
       />,
     );
     await waitFor(() => expect(document.body.textContent).toContain("HDR"));
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 20));
-    });
+    // The panel's own cursor first: it lands a macrotask after the panel opens,
+    // and one that arrives after the line below takes the cursor straight back.
+    await focusEnters("lf-");
     await setFocus("lf-filter-0");
     await act(async () => {
       await remote.ok();
@@ -201,9 +201,9 @@ describe("coming back from the collections", () => {
     });
     await waitFor(() => expect(document.body.textContent).toContain("Date added"));
     // The panel takes its own focus a macrotask after it opens.
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 20));
-    });
+    // The panel's own cursor first: it lands a macrotask after the panel opens,
+    // and one that arrives after the line below takes the cursor straight back.
+    await focusEnters("lf-");
     await setFocus("lf-sort-1");
     await act(async () => {
       await remote.ok();
@@ -250,9 +250,9 @@ describe("opening something from the library", () => {
       await remote.ok();
     });
     await waitFor(() => expect(document.body.textContent).toContain("Date added"));
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 20));
-    });
+    // The panel's own cursor first: it lands a macrotask after the panel opens,
+    // and one that arrives after the line below takes the cursor straight back.
+    await focusEnters("lf-");
     await setFocus("lf-sort-1");
     await act(async () => {
       await remote.ok();
@@ -297,9 +297,9 @@ describe("a panel with nothing to choose from", () => {
         onClose={() => {}}
       />,
     );
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 20));
-    });
+    // Waited for rather than slept through, and it names the key: with nothing
+    // else mounted there is only one place the panel can put the cursor.
+    await focusBecomes("lf-close");
     await act(async () => {
       await remote.down();
     });
@@ -338,9 +338,12 @@ describe("the fallback that catches a lost cursor", () => {
     });
     // It arrives.
     await act(async () => rerender(<Screen ready={true} />));
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 20));
-    });
+    // `focusLands`, not a wait for the key: the fallback names `fb-late` while
+    // nothing is mounted under it, so the key is already this one before the
+    // rerender and a wait for it asserts nothing. What arriving buys is a
+    // button that EXISTS holding the cursor, which is the half of the title
+    // that says it lands there when it does.
+    await focusLands();
     expect(getCurrentFocusKey()).toBe("fb-late");
   });
 });
@@ -382,11 +385,14 @@ describe("a panel whose options are slow, stuck or lost", () => {
     });
     expect(closed, "and an OK in that window must not close the panel").toBe(0);
 
-    // Once the orders arrive the cursor is on the first of them, by itself.
+    // Once the orders arrive the cursor is on the first of them, by itself. The
+    // key was already this one while the chip did not exist - the Down press
+    // above parked it there - so what the arrival has to buy is a chip under
+    // it, and `focusLands` is what asks for that rather than for the name.
     await act(async () => {
       answer([{ key: "titleSort", title: "Name" }]);
-      await new Promise((r) => setTimeout(r, 20));
     });
+    await focusLands();
     expect(getCurrentFocusKey()).toBe("lf-sort-0");
   });
 
@@ -489,10 +495,10 @@ describe("a panel whose options are slow, stuck or lost", () => {
 
     // No press: this is about what is lit when it opens.
     await act(async () => rerender(<Screen open={true} />));
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 50));
-    });
-    expect(getCurrentFocusKey()).toBe("lf-close");
+    // Waited for rather than slept through: the panel's cursor lands on a timer
+    // and fifty milliseconds is a guess about a machine, not about the panel.
+    // It cannot pass on the cursor it started with, which is outside the panel.
+    await focusBecomes("lf-close");
   });
 
   it("reaches the filters when the orders came back empty", async () => {
@@ -515,9 +521,11 @@ describe("a panel whose options are slow, stuck or lost", () => {
       />,
     );
     await waitFor(() => expect(document.body.textContent).toContain("HDR"));
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 20));
-    });
+    // Waited to the panel, then read. This one has a way out as well as a
+    // filter, and opening on the way out - or opening on it and correcting a
+    // moment later, which is one swallowed press - is the failure: a wait for
+    // the filter itself would sit through both and pass.
+    await focusEnters("lf-");
     expect(getCurrentFocusKey()).toBe("lf-filter-0");
   });
 });

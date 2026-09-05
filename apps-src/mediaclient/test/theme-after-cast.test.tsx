@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { act, render } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { themeItem, useTheme } from "../theme";
 import { usePlayer, resetPlayer } from "../playback/player";
 import { useApp } from "../state";
@@ -184,6 +184,12 @@ describe("a series' theme and a film started by voice", () => {
     const { rerender } = render(<Season key="f1" item={season("A")} />);
     await settle();
     const a = made[0]!;
+    // Exact, and it has to be: the bug is that a fade-out scaling by the
+    // current volume computes a step of ZERO from silence, so a test that
+    // started the film a little way up the ramp would be measuring a fade that
+    // can move. Which is why the suite's timer-scaling probe fails this one and
+    // must not be "fixed" here - it stretches the settle above past the window,
+    // the ramp climbs, and the premise is gone. Nothing about the app changed.
     expect(a.volume, "the fade starts from silence").toBe(0);
 
     // A film starts before the ramp has moved at all, which is the window.
@@ -191,8 +197,18 @@ describe("a series' theme and a film started by voice", () => {
       usePlayer.setState({ current: playing });
       rerender(<Season key="f1" item={season("A")} />);
     });
-    await new Promise((r) => setTimeout(r, 350));
-    expect(a.paused, "it was really paused").toBe(true);
+    // The pause is waited for; the level is read AFTER a window, and the two
+    // cannot be swapped. A pause is an event, so waiting for it removes a guess
+    // about the machine and costs nothing. The level is the absence of one -
+    // that the fade-in's own interval was cancelled and is not still raising
+    // this element - and the fade-out reaches zero on its first tick, so a wait
+    // for a low level returns at the instant it is low and never sees a ramp
+    // carrying on after it. Measured: a build whose fade-out completes while
+    // the fade-in leaks passes the wait and fails this.
+    await waitFor(() => expect(a.paused, "it was really paused").toBe(true));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 300));
+    });
     expect(a.volume, "and it did not get louder on the way out").toBeLessThanOrEqual(0.01);
   });
 
