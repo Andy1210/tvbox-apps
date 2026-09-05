@@ -28,13 +28,23 @@ setupRemote();
 // inline transform itself - but the animated path is only taken for a move
 // within a screen, so on an unloaded machine these tests never reach it and the
 // missing method surfaces as `node.animate is not a function` under load.
+//
+// Put back rather than deleted: this environment has no `animate` today, so a
+// delete is the same thing - but a happy-dom that grows one would lose it here
+// for every test after these.
+type Animatable = { animate?: unknown };
+let realAnimate: unknown;
+
 beforeEach(() => {
-  (window.HTMLElement.prototype as unknown as { animate: unknown }).animate = () =>
+  realAnimate = (window.HTMLElement.prototype as unknown as Animatable).animate;
+  (window.HTMLElement.prototype as unknown as Animatable).animate = () =>
     ({ cancel: () => {}, commitStyles: () => {} }) as unknown as Animation;
 });
 
 afterEach(() => {
-  delete (window.HTMLElement.prototype as unknown as { animate?: unknown }).animate;
+  const proto = window.HTMLElement.prototype as unknown as Animatable;
+  if (realAnimate === undefined) delete proto.animate;
+  else proto.animate = realAnimate;
 });
 
 const TILE_W = 200;
