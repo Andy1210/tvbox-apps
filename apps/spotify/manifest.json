@@ -2,8 +2,12 @@
   "id": "spotify",
   "manifestVersion": 1,
   "name": "Spotify",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "changelog": [
+    {
+      "version": "1.7.1",
+      "notes": "Stepping onto the progress bar no longer nudges the rest of the screen. The bar thickens when it takes focus, and the cover, the song title and the buttons used to shift with it."
+    },
     {
       "version": "1.7.0",
       "notes": "Switching between the linked accounts now works from the TV. The box signs itself in as the account whose library you are looking at, so its own Liked Songs and playlists are what play — no phone cast needed, once that account has cast here at least once. The account's name is shown beside the settings gear, starting a song no longer moves the library to another account, and if this box has no login for the account you are browsing yet, the player says whose session the music started in."
