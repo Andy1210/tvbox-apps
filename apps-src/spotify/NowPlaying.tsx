@@ -821,37 +821,43 @@ function SeekBar({
         " ",
       )}
     >
-      <div
-        className={[
-          "relative rounded-full bg-white/15 transition-all",
-          focused ? "h-[1.1vh] ring-[0.3vh] ring-white/70" : "h-[0.6vh]",
-        ].join(" ")}
-      >
-        <div className="absolute top-0 left-0 h-full rounded-full bg-[#1DB954]" style={{ width: pct + "%" }} />
-        {/* Where the song IS, while the cursor is somewhere else - without it
-            there is no way back to it. It differs from the cursor in SHAPE rather
-            than in size: at three metres a size difference alone is a few
-            arc-minutes and reads as one mark that moved. */}
-        {cursor !== null && (
-          <div
-            className="absolute top-1/2 h-[2.2vh] w-[0.35vh] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white"
-            style={{ left: playedPct + "%" }}
-          />
-        )}
-        {/* The cursor, and the only thing on this bar that says it has focus:
-            every other control on this screen turns solid white, and a half-vh
-            height change does not read across a room. */}
+      {/* The bar's own height is reserved at its focused size, whether or not it
+          has focus. It thickens when focus arrives, and this screen is a centred
+          column, so a track that changed the column's height moved the cover, the
+          title and the buttons every time the bar was stepped onto or left. */}
+      <div className="flex h-[1.1vh] items-center">
         <div
           className={[
-            "absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-[0_0_1.5vh_rgba(0,0,0,0.7)]",
-            cursor !== null
-              ? "h-[2.6vh] w-[2.6vh] border-[0.3vh] border-white bg-[#1DB954]"
-              : focused
-                ? "h-[1.8vh] w-[1.8vh] bg-white"
-                : "h-[1.2vh] w-[1.2vh] bg-white/80",
+            "relative w-full rounded-full bg-white/15 transition-all",
+            focused ? "h-[1.1vh] ring-[0.3vh] ring-white/70" : "h-[0.6vh]",
           ].join(" ")}
-          style={{ left: pct + "%" }}
-        />
+        >
+          <div className="absolute top-0 left-0 h-full rounded-full bg-[#1DB954]" style={{ width: pct + "%" }} />
+          {/* Where the song IS, while the cursor is somewhere else - without it
+              there is no way back to it. It differs from the cursor in SHAPE rather
+              than in size: at three metres a size difference alone is a few
+              arc-minutes and reads as one mark that moved. */}
+          {cursor !== null && (
+            <div
+              className="absolute top-1/2 h-[2.2vh] w-[0.35vh] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white"
+              style={{ left: playedPct + "%" }}
+            />
+          )}
+          {/* The cursor, and the only thing on this bar that says it has focus:
+              every other control on this screen turns solid white, and a half-vh
+              height change does not read across a room. */}
+          <div
+            className={[
+              "absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-[0_0_1.5vh_rgba(0,0,0,0.7)]",
+              cursor !== null
+                ? "h-[2.6vh] w-[2.6vh] border-[0.3vh] border-white bg-[#1DB954]"
+                : focused
+                  ? "h-[1.8vh] w-[1.8vh] bg-white"
+                  : "h-[1.2vh] w-[1.2vh] bg-white/80",
+            ].join(" ")}
+            style={{ left: pct + "%" }}
+          />
+        </div>
       </div>
       <div className="flex justify-between text-[1.5vh] text-fg-dim mt-[0.6vh] tabular-nums">
         <span className={cursor !== null ? "text-white" : ""}>{mmss(shown)}</span>
