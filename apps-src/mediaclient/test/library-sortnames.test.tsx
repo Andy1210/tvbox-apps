@@ -4,7 +4,7 @@ import { configureI18n } from "@sdk";
 import { Library } from "../Library";
 import { useApp } from "../state";
 import { clearLibraryViews } from "../libraryView";
-import { setupRemote, setFocus, remote, focusEnters } from "./remote";
+import { setupRemote, setFocus, remote, focusEnters, focusLands } from "./remote";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaBackend, MediaItem } from "../backends/types";
@@ -70,6 +70,11 @@ describe("the word on the sort button", () => {
   it("is asked for once, even when the server does not have one for that order", async () => {
     const { container } = render(<Library libraryId="1" title="Movies" />);
     await waitFor(() => expect(container.textContent).toContain("Film 0"));
+    // The grid's own cursor first, for the same reason the panel's is waited
+    // for below: it lands on a timer, and one that arrives after the line under
+    // this takes the cursor off the arrange button - so the press that opens
+    // the panel goes to a tile instead and nothing opens at all.
+    await focusLands();
 
     // Through the panel, which is the only way to a non-default order.
     await setFocus("lib-arrange");
