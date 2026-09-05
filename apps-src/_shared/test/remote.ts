@@ -144,26 +144,34 @@ export const remote = {
  * pushing the landings out - and COUNT them before you do, because a sweep that
  * patches some of them reports a clean tree and proves nothing. That mistake
  * has been made three times here: once patching a single site in the media
- * client, which has twelve, and missing five chapter-strip tests; once missing
- * the block-body form, which a regex for the one-liner does not match; and once
+ * client, which has twelve of them, and missing five tests in
+ * `chapter-focus.test.tsx` and `player-focus.test.tsx`; once missing the
+ * block-body form, which a regex for the one-liner does not match; and once
  * missing the three that never spell `setFocus` at all, landing through
  * `focusFirstOf`, `jump` and `back`. `apps-src` currently has 41 of the first
- * kind and those 3 of the second. `app-sdk`'s `Osk.tsx` and `PinPad.tsx` carry
+ * kind and those 3 of the second - so the media client owns thirteen in all. `app-sdk`'s `Osk.tsx` and `PinPad.tsx` carry
  * the shape and are watched but not yet raced - stubbing them fails three tests,
  * so a delay there measures something; two of the three helper landings are the
  * opposite, observed by nothing at all, and green at any delay for that reason
  * rather than for a good one.
  *
  * Three things about reading the result. WHERE a landing lands decides how the
- * delay behaves, so there is no one band: the initial-focus sites bite between
- * about 5 and 8 ms and go green again by 15, once the delay is long enough to
- * land after a test's presses rather than between them, while the restore in
- * `Detail.tsx` is monotone from 8 ms to at least 80. A single run proves nothing
- * either, and not always in the same direction - some of these fail 2 full runs
- * in 8 and none in 8 on their own, while the restore's three fail 6 of 6 alone
- * and 2 of 5 in a full suite. And the instrument has a ceiling: above about
- * 40 ms it outruns the declared budget in `season-strip`'s promptness test,
- * which then fails on any tree and is the instrument talking, not the suite.
+ * delay behaves, so do not expect one band: the initial-focus sites used to
+ * bite between about 5 and 8 ms and go green again by 15, once the delay was
+ * long enough to land after a test's presses rather than between them, while
+ * the restore in `Detail.tsx` is monotone from 8 ms to at least 80 - and those
+ * assertions are all waits now, so that first band is history rather than
+ * something to go looking for.
+ *
+ * A single run can mislead in either direction, so say which you measured.
+ * Running one file alone was the more sensitive of the two for the restore
+ * (6 failures in 6, against a full suite that still failed every run but with
+ * two of the three tests rather than three); for the earlier sites it was the
+ * other way round, 2 full runs in 8 and none in 8 alone.
+ *
+ * And the instrument has a ceiling: above about 40 ms it outruns the declared
+ * budget in `season-strip`'s promptness test, which then fails on any tree and
+ * is the instrument talking, not the suite.
  *
  * So an assertion about where the cursor ARRIVES belongs here rather than
  * straight after a counted settle.

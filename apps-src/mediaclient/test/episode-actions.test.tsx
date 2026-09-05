@@ -269,16 +269,22 @@ describe("the overflow button", () => {
     await settleClock();
     await press("more-close");
     expect(el("more-close"), "the menu is gone").toBeNull();
-    // Arrive, then let the turns pass, then read. Closing the menu lands the
-    // cursor TWICE on a healthy build - `useFocusOnReveal` catches it as the
-    // menu goes (on `detail-play` here, on the episode row where the screen was
-    // opened from one), and the restore then moves it to the button - and both
-    // land in the same timer turn, so no wait can see the one in between. What
-    // these tests are about is where the cursor ENDS, since the press that
-    // would start a film comes after, and a wait alone cannot say that: it
-    // returns on first arrival and never sees the cursor leave again. Measured
-    // - a restore that hands the cursor back and then drops it on Play passes a
-    // bare wait and fails this.
+    // Arrive, then let the turns pass, then read - all three of these need the
+    // three lines, and each one earns its place.
+    //
+    // Closing the menu lands the cursor TWICE on a healthy build:
+    // `useFocusOnReveal` catches it as the menu goes, and the restore then
+    // moves it to the button. Both land in the same timer turn, so no wait can
+    // see the one in between - which is why the wait is for the answer here
+    // rather than paired with a read, against the rule everywhere else.
+    //
+    // But a wait returns on first ARRIVAL and never sees the cursor leave
+    // again, and where it ends is the whole subject: the press that would start
+    // a film comes after. Measured - a restore that hands the cursor back and
+    // then drops it on Play passes a bare wait on two of these three and fails
+    // all three here. The settle is what gives the read its reach, and the
+    // reach is that helper's turn count: three turns sees a drop up to about
+    // 5 ms out, and past that nothing here would.
     await focusBecomes("detail-more");
     await settleFocus();
     expect(getCurrentFocusKey()).toBe("detail-more");
@@ -432,16 +438,7 @@ describe("closing the overflow menu", () => {
     await focusOn(`children-${h.season.id}-${h.episodes[0]!.id}`);
     await press("detail-more");
     await remote.back();
-    // Arrive, then let the turns pass, then read. Closing the menu lands the
-    // cursor TWICE on a healthy build - `useFocusOnReveal` catches it as the
-    // menu goes (on `detail-play` here, on the episode row where the screen was
-    // opened from one), and the restore then moves it to the button - and both
-    // land in the same timer turn, so no wait can see the one in between. What
-    // these tests are about is where the cursor ENDS, since the press that
-    // would start a film comes after, and a wait alone cannot say that: it
-    // returns on first arrival and never sees the cursor leave again. Measured
-    // - a restore that hands the cursor back and then drops it on Play passes a
-    // bare wait and fails this.
+    // Arrive, settle, read - see the first of these three, above.
     await focusBecomes("detail-more");
     await settleFocus();
     expect(getCurrentFocusKey()).toBe("detail-more");
@@ -466,6 +463,10 @@ describe("closing the overflow menu", () => {
     await focusOn("detail-more");
     await press("detail-more");
     await remote.back();
+    // Arrive, settle, read, as above - and here the cursor's first landing is
+    // the episode row rather than Play, because `first` follows the episode
+    // that was played. That is the row these tests exist to keep it off, which
+    // is exactly why the read after the settle is the assertion.
     await focusBecomes("detail-more");
     await settleFocus();
     expect(getCurrentFocusKey()).toBe("detail-more");
