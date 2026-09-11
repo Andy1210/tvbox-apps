@@ -25,8 +25,15 @@ const PAGE = 100;
 // Chosen so a tile fills its column: at 26vh tall a 2:3 poster is 17.3vw-ish of
 // height, and six of them left a third of each cell empty, which reads as a
 // mistake rather than as spacing.
-/** Poster height. The tile's own width follows from it at 2:3. */
-const TILE_VH = 26;
+/**
+ * Poster height. The tile's own width follows from it at 2:3.
+ *
+ * Exported for the home screen's own test rather than for any caller: the home
+ * rows take `Tile`'s default and this grid names its own number, so "every
+ * poster in the app is one size" is an invariant across two files with nothing
+ * holding them together. The test asserts both.
+ */
+export const TILE_VH = 26;
 /**
  * Clearance between one row's tile and the next row's top.
  *

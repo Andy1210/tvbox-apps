@@ -9,7 +9,7 @@
   "changelog": [
     {
       "version": "0.64.5",
-      "notes": "The row you carry on watching from had smaller posters than every other row on the home screen. It asked for a shorter tile from a time when it showed the episode's own still rather than the series cover; it takes the same size as the rest now."
+      "notes": "The row you carry on watching from was drawn with smaller posters than every other row on the home screen. It was sized for a time when it showed a still from the episode rather than the series cover; it is the same size as the rest now, which fits one poster fewer on screen and makes them all match."
     },
     {
       "version": "0.64.4",

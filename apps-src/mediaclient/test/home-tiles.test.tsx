@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { configureI18n } from "@sdk";
 import { Home } from "../Home";
 import { useApp } from "../state";
-import { setupRemote, setFocus, flushFocus } from "./remote";
+import { setupRemote, flushFocus } from "./remote";
+import { TILE_VH } from "../Library";
 import en from "../locales/en.json";
 import hu from "../locales/hu.json";
 import type { MediaBackend, MediaItem } from "../backends/types";
@@ -12,9 +13,10 @@ import type { MediaBackend, MediaItem } from "../backends/types";
 //
 // The carry-on-watching row asked for 24vh while every other row, and the
 // library grid, take the shared 26vh default - so the first row of the screen
-// was visibly the smallest one on it. The two were the same artwork by then:
-// the row switched to the SERIES cover in the same change that gave films their
-// posters, and nothing was left that wanted a shorter tile.
+// was visibly the smallest one on it. By then it was showing the same 2:3
+// artwork as its neighbours: it started on the EPISODE's own still, and a later
+// change gave it the series cover instead, which left nothing wanting a
+// shorter tile.
 configureI18n({ hu, en }, { fallback: "en" });
 setupRemote();
 
@@ -37,9 +39,11 @@ function stubBackend(): MediaBackend {
   } as unknown as MediaBackend;
 }
 
-beforeEach(async () => {
+// No focus reset here on purpose. This test reads inline styles, not the
+// cursor - and `setFocus("")` would not clear one anyway: norigin returns early
+// on a falsy key.
+beforeEach(() => {
   useApp.setState({ backend: stubBackend(), screen: { name: "home" }, history: [], failure: null });
-  await act(async () => setFocus(""));
 });
 
 describe("the home screen's posters", () => {
@@ -61,5 +65,13 @@ describe("the home screen's posters", () => {
     const poster = (el: HTMLElement | null) => el?.firstElementChild as HTMLElement | null;
     expect(poster(deck)?.style.height).toBe("26vh");
     expect(poster(recent)?.style.height).toBe("26vh");
+  });
+
+  // The other half of the same invariant, and the half no rendering can reach
+  // from here: the library grid carries its own copy of the number. Without
+  // this the test above stays green while "one poster size" quietly stops
+  // being true.
+  it("are the size the library grid uses too", () => {
+    expect(TILE_VH).toBe(26);
   });
 });
