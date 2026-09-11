@@ -219,7 +219,6 @@ export function Home(): React.JSX.Element {
                     posterUrl={deckPoster}
                     onSelect={open}
                     onFocusItem={setUnder}
-                    heightVh={24}
                   />
                 ) : null;
 
