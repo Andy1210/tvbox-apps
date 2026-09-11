@@ -74,8 +74,9 @@ describe("the home screen's posters", () => {
 
   // The other half of the same invariant, and the half no rendering can reach
   // from here: the library grid carries its own copy of the number. Without
-  // this the test above stays green while "one poster size" quietly stops
-  // being true.
+  // this the test above stays green while the home rows and the grid quietly
+  // stop matching. It is those two only - a detail page's rows and the chapter
+  // strip are deliberately other sizes.
   it("are the size the library grid uses too", () => {
     expect(TILE_VH).toBe(26);
   });

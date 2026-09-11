@@ -29,9 +29,11 @@ const PAGE = 100;
  * Poster height. The tile's own width follows from it at 2:3.
  *
  * Exported for the home screen's own test rather than for any caller: the home
- * rows take `Tile`'s default and this grid names its own number, so "every
- * poster in the app is one size" is an invariant across two files with nothing
- * holding them together. The test asserts both.
+ * rows take `Tile`'s default and this grid names its own number, so "the home
+ * rows and this grid are one poster size" is an invariant across two files with
+ * nothing holding them together. The test asserts both. It is not a rule for
+ * the whole app - a detail page's rows and the chapter strip are deliberately
+ * other sizes, each with its own reason beside it.
  */
 export const TILE_VH = 26;
 /**
