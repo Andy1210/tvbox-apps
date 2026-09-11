@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, waitFor } from "@testing-library/react";
 import { configureI18n } from "@sdk";
 import { Home } from "../Home";
 import { useApp } from "../state";
@@ -49,13 +49,18 @@ beforeEach(() => {
 describe("the home screen's posters", () => {
   it("are the same size in the carry-on-watching row as in the rest", async () => {
     const { container } = render(<Home />);
-    await waitFor(() => expect(screen.getByText("Movies")).toBeInTheDocument());
+    // Wait for the tile this test is ABOUT, not for the library's name. The
+    // screen paints in two passes - on-deck first, then one per library - and
+    // the name is in the top rail, which arrives with the first. Waiting on it
+    // can reach the assertions before the recent row exists at all.
+    const tile = (key: string) => container.querySelector<HTMLElement>(`[data-sfocus="${key}"]`);
+    await waitFor(() => expect(tile("recent-1-i2")).toBeTruthy());
     await flushFocus();
 
     // The width is the tile's own inline style, so this needs no layout engine:
     // Tile sizes itself `heightVh * aspect` and the poster box `heightVh`.
-    const deck = container.querySelector<HTMLElement>('[data-sfocus="ondeck-i1"]');
-    const recent = container.querySelector<HTMLElement>('[data-sfocus="recent-1-i2"]');
+    const deck = tile("ondeck-i1");
+    const recent = tile("recent-1-i2");
     expect(deck).toBeTruthy();
     expect(recent).toBeTruthy();
     expect(deck?.style.width).toBe(recent?.style.width);
