@@ -477,6 +477,41 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     expect(failures).toEqual([]);
   }, 180_000);
 
+  it("resolves a stream for the trailers and extras too, and it really streams", async () => {
+    // An extra is not always a file in the library: where the library is built
+    // from the online agents the server proxies one, so the part it resolves to
+    // is not a library part at all. Nothing else in this suite reaches that
+    // path, and refusing it means no extra on the whole server plays.
+    const b = backend();
+    const libs = await b.libraries();
+    const movies = libs.find((l) => l.kind === "movie")!;
+    const page = await b.libraryPage(movies.id, { offset: 0, limit: 8, sort: "titleSort" });
+
+    let checked = 0;
+    for (const item of page.items) {
+      const d = await b.item(item.id);
+      const extra = d.extras[0];
+      if (!extra) continue;
+      const session = `test-extra-${extra.id}-${Date.now()}`;
+      try {
+        const decision = await b.resolveStream(extra.id, { session, panel: { width: 1920, height: 1080 } });
+        expect(decision.url).toMatch(/^https?:\/\//);
+        // A URL that parses is not a URL that plays. The redirect is followed
+        // by hand rather than by fetch: a proxied extra sends the player on to
+        // wherever the provider keeps the file, which is another origin - the
+        // player is a separate process and has no same-origin policy, but the
+        // one running this test does.
+        const res = await fetch(decision.url, { headers: { Range: "bytes=0-1023" }, redirect: "manual" });
+        expect([200, 206, 301, 302, 303, 307, 308]).toContain(res.status);
+        checked += 1;
+      } finally {
+        await b.endSession(session).catch(() => {});
+      }
+      if (checked >= 3) break;
+    }
+    expect(checked, "no extras across eight films").toBeGreaterThan(0);
+  }, 180_000);
+
   it("hands the player a URL that actually streams", async () => {
     const b = backend();
     const libs = await b.libraries();

@@ -1,13 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 /**
- * Switching seasons from the episode list.
+ * Switching seasons from the episode list, and reaching the series itself.
  *
  * An episode has no screen of its own - it is shown on its season - so the
  * episode list is where somebody is when they want another season, and the only
  * way there was Back to the series and in again. The strip puts the seasons one
  * press above the episodes, and switching keeps the cursor on it, so looking
- * through four of them is four presses rather than twelve.
+ * through four of them is four presses rather than twelve. The series' own page
+ * is behind the overflow button, because a season screen can be arrived at with
+ * no series screen behind it to go Back to.
  */
 
 import type { ItemDetail, MediaItem } from "../backends/types";
@@ -368,5 +370,51 @@ describe("the season strip on an episode list", () => {
     h.releaseSeasons?.();
     await settle();
     expect(getCurrentFocusKey()).toBe(`children-${h.current.id}-${h.episodes[1]!.id}`);
+  });
+});
+
+describe("the way to the series' own page", () => {
+  /** Press a control by its focus key, and let the panel it opens arrive. */
+  async function press(key: string): Promise<void> {
+    const { act } = await import("@testing-library/react");
+    const btn = document.querySelector(`[data-sfocus="${key}"]`);
+    expect(btn, `the ${key} control`).toBeTruthy();
+    await act(async () => {
+      (btn as HTMLElement).click();
+      await tick();
+    });
+    await settle();
+  }
+
+  it("is offered on a season, where the seasons are chosen", async () => {
+    const h = await open();
+    await press("detail-more");
+    expect(document.querySelector('[data-sfocus="more-series"]')?.textContent).toContain("Series page");
+    expect(h.current.parentId).toBe(h.showId);
+  });
+
+  it("opens the series, and Back comes straight back to the episodes", async () => {
+    const { useApp } = await import("../state");
+    const h = await open();
+    await press("detail-more");
+    await press("more-series");
+
+    expect(useApp.getState().screen).toMatchObject({ name: "item", itemId: h.showId });
+    // Pushed rather than replacing: the strip switches BETWEEN seasons and has
+    // its own reason not to leave a trail, but this is a detour.
+    expect(useApp.getState().history).toHaveLength(1);
+    expect(useApp.getState().history[0]).toMatchObject({ name: "item", itemId: h.current.id });
+  });
+
+  it("is last in the menu, so a repeated press cannot reach it", async () => {
+    // Everything else behind this button opens a panel that Back closes. This
+    // one changes the screen, and the menu deliberately has no press guard.
+    await open();
+    await press("detail-more");
+    const keys = [...document.querySelectorAll("[data-sfocus]")]
+      .map((e) => e.getAttribute("data-sfocus") ?? "")
+      .filter((k) => k.startsWith("more-") && k !== "more-close");
+    expect(keys[keys.length - 1]).toBe("more-series");
+    expect(keys.length).toBeGreaterThan(1);
   });
 });

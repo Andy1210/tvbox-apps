@@ -250,10 +250,58 @@ describe("everything the credential is attached to", () => {
       await expect(backend.resolveStream("1", { session: "s" })).rejects.toThrow();
     }
 
-    // The real shape this server sends still plays.
+    // The real shape a library part arrives in still plays.
     body = decision("/library/parts/55784/1457113393/file.mkv");
     const out = await backend.resolveStream("1", { session: "s" });
     expect(out.url).toContain("/library/parts/55784/1457113393/file.mkv");
+    vi.unstubAllGlobals();
+  });
+
+  it("plays an online extra, and keeps the query that picks the file", async () => {
+    // A trailer, a featurette or a behind-the-scenes clip is proxied by the
+    // server rather than held in the library, so its part is not a library part
+    // at all. Refusing it is refusing every extra there is, and `fmt` and
+    // `bitrate` are which rendition comes back rather than decoration.
+    const decision = (key: string): string =>
+      JSON.stringify({
+        MediaContainer: {
+          Metadata: [{ Media: [{ Part: [{ decision: "directplay", key }] }] }],
+        },
+      });
+
+    let body = decision("/services/iva/assets/573437/video.mp4?fmt=4&bitrate=5000");
+    vi.stubGlobal(
+      "fetch",
+      async () => new Response(body, { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+
+    const out = await backend.resolveStream("1", { session: "s" });
+    const url = new URL(out.url);
+    expect(url.origin).toBe("http://192.168.1.10:32400");
+    expect(url.pathname).toBe("/services/iva/assets/573437/video.mp4");
+    expect(url.searchParams.get("fmt")).toBe("4");
+    expect(url.searchParams.get("bitrate")).toBe("5000");
+    expect(url.searchParams.get("X-Plex-Token")).toBe(TOKEN);
+
+    // The shape is still a bound, not a pass. The same traversal and the same
+    // off-origin tricks are refused here as anywhere the token travels.
+    for (const bad of [
+      "/services/iva/assets/573437/../../../:/scrobble",
+      "/services/iva/assets/573437/sub/video.mp4",
+      "/services/iva/assets/x/video.mp4",
+      "http://elsewhere.example.com/services/iva/assets/1/video.mp4",
+      "\thttp://elsewhere.example.com/services/iva/assets/1/video.mp4",
+      "//elsewhere.example.com/services/iva/assets/1/video.mp4",
+    ]) {
+      body = decision(bad);
+      await expect(backend.resolveStream("1", { session: "s" }), bad).rejects.toThrow();
+    }
+
+    // And the library part keeps its own rule: no query there, because the
+    // server sends none and one would be it choosing parameters for an
+    // endpoint of its own.
+    body = decision("/library/parts/1/2/file.mkv?download=1");
+    await expect(backend.resolveStream("1", { session: "s" })).rejects.toThrow();
     vi.unstubAllGlobals();
   });
 });

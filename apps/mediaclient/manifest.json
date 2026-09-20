@@ -5,8 +5,12 @@
     "hu": "M\u00e9dia",
     "en": "Media"
   },
-  "version": "0.64.5",
+  "version": "0.65.0",
   "changelog": [
+    {
+      "version": "0.65.0",
+      "notes": "Trailers and extras play. Pressing one on a film or a series did nothing at all: the server does not keep those files in the library, it fetches them from its own provider and passes them on, and the app was refusing any file that did not come from the library itself. Everything on the \u201cTrailers and extras\u201d row now starts. Where something cannot be started, whatever it is, the screen now says so for a few seconds instead of leaving you to wonder whether the remote worked. And on a series\u2019 episode list the \u2026 button offers \u201cSeries page\u201d, which opens the series itself with all of its seasons on it. The only way there used to be out through the library, because an episode list can be arrived at from the carry-on-watching row, from a search or from a spoken request, with no series page behind it to go Back to. Back from the series returns to the episodes you were on."
+    },
     {
       "version": "0.64.5",
       "notes": "The row you carry on watching from was drawn with smaller posters than every other row on the home screen. It was sized for a time when it showed a still from the episode rather than the series cover; it is the same size as the rest now, which fits one poster fewer on screen and makes them all match."

@@ -96,6 +96,21 @@ const THEME_PATH = /^\/library\/metadata\/\d+\/theme\/\d+$/;
  */
 const PART_PATH = /^\/library\/parts\/\d+\/\d+\/[^/\\?#]*$/;
 /**
+ * Where an ONLINE extra's file lives.
+ *
+ * A trailer, a featurette or a behind-the-scenes clip is usually not a file in
+ * the library at all: the server fetches it from Internet Video Archive and
+ * proxies it, so the part key names that endpoint rather than a library part.
+ * Where a library is built from the online agents, every extra in it is this
+ * shape and none is a library part, so refusing it means no extra plays.
+ *
+ * The query is kept rather than refused: `fmt` and `bitrate` are what choose
+ * the rendition the server redirects to. The path is bounded like PART_PATH and
+ * for the same reason, since this URL carries the token and is handed to the
+ * mpv process.
+ */
+const ONLINE_PART_PATH = /^\/services\/iva\/assets\/\d+\/[A-Za-z0-9._-]+$/;
+/**
  * Where a sidecar subtitle lives. Checked against every external subtitle in a
  * sample of this server's films - all of them are exactly this.
  *
@@ -1051,6 +1066,43 @@ export class PlexBackend implements MediaBackend {
   }
 
   /**
+   * The URL the player is handed for a part, or nothing when the key is not one.
+   *
+   * Resolved before it is judged, never judged as a string: two parsers reading
+   * one value disagree - `artUrl`'s note has the detail - so an absolute value
+   * dressed up with a leading tab passes a pattern and is absolute to the URL
+   * parser, which is how it would leave the server with the token attached.
+   *
+   * Two shapes are allowed and they are not equal. A library part is a file on
+   * this server and carries no query, so one is refused there: a query would be
+   * the server choosing parameters for an endpoint of its own. An online extra
+   * is proxied from elsewhere and its query IS which rendition comes back, so
+   * it travels.
+   */
+  private partUrl(key: string): string | undefined {
+    let url: URL;
+    try {
+      url = new URL(key.replace(/^\//, ""), this.base.endsWith("/") ? this.base : this.base + "/");
+    } catch {
+      return undefined;
+    }
+    if (url.origin !== new URL(this.session.baseUrl).origin || url.hash) {
+      log.warn("part key points off the server; refused");
+      return undefined;
+    }
+    if (!ONLINE_PART_PATH.test(url.pathname) && (!PART_PATH.test(url.pathname) || url.search)) {
+      log.warn("part key is not a media path; refused");
+      return undefined;
+    }
+    // The pathname as the URL parser normalised it, not the raw key: judging one
+    // string and sending another is the disagreement this function exists to
+    // close.
+    return buildUrl(this.base, (url.pathname + url.search).replace(/^\//, ""), {
+      "X-Plex-Token": this.session.token,
+    });
+  }
+
+  /**
    * Decide how to play an item, and hand back a URL the box's player can take.
    *
    * The server does the deciding - that is what `hasMDE` asks for - and answers
@@ -1181,22 +1233,22 @@ export class PlexBackend implements MediaBackend {
       burned || subFile ? "no" : typeof opts.subtitle === "number" && opts.subtitle >= 0 ? opts.subtitle : "no";
 
     if (decision === "directplay" && part?.key) {
-      // The part key is used as given - it carries a timestamp segment between
-      // the id and the filename, and a reconstructed path without it is a 404 -
-      // but it is BOUNDED first, and this is the one place where that matters
-      // most. The token has to be in the URL here, because the player is a
-      // separate process that cannot send headers; the URL is then handed to
-      // that process, which will fetch any host and any scheme. An absolute
-      // value in `part.key` overrides the base entirely, so an unbounded one
-      // put the account token in a query string on a machine of the server's
-      // choosing - in clear, in mpv's argv, and past the redactor, which only
-      // knows about headers.
-      //
-      // Same bug as artUrl and themeUrl, third call site. The rule is not "bound
-      // these three functions" but "bound everything the token is attached to".
-      if (!PART_PATH.test(part.key)) throw new Error("part key is not a media path");
+      // The part key is used as the server wrote it - it carries a timestamp
+      // segment between the id and the filename, and a reconstructed path
+      // without it is a 404 - but it is BOUNDED first, and this is the one place
+      // where that matters most. The token has to be in the URL here, because
+      // the player is a separate process that cannot send headers; the URL is
+      // then handed to that process, which will fetch any host and any scheme.
+      // An absolute value in `part.key` overrides the base entirely, so an
+      // unbounded one put the account token in a query string on a machine of
+      // the server's choosing - in clear, in mpv's argv, and past the redactor,
+      // which only knows about headers. `partUrl` is where that is decided;
+      // same bug as artUrl and themeUrl, and the rule is not "bound these three
+      // functions" but "bound everything the token is attached to".
+      const url = this.partUrl(part.key);
+      if (!url) throw new Error("part key is not a media path");
       return {
-        url: buildUrl(this.base, part.key.replace(/^\//, ""), { "X-Plex-Token": this.session.token }),
+        url,
         audio: "auto",
         // "no", not "auto", unless somebody chose a subtitle. On the direct-play
         // path the player is handed the ORIGINAL file, so what the server

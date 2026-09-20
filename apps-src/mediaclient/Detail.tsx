@@ -173,6 +173,8 @@ export function Detail({
   const [firstChildFailed, setFirstChildFailed] = useState(false);
   const upNext = usePlayer((s) => s.upNext);
   const moving = usePlayer((s) => s.moving);
+  /** A press this screen made that could not be started. Clears itself. */
+  const stepFailed = usePlayer((s) => s.stepFailed);
   // Only to re-render while a countdown is running; the value is the clock.
   const [, setTick] = useState(0);
   const [picking, setPicking] = useState(false);
@@ -1006,6 +1008,26 @@ export function Detail({
       },
     });
 
+  // Last in the menu, not first. A repeat of the press that opens it lands on
+  // the first item, and everything else behind this button opens a panel that
+  // Back closes - this one changes the screen, which is a press nobody made.
+  if (detail.kind === "season" && detail.parentId)
+    overflow.push({
+      key: "series",
+      // The series' own page is where the seasons are chosen, and a season
+      // screen can be arrived at with no series screen behind it at all - from
+      // the carry-on-watching row, from a search result, from a spoken request -
+      // so Back is not a way there. The strip above the episodes moves BETWEEN
+      // seasons; this is how to see them all.
+      label: t("detail.seriesPage"),
+      onEnter: () => {
+        setMore(false);
+        // Pushed rather than replacing, so Back comes straight back to the
+        // episodes somebody was looking at.
+        go({ name: "item", itemId: detail.parentId as string });
+      },
+    });
+
   const actions: Action[] = [];
   if (playable)
     actions.push({
@@ -1083,6 +1105,19 @@ export function Detail({
   return (
     <FocusContext.Provider value={focusKey}>
       <Backdrop item={shown} />
+      {/* A press that could not be answered, said on the screen it was made on.
+          Drawn OVER the page rather than in it: the line lasts a few seconds,
+          and one that takes a row's height would move the season strip and the
+          episode list under it for as long as it is up. Not while the player is
+          showing - the overlay there draws the same field, beside the film it
+          is about. */}
+      {stepFailed && !playing && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-[10vh] z-30 flex justify-center px-[4vw]">
+          <span className="rounded-[0.8vh] bg-black/85 px-[2vw] py-[1vh] text-[2.1vh] font-semibold text-white">
+            {t("player.failed", { title: stepFailed })}
+          </span>
+        </div>
+      )}
       {confirming && (
         <Confirm
           title={t(seasonWatched ? "detail.markSeasonUnconfirm" : "detail.markSeasonConfirm")}

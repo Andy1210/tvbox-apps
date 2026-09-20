@@ -208,6 +208,24 @@ function episodeLabel(item: MediaItem): string | null {
   return item.parentIndex !== undefined && item.index !== undefined ? `S${item.parentIndex}E${item.index}` : null;
 }
 
+/**
+ * Say on screen that a press could not be answered.
+ *
+ * `error` does not say it: no screen draws that field, so a stream that cannot
+ * be resolved leaves the page exactly as it was, and a tile that takes OK and
+ * does nothing cannot be told apart from a dead remote across a room.
+ * `stepFailed` is the field the screens draw, and it clears itself, which is
+ * what a line about one press should do.
+ *
+ * `playSibling` sets it again from its own `finally`, with the same title and a
+ * fresh timer, so the two cannot disagree about whether a step failed.
+ */
+function sayItFailed(set: Setter, item: MediaItem): void {
+  set({ stepFailed: episodeLabel(item) ?? item.title });
+  if (stepFailedTimer) clearTimeout(stepFailedTimer);
+  stepFailedTimer = setTimeout(() => set({ stepFailed: null }), STEP_FAILED_MS);
+}
+
 /** What the store says when the box is showing nothing. */
 const STOPPED = {
   current: null,
@@ -394,6 +412,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     const tv = bridge();
     if (!tv?.play) {
       set({ error: "no player on this box" });
+      sayItFailed(set, item);
       return;
     }
 
@@ -473,7 +492,10 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       // Nobody is waiting for this one, so its failure is not news about whatever
       // is playing now: an abandoned call's late failure used to write the line
       // onto the film that had replaced it.
-      if (forThis === playToken) set({ error: "unplayable" });
+      if (forThis === playToken) {
+        set({ error: "unplayable" });
+        sayItFailed(set, item);
+      }
       return;
     }
 
