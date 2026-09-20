@@ -372,9 +372,13 @@ describe("stepping to the next episode", () => {
     await settle();
     expect(usePlayer.getState().current?.item.id, "the film carries on").toBe("e2");
     // Named, because the line is about the press and not about the film on
-    // screen: it says which episode did not start.
+    // screen: it says which episode did not start, the way every tile caption
+    // and the play button name one - the designation AND the title, since on a
+    // screen reached from somewhere else the designation alone says nothing.
     expect(container.textContent).toContain("S1E3");
-    expect(usePlayer.getState().stepFailed).toBe("S1E3");
+    expect(usePlayer.getState().stepFailed).toBe("S1E3 \u00b7 Episode e3");
+    // And which item it was, so a screen can tell whether the line is its own.
+    expect(usePlayer.getState().stepFailedId).toBe("e3");
   });
 
   it("really stops when an explicit stop lands inside the hand-over", async () => {

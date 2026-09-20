@@ -299,10 +299,68 @@ describe("everything the credential is attached to", () => {
 
     // And the library part keeps its own rule: no query there, because the
     // server sends none and one would be it choosing parameters for an
-    // endpoint of its own.
-    body = decision("/library/parts/1/2/file.mkv?download=1");
-    await expect(backend.resolveStream("1", { session: "s" })).rejects.toThrow();
+    // endpoint of its own. A bare trailing "#" is refused too: `url.hash` is
+    // empty for one, and the character was never allowed in a part key.
+    for (const bad of ["/library/parts/1/2/file.mkv?download=1", "/library/parts/1/2/file.mkv#"]) {
+      body = decision(bad);
+      await expect(backend.resolveStream("1", { session: "s" }), bad).rejects.toThrow();
+    }
     vi.unstubAllGlobals();
+  });
+
+  it("takes only the named parameters out of an extra's query", async () => {
+    // The whole query is written by the SERVER, so it is an allowlist rather
+    // than a pass-through: `searchParams.set` only overwrites the exact spelling
+    // `X-Plex-Token`, and a lower-case one would otherwise ride along beside
+    // ours and let the request authenticate as a name of the server's choosing.
+    const decision = (key: string): string =>
+      JSON.stringify({
+        MediaContainer: {
+          Metadata: [{ Media: [{ Part: [{ decision: "directplay", key }] }] }],
+        },
+      });
+
+    let body = "";
+    vi.stubGlobal(
+      "fetch",
+      async () => new Response(body, { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+
+    const urlFor = async (key: string): Promise<URL> => {
+      body = decision(key);
+      return new URL((await backend.resolveStream("1", { session: "s" })).url);
+    };
+
+    for (const spelling of ["x-plex-token", "X-PLEX-TOKEN", "X-Plex-Token"]) {
+      const url = await urlFor(`/services/iva/assets/1/video.mp4?${spelling}=EVIL&fmt=4`);
+      expect([...url.searchParams.keys()].filter((k) => /x-plex-token/i.test(k)), spelling).toEqual(["X-Plex-Token"]);
+      expect(url.searchParams.get("X-Plex-Token"), spelling).toBe(TOKEN);
+      expect(url.toString(), spelling).not.toContain("EVIL");
+    }
+
+    // Anything else the server names is dropped, and a value that is not the
+    // integer this parameter takes is dropped with it.
+    const url = await urlFor("/services/iva/assets/1/video.mp4?fmt=4&bitrate=5000&url=http://elsewhere/x&cmd=6");
+    expect([...url.searchParams.keys()].sort()).toEqual(["X-Plex-Token", "bitrate", "fmt"]);
+    expect((await urlFor("/services/iva/assets/1/video.mp4?fmt=4x&bitrate=5000")).searchParams.get("fmt")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("will not let a TRACK reach the shape an extra is allowed", async () => {
+    // Music goes through the same bound now, and it may not open the door the
+    // extras path needs: a track is a file on this server whatever a metadata
+    // document says it is.
+    expect(
+      backend.trackUrl({
+        id: "1",
+        kind: "track",
+        title: "x",
+        mediaKey: "/services/iva/assets/1/video.mp4?fmt=4",
+      }),
+    ).toBeUndefined();
+    expect(backend.trackUrl({ id: "1", kind: "track", title: "x", mediaKey: "/library/parts/1/2/song.mp3" })).toContain(
+      "/library/parts/1/2/song.mp3",
+    );
   });
 });
 

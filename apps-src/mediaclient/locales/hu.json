@@ -104,7 +104,7 @@
     "buffering": "Pufferelés…",
     "converting": "Átalakítás ehhez a boxhoz",
     "starting": "{title} indítása…",
-    "failed": "A(z) {title} nem indult el",
+    "failed": "Nem indult el: {title}",
     "play": "Lejátszás",
     "pause": "Szünet",
     "tracks": "Hang és felirat",

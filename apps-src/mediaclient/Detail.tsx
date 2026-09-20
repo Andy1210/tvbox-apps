@@ -173,8 +173,9 @@ export function Detail({
   const [firstChildFailed, setFirstChildFailed] = useState(false);
   const upNext = usePlayer((s) => s.upNext);
   const moving = usePlayer((s) => s.moving);
-  /** A press this screen made that could not be started. Clears itself. */
+  /** A press that could not be started, and what it was. Clears itself. */
   const stepFailed = usePlayer((s) => s.stepFailed);
+  const stepFailedId = usePlayer((s) => s.stepFailedId);
   // Only to re-render while a countdown is running; the value is the clock.
   const [, setTick] = useState(0);
   const [picking, setPicking] = useState(false);
@@ -370,6 +371,23 @@ export function Detail({
     if (playingId) setLastPlayedId(playingId);
   }, [playingId]);
   const lastPlayedChild = lastPlayedId && children.some((c) => c.id === lastPlayedId) ? lastPlayedId : undefined;
+  /**
+   * The same, for the extras row.
+   *
+   * An extra is not a child, so without this the cursor came back to the top of
+   * the page - on the button that starts the FILM. Two costs: a second trailer
+   * is a walk back down through a row that can hold forty of them, and the
+   * reflex press that would have played another one starts a feature film
+   * instead, part way through.
+   *
+   * Read the way the row itself is built, off whichever item the page is
+   * describing, so it cannot name a tile that is not drawn.
+   */
+  const lastPlayedExtra =
+    lastPlayedId &&
+    (((detail?.kind === "season" && focused) || detail)?.extras ?? []).some((e) => e.id === lastPlayedId)
+      ? lastPlayedId
+      : undefined;
 
   /**
    * What the server knows AFTER playback, rather than what it knew before it.
@@ -622,13 +640,15 @@ export function Detail({
     ? `children-${itemId}-${upNext.item.id}`
     : lastPlayedChild
       ? `children-${itemId}-${lastPlayedChild}`
-      : focusChildId
-        ? `children-${itemId}-${focusChildId}`
-        : detail && hasPlayButton(detail, children)
-          ? "detail-play"
-          : children[0]
-            ? `children-${itemId}-${children[0].id}`
-            : "detail-back";
+      : lastPlayedExtra
+        ? `extras-${itemId}-${lastPlayedExtra}`
+        : focusChildId
+          ? `children-${itemId}-${focusChildId}`
+          : detail && hasPlayButton(detail, children)
+            ? "detail-play"
+            : children[0]
+              ? `children-${itemId}-${children[0].id}`
+              : "detail-back";
   /**
    * Where the cursor STARTS, which is not always where it is put back.
    *
@@ -911,6 +931,19 @@ export function Detail({
   const resumable = (toPlay?.viewOffsetMs ?? 0) > 0;
   const shown = (detail.kind === "season" && focused) || detail;
   /**
+   * Whether the failure line belongs to THIS screen.
+   *
+   * Everything this page can start: itself, one of its children, one of the
+   * extras it is drawing. The play token cannot answer this - moving between
+   * screens starts no play, so it bumps nothing - and an unscoped line was read
+   * beside a film that had nothing to do with the press.
+   */
+  const failedHere =
+    stepFailedId !== null &&
+    (stepFailedId === detail.id ||
+      children.some((c) => c.id === stepFailedId) ||
+      shown.extras.some((e) => e.id === stepFailedId));
+  /**
    * Whose tracks the panel lists, as an ITEM rather than a version.
    *
    * On a season that is the highlighted episode - or the FIRST one before
@@ -1008,10 +1041,13 @@ export function Detail({
       },
     });
 
-  // Last in the menu, not first. A repeat of the press that opens it lands on
-  // the first item, and everything else behind this button opens a panel that
-  // Back closes - this one changes the screen, which is a press nobody made.
-  if (detail.kind === "season" && detail.parentId)
+  // Last in the menu, and never the only thing in it. A repeat of the press that
+  // opens the menu lands on its first item, and everything else behind this
+  // button opens a panel that Back closes - this one changes the screen. Being
+  // pushed last is not enough on its own: the other two entries need the
+  // children and the tracks, which arrive a round trip after the item does, so
+  // for that window this would be the first item and the only one.
+  if (overflow.length > 0 && detail.kind === "season" && detail.parentId)
     overflow.push({
       key: "series",
       // The series' own page is where the seasons are chosen, and a season
@@ -1023,8 +1059,10 @@ export function Detail({
       onEnter: () => {
         setMore(false);
         // Pushed rather than replacing, so Back comes straight back to the
-        // episodes somebody was looking at.
-        go({ name: "item", itemId: detail.parentId as string });
+        // episodes somebody was looking at - and opened ON this season, because
+        // a series with twenty-seven of them otherwise arrives at the first one
+        // with the row scrolled to the start.
+        go({ name: "item", itemId: detail.parentId as string, focusChildId: detail.id });
       },
     });
 
@@ -1106,14 +1144,20 @@ export function Detail({
     <FocusContext.Provider value={focusKey}>
       <Backdrop item={shown} />
       {/* A press that could not be answered, said on the screen it was made on.
+          `stepFailedId` is what makes that true: the field is one global with an
+          eight second life, so a person who presses an extra and then opens
+          something else took the line with them and read it beside a title it
+          said nothing about.
+
           Drawn OVER the page rather than in it: the line lasts a few seconds,
           and one that takes a row's height would move the season strip and the
           episode list under it for as long as it is up. Not while the player is
           showing - the overlay there draws the same field, beside the film it
-          is about. */}
-      {stepFailed && !playing && (
+          is about. Clamped, because the title is the server's and an extra's can
+          be a sentence. */}
+      {stepFailed && failedHere && !playing && (
         <div className="pointer-events-none absolute inset-x-0 bottom-[10vh] z-30 flex justify-center px-[4vw]">
-          <span className="rounded-[0.8vh] bg-black/85 px-[2vw] py-[1vh] text-[2.1vh] font-semibold text-white">
+          <span className="line-clamp-2 max-w-[80vw] rounded-[1vh] border border-white/25 bg-[#140f0c]/96 px-[2.2vw] py-[1.2vh] text-center text-[2.4vh] font-semibold text-white shadow-[0_0.6vh_2vh_rgba(0,0,0,0.85)]">
             {t("player.failed", { title: stepFailed })}
           </span>
         </div>

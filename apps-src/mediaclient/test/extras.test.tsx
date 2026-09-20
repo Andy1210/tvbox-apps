@@ -165,6 +165,54 @@ describe("an extra on a detail screen", () => {
     expect(document.body.textContent).toContain("Official Trailer could not be started");
   });
 
+  it("says nothing about a press made on another screen", async () => {
+    // The field is one global with an eight second life, so somebody who
+    // presses an extra and then opens something else used to take the line with
+    // them and read it beside a title it said nothing about.
+    const h = await open();
+    const { usePlayer } = await import("../playback/player");
+    const { act } = await import("@testing-library/react");
+    await act(async () => {
+      usePlayer.setState({ stepFailed: "Egy másik film", stepFailedId: "some-other-item" });
+      await tick();
+    });
+    expect(document.body.textContent).not.toContain("Egy másik film");
+
+    // The same field, about something this screen really can start.
+    await act(async () => {
+      usePlayer.setState({ stepFailed: trailer.title, stepFailedId: trailer.id });
+      await tick();
+    });
+    expect(document.body.textContent).toContain("Official Trailer could not be started");
+    expect(h.film.id).toBeTruthy();
+  });
+
+  it("puts the cursor back on the extra that was pressed, not on the film", async () => {
+    // An extra is not a child of the screen, so the cursor came back to the top
+    // of the page - on the button that starts the FILM. The next press would
+    // have started a feature film part way through.
+    const { getCurrentFocusKey, setFocus } = await import("./remote");
+    const h = await open();
+    await press(`extras-${h.film.id}-${trailer.id}`);
+
+    const { usePlayer, resetPlayer } = await import("../playback/player");
+    expect(usePlayer.getState().current?.item.id).toBe(trailer.id);
+
+    // The player's overlay takes the cursor while it is up, and this page sits
+    // hidden behind it - so what comes back is decided by the screen's own
+    // first key, not by where the press was made. Named rather than rendered:
+    // any key this screen does not own puts `useFocusOnReveal` in exactly the
+    // state leaving a film does.
+    const { act } = await import("@testing-library/react");
+    await setFocus("player");
+    await act(async () => {
+      resetPlayer();
+      await tick();
+    });
+    await settle();
+    expect(getCurrentFocusKey()).toBe(`extras-${h.film.id}-${trailer.id}`);
+  });
+
   it("stops saying it once the line has had its say", async () => {
     // The line belongs to the press, so it goes by itself: one left up would be
     // read as being about whatever is on screen minutes later.

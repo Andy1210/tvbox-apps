@@ -64,6 +64,8 @@ interface Harness extends Fixture {
   childrenFor: string[];
   /** Lets a held season list answer, for the tests about a slow one. */
   releaseSeasons?: () => void;
+  /** The same for the episodes. */
+  releaseEpisodes?: () => void;
 }
 
 async function open(opts?: {
@@ -74,6 +76,8 @@ async function open(opts?: {
   showChildren?: MediaItem[];
   /** The season list never answers, the way a stalled connection does not. */
   holdSeasons?: boolean;
+  /** The EPISODES never answer: the window before the screen knows what it has. */
+  holdEpisodes?: boolean;
   focusSeasons?: boolean;
 }): Promise<Harness> {
   const { render, act } = await import("@testing-library/react");
@@ -102,6 +106,7 @@ async function open(opts?: {
           if (opts?.holdSeasons) await new Promise<void>((r) => (h.releaseSeasons = r));
           return opts?.showChildren ?? f.seasons;
         }
+        if (opts?.holdEpisodes) await new Promise<void>((r) => (h.releaseEpisodes = r));
         return f.episodes;
       },
       setWatched: async () => {},
@@ -386,6 +391,25 @@ describe("the way to the series' own page", () => {
     await settle();
   }
 
+  it("is never the only thing in the menu, so it cannot be the first item", async () => {
+    // The other two entries need the children and the tracks, which arrive a
+    // round trip after the item does. Pushed last is not enough on its own: for
+    // that window this would have been the first item and the only one, on a
+    // menu that deliberately has no press guard - so a repeat of the press that
+    // opens it would change the screen.
+    const h = await open({ holdEpisodes: true });
+    expect(document.querySelector('[data-sfocus="detail-more"]'), "no menu to open yet").toBeNull();
+
+    h.releaseEpisodes?.();
+    await settle();
+    await press("detail-more");
+    const keys = [...document.querySelectorAll("[data-sfocus]")]
+      .map((e) => e.getAttribute("data-sfocus") ?? "")
+      .filter((k) => k.startsWith("more-") && k !== "more-close");
+    expect(keys.length).toBeGreaterThan(1);
+    expect(keys[keys.length - 1]).toBe("more-series");
+  });
+
   it("is offered on a season, where the seasons are chosen", async () => {
     const h = await open();
     await press("detail-more");
@@ -399,22 +423,18 @@ describe("the way to the series' own page", () => {
     await press("detail-more");
     await press("more-series");
 
-    expect(useApp.getState().screen).toMatchObject({ name: "item", itemId: h.showId });
+    // Opened ON the season somebody came from: a series with twenty-seven of
+    // them otherwise arrives at the first one with the row scrolled to the
+    // start, which is the walk back this item exists to save.
+    expect(useApp.getState().screen).toMatchObject({
+      name: "item",
+      itemId: h.showId,
+      focusChildId: h.current.id,
+    });
     // Pushed rather than replacing: the strip switches BETWEEN seasons and has
     // its own reason not to leave a trail, but this is a detour.
     expect(useApp.getState().history).toHaveLength(1);
     expect(useApp.getState().history[0]).toMatchObject({ name: "item", itemId: h.current.id });
   });
 
-  it("is last in the menu, so a repeated press cannot reach it", async () => {
-    // Everything else behind this button opens a panel that Back closes. This
-    // one changes the screen, and the menu deliberately has no press guard.
-    await open();
-    await press("detail-more");
-    const keys = [...document.querySelectorAll("[data-sfocus]")]
-      .map((e) => e.getAttribute("data-sfocus") ?? "")
-      .filter((k) => k.startsWith("more-") && k !== "more-close");
-    expect(keys[keys.length - 1]).toBe("more-series");
-    expect(keys.length).toBeGreaterThan(1);
-  });
 });

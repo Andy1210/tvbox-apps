@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { PlexBackend } from "../backends/plex/backend";
 import type { Session } from "../backends/types";
 
@@ -29,6 +31,26 @@ const session: Session = {
 };
 
 const id = { clientId: "mediaclient-live-test", deviceName: "test" };
+
+/**
+ * The status of a URL, without printing the URL.
+ *
+ * The account token travels in a media URL's query, and the DOM environment's
+ * fetch logs the whole URL of every answer it does not like - a 302 included -
+ * so asking this way put the token in the scrollback of anyone who ran the
+ * suite. node's own client is quiet, and it does not follow the redirect.
+ */
+function statusOf(url: string): Promise<number> {
+  const send = url.startsWith("https:") ? httpsRequest : httpRequest;
+  return new Promise((resolve, reject) => {
+    const req = send(url, { headers: { Range: "bytes=0-1023" } }, (res) => {
+      res.resume();
+      resolve(res.statusCode ?? 0);
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
 
 describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
   // The global stub in setup.ts exists so no ordinary test reaches the network;
@@ -496,13 +518,11 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
       try {
         const decision = await b.resolveStream(extra.id, { session, panel: { width: 1920, height: 1080 } });
         expect(decision.url).toMatch(/^https?:\/\//);
-        // A URL that parses is not a URL that plays. The redirect is followed
-        // by hand rather than by fetch: a proxied extra sends the player on to
-        // wherever the provider keeps the file, which is another origin - the
-        // player is a separate process and has no same-origin policy, but the
-        // one running this test does.
-        const res = await fetch(decision.url, { headers: { Range: "bytes=0-1023" }, redirect: "manual" });
-        expect([200, 206, 301, 302, 303, 307, 308]).toContain(res.status);
+        // A URL that parses is not a URL that plays. A proxied extra sends the
+        // player on to wherever the provider keeps the file, which is another
+        // origin - the player is a separate process with no same-origin policy,
+        // and this asserts the redirect rather than following it.
+        expect([200, 206, 301, 302, 303, 307, 308]).toContain(await statusOf(decision.url));
         checked += 1;
       } finally {
         await b.endSession(session).catch(() => {});
