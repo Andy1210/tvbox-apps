@@ -8,7 +8,7 @@ import {
 } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, useBackspace, useI18n } from "@sdk";
 import { Row } from "./Row";
-import { episodeNumber } from "./Tile";
+import { episodeNumber, itemLabel } from "./Tile";
 import { Message } from "./Message";
 import { artworkScale } from "./posters";
 import { CastRow } from "./CastRow";
@@ -173,6 +173,14 @@ export function Detail({
   const [firstChildFailed, setFirstChildFailed] = useState(false);
   const upNext = usePlayer((s) => s.upNext);
   const moving = usePlayer((s) => s.moving);
+  /**
+   * WHICH press could not be started, if any. Clears itself after a few seconds.
+   *
+   * The id rather than the store's own label: that one is written for the
+   * player's overlay, which is already inside the series and whose row has no
+   * room, while this screen names the thing the way its own tiles do.
+   */
+  const stepFailedId = usePlayer((s) => s.stepFailedId);
   // Only to re-render while a countdown is running; the value is the clock.
   const [, setTick] = useState(0);
   const [picking, setPicking] = useState(false);
@@ -368,6 +376,23 @@ export function Detail({
     if (playingId) setLastPlayedId(playingId);
   }, [playingId]);
   const lastPlayedChild = lastPlayedId && children.some((c) => c.id === lastPlayedId) ? lastPlayedId : undefined;
+  /**
+   * The same, for the extras row.
+   *
+   * An extra is not a child, so without this the cursor came back to the top of
+   * the page - on the button that starts the FILM. Two costs: a second trailer
+   * is a walk back down through a row that can hold forty of them, and the
+   * reflex press that would have played another one starts a feature film
+   * instead, part way through.
+   *
+   * Read the way the row itself is built, off whichever item the page is
+   * describing, so it cannot name a tile that is not drawn.
+   */
+  const lastPlayedExtra =
+    lastPlayedId &&
+    (((detail?.kind === "season" && focused) || detail)?.extras ?? []).some((e) => e.id === lastPlayedId)
+      ? lastPlayedId
+      : undefined;
 
   /**
    * What the server knows AFTER playback, rather than what it knew before it.
@@ -620,13 +645,15 @@ export function Detail({
     ? `children-${itemId}-${upNext.item.id}`
     : lastPlayedChild
       ? `children-${itemId}-${lastPlayedChild}`
-      : focusChildId
-        ? `children-${itemId}-${focusChildId}`
-        : detail && hasPlayButton(detail, children)
-          ? "detail-play"
-          : children[0]
-            ? `children-${itemId}-${children[0].id}`
-            : "detail-back";
+      : lastPlayedExtra
+        ? `extras-${itemId}-${lastPlayedExtra}`
+        : focusChildId
+          ? `children-${itemId}-${focusChildId}`
+          : detail && hasPlayButton(detail, children)
+            ? "detail-play"
+            : children[0]
+              ? `children-${itemId}-${children[0].id}`
+              : "detail-back";
   /**
    * Where the cursor STARTS, which is not always where it is put back.
    *
@@ -909,6 +936,28 @@ export function Detail({
   const resumable = (toPlay?.viewOffsetMs ?? 0) > 0;
   const shown = (detail.kind === "season" && focused) || detail;
   /**
+   * The thing that would not start, when it is one this screen can start.
+   *
+   * The play token cannot answer that question - moving between screens starts
+   * no play, so it bumps nothing - and an unscoped line was read beside a film
+   * that had nothing to do with the press.
+   *
+   * Scoped to what the page DRAWS rather than to its children alone: a film
+   * opened from a collection or a playlist has no children, and its running
+   * order, its countdown and the row that holds them all come from `order` and
+   * `rowItems`. Answering only for the children made the screen silent for the
+   * very next thing in that order - the countdown ran out, nothing started, and
+   * nothing said so.
+   */
+  const failedItem =
+    stepFailedId === null
+      ? undefined
+      : [detail as MediaItem, ...order, ...children, ...rowItems].find((i) => i.id === stepFailedId);
+  const failedExtra =
+    stepFailedId !== null && !failedItem ? shown.extras.find((e) => e.id === stepFailedId) : undefined;
+  /** What to call it: the same words as the tile the press was made on. */
+  const failedTitle = failedItem ? itemLabel(failedItem) : failedExtra?.title;
+  /**
    * Whose tracks the panel lists, as an ITEM rather than a version.
    *
    * On a season that is the highlighted episode - or the FIRST one before
@@ -1006,6 +1055,36 @@ export function Detail({
       },
     });
 
+  // Last in the menu, and not until the screen knows what it holds. A repeat of
+  // the press that opens the menu lands on its first item, and everything else
+  // behind this button opens a panel that Back closes - this one changes the
+  // screen. Being pushed last is not enough on its own: the other two entries
+  // need the children and the tracks, which arrive a round trip after the item
+  // does, so for that window this would be the first item and the only one.
+  //
+  // Gated on the screen having settled rather than on the other entries being
+  // there: a season with no episodes has neither of them, and tying this to
+  // them would take the only way to the series off the one screen that cannot
+  // reach it any other way.
+  if (settled && detail.kind === "season" && detail.parentId)
+    overflow.push({
+      key: "series",
+      // The series' own page is where the seasons are chosen, and a season
+      // screen can be arrived at with no series screen behind it at all - from
+      // the carry-on-watching row, from a search result, from a spoken request -
+      // so Back is not a way there. The strip above the episodes moves BETWEEN
+      // seasons; this is how to see them all.
+      label: t("detail.seriesPage"),
+      onEnter: () => {
+        setMore(false);
+        // Pushed rather than replacing, so Back comes straight back to the
+        // episodes somebody was looking at - and opened ON this season, because
+        // a series with twenty-seven of them otherwise arrives at the first one
+        // with the row scrolled to the start.
+        go({ name: "item", itemId: detail.parentId as string, focusChildId: detail.id });
+      },
+    });
+
   const actions: Action[] = [];
   if (playable)
     actions.push({
@@ -1083,6 +1162,28 @@ export function Detail({
   return (
     <FocusContext.Provider value={focusKey}>
       <Backdrop item={shown} />
+      {/* A press that could not be answered, said on the screen it was made on.
+          `failedTitle` is what makes that true: the field behind it is one
+          global with an eight second life, so a person who presses an extra and
+          then opens something else took the line with them and read it beside a
+          title it said nothing about.
+
+          Drawn OVER the page rather than in it: the line lasts a few seconds,
+          and one that takes a row's height would move the season strip and the
+          episode list under it for as long as it is up. Not while the player is
+          showing - the overlay there draws the same field, beside the film it
+          is about. Clamped, because the title is the server's and an extra's can
+          be a sentence. */}
+      {failedTitle && !playing && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-[10vh] z-30 flex justify-center px-[4vw]">
+          <span className="max-w-[80vw] rounded-[1vh] border border-white/25 bg-[#140f0c]/96 px-[2.2vw] py-[1.2vh] text-center text-[2.4vh] font-semibold text-white shadow-[0_0.6vh_2vh_rgba(0,0,0,0.85)]">
+            {/* The clamp is on the TEXT, not on the pill: `overflow: hidden`
+                cuts at the padding box, so a clamped line left the tops of the
+                next one showing inside the pill's own bottom padding. */}
+            <span className="line-clamp-2">{t("player.failed", { title: failedTitle })}</span>
+          </span>
+        </div>
+      )}
       {confirming && (
         <Confirm
           title={t(seasonWatched ? "detail.markSeasonUnconfirm" : "detail.markSeasonConfirm")}

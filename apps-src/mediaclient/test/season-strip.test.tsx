@@ -1,13 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 /**
- * Switching seasons from the episode list.
+ * Switching seasons from the episode list, and reaching the series itself.
  *
  * An episode has no screen of its own - it is shown on its season - so the
  * episode list is where somebody is when they want another season, and the only
  * way there was Back to the series and in again. The strip puts the seasons one
  * press above the episodes, and switching keeps the cursor on it, so looking
- * through four of them is four presses rather than twelve.
+ * through four of them is four presses rather than twelve. The series' own page
+ * is behind the overflow button, because a season screen can be arrived at with
+ * no series screen behind it to go Back to.
  */
 
 import type { ItemDetail, MediaItem } from "../backends/types";
@@ -62,6 +64,8 @@ interface Harness extends Fixture {
   childrenFor: string[];
   /** Lets a held season list answer, for the tests about a slow one. */
   releaseSeasons?: () => void;
+  /** The same for the episodes. */
+  releaseEpisodes?: () => void;
 }
 
 async function open(opts?: {
@@ -72,6 +76,10 @@ async function open(opts?: {
   showChildren?: MediaItem[];
   /** The season list never answers, the way a stalled connection does not. */
   holdSeasons?: boolean;
+  /** The EPISODES never answer: the window before the screen knows what it has. */
+  holdEpisodes?: boolean;
+  /** A season the server answers with no episodes at all. */
+  emptySeason?: boolean;
   focusSeasons?: boolean;
 }): Promise<Harness> {
   const { render, act } = await import("@testing-library/react");
@@ -100,7 +108,8 @@ async function open(opts?: {
           if (opts?.holdSeasons) await new Promise<void>((r) => (h.releaseSeasons = r));
           return opts?.showChildren ?? f.seasons;
         }
-        return f.episodes;
+        if (opts?.holdEpisodes) await new Promise<void>((r) => (h.releaseEpisodes = r));
+        return opts?.emptySeason ? [] : f.episodes;
       },
       setWatched: async () => {},
       posterUrl: () => undefined,
@@ -369,4 +378,74 @@ describe("the season strip on an episode list", () => {
     await settle();
     expect(getCurrentFocusKey()).toBe(`children-${h.current.id}-${h.episodes[1]!.id}`);
   });
+});
+
+describe("the way to the series' own page", () => {
+  /** Press a control by its focus key, and let the panel it opens arrive. */
+  async function press(key: string): Promise<void> {
+    const { act } = await import("@testing-library/react");
+    const btn = document.querySelector(`[data-sfocus="${key}"]`);
+    expect(btn, `the ${key} control`).toBeTruthy();
+    await act(async () => {
+      (btn as HTMLElement).click();
+      await tick();
+    });
+    await settle();
+  }
+
+  it("is not offered until the screen knows what it holds", async () => {
+    // The other two entries need the children and the tracks, which arrive a
+    // round trip after the item does. Pushed last is not enough on its own: for
+    // that window this would have been the first item and the only one, on a
+    // menu that deliberately has no press guard - so a repeat of the press that
+    // opens it would change the screen.
+    const h = await open({ holdEpisodes: true });
+    expect(document.querySelector('[data-sfocus="detail-more"]'), "no menu to open yet").toBeNull();
+
+    h.releaseEpisodes?.();
+    await settle();
+    await press("detail-more");
+    const keys = [...document.querySelectorAll("[data-sfocus]")]
+      .map((e) => e.getAttribute("data-sfocus") ?? "")
+      .filter((k) => k.startsWith("more-") && k !== "more-close");
+    expect(keys.length).toBeGreaterThan(1);
+    expect(keys[keys.length - 1]).toBe("more-series");
+  });
+
+  it("is offered on a season with no episodes, which can reach the series no other way", async () => {
+    // Gated on the screen having settled rather than on the other entries being
+    // there: those need the children, and a season with none would otherwise
+    // lose the only way off it.
+    await open({ emptySeason: true });
+    await press("detail-more");
+    expect(document.querySelector('[data-sfocus="more-series"]')).toBeTruthy();
+  });
+
+  it("is offered on a season, where the seasons are chosen", async () => {
+    const h = await open();
+    await press("detail-more");
+    expect(document.querySelector('[data-sfocus="more-series"]')?.textContent).toContain("Series page");
+    expect(h.current.parentId).toBe(h.showId);
+  });
+
+  it("opens the series, and Back comes straight back to the episodes", async () => {
+    const { useApp } = await import("../state");
+    const h = await open();
+    await press("detail-more");
+    await press("more-series");
+
+    // Opened ON the season somebody came from: a series with twenty-seven of
+    // them otherwise arrives at the first one with the row scrolled to the
+    // start, which is the walk back this item exists to save.
+    expect(useApp.getState().screen).toMatchObject({
+      name: "item",
+      itemId: h.showId,
+      focusChildId: h.current.id,
+    });
+    // Pushed rather than replacing: the strip switches BETWEEN seasons and has
+    // its own reason not to leave a trail, but this is a detour.
+    expect(useApp.getState().history).toHaveLength(1);
+    expect(useApp.getState().history[0]).toMatchObject({ name: "item", itemId: h.current.id });
+  });
+
 });

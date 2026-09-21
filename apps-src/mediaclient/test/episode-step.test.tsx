@@ -372,9 +372,13 @@ describe("stepping to the next episode", () => {
     await settle();
     expect(usePlayer.getState().current?.item.id, "the film carries on").toBe("e2");
     // Named, because the line is about the press and not about the film on
-    // screen: it says which episode did not start.
+    // screen: it says which episode did not start. The DESIGNATION only, here:
+    // this row already carries the series name and the playing episode's own
+    // caption on one baseline, with no wrap and no truncation, and a screen that
+    // needs the episode's name builds it from the id below.
     expect(container.textContent).toContain("S1E3");
     expect(usePlayer.getState().stepFailed).toBe("S1E3");
+    expect(usePlayer.getState().stepFailedId).toBe("e3");
   });
 
   it("really stops when an explicit stop lands inside the hand-over", async () => {

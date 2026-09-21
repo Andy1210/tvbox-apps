@@ -49,7 +49,14 @@ function progress(item: MediaItem): number | null {
   return Math.min(1, item.viewOffsetMs / item.durationMs);
 }
 
-function label(item: MediaItem): string {
+/**
+ * How this app names an item wherever it writes one out.
+ *
+ * Exported because the failure line on a detail screen has to agree with the
+ * tile the press was made on: two spellings of one episode, a few centimetres
+ * apart, read as two different things.
+ */
+export function itemLabel(item: MediaItem): string {
   if (item.kind !== "episode") return item.title;
 
   // The episode's own NAME, with its number in front of it. The number alone -
@@ -244,9 +251,9 @@ export function Tile({
         <div
           className={`shrink-0 ${captionLines === 3 ? "line-clamp-3" : "line-clamp-2"} text-[1.8vh] leading-[1.5]`}
           style={{ height: `${captionLines * 2.7}vh` }}
-          title={label(item)}
+          title={itemLabel(item)}
         >
-          {label(item)}
+          {itemLabel(item)}
         </div>
       )}
     </div>

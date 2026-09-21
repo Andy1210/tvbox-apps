@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { PlexBackend } from "../backends/plex/backend";
 import type { Session } from "../backends/types";
 
@@ -29,6 +31,26 @@ const session: Session = {
 };
 
 const id = { clientId: "mediaclient-live-test", deviceName: "test" };
+
+/**
+ * The status of a URL, without printing the URL.
+ *
+ * The account token travels in a media URL's query, and the DOM environment's
+ * fetch logs the whole URL of every answer it does not like - a 302 included -
+ * so asking this way put the token in the scrollback of anyone who ran the
+ * suite. node's own client is quiet, and it does not follow the redirect.
+ */
+function statusOf(url: string): Promise<number> {
+  const send = url.startsWith("https:") ? httpsRequest : httpRequest;
+  return new Promise((resolve, reject) => {
+    const req = send(url, { headers: { Range: "bytes=0-1023" } }, (res) => {
+      res.resume();
+      resolve(res.statusCode ?? 0);
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
 
 describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
   // The global stub in setup.ts exists so no ordinary test reaches the network;
@@ -477,6 +499,39 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     expect(failures).toEqual([]);
   }, 180_000);
 
+  it("resolves a stream for the trailers and extras too, and it really streams", async () => {
+    // An extra is not always a file in the library: where the library is built
+    // from the online agents the server proxies one, so the part it resolves to
+    // is not a library part at all. Nothing else in this suite reaches that
+    // path, and refusing it means no extra on the whole server plays.
+    const b = backend();
+    const libs = await b.libraries();
+    const movies = libs.find((l) => l.kind === "movie")!;
+    const page = await b.libraryPage(movies.id, { offset: 0, limit: 8, sort: "titleSort" });
+
+    let checked = 0;
+    for (const item of page.items) {
+      const d = await b.item(item.id);
+      const extra = d.extras[0];
+      if (!extra) continue;
+      const session = `test-extra-${extra.id}-${Date.now()}`;
+      try {
+        const decision = await b.resolveStream(extra.id, { session, panel: { width: 1920, height: 1080 } });
+        expect(decision.url).toMatch(/^https?:\/\//);
+        // A URL that parses is not a URL that plays. A proxied extra sends the
+        // player on to wherever the provider keeps the file, which is another
+        // origin - the player is a separate process with no same-origin policy,
+        // and this asserts the redirect rather than following it.
+        expect([200, 206, 301, 302, 303, 307, 308]).toContain(await statusOf(decision.url));
+        checked += 1;
+      } finally {
+        await b.endSession(session).catch(() => {});
+      }
+      if (checked >= 3) break;
+    }
+    expect(checked, "no extras across eight films").toBeGreaterThan(0);
+  }, 180_000);
+
   it("hands the player a URL that actually streams", async () => {
     const b = backend();
     const libs = await b.libraries();
@@ -488,9 +543,10 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     try {
       // A direct-play part answers 401 without the token and the transcoder
       // answers 400 when it cannot find a profile - both look like a working URL
-      // until something tries to use it.
-      const res = await fetch(decision.url, { headers: { Range: "bytes=0-1023" } });
-      expect([200, 206]).toContain(res.status);
+      // until something tries to use it. Asked through node's client, because
+      // the account token is in this URL and the DOM's fetch prints the whole
+      // of one whenever it does not like the answer.
+      expect([200, 206]).toContain(await statusOf(decision.url));
     } finally {
       await b.endSession(session);
     }

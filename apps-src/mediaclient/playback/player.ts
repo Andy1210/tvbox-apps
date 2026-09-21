@@ -177,6 +177,16 @@ interface PlayerState {
    */
   stepFailed: string | null;
   /**
+   * WHICH item that was, so a screen can tell whether the line is its own.
+   *
+   * The label alone cannot: `stepFailed` is one global field with an eight
+   * second life, and a person who presses an extra and then opens something
+   * else takes it with them - the failure is then drawn beside a title it says
+   * nothing about. The play token cannot stand in for this, because moving
+   * between screens starts no play and so bumps nothing.
+   */
+  stepFailedId: string | null;
+  /**
    * Give up a move in flight.
    *
    * For Back, which is the only key left during one: the step holds the screen
@@ -207,6 +217,30 @@ function episodeLabel(item: MediaItem): string | null {
   // overlay named the same episode two different ways.
   return item.parentIndex !== undefined && item.index !== undefined ? `S${item.parentIndex}E${item.index}` : null;
 }
+
+/**
+ * Say on screen that a press could not be answered.
+ *
+ * `error` does not say it: no screen draws that field, so a stream that cannot
+ * be resolved leaves the page exactly as it was, and a tile that takes OK and
+ * does nothing cannot be told apart from a dead remote across a room.
+ * `stepFailed` is the field the screens draw, and it clears itself, which is
+ * what a line about one press should do.
+ *
+ * `playSibling` sets it again from its own `finally`, with the same title and a
+ * fresh timer, so the two cannot disagree about whether a step failed.
+ *
+ * The DESIGNATION where there is one, not the full caption: the overlay that
+ * draws this is already inside the series, and its row carries the series name
+ * and the playing episode's own caption on one baseline, with no wrap and no
+ * truncation. A screen that needs the name builds it from `stepFailedId`.
+ */
+function sayItFailed(set: Setter, item: MediaItem): void {
+  set({ stepFailed: episodeLabel(item) ?? item.title, stepFailedId: item.id });
+  if (stepFailedTimer) clearTimeout(stepFailedTimer);
+  stepFailedTimer = setTimeout(() => set({ stepFailed: null, stepFailedId: null }), STEP_FAILED_MS);
+}
+
 
 /** What the store says when the box is showing nothing. */
 const STOPPED = {
@@ -313,6 +347,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   siblings: {},
   moving: null,
   stepFailed: null,
+  stepFailedId: null,
   upNext: null,
   subDelaySec: 0,
   overlay: false,
@@ -355,7 +390,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // press there stepped another episode.
     if (stillSettling()) return undefined;
     const mine = ++moveSeq;
-    set({ moving: item, stepFailed: null });
+    set({ moving: item, stepFailed: null, stepFailedId: null });
     const giveUp = setTimeout(() => {
       if (moveSeq === mine) set({ moving: null });
     }, MOVE_GIVE_UP_MS);
@@ -380,10 +415,14 @@ export const usePlayer = create<PlayerState>((set, get) => ({
         // step, by anything that starts, and by its own timer, because a line
         // about a press should not outlive the press by much.
         const failed = get().current?.item.id !== item.id;
-        set({ moving: null, stepFailed: failed ? (episodeLabel(item) ?? item.title) : null });
+        set({
+          moving: null,
+          stepFailed: failed ? (episodeLabel(item) ?? item.title) : null,
+          stepFailedId: failed ? item.id : null,
+        });
         if (failed) {
           if (stepFailedTimer) clearTimeout(stepFailedTimer);
-          stepFailedTimer = setTimeout(() => set({ stepFailed: null }), STEP_FAILED_MS);
+          stepFailedTimer = setTimeout(() => set({ stepFailed: null, stepFailedId: null }), STEP_FAILED_MS);
         }
       }
     }
@@ -394,6 +433,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     const tv = bridge();
     if (!tv?.play) {
       set({ error: "no player on this box" });
+      sayItFailed(set, item);
       return;
     }
 
@@ -420,7 +460,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     if (get().error) set({ error: null });
     if (get().stepFailed) {
       if (stepFailedTimer) clearTimeout(stepFailedTimer);
-      set({ stepFailed: null });
+      set({ stepFailed: null, stepFailedId: null });
     }
 
     // THE NEW FILE IS RESOLVED BEFORE THE OLD ONE IS TOUCHED, and that ordering
@@ -473,7 +513,10 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       // Nobody is waiting for this one, so its failure is not news about whatever
       // is playing now: an abandoned call's late failure used to write the line
       // onto the film that had replaced it.
-      if (forThis === playToken) set({ error: "unplayable" });
+      if (forThis === playToken) {
+        set({ error: "unplayable" });
+        sayItFailed(set, item);
+      }
       return;
     }
 
@@ -1172,5 +1215,13 @@ export function resetPlayer(): void {
   // `switchProfile` rewrites the session in place. After a sign-out it played on
   // over the sign-in screen with a revoked credential.
   playToken += 1;
-  usePlayer.setState({ siblings: {}, moving: null, stepFailed: null, queue: undefined, upNext: null, subDelaySec: 0 });
+  usePlayer.setState({
+    siblings: {},
+    moving: null,
+    stepFailed: null,
+    stepFailedId: null,
+    queue: undefined,
+    upNext: null,
+    subDelaySec: 0,
+  });
 }
