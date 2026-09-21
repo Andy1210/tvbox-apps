@@ -78,6 +78,8 @@ async function open(opts?: {
   holdSeasons?: boolean;
   /** The EPISODES never answer: the window before the screen knows what it has. */
   holdEpisodes?: boolean;
+  /** A season the server answers with no episodes at all. */
+  emptySeason?: boolean;
   focusSeasons?: boolean;
 }): Promise<Harness> {
   const { render, act } = await import("@testing-library/react");
@@ -107,7 +109,7 @@ async function open(opts?: {
           return opts?.showChildren ?? f.seasons;
         }
         if (opts?.holdEpisodes) await new Promise<void>((r) => (h.releaseEpisodes = r));
-        return f.episodes;
+        return opts?.emptySeason ? [] : f.episodes;
       },
       setWatched: async () => {},
       posterUrl: () => undefined,
@@ -391,7 +393,7 @@ describe("the way to the series' own page", () => {
     await settle();
   }
 
-  it("is never the only thing in the menu, so it cannot be the first item", async () => {
+  it("is not offered until the screen knows what it holds", async () => {
     // The other two entries need the children and the tracks, which arrive a
     // round trip after the item does. Pushed last is not enough on its own: for
     // that window this would have been the first item and the only one, on a
@@ -408,6 +410,15 @@ describe("the way to the series' own page", () => {
       .filter((k) => k.startsWith("more-") && k !== "more-close");
     expect(keys.length).toBeGreaterThan(1);
     expect(keys[keys.length - 1]).toBe("more-series");
+  });
+
+  it("is offered on a season with no episodes, which can reach the series no other way", async () => {
+    // Gated on the screen having settled rather than on the other entries being
+    // there: those need the children, and a season with none would otherwise
+    // lose the only way off it.
+    await open({ emptySeason: true });
+    await press("detail-more");
+    expect(document.querySelector('[data-sfocus="more-series"]')).toBeTruthy();
   });
 
   it("is offered on a season, where the seasons are chosen", async () => {

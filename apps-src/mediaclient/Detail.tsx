@@ -1055,13 +1055,18 @@ export function Detail({
       },
     });
 
-  // Last in the menu, and never the only thing in it. A repeat of the press that
-  // opens the menu lands on its first item, and everything else behind this
-  // button opens a panel that Back closes - this one changes the screen. Being
-  // pushed last is not enough on its own: the other two entries need the
-  // children and the tracks, which arrive a round trip after the item does, so
-  // for that window this would be the first item and the only one.
-  if (overflow.length > 0 && detail.kind === "season" && detail.parentId)
+  // Last in the menu, and not until the screen knows what it holds. A repeat of
+  // the press that opens the menu lands on its first item, and everything else
+  // behind this button opens a panel that Back closes - this one changes the
+  // screen. Being pushed last is not enough on its own: the other two entries
+  // need the children and the tracks, which arrive a round trip after the item
+  // does, so for that window this would be the first item and the only one.
+  //
+  // Gated on the screen having settled rather than on the other entries being
+  // there: a season with no episodes has neither of them, and tying this to
+  // them would take the only way to the series off the one screen that cannot
+  // reach it any other way.
+  if (settled && detail.kind === "season" && detail.parentId)
     overflow.push({
       key: "series",
       // The series' own page is where the seasons are chosen, and a season
