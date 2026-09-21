@@ -543,9 +543,10 @@ describe.skipIf(!BASE || !TOKEN)("plex backend against a live server", () => {
     try {
       // A direct-play part answers 401 without the token and the transcoder
       // answers 400 when it cannot find a profile - both look like a working URL
-      // until something tries to use it.
-      const res = await fetch(decision.url, { headers: { Range: "bytes=0-1023" } });
-      expect([200, 206]).toContain(res.status);
+      // until something tries to use it. Asked through node's client, because
+      // the account token is in this URL and the DOM's fetch prints the whole
+      // of one whenever it does not like the answer.
+      expect([200, 206]).toContain(await statusOf(decision.url));
     } finally {
       await b.endSession(session);
     }

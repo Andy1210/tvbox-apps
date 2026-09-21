@@ -229,24 +229,18 @@ function episodeLabel(item: MediaItem): string | null {
  *
  * `playSibling` sets it again from its own `finally`, with the same title and a
  * fresh timer, so the two cannot disagree about whether a step failed.
+ *
+ * The DESIGNATION where there is one, not the full caption: the overlay that
+ * draws this is already inside the series, and its row carries the series name
+ * and the playing episode's own caption on one baseline, with no wrap and no
+ * truncation. A screen that needs the name builds it from `stepFailedId`.
  */
 function sayItFailed(set: Setter, item: MediaItem): void {
-  set({ stepFailed: failureLabel(item), stepFailedId: item.id });
+  set({ stepFailed: episodeLabel(item) ?? item.title, stepFailedId: item.id });
   if (stepFailedTimer) clearTimeout(stepFailedTimer);
   stepFailedTimer = setTimeout(() => set({ stepFailed: null, stepFailedId: null }), STEP_FAILED_MS);
 }
 
-/**
- * How a thing that would not start is named.
- *
- * The designation AND the name, which is how every tile caption and the play
- * button already write an episode: the designation alone says which episode of
- * a series somebody is already looking at, and on a screen reached from
- * somewhere else it says nothing at all.
- */
-function failureLabel(item: MediaItem): string {
-  return [episodeLabel(item), item.title].filter(Boolean).join(" \u00b7 ");
-}
 
 /** What the store says when the box is showing nothing. */
 const STOPPED = {
@@ -423,7 +417,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
         const failed = get().current?.item.id !== item.id;
         set({
           moving: null,
-          stepFailed: failed ? failureLabel(item) : null,
+          stepFailed: failed ? (episodeLabel(item) ?? item.title) : null,
           stepFailedId: failed ? item.id : null,
         });
         if (failed) {

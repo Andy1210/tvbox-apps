@@ -8,7 +8,7 @@ import {
 } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton, useBackspace, useI18n } from "@sdk";
 import { Row } from "./Row";
-import { episodeNumber } from "./Tile";
+import { episodeNumber, itemLabel } from "./Tile";
 import { Message } from "./Message";
 import { artworkScale } from "./posters";
 import { CastRow } from "./CastRow";
@@ -173,8 +173,13 @@ export function Detail({
   const [firstChildFailed, setFirstChildFailed] = useState(false);
   const upNext = usePlayer((s) => s.upNext);
   const moving = usePlayer((s) => s.moving);
-  /** A press that could not be started, and what it was. Clears itself. */
-  const stepFailed = usePlayer((s) => s.stepFailed);
+  /**
+   * WHICH press could not be started, if any. Clears itself after a few seconds.
+   *
+   * The id rather than the store's own label: that one is written for the
+   * player's overlay, which is already inside the series and whose row has no
+   * room, while this screen names the thing the way its own tiles do.
+   */
   const stepFailedId = usePlayer((s) => s.stepFailedId);
   // Only to re-render while a countdown is running; the value is the clock.
   const [, setTick] = useState(0);
@@ -931,18 +936,27 @@ export function Detail({
   const resumable = (toPlay?.viewOffsetMs ?? 0) > 0;
   const shown = (detail.kind === "season" && focused) || detail;
   /**
-   * Whether the failure line belongs to THIS screen.
+   * The thing that would not start, when it is one this screen can start.
    *
-   * Everything this page can start: itself, one of its children, one of the
-   * extras it is drawing. The play token cannot answer this - moving between
-   * screens starts no play, so it bumps nothing - and an unscoped line was read
-   * beside a film that had nothing to do with the press.
+   * The play token cannot answer that question - moving between screens starts
+   * no play, so it bumps nothing - and an unscoped line was read beside a film
+   * that had nothing to do with the press.
+   *
+   * Scoped to what the page DRAWS rather than to its children alone: a film
+   * opened from a collection or a playlist has no children, and its running
+   * order, its countdown and the row that holds them all come from `order` and
+   * `rowItems`. Answering only for the children made the screen silent for the
+   * very next thing in that order - the countdown ran out, nothing started, and
+   * nothing said so.
    */
-  const failedHere =
-    stepFailedId !== null &&
-    (stepFailedId === detail.id ||
-      children.some((c) => c.id === stepFailedId) ||
-      shown.extras.some((e) => e.id === stepFailedId));
+  const failedItem =
+    stepFailedId === null
+      ? undefined
+      : [detail as MediaItem, ...order, ...children, ...rowItems].find((i) => i.id === stepFailedId);
+  const failedExtra =
+    stepFailedId !== null && !failedItem ? shown.extras.find((e) => e.id === stepFailedId) : undefined;
+  /** What to call it: the same words as the tile the press was made on. */
+  const failedTitle = failedItem ? itemLabel(failedItem) : failedExtra?.title;
   /**
    * Whose tracks the panel lists, as an ITEM rather than a version.
    *
@@ -1144,10 +1158,10 @@ export function Detail({
     <FocusContext.Provider value={focusKey}>
       <Backdrop item={shown} />
       {/* A press that could not be answered, said on the screen it was made on.
-          `stepFailedId` is what makes that true: the field is one global with an
-          eight second life, so a person who presses an extra and then opens
-          something else took the line with them and read it beside a title it
-          said nothing about.
+          `failedTitle` is what makes that true: the field behind it is one
+          global with an eight second life, so a person who presses an extra and
+          then opens something else took the line with them and read it beside a
+          title it said nothing about.
 
           Drawn OVER the page rather than in it: the line lasts a few seconds,
           and one that takes a row's height would move the season strip and the
@@ -1155,10 +1169,13 @@ export function Detail({
           showing - the overlay there draws the same field, beside the film it
           is about. Clamped, because the title is the server's and an extra's can
           be a sentence. */}
-      {stepFailed && failedHere && !playing && (
+      {failedTitle && !playing && (
         <div className="pointer-events-none absolute inset-x-0 bottom-[10vh] z-30 flex justify-center px-[4vw]">
-          <span className="line-clamp-2 max-w-[80vw] rounded-[1vh] border border-white/25 bg-[#140f0c]/96 px-[2.2vw] py-[1.2vh] text-center text-[2.4vh] font-semibold text-white shadow-[0_0.6vh_2vh_rgba(0,0,0,0.85)]">
-            {t("player.failed", { title: stepFailed })}
+          <span className="max-w-[80vw] rounded-[1vh] border border-white/25 bg-[#140f0c]/96 px-[2.2vw] py-[1.2vh] text-center text-[2.4vh] font-semibold text-white shadow-[0_0.6vh_2vh_rgba(0,0,0,0.85)]">
+            {/* The clamp is on the TEXT, not on the pill: `overflow: hidden`
+                cuts at the padding box, so a clamped line left the tops of the
+                next one showing inside the pill's own bottom padding. */}
+            <span className="line-clamp-2">{t("player.failed", { title: failedTitle })}</span>
           </span>
         </div>
       )}

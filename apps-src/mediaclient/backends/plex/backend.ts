@@ -112,12 +112,17 @@ const ONLINE_PART_PATH = /^\/services\/iva\/assets\/\d+\/[A-Za-z0-9._-]+$/;
  *
  * A library part carries none and is refused if it does, but this endpoint
  * takes the rendition in its query, so one has to travel. An ALLOWLIST rather
- * than a pass-through, the same decision as FILTER_QUERY below and for the same
- * reason: the whole query is written by the server, and a name it chooses is a
- * name the request could authenticate as. `URLSearchParams.set` only overwrites
- * the exact spelling `X-Plex-Token`, so a lower-case one would survive beside
- * ours. Rebuilding from named integers also settles the encoding, which
- * `buildUrl` would otherwise re-serialise.
+ * than a pass-through, the same decision as FILTER_PATH_PARAMS below and for
+ * the same reason: the whole query is written by the server, and a name it
+ * chooses is a name the request could authenticate as. `URLSearchParams.set`
+ * only overwrites the exact spelling `X-Plex-Token`, so a lower-case one would
+ * survive beside ours. Rebuilding from named values also settles the encoding,
+ * which `buildUrl` would otherwise re-serialise.
+ *
+ * Matched on the DECODED name, because that is what `URLSearchParams` hands
+ * back, and a parameter this does not name is dropped rather than passed on -
+ * so a rendition the server later learns to ask for silently stops being asked
+ * for. That is the safe direction: the file still plays, at the default.
  */
 const ONLINE_PART_QUERY = ["fmt", "bitrate"] as const;
 /**
@@ -791,9 +796,8 @@ export class PlexBackend implements MediaBackend {
     if (!item.mediaKey) return undefined;
     // One bound, in one place: `partUrl` holds it for every URL the token is
     // attached to, and a track is a library part like any other.
-    const url = this.partUrl(item.mediaKey);
-    if (!url) log.warn("track URL is not a media path on this server; dropped");
-    return url;
+    // `partUrl` has already said which bound it hit.
+    return this.partUrl(item.mediaKey);
   }
 
   /**
@@ -1087,9 +1091,19 @@ export class PlexBackend implements MediaBackend {
     // A fragment is refused on the RAW key rather than on `url.hash`, which is
     // empty for a trailing "#" - the pattern these keys were checked against
     // excluded the character itself, and it should stay excluded.
-    if (url.origin !== new URL(this.session.baseUrl).origin || key.includes("#")) return undefined;
+    if (url.origin !== new URL(this.session.baseUrl).origin) {
+      // Worth a line of its own: this is the bound that keeps the account token
+      // off a host the server names, so tripping it is a fact about the server
+      // rather than about the file.
+      log.warn("part key points off the server; refused");
+      return undefined;
+    }
+    if (key.includes("#")) return undefined;
     const online = allowOnline && ONLINE_PART_PATH.test(url.pathname);
-    if (!online && (!PART_PATH.test(url.pathname) || url.search)) return undefined;
+    if (!online && (!PART_PATH.test(url.pathname) || url.search)) {
+      log.warn("part key is not a media path; refused");
+      return undefined;
+    }
     // Named parameters with values of a known shape, not the server's query as
     // it was written. The path travels as the URL parser normalised it, because
     // judging one string and sending another is the disagreement above.

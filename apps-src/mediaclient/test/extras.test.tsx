@@ -11,6 +11,9 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 
 import type { Extra, ItemDetail, MediaItem, StreamDecision } from "../backends/types";
 
+/** The film after this one, when the page was opened from a list. */
+const NEXT: MediaItem = { id: "f-next", kind: "movie", title: "Második film" };
+
 const { setupRemote, flushFocus } = await import("./remote");
 setupRemote();
 
@@ -28,7 +31,7 @@ interface Harness {
   film: MediaItem;
 }
 
-async function open(opts?: { resolve?: () => Promise<StreamDecision> }): Promise<Harness> {
+async function open(opts?: { resolve?: () => Promise<StreamDecision>; queueFrom?: boolean }): Promise<Harness> {
   const { render } = await import("@testing-library/react");
   const { configureI18n } = await import("@sdk");
   const { Detail } = await import("../Detail");
@@ -82,7 +85,7 @@ async function open(opts?: { resolve?: () => Promise<StreamDecision> }): Promise
     failure: null,
   });
 
-  render(<Detail itemId={film.id} />);
+  render(<Detail itemId={film.id} queueFrom={opts?.queueFrom ? [film, NEXT] : undefined} />);
   await settle();
   return { film };
 }
@@ -185,6 +188,22 @@ describe("an extra on a detail screen", () => {
     });
     expect(document.body.textContent).toContain("Official Trailer could not be started");
     expect(h.film.id).toBeTruthy();
+  });
+
+  it("says so for the next thing in the running order, not only for its own children", async () => {
+    // A film opened from a collection or a playlist has no children: the order
+    // it plays through, the countdown to the next one and the row that draws
+    // that countdown all come from the list it was opened FROM. Answering only
+    // for the children left the screen silent for the very next thing in it -
+    // the countdown ran out, nothing started, and nothing said so.
+    await open({ queueFrom: true });
+    const { usePlayer } = await import("../playback/player");
+    const { act } = await import("@testing-library/react");
+    await act(async () => {
+      usePlayer.setState({ stepFailed: NEXT.title, stepFailedId: NEXT.id });
+      await tick();
+    });
+    expect(document.body.textContent).toContain("Második film could not be started");
   });
 
   it("puts the cursor back on the extra that was pressed, not on the film", async () => {

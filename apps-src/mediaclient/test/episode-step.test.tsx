@@ -372,12 +372,12 @@ describe("stepping to the next episode", () => {
     await settle();
     expect(usePlayer.getState().current?.item.id, "the film carries on").toBe("e2");
     // Named, because the line is about the press and not about the film on
-    // screen: it says which episode did not start, the way every tile caption
-    // and the play button name one - the designation AND the title, since on a
-    // screen reached from somewhere else the designation alone says nothing.
+    // screen: it says which episode did not start. The DESIGNATION only, here:
+    // this row already carries the series name and the playing episode's own
+    // caption on one baseline, with no wrap and no truncation, and a screen that
+    // needs the episode's name builds it from the id below.
     expect(container.textContent).toContain("S1E3");
-    expect(usePlayer.getState().stepFailed).toBe("S1E3 \u00b7 Episode e3");
-    // And which item it was, so a screen can tell whether the line is its own.
+    expect(usePlayer.getState().stepFailed).toBe("S1E3");
     expect(usePlayer.getState().stepFailedId).toBe("e3");
   });
 
