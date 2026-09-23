@@ -150,6 +150,7 @@ function createDialReceiver(o) {
   let budgetTimer = null;
   let joinTimer = null; // retrying the multicast join (a box that booted before its wifi)
   let joined = false;
+  let restartTimer = null; // reopening the SSDP socket after it failed at run time
   const log = (m) => o.log && o.log(m);
   // How many distinct sources the SSDP budget tracks. Full, an unknown source is
   // refused: a reply is cheap, spoofing the source of a UDP search is free, and the
@@ -469,21 +470,33 @@ function createDialReceiver(o) {
   }
 
   function startSsdp(cb) {
-    ssdp = dgram.createSocket({ type: "udp4", reuseAddr: true });
-    ssdp.on("error", (e) => {
+    const sock = dgram.createSocket({ type: "udp4", reuseAddr: true });
+    ssdp = sock;
+    sock.on("error", (e) => {
       log("ssdp: " + e.message);
       try {
-        ssdp.close();
+        sock.close();
       } catch (x) {}
+      if (ssdp !== sock) return; // stopped, or already replaced
       ssdp = null;
+      joined = false;
       if (cb) {
         const done = cb;
         cb = null;
-        done(e);
+        return done(e);
       }
+      // An error after the socket was up (the interface went away, say) would
+      // otherwise leave the REST half running and the box silently missing from
+      // every phone's cast list. The socket is opened again while the receiver is on.
+      if (restartTimer) return;
+      restartTimer = setTimeout(() => {
+        restartTimer = null;
+        if (server && !ssdp) startSsdp(null);
+      }, o.ssdpRestartMs || JOIN_RETRY_MS);
+      if (restartTimer.unref) restartTimer.unref();
     });
-    ssdp.on("message", onSsdp);
-    ssdp.bind(SSDP_PORT, () => {
+    sock.on("message", onSsdp);
+    sock.bind(SSDP_PORT, () => {
       // Joining the group is what makes the box FINDABLE - the REST half being up
       // means nothing to a phone that never learns the address. A box that boots
       // before its wifi associates fails this join, so it is retried rather than
@@ -536,6 +549,8 @@ function createDialReceiver(o) {
       budgetTimer = null;
       if (joinTimer) clearInterval(joinTimer);
       joinTimer = null;
+      if (restartTimer) clearTimeout(restartTimer);
+      restartTimer = null;
       joined = false;
       const s = server;
       const u = ssdp;
@@ -562,6 +577,7 @@ function createDialReceiver(o) {
     _onSsdp: onSsdp,
     _replyAllowed: replyAllowed,
     _launchAllowed: launchAllowed,
+    _ssdp: () => ssdp,
   };
 }
 
