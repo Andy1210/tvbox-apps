@@ -218,6 +218,14 @@ function folders() {
   return out;
 }
 
+// The string half of resolveFolder: inside the library by spelling, with no
+// file system access, so it is safe to ask before anything touches the disk.
+function underLibrary(input) {
+  const want = path.resolve(String(input || ""));
+  const root = path.resolve(roms.ROMS_DIR);
+  return want === root || want.startsWith(root + path.sep);
+}
+
 // Is this path one of the folders a scan may be pointed at? The UI sends a path back,
 // so it is checked against the list rather than trusted - and a path outside the roms
 // folder must never reach a command line.
@@ -474,8 +482,14 @@ async function scan(folder, opts) {
   if (o.onProgress) o.onProgress({ stage: "adding", folder: dir, matched: ra.seen - ra.missed });
   let mine = { added: 0, skipped: 0, systems: [] };
   try {
-    mine = addMissing(dir, o);
-    foldVariants(o);
+    // `finish` lets the caller run this pass somewhere that may block (it walks
+    // the folder and rewrites playlists); by default it runs right here.
+    if (o.finish) mine = await o.finish(dir, o.system || "");
+    else {
+      mine = addMissing(dir, o);
+      foldVariants(o);
+    }
+    if (!mine || mine.error) throw new Error((mine && mine.error) || "finish_failed");
   } catch (e) {
     return { ok: false, error: "write_failed", detail: String((e && e.message) || e) };
   }
@@ -497,6 +511,7 @@ module.exports = {
   walk,
   folders,
   resolveFolder,
+  underLibrary,
   inspect,
   knownPaths,
   readPlaylist,

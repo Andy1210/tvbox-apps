@@ -70,6 +70,24 @@ test("only ground the box offers as a source may be linked", () => {
   assert.strictEqual(folders.add({ name: "usb", path: STICK }).ok, true, "the home directory is fine");
 });
 
+test("HOME itself and its hidden directories cannot be linked", () => {
+  reset();
+  const hidden = path.join(HOME, ".config", "games");
+  fs.mkdirSync(hidden, { recursive: true });
+  fs.mkdirSync(path.join(HOME, ".tvbox", "apps", "x"), { recursive: true });
+  assert.strictEqual(folders.add({ name: "home", path: HOME }).error, "bad_path");
+  assert.strictEqual(folders.add({ name: "cfg", path: hidden }).error, "bad_path");
+  assert.strictEqual(folders.add({ name: "apps", path: path.join(HOME, ".tvbox", "apps", "x") }).error, "bad_path");
+  assert.strictEqual(folders.add({ name: "tvbox", path: path.join(HOME, ".tvbox") }).error, "bad_path");
+});
+
+test("a network share the shell mounted may be linked", () => {
+  reset();
+  const share = path.join(HOME, ".tvbox", "shares", "nas", "roms");
+  fs.mkdirSync(share, { recursive: true });
+  assert.strictEqual(folders.add({ name: "nas", path: share }).ok, true);
+});
+
 test("a path that is not a directory on this box is refused", () => {
   reset();
   assert.strictEqual(folders.add({ name: "gone", path: path.join(HOME, "nope") }).error, "bad_path");

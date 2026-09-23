@@ -25,6 +25,23 @@ function putCore(name, data) {
 }
 const reset = () => fs.rmSync(cores.CORES_DIR, { recursive: true, force: true });
 
+test("a system pack carrying a symlink entry is refused before anything is unpacked", async () => {
+  const { execFileSync } = require("child_process");
+  const work = fs.mkdtempSync(path.join(HOME, "zip-"));
+  fs.mkdirSync(path.join(work, "pack"));
+  fs.writeFileSync(path.join(work, "pack", "bios.bin"), "x");
+  fs.symlinkSync("/etc/passwd", path.join(work, "pack", "link"));
+  const bad = path.join(work, "bad.zip");
+  execFileSync("zip", ["-qry", bad, "pack"], { cwd: work });
+  assert.deepStrictEqual(await cores._test.unpackAssets(bad), { ok: false, error: "unsafe_archive" });
+  assert.ok(!fs.existsSync(path.join(cores.SYSTEM_DIR, "pack")), "nothing was unpacked");
+  fs.unlinkSync(path.join(work, "pack", "link"));
+  const good = path.join(work, "good.zip");
+  execFileSync("zip", ["-qr", good, "pack"], { cwd: work });
+  assert.strictEqual((await cores._test.unpackAssets(good)).ok, true);
+  assert.ok(fs.existsSync(path.join(cores.SYSTEM_DIR, "pack", "bios.bin")));
+});
+
 test("the cores directory is under the redirected HOME", () => {
   assert.ok(cores.CORES_DIR.startsWith(HOME), cores.CORES_DIR);
 });

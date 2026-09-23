@@ -367,13 +367,16 @@ function coverFile(system, i) {
 // Everything needed to launch one game: the ROM as the playlist records it and the
 // core resolved for its console. `error` says which of the two is missing, because
 // "nothing happened" on a TV is the worst possible answer.
-function launchSpec(system, i) {
+function launchSpec(system, i, opts) {
   const g = games(system)[Number(i)];
   if (!g) return { error: "unknown_game" };
   const core = coreFor(system);
   if (!core) return { error: "no_core" };
   const so = corePath(core);
   if (!cores.isRegularFile(so)) return { error: "no_core" };
+  // The caller may check the ROM itself (romReachable), because on a network
+  // share a synchronous stat can block for as long as the share does not answer.
+  if (opts && opts.statRom === false) return { label: g.label, rom: g.rom, core, corePath: so };
   try {
     if (!fs.statSync(g.rom).isFile()) return { error: "rom_missing", rom: g.rom };
   } catch (e) {
@@ -384,7 +387,26 @@ function launchSpec(system, i) {
   return { label: g.label, rom: g.rom, core, corePath: so };
 }
 
+// The ROM is a file, answered within `ms`. The stat runs on libuv's pool, so a
+// share that hangs costs a pool thread for as long as it hangs, not the process.
+function romReachable(rom, ms) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), ms);
+    fs.promises.stat(rom).then(
+      (st) => {
+        clearTimeout(timer);
+        resolve(st.isFile());
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(false);
+      },
+    );
+  });
+}
+
 module.exports = {
+  romReachable,
   OVERRIDES_FILE,
   extRank,
   better,

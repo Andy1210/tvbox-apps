@@ -44,6 +44,22 @@ function romPath(system, name, part) {
   return p.startsWith(dir + path.sep) ? p : "";
 }
 
+// A system folder that is a LINK is a folder linked in from elsewhere on the box
+// (folders.js), not an uploaded library. Uploads and deletes must never reach
+// through one: the link can point at any directory the user may link, and the
+// upload and delete routes answer a phone, not the person who made the link.
+function isLink(p) {
+  try {
+    return fs.lstatSync(p).isSymbolicLink();
+  } catch (e) {
+    return false; // absent
+  }
+}
+
+function linkedSystem(system) {
+  return isLink(path.join(ROMS_DIR, system));
+}
+
 function ensureDir(system) {
   const dir = path.join(ROMS_DIR, system);
   fs.mkdirSync(dir, { recursive: true });
@@ -64,6 +80,8 @@ function writeChunk({ system, name, offset, data, last }) {
   const part = romPath(system, name, true);
   const final = romPath(system, name, false);
   if (!part || !final) return { ok: false, error: "bad_name" };
+  if (linkedSystem(system)) return { ok: false, error: "is_link" };
+  if (isLink(part) || isLink(final)) return { ok: false, error: "bad_name" };
   const off = Number(offset);
   if (!Number.isInteger(off) || off < 0) return { ok: false, error: "bad_offset" };
   let buf;
@@ -155,6 +173,7 @@ function list() {
 
 // Delete a game (or an abandoned partial upload of it).
 function remove(system, name) {
+  if (!systemOk(system) || linkedSystem(system)) return false;
   let gone = false;
   for (const part of [false, true]) {
     const p = romPath(system, name, part);
@@ -186,6 +205,7 @@ function remove(system, name) {
 function removeSystem(system) {
   if (!systemOk(system)) return { ok: false, error: "bad_system" };
   const dir = path.join(ROMS_DIR, system);
+  if (linkedSystem(system)) return { ok: false, error: "is_link" };
   if (mountedDirs().has(dir)) return { ok: false, error: "is_mount" };
   let entries;
   try {

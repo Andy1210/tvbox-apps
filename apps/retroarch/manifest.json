@@ -2,8 +2,12 @@
   "id": "retroarch",
   "manifestVersion": 1,
   "name": "RetroArch",
-  "version": "1.13.1",
+  "version": "1.13.2",
   "changelog": [
+    {
+      "version": "1.13.2",
+      "notes": "Ha egy játék nem indul el, az ok most egy rövid üzenet a borítók fölött, és a kurzor ott marad, ahol volt: a többi játék egy gombnyomásra van. A mappák beolvasása és egy játék indítása már nem fagyaszthatja le a boxot, ha egy hálózati megosztás nem válaszol. A telefonról feltöltött játékok csak a feltöltött mappákba kerülhetnek, egy máshonnan belinkelt mappába soha, és a box saját beállításmappái nem linkelhetők be. / When a game will not start, the reason is now a short notice over the covers and the cursor stays where it was, so the rest of the library is one press away. Scanning a folder and starting a game can no longer freeze the box when a network share stops answering. Games uploaded from a phone only ever land in uploaded folders, never in a folder linked in from elsewhere, and the box's own settings folders cannot be linked in."
+    },
     {
       "version": "1.13.1",
       "notes": "On a console with no games left, Right and OK now move to the button beside it instead of doing nothing - and neither pulls the cursor out of the console list a moment later. The cursor also stays somewhere you can see it after a search that finds nothing, after clearing one, and when a game refuses to start - that screen used to leave the remote with nothing to press but Back."

@@ -59,6 +59,17 @@ function targetOk(p) {
   }
   const inside = (root) => real === root || real.startsWith(root + path.sep);
   if (!allowedRoots().some(inside)) return false;
+  // HOME as a whole is not a game library, and a hidden directory under it holds
+  // configuration and app data (~/.tvbox, ~/.config, ~/.local, ~/.var): linking one
+  // in would expose it through the library's file share and its routes. The one
+  // hidden place that does hold games is where the shell mounts network shares.
+  const home = fs.realpathSync(HOME);
+  if (real === home) return false;
+  const shares = path.join(HOME, ".tvbox", "shares");
+  const sharesReal = fs.existsSync(shares) ? fs.realpathSync(shares) : shares;
+  const inShare = real.startsWith(sharesReal + path.sep);
+  const rel = path.relative(home, real);
+  if (!inShare && !rel.startsWith("..") && rel.split(path.sep).some((seg) => seg.startsWith("."))) return false;
   const roms = fs.existsSync(ROMS_DIR) ? fs.realpathSync(ROMS_DIR) : ROMS_DIR;
   return real !== roms && !real.startsWith(roms + path.sep);
 }

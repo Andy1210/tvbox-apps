@@ -127,3 +127,30 @@ test("remove refuses a traversing name instead of deleting outside the library",
 });
 
 test.after(() => fs.rmSync(HOME, { recursive: true, force: true }));
+
+test("uploads and deletes never reach through a linked-in folder", () => {
+  reset();
+  const elsewhere = path.join(HOME, "elsewhere");
+  fs.rmSync(elsewhere, { recursive: true, force: true });
+  fs.mkdirSync(elsewhere, { recursive: true });
+  fs.writeFileSync(path.join(elsewhere, "keep.txt"), "mine");
+  fs.mkdirSync(roms.ROMS_DIR, { recursive: true });
+  fs.symlinkSync(elsewhere, path.join(roms.ROMS_DIR, "linked"));
+  const w = roms.writeChunk({ system: "linked", name: "plugin.js", offset: 0, data: b64("x"), last: true });
+  assert.deepStrictEqual(w, { ok: false, error: "is_link" });
+  assert.ok(!fs.existsSync(path.join(elsewhere, "plugin.js")));
+  assert.deepStrictEqual(roms.removeSystem("linked"), { ok: false, error: "is_link" });
+  assert.strictEqual(roms.remove("linked", "keep.txt"), false);
+  assert.strictEqual(fs.readFileSync(path.join(elsewhere, "keep.txt"), "utf8"), "mine");
+});
+
+test("an upload does not write through a link planted in a real system folder", () => {
+  reset();
+  const target = path.join(HOME, "victim.txt");
+  fs.writeFileSync(target, "mine");
+  fs.mkdirSync(path.join(roms.ROMS_DIR, "nes"), { recursive: true });
+  fs.symlinkSync(target, path.join(roms.ROMS_DIR, "nes", "game.nes.part"));
+  const w = roms.writeChunk({ system: "nes", name: "game.nes", offset: 0, data: b64("x"), last: true });
+  assert.strictEqual(w.ok, false);
+  assert.strictEqual(fs.readFileSync(target, "utf8"), "mine");
+});

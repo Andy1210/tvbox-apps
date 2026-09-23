@@ -263,3 +263,26 @@ test("a playlist entry with no path is not carried over", () => {
     "only the entry that names a game came across",
   );
 });
+
+test("the out-of-process finish pass does what the in-process one does", () => {
+  // scan-cli.js is what the plugin runs so a walk over a share cannot block the
+  // shell; it has to add the same entries addMissing would.
+  reset();
+  installCore("mgba", 'database = "' + GBA + '"\nsupported_extensions = "gba"\n');
+  const dir = folder("gba3", { "Zelda (USA).gba": "" });
+  const { execFileSync } = require("child_process");
+  const cli = path.join(__dirname, "scan-cli.js");
+  const run = (...args) =>
+    JSON.parse(execFileSync(process.execPath, [cli, ...args], { env: { ...process.env, HOME } }));
+  assert.deepStrictEqual(run("finish", dir).added, 1);
+  assert.strictEqual(scan.readPlaylist(GBA).items.length, 1);
+  assert.strictEqual(run("inspect", dir).already, 1);
+  assert.strictEqual(run("finish", "/etc").error, "bad_folder");
+  assert.strictEqual(run("nope").error, "bad_command");
+});
+
+test("underLibrary answers by spelling alone", () => {
+  assert.strictEqual(scan.underLibrary(path.join(roms.ROMS_DIR, "gba")), true);
+  assert.strictEqual(scan.underLibrary(path.join(roms.ROMS_DIR, "..", "x")), false);
+  assert.strictEqual(scan.underLibrary("/etc"), false);
+});
