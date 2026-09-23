@@ -80,6 +80,7 @@ export function Stream({
 
   useEffect(() => {
     let alive = true;
+    const aborter = new AbortController();
     let poll: ReturnType<typeof setInterval> | null = null;
 
     const stopPolling = () => {
@@ -159,7 +160,7 @@ export function Stream({
             });
           }, WATCH_POLL_MS);
           try {
-            handle.current = await connect(
+            const h = await connect(
               {
               onPhase: (p, detail) => {
                 if (!alive) return;
@@ -211,7 +212,11 @@ export function Stream({
               // offer carries it without a second round trip at the one moment
               // that matters.
               s.quality,
+              aborter.signal,
             );
+            // Left while it was connecting: nothing will ever close it but us.
+            if (!alive) h.close();
+            else handle.current = h;
           } catch (e) {
             // Through the code table like everywhere else: the raw message is the
             // upstream failure text, and `exchange_failed` carries Microsoft's own
@@ -229,6 +234,7 @@ export function Stream({
 
     return () => {
       alive = false;
+      aborter.abort();
       stopPolling();
       handle.current?.close();
       handle.current = null;

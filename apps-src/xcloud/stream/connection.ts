@@ -111,7 +111,14 @@ export interface Quality {
   stereo?: boolean;
 }
 
-export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<StreamHandle> {
+/**
+ * `signal` ends a connection that is still being negotiated: until `connect`
+ * returns there is no handle to close, and a screen left during the several
+ * seconds that takes would otherwise leave the peer connection and its timers
+ * running behind it.
+ */
+export async function connect(cb: StreamCallbacks, quality?: Quality, signal?: AbortSignal): Promise<StreamHandle> {
+  if (signal?.aborted) throw new Error("aborted");
   const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
   const channels = new Map<string, RTCDataChannel>();
   const candidates: RTCIceCandidate[] = [];
@@ -322,11 +329,20 @@ export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<S
   // handle for a caller to close - so the peer connection, four data channels and
   // the 60 Hz input timer would be left running behind an error screen, with the
   // video and audio elements still receiving tracks.
+  const onAbort = () => close();
+  signal?.addEventListener("abort", onAbort, { once: true });
   try {
     return await negotiate();
   } catch (e) {
     close();
     throw e;
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
+  }
+
+  // Between the steps: a connection closed while a step was out goes no further.
+  function stillWanted(): void {
+    if (closed) throw new Error("aborted");
   }
 
   async function negotiate(): Promise<StreamHandle> {
@@ -342,14 +358,17 @@ export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<S
   await pc.setLocalDescription(offer);
 
   await waitForIce(pc, ICE_GATHER_TIMEOUT_MS);
+  stillWanted();
 
   const { answer } = await api.exchangeSdp(pc.localDescription?.sdp || offer.sdp || "");
+  stillWanted();
   if (!answer || !answer.sdp) throw new Error("the server answered the offer with no SDP");
   cb.onPhase("answered");
   await pc.setRemoteDescription({ type: "answer", sdp: answer.sdp });
 
   cb.onPhase("connecting");
   const { candidates: remote } = await api.exchangeIce(candidates.map((c) => c.toJSON()));
+  stillWanted();
   for (const c of remote || []) {
     try {
       await pc.addIceCandidate(toCandidate(c));
@@ -359,6 +378,7 @@ export async function connect(cb: StreamCallbacks, quality?: Quality): Promise<S
     }
   }
 
+  stillWanted();
   watchFrames();
   return {
     close,

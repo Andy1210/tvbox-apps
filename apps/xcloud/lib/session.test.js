@@ -194,6 +194,52 @@ test("waiting gives up on its own deadline and says what it last saw", async () 
   );
 });
 
+test("time in the queue does not count against the provisioning deadline", async () => {
+  reset();
+  const until = Date.now() + 120;
+  handler = withAuth((c) => {
+    if (c.path.endsWith("/state"))
+      return { status: 200, body: { state: Date.now() < until ? "WaitingForResources" : "Provisioned" } };
+    if (c.path.includes("/v1/waittime/")) return { status: 200, body: { estimatedTotalWaitTimeInSeconds: 1 } };
+    return { status: 404, body: "" };
+  });
+  const r = await session.waitReady(live, { intervalMs: 5, timeoutMs: 60 });
+  assert.equal(r.state, "Provisioned");
+});
+
+test("the queue has a bound of its own", async () => {
+  reset();
+  handler = withAuth((c) => {
+    if (c.path.endsWith("/state")) return { status: 200, body: { state: "WaitingForResources" } };
+    return { status: 200, body: { estimatedTotalWaitTimeInSeconds: 1 } };
+  });
+  await assert.rejects(
+    () => session.waitReady(live, { intervalMs: 5, timeoutMs: 5000, queueMaxMs: 40 }),
+    (e) => e.code === "provision_timeout",
+  );
+});
+
+test("one failed poll does not end a session being prepared, a refusal does", async () => {
+  reset();
+  let polls = 0;
+  handler = withAuth((c) => {
+    if (c.path.endsWith("/state")) {
+      polls++;
+      if (polls === 2) return { status: 503, body: "" };
+      return { status: 200, body: { state: polls < 4 ? "Provisioning" : "Provisioned" } };
+    }
+    return { status: 404, body: "" };
+  });
+  assert.equal((await session.waitReady(live, { intervalMs: 1, timeoutMs: 5000 })).state, "Provisioned");
+
+  reset();
+  handler = withAuth((c) => (c.path.endsWith("/state") ? { status: 404, body: "" } : { status: 404, body: "" }));
+  await assert.rejects(
+    () => session.waitReady(live, { intervalMs: 1, timeoutMs: 5000 }),
+    (e) => e.code === "gssv_failed",
+  );
+});
+
 test("an unknown state keeps the session alive rather than failing it", async () => {
   reset();
   let polls = 0;

@@ -193,6 +193,52 @@ module.exports = (host) => {
     }
   }
 
+  let signinStarting = null;
+  // The device-code flow. Every handler checks that the sign-in it belongs to is
+  // still the current one: a cancelled poller answers late, and without the check
+  // its failure was written onto the sign-in that replaced it.
+  async function beginSignin() {
+    const dc = await auth.startDeviceCodeAuth();
+    const controller = new AbortController();
+    const mine = {
+      // `expiresAt` as well as the lifetime: this sign-in outlives the page (a
+      // reload picks it back up), so a screen that counts from when IT opened
+      // reports a code as fresh minutes after it died.
+      public: {
+        userCode: dc.userCode,
+        verificationUri: dc.verificationUri,
+        expiresIn: dc.expiresIn,
+        expiresAt: Date.now() + dc.expiresIn * 1000,
+      },
+      controller,
+      state: "waiting",
+      error: null,
+    };
+    signin = mine;
+    auth
+      .pollForDeviceCode(dc.deviceCode, { ...dc, signal: controller.signal })
+      .then(() => {
+        if (signin === mine) signin = null;
+        if (controller.signal.aborted) return;
+        log("signed in");
+        // Warm the library while the person is still looking at the
+        // "signed in" screen, so the grid is not the next wait.
+        library
+          .refresh({ language: library.askedLanguage() || locale() })
+          .catch((e) => log("library warm-up failed:", e.message));
+      })
+      .catch((e) => {
+        // Kept, not cleared: the screen has to be able to say WHY, and a
+        // cleared state reads as "never started".
+        if (signin === mine) {
+          mine.state = "failed";
+          mine.error = { code: e.code || "error", error: String(e.message || e) };
+        }
+        if (!controller.signal.aborted) log("sign-in failed:", e.code || "", e.message);
+      });
+    return { ok: true, ...mine.public };
+  }
+
   const routes = {
     "GET /status": (req, res) => status().then((s) => host.json(res, s)),
 
@@ -205,48 +251,10 @@ module.exports = (host) => {
       // out was Retry then Cancel then Start - which nobody would find.
       if (signin && signin.state === "failed") signin = null;
       if (signin) return host.json(res, { ok: true, ...signin.public });
-      auth
-        .startDeviceCodeAuth()
-        .then((dc) => {
-          const controller = new AbortController();
-          signin = {
-            // `expiresAt` as well as the lifetime: this sign-in outlives the page (a
-            // reload picks it back up), so a screen that counts from when IT opened
-            // reports a code as fresh minutes after it died.
-            public: {
-              userCode: dc.userCode,
-              verificationUri: dc.verificationUri,
-              expiresIn: dc.expiresIn,
-              expiresAt: Date.now() + dc.expiresIn * 1000,
-            },
-            controller,
-            state: "waiting",
-            error: null,
-          };
-          host.json(res, { ok: true, ...signin.public });
-
-          auth
-            .pollForDeviceCode(dc.deviceCode, { ...dc, signal: controller.signal })
-            .then(() => {
-              signin = null;
-              log("signed in");
-              // Warm the library while the person is still looking at the
-              // "signed in" screen, so the grid is not the next wait.
-              library
-                .refresh({ language: library.askedLanguage() || locale() })
-                .catch((e) => log("library warm-up failed:", e.message));
-            })
-            .catch((e) => {
-              // Kept, not cleared: the screen has to be able to say WHY, and a
-              // cleared state reads as "never started".
-              if (signin) {
-                signin.state = "failed";
-                signin.error = { code: e.code || "error", error: String(e.message || e) };
-              }
-              log("sign-in failed:", e.code || "", e.message);
-            });
-        })
-        .catch((e) => host.json(res, errorPayload(e)));
+      // A second press while the first is still asking Microsoft for a code joins
+      // it, rather than minting a second code and leaving a poller behind.
+      if (!signinStarting) signinStarting = beginSignin().finally(() => (signinStarting = null));
+      signinStarting.then((r) => host.json(res, r)).catch((e) => host.json(res, errorPayload(e)));
     },
 
     "GET /signin/state": (req, res) => {

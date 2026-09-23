@@ -2,7 +2,7 @@
   "id": "xcloud",
   "manifestVersion": 1,
   "name": "Xbox Cloud Gaming",
-  "version": "2.9.3",
+  "version": "2.9.4",
   "type": "webclient",
   "status": "ready",
   "accent": "#107c10",
@@ -16,6 +16,10 @@
     "hu": "Xbox Game Pass Ultimate játékok streamelése egyenesen a TV-re - konzol nélkül. Jelentkezz be a képernyőn megjelenő kóddal, aztán párosíts egy Bluetooth- vagy USB-kontrollert. Gyors internet kell hozzá; a kép élő H.264 videófolyam."
   },
   "changelog": [
+    {
+      "version": "2.9.4",
+      "notes": "Ha csatlakozás közben kilépsz egy játékból, a kapcsolat most tényleg lezárul, és nem fut tovább a háttérben. A sorban állás ideje nem számít bele az indítási időkorlátba, és egy pillanatnyi hálózati hiba nem szakítja meg az előkészítés alatt álló játékot. A bejelentkezés gombjának gyors kétszeri megnyomása nem kér két kódot, és egy megszakított bejelentkezés nem rontja el a következőt. / Leaving a game while it is still connecting now really closes the connection instead of leaving it running in the background. Time spent in the queue no longer counts against the start-up time limit, and a brief network error no longer ends a game that is still being prepared. Pressing the sign-in button twice quickly no longer asks for two codes, and a cancelled sign-in no longer spoils the next one."
+    },
     {
       "version": "2.9.3",
       "notes": "A game that cannot start now says so instead of leaving the screen on Starting for good, quitting from the Xbox guide goes straight back to the library rather than ending on an error, and the genre filters stay where they are while the catalogue is still loading."
