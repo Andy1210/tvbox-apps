@@ -149,7 +149,13 @@
     <div id="list"></div>
     <div id="empty" hidden>{{empty}}</div>
 
+    <script src="/tvbox-seal.js"></script>
     <script>
+      // Sealed with the key the QR carries in its fragment when the box serves
+      // /tvbox-seal.js; a box without it takes the plain body.
+      function sealBody(b) {
+        return window.tvboxSeal ? window.tvboxSeal.body(b) : JSON.stringify(b);
+      }
       const T = {
         uploading: "{{uploading}}",
         done: "{{done}}",
@@ -219,11 +225,13 @@
       // The pairing server gates every route on the session code: "c" in the query
       // for reads, "code" in the body for writes.
       const code = new URLSearchParams(location.search).get("c") || "";
-      const api = (p, body) =>
+      // A ROM chunk goes plain: it is not a secret, and sealing 4 MB means
+      // base64-encoding it twice on the phone for every chunk.
+      const api = (p, body, { plain = false } = {}) =>
         fetch(p, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...body, code }),
+          body: plain ? JSON.stringify({ ...body, code }) : sealBody({ ...body, code }),
         }).then((r) => r.json());
 
       go.onclick = () => pick.click();
@@ -257,7 +265,7 @@
           const last = offset + CHUNK >= file.size;
           let r;
           try {
-            r = await api("/rom-chunk", { system, name: file.name, offset, data, last });
+            r = await api("/rom-chunk", { system, name: file.name, offset, data, last }, { plain: true });
           } catch (e) {
             return false;
           }

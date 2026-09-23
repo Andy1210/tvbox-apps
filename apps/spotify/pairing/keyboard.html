@@ -115,7 +115,13 @@
       </div>
     </details>
     <div id="st"></div>
+    <script src="/tvbox-seal.js"></script>
     <script>
+      // Sealed with the key the QR carries in its fragment when the box serves
+      // /tvbox-seal.js; a box without it takes the plain body.
+      function sealBody(b) {
+        return window.tvboxSeal ? window.tvboxSeal.body(b) : JSON.stringify(b);
+      }
       document.getElementById("code").value = new URLSearchParams(location.search).get("c") || "";
       function code() {
         return document.getElementById("code").value;
@@ -129,7 +135,7 @@
         fetch("/fill" + location.search, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ code: code(), field: field, value: v }),
+          body: sealBody({ code: code(), field: field, value: v }),
         })
           .then(function (r) {
             st(r.ok ? "{{sent}}" : "✗");
@@ -143,7 +149,7 @@
         return fetch("/key" + location.search, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(b),
+          body: sealBody(b),
         })
           .then(function (r) {
             if (!r.ok) st("✗");

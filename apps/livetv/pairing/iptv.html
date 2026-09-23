@@ -102,7 +102,13 @@
     </fieldset>
     <button id="save" onclick="save()">{{save}}</button>
     <div id="msg"></div>
+    <script src="/tvbox-seal.js"></script>
     <script>
+      // Sealed with the key the QR carries in its fragment when the box serves
+      // /tvbox-seal.js; a box without it takes the plain body.
+      function sealBody(b) {
+        return window.tvboxSeal ? window.tvboxSeal.body(b) : JSON.stringify(b);
+      }
       var M = "xtream";
       document.getElementById("code").value = new URLSearchParams(location.search).get("c") || "";
       function mode(m) {
@@ -127,7 +133,7 @@
         fetch("/save" + location.search, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(b),
+          body: sealBody(b),
         })
           .then(function (r) {
             return r.json();
