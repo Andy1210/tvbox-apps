@@ -313,8 +313,27 @@ export function MusicList({
                     // A row that has not arrived is still a row: without a box of
                     // the same height the ones below it move as pages land, and a
                     // list that shifts under the cursor is a list you cannot aim
-                    // at.
-                    <div className="h-full animate-pulse rounded-[1vh] bg-white/5" aria-hidden="true" />
+                    // at. It takes focus too, so Down at the edge of a page that
+                    // failed still moves, and landing on it asks for the page
+                    // again.
+                    <FocusButton
+                      focusKey={`mrow-${i}`}
+                      onEnter={() => void loadPage(Math.floor(i / PAGE))}
+                      onFocused={() => {
+                        setCursor(i);
+                        void loadPage(Math.floor(i / PAGE));
+                      }}
+                      onArrowPress={(dir) => {
+                        if (dir === "up" && i === 0 && topKey) {
+                          setFocus(topKey);
+                          return false;
+                        }
+                        return true;
+                      }}
+                      className="block h-full w-full animate-pulse rounded-[1vh] bg-white/5"
+                    >
+                      <span className="sr-only">…</span>
+                    </FocusButton>
                   )}
                 </li>
               );

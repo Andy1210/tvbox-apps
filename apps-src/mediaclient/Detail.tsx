@@ -25,7 +25,7 @@ import { MoreIcon, PlayIcon, WatchedIcon } from "./icons";
 import { Backdrop } from "./Backdrop";
 import { themeItem, useTheme } from "./theme";
 import { useFocusFallback, useFocusOnReveal, useInitialFocus, useScrollToTopOnFirst } from "./focus";
-import { usePlayer, useShowingPlayer } from "./playback/player";
+import { reportPlayFailed, usePlayer, useShowingPlayer } from "./playback/player";
 import { rememberedVersion, useChosenVersion } from "./chosenVersion";
 import { classify, useApp } from "./state";
 import { rememberTrack, resolveTrack, type ChosenTrack } from "./tracks";
@@ -142,6 +142,18 @@ export function Detail({
    * so the language choice has to follow the highlight rather than the screen.
    */
   const [focused, setFocused] = useState<ItemDetail | null>(null);
+  /** Which highlight and which press the latest episode read belongs to. */
+  const focusSeq = useRef(0);
+  const selectSeq = useRef(0);
+  useEffect(
+    () => () => {
+      // Leaving the screen withdraws a press still being read, so it cannot
+      // start a film behind whatever came next.
+      focusSeq.current++;
+      selectSeq.current++;
+    },
+    [],
+  );
   const [firstChild, setFirstChild] = useState<ItemDetail | null>(null);
   /**
    * The episode Play would start, with its own track list.
@@ -843,6 +855,10 @@ export function Detail({
   // A group with nothing in it. Without this the screen had no focusable at all
   // - Play is hidden on a group and there is no first child to fall back to -
   // so every press was discarded and only Back did anything.
+  //
+  // Only once its children have been read: `detail` lands before them, and saying
+  // "empty" with Back focused in that gap is a screen that a held OK leaves.
+  if (!playableKind(detail) && children.length === 0 && !settled) return <Message loading />;
   if (!playableKind(detail) && children.length === 0)
     return (
       <Message
@@ -1405,12 +1421,15 @@ export function Detail({
               // Already showing it: moving back onto the same tile must not
               // start another request or another render.
               if (focused?.id === item.id) return;
-              // Cached by the backend, so moving along a row of episodes is not
-              // a request each.
+              // Only the answer for the tile the cursor is on now may land: a
+              // row walked quickly answers out of order, and the header, the
+              // tracks and Mark watched all act on `focused`. Cached by the
+              // backend, so moving along a row of episodes is not a request each.
+              const mine = ++focusSeq.current;
               void backend
                 .item(item.id)
-                .then((d) => setFocused(d))
-                .catch(() => setFocused(null));
+                .then((d) => focusSeq.current === mine && setFocused(d))
+                .catch(() => focusSeq.current === mine && setFocused(null));
             }}
             onSelect={(item) => {
               // An episode plays. There is nothing on a screen of its own worth
@@ -1420,15 +1439,25 @@ export function Detail({
               if (item.kind === "episode" && backend) {
                 // Resolved against the episode being started, not the one the
                 // cursor was on when the language was chosen.
-                void backend.item(item.id).then((d) =>
-                  // The screen's own list is the running order: a playlist and
-                  // a collection are one, and a season is one too. Without it
-                  // an episode played from a playlist would be followed by the
-                  // next episode of its SERIES, and a film by nothing at all.
-                  usePlayer
-                    .getState()
-                    .play(backend, item, { version, ...pick(d.versions[version], d.id), queue: children }),
-                );
+                // The press is only acted on if nothing replaced it while the
+                // episode was being read: Back, another press, or leaving.
+                const mine = ++selectSeq.current;
+                void backend
+                  .item(item.id)
+                  .then((d) => {
+                    if (selectSeq.current !== mine) return;
+                    // The screen's own list is the running order: a playlist and
+                    // a collection are one, and a season is one too. Without it
+                    // an episode played from a playlist would be followed by the
+                    // next episode of its SERIES, and a film by nothing at all.
+                    return usePlayer
+                      .getState()
+                      .play(backend, item, { version, ...pick(d.versions[version], d.id), queue: children });
+                  })
+                  .catch((e) => {
+                    log.warn("episode could not be read to play", e);
+                    if (selectSeq.current === mine) reportPlayFailed(item);
+                  });
                 return;
               }
               // A film opens its own screen, and that screen has no children to

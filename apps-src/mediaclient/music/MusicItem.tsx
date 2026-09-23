@@ -187,11 +187,13 @@ export function MusicItem({
           {/* The pitch is reserved here for the same reason the songs list
               reserves it: a row that measures taller than its box makes its
               neighbour unreachable, which cost the queue every other track. */}
+          {/* Keyed by position as well as id: a playlist can hold the same song
+              twice, and two rows with one focus key leave one of them unreachable. */}
           {tracks.map((item, i) => (
-            <li key={item.id} style={{ height: `${TRACK_ROW_VH}vh` }}>
+            <li key={`${i}-${item.id}`} style={{ height: `${TRACK_ROW_VH}vh` }}>
               <TrackRow
                 item={item}
-                focusKey={`mt-${item.id}`}
+                focusKey={`mt-${i}-${item.id}`}
                 ordinal={item.index ?? i + 1}
                 // No cover per row on an album: every one of them is the album's
                 // own, already shown at the top, so the column would be the same

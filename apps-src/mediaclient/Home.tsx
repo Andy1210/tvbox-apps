@@ -101,9 +101,10 @@ export function Home(): React.JSX.Element {
       : "nav-search";
   useInitialFocus(firstKey, Boolean(data));
   // Focus is set once; without a fallback anything that unmounts the focused
-  // tile afterwards leaves the D-pad dead with only Back working.
+  // tile afterwards leaves the D-pad dead with only Back working. On the failure
+  // screen the rail is not drawn, so the fallback is that screen's first button.
   useFocusFallback(
-    firstKey,
+    failure ? (failure.kind === "signed-out" ? "msg-signin" : "msg-retry") : firstKey,
     (key) =>
       key.startsWith("ondeck-") ||
       key.startsWith("lib-") ||

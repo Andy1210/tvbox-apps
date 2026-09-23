@@ -15,7 +15,7 @@ import { doesFocusableExist, getCurrentFocusKey } from "@noriginmedia/norigin-sp
 import { isVisible } from "../lifecycle";
 import { rememberedVersion } from "../chosenVersion";
 import type { CommandResult, CompanionCommand } from "../backends/plex/companion";
-import type { MediaBackend, MediaItem } from "../backends/types";
+import type { ItemDetail, MediaBackend, MediaItem } from "../backends/types";
 import { log } from "../redact";
 import { readRaw, removeRaw } from "../storage";
 import { translate, useLocaleStore } from "@sdk";
@@ -302,6 +302,32 @@ async function startMusic(
 function ratingKey(key: string | undefined): string | undefined {
   const m = /^\/(?:library\/metadata|playlists)\/(\d+)\b/.exec(key ?? "");
   return m ? m[1] : undefined;
+}
+
+/**
+ * The item to start and the running order after it, for a film cast.
+ *
+ * With a play queue, the queue's own entry and its items; without one, or when
+ * the queue cannot be read, the item as asked for, which is what was done before.
+ */
+async function fromCastQueue(
+  cmd: CompanionCommand,
+  backend: MediaBackend,
+  item: ItemDetail,
+): Promise<{ item: ItemDetail; queue?: MediaItem[] }> {
+  const qid = queueId(arg(cmd, "containerKey"));
+  if (!qid) return { item };
+  try {
+    const q = await backend.queueItems(qid);
+    if (!q.items.length) return { item };
+    const entry = q.items[Math.min(Math.max(0, q.startIndex), q.items.length - 1)];
+    // The queue's rows carry no versions or tracks, so the entry is read whole.
+    const detail = entry.id === item.id ? item : await backend.item(entry.id);
+    return { item: detail, queue: q.items };
+  } catch (e) {
+    log.warn("could not read the cast play queue", e);
+    return { item };
+  }
 }
 
 /** Which item kinds belong to the music player rather than the film player. */
@@ -609,8 +635,17 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       // The controller's word is a fallback, and only for something that is not
       // itself a film: `type=music` with a film's key handed the film's own file
       // to the music player, with no display mode, no transcode and no subtitle.
-      const musical = MUSIC_KINDS.has(item.kind) || (arg(cmd, "type") === "music" && !VIDEO_KINDS.has(item.kind));
+      // A playlist is music unless it says it is not: a playlist of films is
+      // played like the films it holds.
+      const videoList = item.kind === "playlist" && item.playlistType === "video";
+      const musical =
+        !videoList &&
+        (MUSIC_KINDS.has(item.kind) || (arg(cmd, "type") === "music" && !VIDEO_KINDS.has(item.kind)));
       if (musical) return await startMusic(cmd, backend, item, asked);
+      // A film cast with a play queue (a playlist, a season from "play all") is
+      // the queue's running order from the entry it names. Played as the one
+      // item, the rest of the queue was simply dropped.
+      const film = await fromCastQueue(cmd, backend, item);
       const offset = Number(arg(cmd, "offset") ?? "0");
       const at = Number.isFinite(offset) && offset > 0 ? offset : 0;
       // A film needs the screen, so it is asked for rather than required: the
@@ -630,19 +665,20 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
       if (!(await bringToFront())) return no("the media app could not come to the screen");
       const afterFront = personChanged(asked);
       if (afterFront) return afterFront;
-      await p.play(backend, item, {
-        version: rememberedVersion(item.id, item.versions.length),
+      await p.play(backend, film.item, {
+        version: rememberedVersion(film.item.id, film.item.versions.length),
         // The controller's offset is the whole instruction, so the server's own
         // resume point must not be used as well: with `resume` the film started
         // at `viewOffsetMs` and only then seeked, which begins a transcode in
         // the wrong place and leaves the bar pointing where it never went.
         resume: false,
         startMs: at,
+        queue: film.queue,
       });
       // What the player DID, not what it was asked to do: an unconditional OK
       // told the house a film was playing while the television showed the
       // launcher.
-      const playing = started(item.id);
+      const playing = started(film.item.id);
       if (!playing.ok) return playing;
       // And it must still be the screen in front, or what just started is
       // playing behind the launcher. Stopped rather than left running: the
@@ -668,7 +704,7 @@ export async function runCompanionCommand(cmd: CompanionCommand): Promise<Comman
         await p.stop();
         return later;
       }
-      showBrowseScreenFor(item);
+      showBrowseScreenFor(film.item);
       return ok;
     }
     case "/player/playback/play":

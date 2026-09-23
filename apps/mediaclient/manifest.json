@@ -5,8 +5,12 @@
     "hu": "M\u00e9dia",
     "en": "Media"
   },
-  "version": "0.65.0",
+  "version": "0.65.1",
   "changelog": [
+    {
+      "version": "0.65.1",
+      "notes": "Pressing Home during a film no longer leaves the app thinking it is still playing: coming back shows the library, and the screensaver works again. A server that stops answering can no longer stall the next episode, and a phone can always cast to the box again after a dropped connection. In the music list, a page that failed to load no longer stops the remote at its edge, and a playlist holding the same song twice has every row reachable. On an episode list, walking quickly along a row can no longer leave the details of a different episode on screen, and an episode that cannot be read says so instead of doing nothing. Switching to another version of a film keeps the quality limit you chose. A film playlist cast from a phone plays as films, in the order the phone sent."
+    },
     {
       "version": "0.65.0",
       "notes": "Trailers and extras play. Pressing one on a film or a series did nothing at all: those files are not kept in the library, the server sends the box off to the provider that holds them, and the app was refusing any file that did not come from the library itself. Everything on the \u201cTrailers and extras\u201d row now starts, and when one finishes the highlight is back on the one you pressed rather than on the button that starts the film. Where something turns out not to be playable at all, the screen now says so for a few seconds instead of leaving you to wonder whether the remote worked; a film that fails after it has started is still silent. And on a series\u2019 episode list the \u2026 button offers \u201cSeries page\u201d, which opens the series itself with all of its seasons on it and the one you came from already picked out. The only way there used to be out through the library, because an episode list can be arrived at from the carry-on-watching row, from a search or from a spoken request, with no series page behind it to go Back to. Back from the series returns to the episodes you were on. One thing worth knowing: these files are not on your server, so the box fetches a trailer over the internet from the company that supplies them. It goes over an encrypted connection and carries none of your account details, but that company does see that a trailer was watched."

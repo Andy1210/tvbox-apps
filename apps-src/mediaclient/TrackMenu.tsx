@@ -93,7 +93,9 @@ export function TrackMenu({
   onSearchLanguage,
   initial = "version",
 }: TrackMenuProps): React.JSX.Element {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const num = (n: number, digits = 0): string =>
+    new Intl.NumberFormat(locale ?? "en", { maximumFractionDigits: digits, minimumFractionDigits: digits }).format(n);
   const [choice, setChoice] = useState<Choice>(current);
   const { ref, focusKey } = useFocusable({ focusKey: "trackmenu", saveLastFocusedChild: true, isFocusBoundary: true });
 
@@ -252,10 +254,11 @@ export function TrackMenu({
                         ? `${v.label} · ${t("tracks.part", { n: String(v.partIndex + 1), of: String(v.parts) })}`
                         : v.label
                     }
-                    hint={versionHint(v)}
+                    hint={versionHint(v, (n) => t("tracks.gb", { n: num(n, 1) }))}
                     // Changing the file invalidates the track choices made against
                     // the old one, so they go back to the server's own selection.
-                    onEnter={() => apply({ version: i })}
+                    // The quality ceiling is not about the file, so it stays.
+                    onEnter={() => apply({ version: i, maxBitrateKbps: choice.maxBitrateKbps })}
                   />
                 ))}
               </Column>
@@ -328,7 +331,13 @@ export function TrackMenu({
                   // The number under the name, on every row that has one. It used
                   // to be a single warning parked on "Original" - the one row it
                   // does not describe.
-                  hint={q.kbps ? (q.kbps >= 1000 ? `${q.kbps / 1000} Mbps` : `${q.kbps} kbps`) : undefined}
+                  hint={
+                    q.kbps
+                      ? q.kbps >= 1000
+                        ? t("tracks.mbps", { n: num(q.kbps / 1000) })
+                        : t("tracks.kbps", { n: num(q.kbps) })
+                      : undefined
+                  }
                   // A ceiling is baked into the stream when it is built, so this
                   // restarts playback where it stands rather than adjusting
                   // anything that is already running.
@@ -355,11 +364,11 @@ export function TrackMenu({
   );
 }
 
-function versionHint(v: MediaVersion): string {
+function versionHint(v: MediaVersion, gb: (n: number) => string): string {
   const bits = [
     v.resolution && v.resolution !== "sd" && v.resolution !== "sdp" ? v.resolution : undefined,
     v.videoCodec?.toUpperCase(),
-    v.sizeBytes ? `${(v.sizeBytes / 1e9).toFixed(1)} GB` : undefined,
+    v.sizeBytes ? gb(v.sizeBytes / 1e9) : undefined,
   ].filter(Boolean);
   return bits.join(" · ");
 }
@@ -440,7 +449,7 @@ function Offset({
   onNudge: (deltaSec: number) => void;
   label: string;
 }): React.JSX.Element {
-  const { locale } = useI18n();
+  const { t, locale } = useI18n();
   // Always entered at the same end, which is not the library's default.
   // Remembering the last button read well on paper - nudge further, one press
   // each - but nudging never leaves the button, so it bought nothing, and it
@@ -492,7 +501,7 @@ function Offset({
           >
             &#8722;
           </FocusButton>
-          <span className="text-[2.4vh] tabular-nums">{shown}s</span>
+          <span className="text-[2.4vh] tabular-nums">{t("tracks.seconds", { n: shown })}</span>
           <FocusButton
             focusKey="sub-offset-up"
             onEnter={() => onNudge(STEP_SEC)}

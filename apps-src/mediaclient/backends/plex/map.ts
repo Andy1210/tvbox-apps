@@ -28,6 +28,8 @@ export interface PlexMetadata {
   theme?: string;
   grandparentTheme?: string;
   composite?: string;
+  /** On a playlist: what it holds. */
+  playlistType?: string;
   UltraBlurColors?: { topLeft?: string; topRight?: string; bottomRight?: string; bottomLeft?: string };
   parentTheme?: string;
   titleSort?: string;
@@ -194,6 +196,10 @@ export function toItem(m: PlexMetadata): MediaItem {
     // with no file, and a fabricated path would instead reach the player and
     // fail there, where nothing can explain it.
     mediaKey: m.Media?.[0]?.Part?.[0]?.key,
+    playlistType:
+      m.playlistType === "audio" || m.playlistType === "video" || m.playlistType === "photo"
+        ? m.playlistType
+        : undefined,
     viewOffsetMs: m.viewOffset,
     viewCount: m.viewCount,
     lastViewedAt: m.lastViewedAt,

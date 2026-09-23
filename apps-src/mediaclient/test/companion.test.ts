@@ -155,6 +155,32 @@ describe("the companion poll", () => {
     ).toBe(true);
   });
 
+  it("polls again when a held poll never answers", async () => {
+    // A connection that died without closing leaves the poll pending for ever,
+    // and the box is uncastable until the app restarts. The poll has a deadline.
+    vi.useFakeTimers();
+    try {
+      let polls = 0;
+      vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+        if (String(url).includes("/player/proxy/poll")) polls += 1;
+        return held(init);
+      });
+      const stop = startCompanion({
+        baseUrl: "http://s:32400",
+        token: "t",
+        id: ID,
+        onCommand: () => ({ ok: true as const }),
+      });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(polls).toBe(1);
+      await vi.advanceTimersByTimeAsync(10 * 60_000 + 1000);
+      expect(polls, "a second poll after the deadline").toBeGreaterThanOrEqual(2);
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("stops polling when it is told to", async () => {
     // It is started from an effect and torn down with the session. A loop that
     // outlived sign-out would keep answering for an account that has left.

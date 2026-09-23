@@ -912,6 +912,15 @@ export const usePlayer = create<PlayerState>((set, get) => ({
  * `useTheme` asks the same question for consistency rather than for a hole of
  * its own - what keeps a theme out of a gap is that playback already silenced it.
  */
+/**
+ * Say that a press on this item could not be answered, from outside the store:
+ * a screen that has to fetch something before it can call `play` fails before
+ * the player ever hears of it.
+ */
+export function reportPlayFailed(item: MediaItem): void {
+  sayItFailed((partial) => usePlayer.setState(partial), item);
+}
+
 export function useShowingPlayer(): boolean {
   return usePlayer((s) => s.current !== null);
 }
@@ -1179,6 +1188,17 @@ function wireLifecycle(): void {
     postNowPlaying({ state: "idle" });
     const session = s.current.decision.session;
     if (session && currentBackend) void currentBackend.endSession(session).catch(() => {});
+    // And forget it here too. The shell has stopped the film, so a store still
+    // saying "playing" would come back to a frozen overlay over nothing, the
+    // browsing screens hidden, the screensaver held off and phones told a film is
+    // on. The token keeps a play still in flight from landing behind the launcher.
+    scheduler = null;
+    releasePlayer("video");
+    unsubscribePlayer?.();
+    unsubscribePlayer = null;
+    startedAt = 0;
+    playToken += 1;
+    usePlayer.setState(STOPPED);
   });
 
   onResume(() => {
