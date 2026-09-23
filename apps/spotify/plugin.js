@@ -149,6 +149,11 @@ function parseLrc(lrc) {
   }
   return out.sort((a, b) => a.ms - b.ms);
 }
+// What a lookup that did not get an answer resolves to, as opposed to null for
+// "LRCLIB has no lyrics for this". Only the second may be cached: a network blip
+// would otherwise read as "no lyrics" for that track for the rest of the session.
+const LRCLIB_FAILED = Symbol("lrclib_failed");
+
 function fetchLrclib(query) {
   return new Promise((resolve) => {
     const req = https.get(
@@ -157,7 +162,7 @@ function fetchLrclib(query) {
       (res) => {
         if (res.statusCode !== 200) {
           res.resume();
-          return resolve(null);
+          return resolve(res.statusCode === 404 ? null : LRCLIB_FAILED);
         }
         let d = "";
         res.setEncoding("utf8");
@@ -166,12 +171,12 @@ function fetchLrclib(query) {
           try {
             resolve(JSON.parse(d));
           } catch (e) {
-            resolve(null);
+            resolve(LRCLIB_FAILED);
           }
         });
       },
     );
-    req.on("error", () => resolve(null));
+    req.on("error", () => resolve(LRCLIB_FAILED));
     req.setTimeout(8000, () => req.destroy());
   });
 }
@@ -190,7 +195,7 @@ function searchLrclib(title, artist, durSec) {
       (res) => {
         if (res.statusCode !== 200) {
           res.resume();
-          return resolve(null);
+          return resolve(LRCLIB_FAILED);
         }
         let d = "";
         res.setEncoding("utf8");
@@ -200,7 +205,7 @@ function searchLrclib(title, artist, durSec) {
           try {
             list = JSON.parse(d);
           } catch (e) {
-            return resolve(null);
+            return resolve(LRCLIB_FAILED);
           }
           if (!Array.isArray(list) || !list.length) return resolve(null);
           const want = Number(durSec) || 0;
@@ -213,7 +218,7 @@ function searchLrclib(title, artist, durSec) {
         });
       },
     );
-    req.on("error", () => resolve(null));
+    req.on("error", () => resolve(LRCLIB_FAILED));
     req.setTimeout(8000, () => req.destroy());
   });
 }
@@ -503,11 +508,15 @@ module.exports = (host) => {
     }
     authWin = null;
   }
+  // A sign-in nobody finishes must not keep the television: the window is
+  // fullscreen and on top of everything, and only the OAuth callback closes it.
+  const AUTH_IDLE_MS = 10 * 60 * 1000;
+  let authIdle = null;
   function startSpotifyAuth() {
     if (!spotifyApi.configured()) return { ok: false, error: "no_credentials" };
     authState = crypto.randomBytes(8).toString("hex");
     closeAuthWin();
-    authWin = new host.BrowserWindow({
+    const w = new host.BrowserWindow({
       fullscreen: true,
       frame: false,
       backgroundColor: "#0b0f14",
@@ -517,28 +526,55 @@ module.exports = (host) => {
         enableBlinkFeatures: "SpatialNavigation", // D-pad arrows move focus on the raw Spotify page; Enter activates
       },
     });
-    authWin.setAlwaysOnTop(true, "screen-saver");
+    authWin = w;
+    w.setAlwaysOnTop(true, "screen-saver");
     // Clear any prior Spotify session so adding a DIFFERENT account (family boxes)
     // always prompts a fresh login instead of silently reusing the last one.
-    authWin.webContents.session
+    w.webContents.session
       .clearStorageData()
       .catch(() => {})
       .then(() => {
-        if (authWin && !authWin.isDestroyed()) authWin.loadURL(spotifyApi.authUrl(authState));
+        if (!w.isDestroyed()) w.loadURL(spotifyApi.authUrl(authState));
       });
     // Make spatial-nav focus visible and grab focus so the remote drives the page.
-    authWin.webContents.on("did-finish-load", () => {
-      authWin.webContents
+    w.webContents.on("did-finish-load", () => {
+      if (w.isDestroyed()) return;
+      w.webContents
         .insertCSS(
           ":focus,:focus-visible{outline:0.4vh solid #1DB954 !important;outline-offset:0.2vh;border-radius:4px}",
         )
         .catch(() => {});
       try {
-        authWin.webContents.focus();
+        w.webContents.focus();
       } catch (e) {}
     });
-    authWin.on("closed", () => {
-      authWin = null;
+    // The remote's Back leaves the sign-in. Escape and the browser Back key always
+    // do; Backspace only outside a text field, where it is still needed for typing.
+    w.webContents.on("before-input-event", (event, input) => {
+      if (input.type !== "keyDown") return;
+      if (input.key === "Escape" || input.key === "BrowserBack") {
+        event.preventDefault();
+        closeAuthWin();
+      } else if (input.key === "Backspace") {
+        w.webContents
+          .executeJavaScript(
+            "(function(){var a=document.activeElement;return !!a&&(a.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))})()",
+            true,
+          )
+          .then((editing) => {
+            if (!editing && authWin === w) closeAuthWin();
+          })
+          .catch(() => {});
+      }
+    });
+    clearTimeout(authIdle);
+    authIdle = setTimeout(() => {
+      if (authWin === w) closeAuthWin();
+    }, AUTH_IDLE_MS);
+    // Only the window this call opened: a second press on "add account" replaces
+    // it, and the first one's close must not forget the second.
+    w.on("closed", () => {
+      if (authWin === w) authWin = null;
     });
     return { ok: true };
   }
@@ -1265,7 +1301,9 @@ module.exports = (host) => {
         .then((s) => host.json(res, s))
         .catch(() => host.json(res, { configured: false, connected: false, user: "" }));
     },
-    "GET /auth/start": (req, res) => host.json(res, startSpotifyAuth()),
+    // POST: it opens a window over whatever is on screen and resets a sign-in in
+    // progress, which no <img src> on another page may be able to do.
+    "POST /auth/start": (req, res) => host.json(res, startSpotifyAuth()),
     // NOT a route to put in `registerRoutes`' `guard` list, however much it looks
     // like one. Spotify's own page navigates down to this URL after the consent
     // screen, and a page-initiated navigation carries `Sec-Fetch-Site:
@@ -1316,22 +1354,49 @@ module.exports = (host) => {
       if (dur) params.set("duration", dur);
       const bare = new URLSearchParams({ track_name: title, artist_name: artist });
       if (dur) bare.set("duration", dur);
-      // exact (album+duration) -> exact without album -> full-text search
+      // exact (album+duration) -> exact without album -> full-text search. A step
+      // that failed rather than found nothing still lets the next one try, but the
+      // answer is then not cached.
+      let failed = false;
+      const found = (d) => {
+        if (d === LRCLIB_FAILED) {
+          failed = true;
+          return null;
+        }
+        return d;
+      };
       fetchLrclib(params.toString())
-        .then((d) => d || (album ? fetchLrclib(bare.toString()) : null))
-        .then((d) => d || searchLrclib(title, artist, dur))
+        .then(found)
+        .then((d) => d || (album ? fetchLrclib(bare.toString()).then(found) : null))
+        .then((d) => d || searchLrclib(title, artist, dur).then(found))
         .then((d) => {
           const out = d
             ? { synced: parseLrc(d.syncedLyrics || ""), plain: d.plainLyrics || "", instrumental: !!d.instrumental }
             : { synced: [], plain: "", instrumental: false };
-          if (lyricsCache.size > 100) lyricsCache.clear(); // bound the cache
-          lyricsCache.set(key, out);
+          if (d || !failed) {
+            if (lyricsCache.size > 100) lyricsCache.clear(); // bound the cache
+            lyricsCache.set(key, out);
+          }
           host.json(res, out);
         });
     },
   };
 
-  host.registerRoutes("/tvbox/api/spotify", routes);
+  // Reads that SPEND something get the same-origin gate every non-GET has: each
+  // one is an authenticated Web API request on the linked account's quota (or a
+  // lookup at LRCLIB), and an <img src> on any page the box loads could fire it.
+  host.registerRoutes("/tvbox/api/spotify", routes, {
+    guard: [
+      "GET /auth/status",
+      "GET /queue",
+      "GET /player",
+      "GET /liked",
+      "GET /playlists",
+      "GET /playlist",
+      "GET /search",
+      "GET /lyrics",
+    ],
+  });
 
   // Spotify's phone-pairing pages: the API-keys form and the phone-as-keyboard
   // that types into our OAuth login window. Registered here (not in core) so they

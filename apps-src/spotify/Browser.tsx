@@ -15,7 +15,7 @@ import {
   type ListResult,
 } from "./api";
 import { TrackList } from "./TrackList";
-import { useBrowse, type BrowseTab } from "./stores/browse";
+import { useBrowse, type BrowseTab, type SearchResults } from "./stores/browse";
 import { ROWS, TABS, TOOLS, focusLost, jump } from "./focus";
 
 function Row({
@@ -65,7 +65,11 @@ function apiErrorText(t: (k: string, p?: Record<string, string>) => string, erro
   // A long list is read many pages at a time, so Spotify's rate limit is a normal
   // thing to meet. Raw JSON on a television is not an error message.
   if (/HTTP 429/.test(error)) return t("spotify.rateLimited");
-  return t("spotify.apiError", { error });
+  // The raw text is Spotify's own JSON or an English exception: it belongs in the
+  // console. The screen gets the status code, when there is one.
+  console.warn("[spotify] request failed:", error);
+  const code = /HTTP (\d{3})/.exec(error);
+  return code ? t("spotify.apiError", { error: code[1] }) : t("spotify.apiUnreachable");
 }
 
 // Why a play did nothing. Its own exported function because there are THREE call
@@ -224,7 +228,7 @@ export function Browser({
   const setPlaylists = (v: ListResult<Playlist> | null): void => remember({ playlists: v });
   const setOpenPl = (v: Playlist | null): void => remember({ openPl: v });
   const setPlTracks = (v: ListResult<Track> | null): void => remember({ plTracks: v });
-  const setResults = (v: { tracks: Track[]; playlists: Playlist[] } | null): void => remember({ results: v });
+  const setResults = (v: SearchResults | null): void => remember({ results: v });
   const setQuery = (v: string): void => remember({ query: v });
   const [osk, setOsk] = useState(false);
   const [err, setErr] = useState("");
@@ -289,19 +293,37 @@ export function Browser({
   // somebody else's library now. Dropped rather than relabelled: the header would
   // otherwise name one account over another's tracks, and pressing one of them
   // sends that account's context to the new owner's player, which refuses it.
+  //
+  // `gen` counts those hand-overs. A read that was already in flight answers for
+  // the account it was asked as, so an answer from an older generation is
+  // dropped, and the bump is also what makes the lists be read again when they
+  // were still empty at the switch.
+  const [gen, setGen] = useState(0);
+  const genRef = useRef(0);
   useEffect(() => {
     const store = useBrowse.getState();
     if (store.shownFor === account) return;
     wanted.current = "";
+    searchSeq.current++;
     store.forgetLists();
     store.set({ shownFor: account });
+    genRef.current++;
+    setGen(genRef.current);
   }, [account]);
   useEffect(() => {
-    if (tab === "liked" && liked === null) fetchLiked().then(setLiked);
-  }, [tab, liked]);
+    if (tab !== "liked" || liked !== null) return;
+    const asked = genRef.current;
+    fetchLiked().then((r) => {
+      if (genRef.current === asked) setLiked(r);
+    });
+  }, [tab, liked, gen]);
   useEffect(() => {
-    if (tab === "playlists" && playlists === null) fetchPlaylists().then(setPlaylists);
-  }, [tab, playlists]);
+    if (tab !== "playlists" || playlists !== null) return;
+    const asked = genRef.current;
+    fetchPlaylists().then((r) => {
+      if (genRef.current === asked) setPlaylists(r);
+    });
+  }, [tab, playlists, gen]);
 
   // Where focus lands when the view changes. `jump` rather than setFocus: an open
   // playlist has no rows until its tracks arrive, and a setFocus at a key that is
@@ -412,14 +434,22 @@ export function Browser({
     if (wanted.current === p.id) setPlTracks(r);
   };
 
+  // Only the newest search may draw: a slow answer to an earlier query, or one
+  // asked as the account the box has since moved off, is dropped.
   const [searching, setSearching] = useState(false);
+  const searchSeq = useRef(0);
   const runSearch = async (q: string) => {
     setQuery(q);
     setOsk(false);
     setResults(null);
-    if (!q.trim()) return;
+    const mine = ++searchSeq.current;
+    if (!q.trim()) {
+      setSearching(false);
+      return;
+    }
     setSearching(true);
     const r = await search(q.trim());
+    if (searchSeq.current !== mine) return;
     setSearching(false);
     setResults(r);
   };
@@ -480,7 +510,7 @@ export function Browser({
           (liked === null ? (
             <Spinner t={t("spotify.loadingLiked")} />
           ) : liked.error ? (
-            <Empty t={apiErrorText(t, liked.error)} />
+            <Failed text={apiErrorText(t, liked.error)} retry={t("spotify.retry")} onRetry={() => setLiked(null)} />
           ) : (
             <>
               {liked.truncated && <Truncated t={t("spotify.truncated")} />}
@@ -508,7 +538,11 @@ export function Browser({
           (playlists === null ? (
             <Spinner t={t("spotify.loadingPlaylists")} />
           ) : playlists.error ? (
-            <Empty t={apiErrorText(t, playlists.error)} />
+            <Failed
+              text={apiErrorText(t, playlists.error)}
+              retry={t("spotify.retry")}
+              onRetry={() => setPlaylists(null)}
+            />
           ) : playlists.items.length === 0 ? (
             <Empty t={t("spotify.emptyList")} />
           ) : (
@@ -543,7 +577,11 @@ export function Browser({
             {plTracks === null ? (
               <Spinner t={t("spotify.loadingList")} />
             ) : plTracks.error ? (
-              <Empty t={apiErrorText(t, plTracks.error)} />
+              <Failed
+                text={apiErrorText(t, plTracks.error)}
+                retry={t("spotify.retry")}
+                onRetry={() => openPlaylist(openPl, useBrowse.getState().cameFrom)}
+              />
             ) : plTracks.items.length === 0 ? (
               <Empty t={t("spotify.followedHint")} />
             ) : (
@@ -599,7 +637,14 @@ export function Browser({
             {/* Searching, found nothing, and never searched all used to look the
                 same: the query row and nothing else. */}
             {searching && <Spinner t={t("spotify.searching")} />}
-            {!searching && results && !results.tracks.length && !results.playlists.length && (
+            {!searching && results && results.error && (
+              <Failed
+                text={apiErrorText(t, results.error)}
+                retry={t("spotify.retry")}
+                onRetry={() => runSearch(query)}
+              />
+            )}
+            {!searching && results && !results.error && !results.tracks.length && !results.playlists.length && (
               <Empty t={t("spotify.noSearchMatch")} />
             )}
           </div>
@@ -659,6 +704,19 @@ function Spinner({ t }: { t?: string }) {
 }
 function Empty({ t }: { t: string }) {
   return <div className="text-[2vh] text-fg-dim text-center mt-[6vh] px-[8vw]">{t}</div>;
+}
+// A read that failed says why and offers to ask again. A list is read once per
+// visit, so without the button a passing network error would stand for the rest
+// of the session.
+function Failed({ text, retry, onRetry }: { text: string; retry: string; onRetry: () => void }) {
+  return (
+    <div className="flex flex-col items-center">
+      <Empty t={text} />
+      <div className="mt-[2vh] w-[30vw]">
+        <Row fk="br-retry" title={retry} onEnter={onRetry} />
+      </div>
+    </div>
+  );
 }
 // A library longer than the box will page must say so: the alternative is a list
 // that simply ends, with nothing to tell the difference from a shorter library.

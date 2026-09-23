@@ -2,8 +2,12 @@
   "id": "spotify",
   "manifestVersion": 1,
   "name": "Spotify",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "changelog": [
+    {
+      "version": "1.7.2",
+      "notes": "A bejelentkező ablak a távirányító Vissza gombjával bezárható, és tíz perc tétlenség után magától is bezárul, így egy félbehagyott bejelentkezés nem foglalja a tévét. Ha a könyvtár vagy egy lejátszási lista nem töltődik be, egy Újra gombbal újra lekérhető, és fiókváltás után a lista mindig az új fiókhoz tartozik. Egy hálózati hiba miatt a dalszöveg már nem tűnik el az egész munkamenetre, és egy hibás kliens-titok nem választja le a fiókokat. / The sign-in window closes with the remote's Back button, and on its own after ten idle minutes, so an abandoned sign-in no longer holds the TV. A library or playlist that fails to load has a Try again button, and after an account switch the list always belongs to the new account. A network hiccup no longer hides a song's lyrics for the rest of the session, and a wrong client secret no longer unlinks the accounts."
+    },
     {
       "version": "1.7.1",
       "notes": "Stepping onto the progress bar no longer nudges the rest of the screen. The bar thickens when it takes focus, and the cover, the song title and the buttons used to shift with it."

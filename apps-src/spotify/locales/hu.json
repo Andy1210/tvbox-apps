@@ -69,7 +69,7 @@
     "connectSteps": "A telefonon: add meg az e-mail-címed → Küldés, majd az e-mailben kapott kódot (vagy a jelszót) → Küldés.",
     "notRegistered": "A Spotify elutasította ezt a fiókot: nincs hozzáadva a developer alkalmazáshoz. A developer.spotify.com oldalon nyisd meg az appot, Settings, User Management, és add hozzá a fiók e-mail-címét.",
     "apiUnreachable": "A Spotify most nem érhető el.",
-    "apiError": "Spotify hiba: {error}",
+    "apiError": "A Spotify elutasította a kérést ({error}).",
     "otherAccount": "Most egy másik Spotify-fiókról szól a zene. Arról a telefonról állítsd le, vagy kösd össze a fiókot a Fiókoknál.",
     "boxUnreachable": "A box most nem látszik Spotify-eszközként. Próbáld újra egy kicsit később.",
     "searchInList": "Keresés a listában",
@@ -107,6 +107,7 @@
     "startingSlow": "A box visszajelentkeztetése eltarthat egy kis ideig.",
     "recoveryCooling": "Az előbb próbáltuk visszakapcsolni a boxot, és nem sikerült. Várj egy percet, vagy castolj rá a telefonodról.",
     "ctrlUnreachable": "A box most nem látszik Spotify-eszközként. Indítsd el innen a lejátszást, vagy castolj rá a telefonodról.",
-    "ctrlError": "A parancs nem ment át. Próbáld újra."
+    "ctrlError": "A parancs nem ment át. Próbáld újra.",
+    "retry": "Újra"
   }
 }

@@ -21,6 +21,8 @@ export type BrowseTab = "liked" | "playlists" | "search";
 export interface SearchResults {
   tracks: Track[];
   playlists: Playlist[];
+  /** Set when the search did not run: the screen offers to ask again. */
+  error?: string;
 }
 
 interface BrowseStore {

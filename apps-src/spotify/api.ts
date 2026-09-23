@@ -94,7 +94,7 @@ export async function removeAccount(id: string): Promise<void> {
 }
 
 export async function startConnect(): Promise<void> {
-  await fetch("/tvbox/api/spotify/auth/start").catch(() => {});
+  await fetch("/tvbox/api/spotify/auth/start", { method: "POST", headers: JSON_HEADERS, body: "{}" }).catch(() => {});
 }
 
 // Turn Spotify Connect on/off for this box (librespot daemon). No account
@@ -157,12 +157,16 @@ export async function fetchPlaylistItems(id: string): Promise<ListResult<Track>>
   }
 }
 
-export async function search(q: string): Promise<{ tracks: Track[]; playlists: Playlist[] }> {
+export type SearchResult = { tracks: Track[]; playlists: Playlist[]; error?: string };
+
+// `error` is set when the search did not run, so a refused or unreachable Web API
+// is not reported as "nothing matched".
+export async function search(q: string): Promise<SearchResult> {
   try {
     const r = await (await fetch("/tvbox/api/spotify/search?q=" + encodeURIComponent(q), { cache: "no-store" })).json();
-    return { tracks: r.tracks || [], playlists: r.playlists || [] };
+    return { tracks: r.tracks || [], playlists: r.playlists || [], error: String(r.error || "") };
   } catch {
-    return { tracks: [], playlists: [] };
+    return { tracks: [], playlists: [], error: "network" };
   }
 }
 
