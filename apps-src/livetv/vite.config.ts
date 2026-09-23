@@ -2,6 +2,7 @@ import path from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { appCsp } from "../_shared/csp";
 
 // Standalone build for the Live TV app package. The app is served by the shell
 // at /livetv/ (same origin as /tvbox/api), so assets are referenced relatively
@@ -14,7 +15,7 @@ export default defineConfig({
   // app source dir (otherwise it defaults to the invoking cwd, tvbox-apps).
   root: __dirname,
   base: "./",
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), appCsp()],
   // @sdk = the shared @tvbox/app-sdk, consumed as source (no build step). dedupe
   // is REQUIRED so app-sdk's bare react/zustand/etc. imports resolve to this
   // project's single copy — otherwise React sees two instances ("invalid hook

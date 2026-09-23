@@ -5,8 +5,12 @@
     "hu": "Fájlok",
     "en": "Files"
   },
-  "version": "1.1.0",
+  "version": "1.1.1",
   "changelog": [
+    {
+      "version": "1.1.1",
+      "notes": "Az alkalmazás oldala most csak a saját kódját futtathatja, így egy fájlnév vagy más szöveg akkor sem futhat le programként, ha valahogy az oldalra kerülne. / The app's page now only runs its own code, so a file name or other text could not run as a program even if it ever reached the page."
+    },
     {
       "version": "1.1.0",
       "notes": "Photos: a folder of pictures opens as a grid instead of a list, any of them fills the screen, and the arrows page through the folder. OK enlarges a photo and the arrows then move around inside it. Photos can also be sent straight from a phone: pick 'From your phone', scan the code, and they appear on the TV."

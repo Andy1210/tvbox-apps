@@ -2,6 +2,7 @@ import path from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { appCsp } from "../_shared/csp";
 
 // Standalone build for the Xbox Cloud Gaming package. Served by the shell at
 // /xcloud/, same origin as /tvbox/api - which is what lets the page reach its own
@@ -11,7 +12,7 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   root: __dirname,
   base: "./",
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), appCsp()],
   resolve: {
     alias: { "@sdk": path.resolve(__dirname, "../../../app-sdk/src") },
     dedupe: ["react", "react-dom", "zustand", "@noriginmedia/norigin-spatial-navigation"],
