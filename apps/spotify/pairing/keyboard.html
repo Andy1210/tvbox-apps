@@ -123,8 +123,8 @@
       // crosses the network in clear. A box that does not serve it put the code
       // in the query and takes a plain body.
       var seal = window.tvboxSeal;
-      function sealBody(b) {
-        return seal ? seal.body(b) : JSON.stringify(b);
+      function sealBody(b, route) {
+        return seal ? seal.body(b, route) : JSON.stringify(b);
       }
       function pairCode() {
         return seal ? seal.code : new URLSearchParams(location.search).get("c") || "";
@@ -146,7 +146,7 @@
         fetch("/fill" + writeQuery(), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: sealBody({ code: code(), field: field, value: v }),
+          body: sealBody({ code: code(), field: field, value: v }, "/fill"),
         })
           .then(function (r) {
             st(r.ok ? "{{sent}}" : "✗");
@@ -160,7 +160,7 @@
         return fetch("/key" + writeQuery(), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: sealBody(b),
+          body: sealBody(b, "/key"),
         })
           .then(function (r) {
             if (!r.ok) st("✗");

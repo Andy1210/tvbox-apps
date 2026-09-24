@@ -89,7 +89,7 @@ jobs:
         # them run here. No-op when a package ships none.
         run: |
           shopt -s nullglob
-          tests=(apps/*/lib/*.test.js)
+          tests=(apps/*/lib/*.test.js apps/*/plugin.test.js)
           if [ ${#tests[@]} -gt 0 ]; then node --test "${tests[@]}"; else echo "no package tests"; fi
         shell: bash
 

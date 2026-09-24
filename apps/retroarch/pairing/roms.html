@@ -157,8 +157,8 @@
       // crosses the network in clear. A box that does not serve it put the code
       // in the query and takes a plain body.
       const seal = window.tvboxSeal;
-      function sealBody(b) {
-        return seal ? seal.body(b) : JSON.stringify(b);
+      function sealBody(b, route) {
+        return seal ? seal.body(b, route) : JSON.stringify(b);
       }
       const T = {
         uploading: "{{uploading}}",
@@ -243,7 +243,7 @@
           return fetch(p, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: sealBody({ ...body, code }),
+            body: sealBody({ ...body, code }, p),
           }).then((r) => r.json());
         }
         const text = JSON.stringify(seal && seal.sealed ? body : { ...body, code });
