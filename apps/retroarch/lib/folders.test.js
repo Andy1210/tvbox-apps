@@ -88,6 +88,19 @@ test("a network share the shell mounted may be linked", () => {
   assert.strictEqual(folders.add({ name: "nas", path: share }).ok, true);
 });
 
+test("a user folder the shell offers under ~/.tvbox may be linked, its machinery may not", () => {
+  const user = path.join(HOME, ".tvbox", "games-drop", "gba");
+  fs.mkdirSync(user, { recursive: true });
+  assert.strictEqual(folders.add({ name: "drop", path: user }).ok, true);
+  const snaps = path.join(HOME, ".tvbox", "config-snapshots");
+  fs.mkdirSync(snaps, { recursive: true });
+  assert.strictEqual(folders.add({ name: "snaps", path: snaps }).error, "bad_path");
+  const hiddenInside = path.join(HOME, ".tvbox", "games-drop", ".secret");
+  fs.mkdirSync(hiddenInside, { recursive: true });
+  assert.strictEqual(folders.add({ name: "sec", path: hiddenInside }).error, "bad_path");
+  folders.remove("drop");
+});
+
 test("a path that is not a directory on this box is refused", () => {
   reset();
   assert.strictEqual(folders.add({ name: "gone", path: path.join(HOME, "nope") }).error, "bad_path");

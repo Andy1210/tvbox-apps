@@ -57,6 +57,22 @@ test("a scan can only be pointed inside the roms folder", () => {
   assert.strictEqual(scan.resolveFolder(""), "");
 });
 
+test("a linked folder can be scanned through its link, and only through one the app made", () => {
+  const folders = require("./folders");
+  const outside = path.join(HOME, "Games", "gba");
+  fs.mkdirSync(outside, { recursive: true });
+  fs.writeFileSync(path.join(outside, "A.gba"), "x");
+  assert.strictEqual(folders.add({ name: "stick", path: outside }).ok, true);
+  const viaLink = path.join(roms.ROMS_DIR, "stick");
+  assert.strictEqual(scan.resolveFolder(viaLink), fs.realpathSync(outside));
+  // A link nobody registered, planted in the library, still escapes nowhere.
+  fs.symlinkSync("/etc", path.join(roms.ROMS_DIR, "planted"));
+  assert.strictEqual(scan.resolveFolder(path.join(roms.ROMS_DIR, "planted")), "");
+  fs.unlinkSync(path.join(roms.ROMS_DIR, "planted"));
+  folders.remove("stick");
+  assert.strictEqual(scan.resolveFolder(viaLink), "");
+});
+
 test("the walk keeps games, drops what sits next to them, and skips a disc's raw tracks", () => {
   const dir = folder("psx", {
     "Game.cue": "",

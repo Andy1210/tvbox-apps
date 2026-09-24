@@ -102,7 +102,16 @@ export interface RowProps {
  * has to be the one on screen, and letting the browser's own scrollIntoView do
  * it puts the tile at the edge, where the next press appears to do nothing.
  */
-export function Row({
+/**
+ * An empty row draws nothing, and it registers nothing either: a focusable
+ * registered before its node exists has no coordinates, and spatial navigation
+ * can then offer it as a target that highlights nothing.
+ */
+export function Row(props: RowProps): React.JSX.Element | null {
+  return props.items.length === 0 ? null : <RowBody {...props} />;
+}
+
+function RowBody({
   id,
   title,
   items,
@@ -117,7 +126,7 @@ export function Row({
   countdownFor,
   keepAbove,
   describing,
-}: RowProps): React.JSX.Element | null {
+}: RowProps): React.JSX.Element {
   const section = useRef<HTMLElement | null>(null);
   const window_ = useRef<HTMLDivElement>(null);
   const layer = useRef<HTMLDivElement | null>(null);
@@ -283,8 +292,6 @@ export function Row({
   );
 
   const { ref, focusKey } = useFocusable({ focusKey: `row-${id}`, trackChildren: true, saveLastFocusedChild: true });
-
-  if (items.length === 0) return null;
 
   return (
     <FocusContext.Provider value={focusKey}>

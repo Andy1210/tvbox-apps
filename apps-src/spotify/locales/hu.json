@@ -108,6 +108,6 @@
     "recoveryCooling": "Az előbb próbáltuk visszakapcsolni a boxot, és nem sikerült. Várj egy percet, vagy castolj rá a telefonodról.",
     "ctrlUnreachable": "A box most nem látszik Spotify-eszközként. Indítsd el innen a lejátszást, vagy castolj rá a telefonodról.",
     "ctrlError": "A parancs nem ment át. Próbáld újra.",
-    "retry": "Újra"
+    "retry": "Próbáld újra"
   }
 }

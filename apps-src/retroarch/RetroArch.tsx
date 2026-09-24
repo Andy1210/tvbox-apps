@@ -100,14 +100,19 @@ const PLAY_NOTICE_MS = 6000;
  * can try another game straight away.
  */
 function PlayNotice({ text, onDone }: { text: string; onDone: () => void }) {
+  // The timer follows the TEXT only. The parent passes a new callback on every
+  // render, and restarting on that would keep the notice up for as long as the
+  // screen keeps re-rendering.
+  const done = useRef(onDone);
+  done.current = onDone;
   useEffect(() => {
-    const timer = setTimeout(onDone, PLAY_NOTICE_MS);
+    const timer = setTimeout(() => done.current(), PLAY_NOTICE_MS);
     return () => clearTimeout(timer);
-  }, [text, onDone]);
+  }, [text]);
   return (
     <div
       role="alert"
-      className="absolute left-1/2 bottom-[5vh] -translate-x-1/2 max-w-[70vw] z-20 rounded-[1vh] bg-bg-1 border border-white/15 px-[2.5vh] py-[1.5vh] text-[2vh] text-center shadow-lg"
+      className="absolute left-1/2 top-[3vh] -translate-x-1/2 max-w-[70vw] z-20 rounded-[1vh] bg-bg-1 border border-white/15 px-[2.5vh] py-[1.5vh] text-[2vh] text-center shadow-lg"
     >
       {text}
     </div>

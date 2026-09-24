@@ -77,6 +77,9 @@ export function MusicList({
   const [cursor, setCursor] = useState(0);
   const [reload, setReload] = useState(0);
   const inflight = useRef<Set<number>>(new Set());
+  // Pages whose last read failed. Their rows stop looking like they are loading
+  // and say what OK does instead.
+  const [failedPages, setFailedPages] = useState<ReadonlySet<number>>(new Set());
   /**
    * Where Up from the top of the list goes.
    *
@@ -96,6 +99,7 @@ export function MusicList({
     setPages(new Map());
     setLetters([]);
     setCursor(0);
+    setFailedPages(new Set());
     inflight.current = new Set();
   }, [lens, libraryId]);
 
@@ -106,6 +110,12 @@ export function MusicList({
       try {
         const p = await backend.libraryPage(libraryId, { offset: index * PAGE, limit: PAGE, of });
         setPages((m) => new Map(m).set(index, p.items));
+        setFailedPages((f) => {
+          if (!f.has(index)) return f;
+          const next = new Set(f);
+          next.delete(index);
+          return next;
+        });
         if (p.total !== undefined) setTotal(p.total);
         else if (p.items.length < PAGE) setTotal(index * PAGE + p.items.length);
       } catch (e) {
@@ -113,6 +123,7 @@ export function MusicList({
         // that failed once on a flaky network must not become a permanent hole.
         inflight.current.delete(index);
         log.warn("music page failed", e);
+        setFailedPages((f) => (f.has(index) ? f : new Set(f).add(index)));
         if (index === 0) fail(classify(e));
         return;
       }
@@ -330,9 +341,17 @@ export function MusicList({
                         }
                         return true;
                       }}
-                      className="block h-full w-full animate-pulse rounded-[1vh] bg-white/5"
+                      className={
+                        failedPages.has(Math.floor(i / PAGE))
+                          ? "block h-full w-full rounded-[1vh] bg-white/5 px-[1.5vw] text-left text-[2vh] text-white/60"
+                          : "block h-full w-full animate-pulse rounded-[1vh] bg-white/5"
+                      }
                     >
-                      <span className="sr-only">…</span>
+                      {failedPages.has(Math.floor(i / PAGE)) ? (
+                        t("music.pageFailed")
+                      ) : (
+                        <span className="sr-only">…</span>
+                      )}
                     </FocusButton>
                   )}
                 </li>

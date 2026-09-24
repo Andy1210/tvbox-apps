@@ -508,7 +508,7 @@ module.exports = (host) => {
     }
     authWin = null;
   }
-  // A sign-in nobody finishes must not keep the television: the window is
+  // A sign-in nobody touches must not keep the television: the window is
   // fullscreen and on top of everything, and only the OAuth callback closes it.
   const AUTH_IDLE_MS = 10 * 60 * 1000;
   let authIdle = null;
@@ -548,29 +548,39 @@ module.exports = (host) => {
         w.webContents.focus();
       } catch (e) {}
     });
-    // The remote's Back leaves the sign-in. Escape and the browser Back key always
-    // do; Backspace only outside a text field, where it is still needed for typing.
+    // The remote's Back leaves the sign-in, and so does Home. A remote's Back
+    // arrives as Backspace, which a text field still needs for typing, so inside a
+    // field it deletes as usual and only a Back on an EMPTY field leaves. Escape and
+    // the browser Back key always leave.
+    const armIdle = () => {
+      clearTimeout(authIdle);
+      authIdle = setTimeout(() => {
+        if (authWin === w) closeAuthWin();
+      }, AUTH_IDLE_MS);
+    };
     w.webContents.on("before-input-event", (event, input) => {
       if (input.type !== "keyDown") return;
-      if (input.key === "Escape" || input.key === "BrowserBack") {
+      armIdle();
+      if (input.key === "Escape" || input.key === "BrowserBack" || input.key === "BrowserHome") {
         event.preventDefault();
         closeAuthWin();
       } else if (input.key === "Backspace") {
         w.webContents
           .executeJavaScript(
-            "(function(){var a=document.activeElement;return !!a&&(a.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))})()",
+            "(function(){var a=document.activeElement;if(!a)return false;" +
+              "if(a.isContentEditable)return (a.textContent||'').length>0;" +
+              "if(/^(INPUT|TEXTAREA)$/.test(a.tagName))return (a.value||'').length>0;" +
+              "return a.tagName==='SELECT'})()",
             true,
           )
-          .then((editing) => {
-            if (!editing && authWin === w) closeAuthWin();
+          .then((keep) => {
+            if (!keep && authWin === w) closeAuthWin();
           })
           .catch(() => {});
       }
     });
-    clearTimeout(authIdle);
-    authIdle = setTimeout(() => {
-      if (authWin === w) closeAuthWin();
-    }, AUTH_IDLE_MS);
+    // Closed after AUTH_IDLE_MS with no key pressed in it.
+    armIdle();
     // Only the window this call opened: a second press on "add account" replaces
     // it, and the first one's close must not forget the second.
     w.on("closed", () => {

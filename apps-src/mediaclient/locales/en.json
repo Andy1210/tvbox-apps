@@ -233,6 +233,7 @@
     "nowPlaying": "Now playing",
     "off": "off",
     "on": "on",
+    "pageFailed": "Could not load. Press OK to try again.",
     "pause": "Pause",
     "play": "Play",
     "playAll": "Play all",

@@ -32,6 +32,7 @@ const cores = require("./cores");
 const art = require("./art");
 const roms = require("./roms");
 const games = require("./games");
+const linked = require("./folders");
 
 const FLATPAK_REF = "org.libretro.RetroArch";
 const SCAN_TIMEOUT_MS = 45 * 60 * 1000; // a big folder over a network share, hashed file by file
@@ -240,10 +241,20 @@ function resolveFolder(input) {
     // pointing anywhere on the box, and this value goes on RetroArch's command
     // line. The root is resolved too, so a library that is itself a link (an
     // external drive, say) keeps working - only escaping from inside it does not.
-    const realRoot = fs.realpathSync(root);
     const real = fs.realpathSync(want);
-    if (real !== realRoot && !real.startsWith(realRoot + path.sep)) return "";
-    return real;
+    const inside = (base) => real === base || real.startsWith(base + path.sep);
+    if (inside(fs.realpathSync(root))) return real;
+    // A linked folder (folders.js) points outside the library on purpose. Its
+    // target is accepted when the path was spelled through that link, the link is
+    // one the app made, and where it points still passes the same test `add` used.
+    for (const f of linked.read()) {
+      const link = linked.linkPath(f.name);
+      if (want !== link && !want.startsWith(link + path.sep)) continue;
+      if (!fs.lstatSync(link).isSymbolicLink()) continue;
+      const target = fs.realpathSync(link);
+      if (linked.targetOk(target) && inside(target)) return real;
+    }
+    return "";
   } catch (e) {
     return "";
   }

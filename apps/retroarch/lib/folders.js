@@ -44,6 +44,47 @@ function allowedRoots() {
   return [HOME, path.join("/media", user), path.join("/run/media", user)];
 }
 
+// The box's own machinery under ~/.tvbox, as opposed to the user content that
+// also lives there. Kept in step with the shell's contentdirs.js, which offers
+// every other folder under ~/.tvbox as a source.
+const MACHINERY = new Set([
+  "appdata",
+  "apps",
+  "apps-data",
+  "bin",
+  "cache",
+  "config-snapshots",
+  "current",
+  "fileserver",
+  "librespot-cache",
+  "photoshare",
+  "pyenv",
+  "__pycache__",
+  "shell",
+  "shell-userdata",
+  "update",
+  "versions",
+]);
+
+// HOME as a whole is not a game library, and a hidden directory under it holds
+// configuration and app data (~/.config, ~/.local, ~/.var, the box's own files
+// under ~/.tvbox): linking one in would expose it through the library's file
+// share and its routes. Under ~/.tvbox, the folders the shell offers as user
+// content are allowed (network shares included); anywhere else, a path with a
+// hidden segment is refused.
+function userContent(home, real) {
+  const rel = path.relative(home, real);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) return true; // removable media
+  const segs = rel.split(path.sep);
+  let rest = segs;
+  if (segs[0] === ".tvbox") {
+    const top = segs[1];
+    if (!top || top.startsWith(".") || MACHINERY.has(top)) return false;
+    rest = segs.slice(2);
+  }
+  return !rest.some((seg) => seg.startsWith("."));
+}
+
 // Absolute, real (so a link cannot be aimed through another link at something
 // else later), a directory, inside one of those roots, and NOT inside the library
 // itself - linking roms/ into roms/ is a loop the scanner would have to defend
@@ -59,17 +100,9 @@ function targetOk(p) {
   }
   const inside = (root) => real === root || real.startsWith(root + path.sep);
   if (!allowedRoots().some(inside)) return false;
-  // HOME as a whole is not a game library, and a hidden directory under it holds
-  // configuration and app data (~/.tvbox, ~/.config, ~/.local, ~/.var): linking one
-  // in would expose it through the library's file share and its routes. The one
-  // hidden place that does hold games is where the shell mounts network shares.
   const home = fs.realpathSync(HOME);
   if (real === home) return false;
-  const shares = path.join(HOME, ".tvbox", "shares");
-  const sharesReal = fs.existsSync(shares) ? fs.realpathSync(shares) : shares;
-  const inShare = real.startsWith(sharesReal + path.sep);
-  const rel = path.relative(home, real);
-  if (!inShare && !rel.startsWith("..") && rel.split(path.sep).some((seg) => seg.startsWith("."))) return false;
+  if (!userContent(home, real)) return false;
   const roms = fs.existsSync(ROMS_DIR) ? fs.realpathSync(ROMS_DIR) : ROMS_DIR;
   return real !== roms && !real.startsWith(roms + path.sep);
 }
@@ -206,6 +239,7 @@ module.exports = {
   MAX_FOLDERS,
   nameOk,
   targetOk,
+  userContent,
   nameFree,
   read,
   write,

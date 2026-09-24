@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act, render, waitFor } from "@testing-library/react";
 import { configureI18n } from "@sdk";
 import { Row } from "../Row";
@@ -219,5 +219,26 @@ describe("what a rail thinks it can see", () => {
     // counted as usable this stops 2 * PAD short, which is where the crop
     // came from.
     expect(offsetOf(container)).toBe(12 * TILE_W - (VIEWPORT - 2 * PAD));
+  });
+});
+
+describe("an empty rail", () => {
+  it("registers no focusable until it has something to show", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { container, rerender } = render(
+        <Row id="empty-row" title="Films" items={[]} posterUrl={() => undefined} onSelect={() => {}} />,
+      );
+      await settle();
+      expect(container.textContent).toBe("");
+      rerender(
+        <Row id="empty-row" title="Films" items={list("c", 3)} posterUrl={() => undefined} onSelect={() => {}} />,
+      );
+      await settle();
+      const noNode = warn.mock.calls.filter((c) => String(c[0]).includes("without a node reference"));
+      expect(noNode).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
