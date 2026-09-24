@@ -22,6 +22,7 @@ function track(n: number): MediaItem {
 }
 
 let failSecondPage = true;
+let failLetterOffset = false;
 
 function stubBackend(): MediaBackend {
   return {
@@ -37,7 +38,10 @@ function stubBackend(): MediaBackend {
       { key: "A", title: "A", size: JUMP },
       { key: "M", title: "M", size: TOTAL - JUMP },
     ],
-    letterOffset: async (_id: string, key: string) => (key === "M" ? JUMP : 0),
+    letterOffset: async (_id: string, key: string) => {
+      if (failLetterOffset) throw new Error("network");
+      return key === "M" ? JUMP : 0;
+    },
     posterUrl: () => undefined,
     imageHeaders: () => ({}),
   } as unknown as MediaBackend;
@@ -45,6 +49,7 @@ function stubBackend(): MediaBackend {
 
 beforeEach(async () => {
   failSecondPage = true;
+  failLetterOffset = false;
   useApp.setState({ backend: stubBackend(), screen: { name: "home" }, history: [], failure: null });
   await clearFocus();
 });
@@ -63,6 +68,8 @@ describe("a music page that failed", () => {
     });
     await focusBecomes(`mrow-${JUMP}`);
     await waitFor(() => expect(container.textContent).toContain(en.music.pageFailed));
+    // Said once, on the row the cursor is on, not on every row of the page.
+    expect(container.textContent!.split(en.music.pageFailed).length - 1).toBe(1);
 
     failSecondPage = false;
     await act(async () => {
@@ -70,5 +77,19 @@ describe("a music page that failed", () => {
     });
     await waitFor(() => expect(container.textContent).toContain(`Song ${JUMP}`));
     expect(container.textContent).not.toContain(en.music.pageFailed);
+  });
+
+  it("a letter whose place cannot be asked says so and leaves the cursor on the letter", async () => {
+    failLetterOffset = true;
+    const { container } = render(<MusicList libraryId="9" lens="artists" title="Music" />);
+    await waitFor(() => expect(container.textContent).toContain("Song 0"));
+    await waitFor(() => expect(container.textContent).toContain("M"));
+    await focusLands();
+    await setFocus("letter-M");
+    await act(async () => {
+      await remote.ok();
+    });
+    await waitFor(() => expect(container.textContent).toContain(en.music.jumpFailed));
+    await focusBecomes("letter-M");
   });
 });

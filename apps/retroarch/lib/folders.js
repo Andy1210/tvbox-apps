@@ -46,7 +46,11 @@ function allowedRoots() {
 
 // The box's own machinery under ~/.tvbox, as opposed to the user content that
 // also lives there. Kept in step with the shell's contentdirs.js, which offers
-// every other folder under ~/.tvbox as a source.
+// every other folder under ~/.tvbox as a source, plus the shell's private
+// working folders it never offers. A folder that is not on this list is still
+// refused when it is private to the box user (see privateDir), which is how the
+// shell marks what holds credentials, so a folder a newer shell adds is not
+// linkable just because this list has not caught up.
 const MACHINERY = new Set([
   "appdata",
   "apps",
@@ -60,11 +64,23 @@ const MACHINERY = new Set([
   "photoshare",
   "pyenv",
   "__pycache__",
+  "screenframe",
   "shell",
   "shell-userdata",
   "update",
+  "update-keys",
   "versions",
 ]);
+
+// No group or other permission bits: the shell writes what it keeps private
+// (keys, tokens, captures of the screen) that way.
+function privateDir(p) {
+  try {
+    return (fs.statSync(p).mode & 0o077) === 0;
+  } catch (e) {
+    return true;
+  }
+}
 
 // HOME as a whole is not a game library, and a hidden directory under it holds
 // configuration and app data (~/.config, ~/.local, ~/.var, the box's own files
@@ -80,6 +96,7 @@ function userContent(home, real) {
   if (segs[0] === ".tvbox") {
     const top = segs[1];
     if (!top || top.startsWith(".") || MACHINERY.has(top)) return false;
+    if (privateDir(path.join(home, ".tvbox", top))) return false;
     rest = segs.slice(2);
   }
   return !rest.some((seg) => seg.startsWith("."));

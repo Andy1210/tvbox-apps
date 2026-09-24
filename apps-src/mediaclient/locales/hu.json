@@ -233,6 +233,7 @@
     "nowPlaying": "Most szól",
     "off": "ki",
     "on": "be",
+    "jumpFailed": "Nem sikerült arra a betűre ugrani.",
     "pageFailed": "Nem sikerült betölteni. Nyomd meg az OK-t az újrapróbáláshoz.",
     "pause": "Szünet",
     "play": "Lejátszás",

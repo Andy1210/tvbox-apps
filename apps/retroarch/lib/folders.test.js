@@ -101,6 +101,22 @@ test("a user folder the shell offers under ~/.tvbox may be linked, its machinery
   folders.remove("drop");
 });
 
+test("the shell's key and capture folders, and any private folder under ~/.tvbox, may not be linked", () => {
+  for (const name of ["update-keys", "screenframe"]) {
+    const dir = path.join(HOME, ".tvbox", name);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o755 });
+    assert.strictEqual(folders.add({ name: "m" + name.length, path: dir }).error, "bad_path", name);
+  }
+  // A folder a newer shell adds and keeps to itself is refused without a list entry.
+  const fresh = path.join(HOME, ".tvbox", "new-secrets");
+  fs.mkdirSync(fresh, { recursive: true });
+  fs.chmodSync(fresh, 0o700);
+  assert.strictEqual(folders.add({ name: "fresh", path: fresh }).error, "bad_path");
+  fs.chmodSync(fresh, 0o755);
+  assert.strictEqual(folders.add({ name: "fresh", path: fresh }).ok, true);
+  folders.remove("fresh");
+});
+
 test("a path that is not a directory on this box is refused", () => {
   reset();
   assert.strictEqual(folders.add({ name: "gone", path: path.join(HOME, "nope") }).error, "bad_path");

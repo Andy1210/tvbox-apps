@@ -162,6 +162,11 @@ export function MusicList({
 
   const at = (index: number): MediaItem | undefined => pages.get(Math.floor(index / PAGE))?.[index % PAGE];
 
+  /** The one row of a failed page that says so: the cursor's, when it is on that
+   * page, otherwise the first of the page's rows the window shows. */
+  const failedTextRow = (page: number): number =>
+    Math.floor(cursor / PAGE) === page ? cursor : Math.max(start, page * PAGE);
+
   // No scrolling from here. Every row is a FocusButton, and the SDK already
   // brings the focused one into view with `block: "nearest"` - scrolling it a
   // second time from a cursor effect is what let spatial navigation resolve
@@ -206,10 +211,13 @@ export function MusicList({
         await loadPage(Math.floor(offset / PAGE));
         setFocus(`mrow-${offset}`);
       } catch (e) {
+        // Where the letter starts could not be asked, so the list stays where it
+        // is and the cursor on the letter; the header says why nothing moved.
         log.warn("letter jump failed", e);
+        setNote(t("music.jumpFailed"));
       }
     },
-    [backend, libraryId, of, loadPage],
+    [backend, libraryId, of, loadPage, t],
   );
 
   const openOrPlay = async (index: number): Promise<void> => {
@@ -343,11 +351,11 @@ export function MusicList({
                       }}
                       className={
                         failedPages.has(Math.floor(i / PAGE))
-                          ? "block h-full w-full rounded-[1vh] bg-white/5 px-[1.5vw] text-left text-[2vh] text-white/60"
+                          ? "flex h-full w-full items-center rounded-[1vh] bg-white/5 px-[1.5vw] text-left text-[2vh] text-white/60"
                           : "block h-full w-full animate-pulse rounded-[1vh] bg-white/5"
                       }
                     >
-                      {failedPages.has(Math.floor(i / PAGE)) ? (
+                      {failedPages.has(Math.floor(i / PAGE)) && i === failedTextRow(Math.floor(i / PAGE)) ? (
                         t("music.pageFailed")
                       ) : (
                         <span className="sr-only">…</span>

@@ -73,6 +73,57 @@ test("a linked folder can be scanned through its link, and only through one the 
   assert.strictEqual(scan.resolveFolder(viaLink), "");
 });
 
+test("a resolved linked folder resolves to itself, and a sibling of its target does not", () => {
+  const folders = require("./folders");
+  const outside = path.join(HOME, "Games2", "gba");
+  fs.mkdirSync(outside, { recursive: true });
+  fs.mkdirSync(path.join(HOME, "Games2", "other"), { recursive: true });
+  assert.strictEqual(folders.add({ name: "stick2", path: outside }).ok, true);
+  const once = scan.resolveFolder(path.join(roms.ROMS_DIR, "stick2"));
+  assert.strictEqual(once, fs.realpathSync(outside));
+  // The scan resolves the folder, then hands the answer to its finish step,
+  // which resolves it again.
+  assert.strictEqual(scan.resolveFolder(once), once);
+  assert.strictEqual(scan.resolveFolder(path.join(once, "..", "other")), "");
+  assert.strictEqual(scan.resolveFolder(path.join(HOME, "Games2")), "");
+  // A link inside the target that points elsewhere is not the target.
+  fs.symlinkSync("/etc", path.join(outside, "escape"));
+  assert.strictEqual(scan.resolveFolder(path.join(once, "escape")), "");
+  fs.unlinkSync(path.join(outside, "escape"));
+  folders.remove("stick2");
+  assert.strictEqual(scan.resolveFolder(once), "");
+});
+
+test("a linked folder goes through the whole scan, finish pass included", async () => {
+  reset();
+  installCore("mgba", 'database = "' + GBA + '"\nsupported_extensions = "gba"\n');
+  const folders = require("./folders");
+  const outside = path.join(HOME, "Games3", "gba");
+  fs.mkdirSync(outside, { recursive: true });
+  fs.writeFileSync(path.join(outside, "Metroid (USA).gba"), "x");
+  assert.strictEqual(folders.add({ name: "stick3", path: outside }).ok, true);
+  const { execFileSync } = require("child_process");
+  const cli = path.join(__dirname, "scan-cli.js");
+  const dir = scan.resolveFolder(path.join(roms.ROMS_DIR, "stick3"));
+  // This is what the plugin's finish step is called with: the resolved folder.
+  const out = JSON.parse(execFileSync(process.execPath, [cli, "finish", dir], { env: { ...process.env, HOME } }));
+  assert.strictEqual(out.error, undefined);
+  assert.strictEqual(out.added, 1);
+  // And the in-process scan, with RetroArch's own pass stubbed out, reaches the
+  // same finish step with the same folder.
+  let finishedWith = "";
+  const res = await scan.scan(path.join(roms.ROMS_DIR, "stick3"), {
+    retroarch: async () => ({ ok: true, seen: 1, missed: 0 }),
+    finish: async (d) => {
+      finishedWith = d;
+      return JSON.parse(execFileSync(process.execPath, [cli, "finish", d], { env: { ...process.env, HOME } }));
+    },
+  });
+  assert.notStrictEqual(res.error, "bad_folder");
+  assert.strictEqual(finishedWith, dir);
+  folders.remove("stick3");
+});
+
 test("the walk keeps games, drops what sits next to them, and skips a disc's raw tracks", () => {
   const dir = folder("psx", {
     "Game.cue": "",

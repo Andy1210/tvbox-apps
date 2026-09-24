@@ -233,8 +233,26 @@ function underLibrary(input) {
 function resolveFolder(input) {
   const want = path.resolve(String(input || ""));
   const root = path.resolve(roms.ROMS_DIR);
-  if (want !== root && !want.startsWith(root + path.sep)) return "";
+  const spelledInLibrary = want === root || want.startsWith(root + path.sep);
   try {
+    // The targets of the links this app made, each still passing the test `add`
+    // used. Read before anything else touches the path, so an input outside the
+    // library that is not inside one of them never reaches stat.
+    const targets = [];
+    for (const f of linked.read()) {
+      const link = linked.linkPath(f.name);
+      try {
+        if (!fs.lstatSync(link).isSymbolicLink()) continue;
+        const target = fs.realpathSync(link);
+        if (linked.targetOk(target)) targets.push({ link, target });
+      } catch (e) {
+        /* a dangling or unreadable link names nothing */
+      }
+    }
+    const inside = (p, base) => p === base || p.startsWith(base + path.sep);
+    // The answer is itself a real path, and callers pass it on (the scan hands it
+    // to its finish step), so an already resolved linked target is accepted as is.
+    if (!spelledInLibrary && !targets.some((t) => inside(want, t.target))) return "";
     if (!fs.statSync(want).isDirectory()) return "";
     // Compare what the paths REALLY are, not what they spell. A subdirectory of
     // the library that is a symlink elsewhere passes the string test above while
@@ -242,17 +260,13 @@ function resolveFolder(input) {
     // line. The root is resolved too, so a library that is itself a link (an
     // external drive, say) keeps working - only escaping from inside it does not.
     const real = fs.realpathSync(want);
-    const inside = (base) => real === base || real.startsWith(base + path.sep);
-    if (inside(fs.realpathSync(root))) return real;
+    if (inside(real, fs.realpathSync(root))) return real;
     // A linked folder (folders.js) points outside the library on purpose. Its
-    // target is accepted when the path was spelled through that link, the link is
-    // one the app made, and where it points still passes the same test `add` used.
-    for (const f of linked.read()) {
-      const link = linked.linkPath(f.name);
-      if (want !== link && !want.startsWith(link + path.sep)) continue;
-      if (!fs.lstatSync(link).isSymbolicLink()) continue;
-      const target = fs.realpathSync(link);
-      if (linked.targetOk(target) && inside(target)) return real;
+    // target is accepted when the path was spelled through that link, or is
+    // already inside where it points.
+    for (const t of targets) {
+      const named = spelledInLibrary ? inside(want, t.link) : inside(want, t.target);
+      if (named && inside(real, t.target)) return real;
     }
     return "";
   } catch (e) {
@@ -479,13 +493,13 @@ async function scan(folder, opts) {
   const dir = resolveFolder(folder);
   if (!dir) return { ok: false, error: "bad_folder" };
   if (o.onProgress) o.onProgress({ stage: "retroarch", folder: dir });
-  const ra = await retroarchScan(dir, o.env, o.onChild);
+  // `retroarch` replaces the RetroArch pass, which needs the flatpak, in tests.
+  const ra = await (o.retroarch || retroarchScan)(dir, o.env, o.onChild);
   // A stop is a stop first: it is why the pass ended, and reporting it as a
   // failure would be a lie about something the user did on purpose. `missed`
   // counts every "??" in the output while `seen` counts progress lines, so a
   // SIGTERM landing mid-line can leave more of the first than the second.
-  if (o.stopped && o.stopped())
-    return { ok: true, stopped: true, matched: Math.max(0, ra.seen - ra.missed), added: 0 };
+  if (o.stopped && o.stopped()) return { ok: true, stopped: true, matched: Math.max(0, ra.seen - ra.missed), added: 0 };
   // Otherwise a pass that did not run is a failed scan, not an empty one. Without
   // this, a missing flatpak or a non-zero exit came back as "done, 0 recognised"
   // and the screen said the folder simply had nothing in it.
