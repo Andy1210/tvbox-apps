@@ -219,7 +219,8 @@ module.exports = (host) => {
 
   // The page's own release runs in its unmount, and a quit destroys the window
   // without running it, so the poll would stay "taken" and the box off the cast
-  // list until the shell restarted. The shell calls this on a deliberate quit.
+  // list until the shell restarted. The shell calls appClosed on a deliberate
+  // quit and, on newer shells, windowGone on every teardown of the window.
   const release = () => {
     if (!appPolling) return;
     appPolling = false;
@@ -228,6 +229,9 @@ module.exports = (host) => {
 
   return {
     appClosed() {
+      release();
+    },
+    windowGone() {
       release();
     },
     start() {

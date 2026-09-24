@@ -124,3 +124,22 @@ test("quitting the app hands the poll back even though the page never said so", 
     t.restore();
   }
 });
+
+test("a window torn down for any reason hands the poll back", () => {
+  const t = fakeTimers();
+  try {
+    const { plugin, call } = load();
+    plugin.start();
+    call("POST /poll-taken");
+    // Evicted, crashed or destroyed by the shell: only windowGone is called.
+    plugin.windowGone();
+    assert.deepStrictEqual(
+      [...t.live.values()].map((x) => x.ms),
+      [15_000],
+    );
+    plugin.windowGone();
+    assert.strictEqual(t.live.size, 1, "a second call is a no-op");
+  } finally {
+    t.restore();
+  }
+});
