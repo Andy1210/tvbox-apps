@@ -59,7 +59,9 @@ function Row({
 // tracks/playlists. Selecting plays on the box and returns to now-playing.
 // Map a Web API error to actionable copy: the common trap is a Development
 // Mode Spotify app without this account in its User Management list (403).
-function apiErrorText(t: (k: string, p?: Record<string, string>) => string, error: string): string {
+// Exported for the voice search in Spotify.tsx, whose failure is a search error,
+// not a playback one.
+export function apiErrorText(t: (k: string, p?: Record<string, string>) => string, error: string): string {
   if (/not registered/i.test(error)) return t("spotify.notRegistered");
   if (error === "network") return t("spotify.apiUnreachable");
   // A long list is read many pages at a time, so Spotify's rate limit is a normal
@@ -304,7 +306,10 @@ export function Browser({
     const store = useBrowse.getState();
     if (store.shownFor === account) return;
     wanted.current = "";
+    // A search in flight is dropped with the lists, and so is its spinner: the
+    // stale answer returns before it would clear it.
     searchSeq.current++;
+    setSearching(false);
     store.forgetLists();
     store.set({ shownFor: account });
     genRef.current++;

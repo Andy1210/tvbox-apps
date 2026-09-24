@@ -90,7 +90,9 @@ function privateDir(p) {
 // hidden segment is refused.
 function userContent(home, real) {
   const rel = path.relative(home, real);
-  if (rel.startsWith("..") || path.isAbsolute(rel)) return true; // removable media
+  // Outside HOME is removable media. A leading ".." SEGMENT, not a prefix: a
+  // folder named "..cache" is still inside HOME, and hidden.
+  if (rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel)) return true;
   const segs = rel.split(path.sep);
   let rest = segs;
   if (segs[0] === ".tvbox") {

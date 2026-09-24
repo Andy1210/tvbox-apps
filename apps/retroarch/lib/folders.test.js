@@ -79,6 +79,10 @@ test("HOME itself and its hidden directories cannot be linked", () => {
   assert.strictEqual(folders.add({ name: "cfg", path: hidden }).error, "bad_path");
   assert.strictEqual(folders.add({ name: "apps", path: path.join(HOME, ".tvbox", "apps", "x") }).error, "bad_path");
   assert.strictEqual(folders.add({ name: "tvbox", path: path.join(HOME, ".tvbox") }).error, "bad_path");
+  // A name that merely starts with two dots is inside HOME, not above it.
+  const dots = path.join(HOME, "..cache", "games");
+  fs.mkdirSync(dots, { recursive: true });
+  assert.strictEqual(folders.add({ name: "dots", path: dots }).error, "bad_path");
 });
 
 test("a network share the shell mounted may be linked", () => {

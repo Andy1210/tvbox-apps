@@ -512,6 +512,9 @@ module.exports = (host) => {
   // fullscreen and on top of everything, and only the OAuth callback closes it.
   const AUTH_IDLE_MS = 10 * 60 * 1000;
   let authIdle = null;
+  // A Backspace this plugin sends into the sign-in window itself, which the key
+  // handler lets through instead of checking again.
+  let authPassBackspaceUntil = 0;
   function startSpotifyAuth() {
     if (!spotifyApi.configured()) return { ok: false, error: "no_credentials" };
     authState = crypto.randomBytes(8).toString("hex");
@@ -565,6 +568,13 @@ module.exports = (host) => {
         event.preventDefault();
         closeAuthWin();
       } else if (input.key === "Backspace") {
+        if (Date.now() < authPassBackspaceUntil) {
+          authPassBackspaceUntil = 0;
+          return;
+        }
+        // Held back until the field is looked at: let through, it would delete
+        // the last character first and the check would then see an empty field.
+        event.preventDefault();
         w.webContents
           .executeJavaScript(
             "(function(){var a=document.activeElement;if(!a)return false;" +
@@ -574,7 +584,9 @@ module.exports = (host) => {
             true,
           )
           .then((keep) => {
-            if (!keep && authWin === w) closeAuthWin();
+            if (authWin !== w || w.isDestroyed()) return;
+            if (!keep) return closeAuthWin();
+            sendAuthBackspace(w.webContents);
           })
           .catch(() => {});
       }
@@ -647,6 +659,11 @@ module.exports = (host) => {
       || c[c.length-1];
     if(p){p.click();return 'clicked:'+t(p).slice(0,40);} return 'none';
   })()`;
+  function sendAuthBackspace(wc) {
+    authPassBackspaceUntil = Date.now() + 500;
+    wc.sendInputEvent({ type: "keyDown", keyCode: "Backspace" });
+    wc.sendInputEvent({ type: "keyUp", keyCode: "Backspace" });
+  }
   function injectAuthKey(ev) {
     if (!authWin || authWin.isDestroyed() || !ev) return;
     const wc = authWin.webContents;
@@ -657,7 +674,9 @@ module.exports = (host) => {
         wc.executeJavaScript(CLICK_PRIMARY_JS, true).catch(() => {});
       } else if (ev.special) {
         const kc = { backspace: "Backspace", tab: "Tab", enter: "Enter" }[ev.special];
-        if (kc) {
+        // The phone's Backspace only ever deletes: it is not the remote's Back.
+        if (kc === "Backspace") sendAuthBackspace(wc);
+        else if (kc) {
           wc.sendInputEvent({ type: "keyDown", keyCode: kc });
           wc.sendInputEvent({ type: "keyUp", keyCode: kc });
         }

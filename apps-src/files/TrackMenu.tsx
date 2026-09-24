@@ -76,7 +76,19 @@ export function TrackMenu({ tracks, onClose }: { tracks: TvboxTrack[]; onClose: 
   // to replace.
   useEffect(() => setList(tracks), [tracks]);
 
+  // Initial focus: the selected audio track, else the selected/Off subtitle row.
+  // It follows the list the caller re-reads as the menu opens, until the first
+  // key press: after that the cursor is the user's.
+  const touched = useRef(false);
   useEffect(() => {
+    const mark = (): void => {
+      touched.current = true;
+    };
+    window.addEventListener("keydown", mark, true);
+    return () => window.removeEventListener("keydown", mark, true);
+  }, []);
+  useEffect(() => {
+    if (touched.current) return;
     const audio = tracks.filter((x) => x.type === "audio");
     const subs = tracks.filter((x) => x.type === "sub");
     const a = audio.find((x) => x.selected) || audio[0];
@@ -84,8 +96,7 @@ export function TrackMenu({ tracks, onClose }: { tracks: TvboxTrack[]; onClose: 
     const key = a ? `track-audio-${a.id}` : s ? `track-sub-${s.id}` : "track-sub-off";
     const id = setTimeout(() => setFocus(key), 0);
     return () => clearTimeout(id);
-    // mount-only on purpose: the opening snapshot decides where focus lands
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tracks]);
 
   const apply = useCallback((type: "audio" | "sub", id: number | "no") => {
     window.tvbox?.setTrack?.(type, id);

@@ -322,22 +322,26 @@ export function startCompanion(opts: {
         // and then the box is uncastable until the app restarts.
         const pollController = controller;
         const pollTimer = setTimeout(() => pollController.abort(), POLL_TIMEOUT_MS);
-        const res = await fetch(url.toString(), { headers: headers(), signal: controller.signal }).finally(() =>
-          clearTimeout(pollTimer),
-        );
-        // A dead credential is not a transient failure, and this is the one
-        // place in the app that would otherwise swallow it: everywhere else a
-        // 401 becomes "signed out" on screen. Here it would be a warning line
-        // every sixty seconds, forever, with the box looking fine.
-        if (res.status === 401 || res.status === 403) {
-          log.warn("companion poll rejected the credential; stopping");
-          opts.onUnauthorized?.();
-          return;
+        // The deadline covers the body too: a server can send its headers and then
+        // stall, and a stalled body read stops the poll just as surely.
+        let answer: { text: string; over: boolean };
+        try {
+          const res = await fetch(url.toString(), { headers: headers(), signal: controller.signal });
+          // A dead credential is not a transient failure, and this is the one
+          // place in the app that would otherwise swallow it: everywhere else a
+          // 401 becomes "signed out" on screen. Here it would be a warning line
+          // every sixty seconds, forever, with the box looking fine.
+          if (res.status === 401 || res.status === 403) {
+            log.warn("companion poll rejected the credential; stopping");
+            opts.onUnauthorized?.();
+            return;
+          }
+          if (!res.ok) throw new Error(`poll answered ${res.status}`);
+          backoff = RETRY_MS;
+          answer = await boundedText(res, MAX_ANSWER_BYTES);
+        } finally {
+          clearTimeout(pollTimer);
         }
-        if (!res.ok) throw new Error(`poll answered ${res.status}`);
-        backoff = RETRY_MS;
-
-        const answer = await boundedText(res, MAX_ANSWER_BYTES);
         // Nothing to answer with: the commandID the controller is waiting on is
         // inside the body that was refused, so all this can do is say why and
         // let the poll come round again.

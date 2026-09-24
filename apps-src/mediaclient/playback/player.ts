@@ -241,7 +241,6 @@ function sayItFailed(set: Setter, item: MediaItem): void {
   stepFailedTimer = setTimeout(() => set({ stepFailed: null, stepFailedId: null }), STEP_FAILED_MS);
 }
 
-
 /** What the store says when the box is showing nothing. */
 const STOPPED = {
   current: null,
@@ -1173,6 +1172,9 @@ function wireLifecycle(): void {
     // somebody pressed Home would start a film over the launcher five seconds
     // later, with nothing able to cancel it.
     usePlayer.getState().cancelUpNext();
+    // A play still resolving is given up whether or not a film is on screen:
+    // with nothing current it would otherwise start behind the launcher.
+    playToken += 1;
     const s = usePlayer.getState();
     if (!s.current) return;
     // Synchronous-ish and best effort: the page may be frozen immediately after,
@@ -1191,13 +1193,12 @@ function wireLifecycle(): void {
     // And forget it here too. The shell has stopped the film, so a store still
     // saying "playing" would come back to a frozen overlay over nothing, the
     // browsing screens hidden, the screensaver held off and phones told a film is
-    // on. The token keeps a play still in flight from landing behind the launcher.
+    // on.
     scheduler = null;
     releasePlayer("video");
     unsubscribePlayer?.();
     unsubscribePlayer = null;
     startedAt = 0;
-    playToken += 1;
     usePlayer.setState(STOPPED);
   });
 

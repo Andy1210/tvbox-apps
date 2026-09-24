@@ -1418,14 +1418,15 @@ export function Detail({
             }
             onFocusItem={(item) => {
               if (item.kind !== "episode" || !backend) return;
-              // Already showing it: moving back onto the same tile must not
-              // start another request or another render.
-              if (focused?.id === item.id) return;
               // Only the answer for the tile the cursor is on now may land: a
               // row walked quickly answers out of order, and the header, the
-              // tracks and Mark watched all act on `focused`. Cached by the
+              // tracks and Mark watched all act on `focused`. Counted before the
+              // check below, so coming back onto the tile already shown still
+              // outdates a read started for the one in between. Cached by the
               // backend, so moving along a row of episodes is not a request each.
               const mine = ++focusSeq.current;
+              // Already showing it: no new request and no new render.
+              if (focused?.id === item.id) return;
               void backend
                 .item(item.id)
                 .then((d) => focusSeq.current === mine && setFocused(d))

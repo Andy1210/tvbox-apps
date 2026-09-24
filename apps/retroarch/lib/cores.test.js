@@ -42,6 +42,24 @@ test("a system pack carrying a symlink entry is refused before anything is unpac
   assert.ok(fs.existsSync(path.join(cores.SYSTEM_DIR, "pack", "bios.bin")));
 });
 
+test("a symlink entry with setuid or sticky bits is refused as well", async () => {
+  const { execFileSync } = require("child_process");
+  const work = fs.mkdtempSync(path.join(HOME, "zip-"));
+  const bad = path.join(work, "bits.zip");
+  // zip cannot store those bits for a link, so the entry is written by hand.
+  execFileSync("python3", [
+    "-c",
+    [
+      "import sys, zipfile",
+      "zi = zipfile.ZipInfo('pack/l'); zi.create_system = 3",
+      "zi.external_attr = 0o127777 << 16",
+      "z = zipfile.ZipFile(sys.argv[1], 'w'); z.writestr(zi, '/etc/passwd'); z.close()",
+    ].join("\n"),
+    bad,
+  ]);
+  assert.deepStrictEqual(await cores._test.unpackAssets(bad), { ok: false, error: "unsafe_archive" });
+});
+
 test("the cores directory is under the redirected HOME", () => {
   assert.ok(cores.CORES_DIR.startsWith(HOME), cores.CORES_DIR);
 });

@@ -3,7 +3,7 @@ import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spat
 import { useI18n, useBackspace, useConfigStore, FocusButton, tvbox } from "@sdk";
 import { NowPlaying } from "./NowPlaying";
 import { SpotifySettings } from "./SpotifySettings";
-import { Browser, playErrorText, startedAsText } from "./Browser";
+import { Browser, apiErrorText, playErrorText, startedAsText } from "./Browser";
 import { useSpotifyStore } from "./stores/spotify";
 import { authStatus, play, search, setSpotifyEnabled, URIS_MAX, type AuthStatus } from "./api";
 
@@ -241,7 +241,7 @@ export function Spotify({ onExit }: { onExit: () => void }) {
     void search(query).then(async (r) => {
       if (voiceSeq.current !== mine) return;
       if (r.error) {
-        say(playErrorText(t, r.error), true);
+        say(apiErrorText(t, r.error), true);
         return;
       }
       if (!r.tracks.length) {

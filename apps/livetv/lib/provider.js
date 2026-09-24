@@ -361,9 +361,22 @@ const inflight = { channels: null, epg: null };
 function shared(key, run) {
   const gen = generation;
   if (inflight[key] && inflight[key].gen === gen) return inflight[key].p;
-  const p = run(gen).finally(() => {
-    if (inflight[key] && inflight[key].p === p) inflight[key] = null;
-  });
+  // Either outcome of a read that outlived a source change is the old source's,
+  // a failure included, so both become source_changed and the caller asks again.
+  const stale = () => gen !== generation;
+  const p = run(gen)
+    .then(
+      (v) => {
+        if (stale()) throw new Error("source_changed");
+        return v;
+      },
+      (e) => {
+        throw stale() ? new Error("source_changed") : e;
+      },
+    )
+    .finally(() => {
+      if (inflight[key] && inflight[key].p === p) inflight[key] = null;
+    });
   inflight[key] = { gen, p };
   return p;
 }
