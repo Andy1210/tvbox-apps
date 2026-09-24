@@ -102,3 +102,25 @@ test("a release with nothing taken, or after stop(), runs no tick", () => {
     t.restore();
   }
 });
+
+test("quitting the app hands the poll back even though the page never said so", () => {
+  const t = fakeTimers();
+  try {
+    const { plugin, call } = load();
+    plugin.start();
+    call("POST /poll-taken");
+    const before = [...t.live.values()].map((x) => x.ms);
+    assert.deepStrictEqual(before, [10_000], "only the start delay is pending");
+    // The window was destroyed: no poll-released arrives, only the shell's hook.
+    plugin.appClosed();
+    const after = [...t.live.values()].map((x) => x.ms);
+    assert.deepStrictEqual(after, [15_000], "the receiver ran at once and keeps watching");
+    // Nothing was taken any more, so a late release or a second quit is a no-op.
+    const [id] = [...t.live.keys()];
+    call("POST /poll-released");
+    plugin.appClosed();
+    assert.deepStrictEqual([...t.live.keys()], [id]);
+  } finally {
+    t.restore();
+  }
+});

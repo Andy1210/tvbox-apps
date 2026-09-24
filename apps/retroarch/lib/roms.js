@@ -105,8 +105,12 @@ function writeChunk({ system, name, offset, data, last }) {
   // with nothing more than the pairing session, so replacing a file would hand
   // that session the bytes an emulator core later parses. Deleting first is the
   // way to swap a game. Checked on every chunk, so an upload of the same name
-  // that finished in between is not replaced by the last chunk of this one.
-  if (exists(final)) return { ok: false, error: "exists" };
+  // that finished in between is not replaced by the last chunk of this one. Its
+  // partial can never become a game after that, so it goes too.
+  if (exists(final)) {
+    removePart(part);
+    return { ok: false, error: "exists" };
+  }
   ensureDir(system);
   const have = sizeOf(part);
   if (off === 0) {
@@ -120,24 +124,33 @@ function writeChunk({ system, name, offset, data, last }) {
     // A hard link to the final name fails if that name exists, where a rename
     // would replace it, so a file that appeared since the check above is kept.
     // A file system with no hard links (FAT, exFAT) gets the rename, behind one
-    // more existence check.
+    // more existence check. A refused upload drops its finished partial, which
+    // nothing else would ever remove.
+    const refuse = () => {
+      removePart(part);
+      return { ok: false, error: "exists" };
+    };
     try {
       fs.linkSync(part, final);
     } catch (e) {
-      if (e && e.code === "EEXIST") return { ok: false, error: "exists" };
+      if (e && e.code === "EEXIST") return refuse();
       if (!e || !["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EXDEV"].includes(e.code)) throw e;
-      if (exists(final)) return { ok: false, error: "exists" };
+      if (exists(final)) return refuse();
       fs.renameSync(part, final);
       return { ok: true, size, done: true, name };
     }
-    try {
-      fs.unlinkSync(part);
-    } catch (e) {
-      /* the final file is in place; a leftover partial is swept like any other */
-    }
+    removePart(part);
     return { ok: true, size, done: true, name };
   }
   return { ok: true, size };
+}
+
+function removePart(part) {
+  try {
+    fs.unlinkSync(part);
+  } catch (e) {
+    /* already gone; the final file, if any, is what matters */
+  }
 }
 
 // Directories under the library that are actually MOUNTS, e.g. a network share.

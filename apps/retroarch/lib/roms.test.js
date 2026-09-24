@@ -170,6 +170,7 @@ test("an upload that another one finished first does not replace it on its last 
   const last = roms.writeChunk({ system: "gba", name: "r.gba", offset: 2, data: b64("cc"), last: true });
   assert.deepStrictEqual(last, { ok: false, error: "exists" });
   assert.strictEqual(fs.readFileSync(path.join(roms.ROMS_DIR, "gba", "r.gba"), "utf8"), "FIRST");
+  assert.ok(!fs.existsSync(path.join(roms.ROMS_DIR, "gba", "r.gba.part")), "the refused partial is removed");
 });
 
 test("a game that lands between the check and the final move is kept", () => {
@@ -191,4 +192,25 @@ test("a game that lands between the check and the final move is kept", () => {
   }
   assert.deepStrictEqual(last, { ok: false, error: "exists" });
   assert.strictEqual(fs.readFileSync(final, "utf8"), "FIRST");
+  assert.ok(!fs.existsSync(final + ".part"), "the finished partial of a refused upload is removed");
+});
+
+test("on a file system with no hard links, a refused last chunk also drops its partial", () => {
+  reset();
+  assert.ok(roms.writeChunk({ system: "gba", name: "f.gba", offset: 0, data: b64("aa") }).ok);
+  const final = path.join(roms.ROMS_DIR, "gba", "f.gba");
+  const link = fs.linkSync;
+  fs.linkSync = () => {
+    fs.writeFileSync(final, "FIRST");
+    throw Object.assign(new Error("no links"), { code: "EPERM" });
+  };
+  let last;
+  try {
+    last = roms.writeChunk({ system: "gba", name: "f.gba", offset: 2, data: b64("cc"), last: true });
+  } finally {
+    fs.linkSync = link;
+  }
+  assert.deepStrictEqual(last, { ok: false, error: "exists" });
+  assert.strictEqual(fs.readFileSync(final, "utf8"), "FIRST");
+  assert.ok(!fs.existsSync(final + ".part"));
 });

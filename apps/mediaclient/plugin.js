@@ -203,11 +203,9 @@ module.exports = (host) => {
       "POST /poll-released": (req, res) => {
         // Only a poll this receiver handed over can be handed back. A release
         // with nothing taken changes nothing, and must not run a tick of its own.
-        if (!appPolling) return host.json(res, { ok: true });
-        appPolling = false;
         // Straight away rather than at the next tick: the app has just stopped
         // answering, and until this receiver does the box is not a player.
-        tick();
+        release();
         host.json(res, { ok: true });
       },
     },
@@ -219,7 +217,19 @@ module.exports = (host) => {
     },
   );
 
+  // The page's own release runs in its unmount, and a quit destroys the window
+  // without running it, so the poll would stay "taken" and the box off the cast
+  // list until the shell restarted. The shell calls this on a deliberate quit.
+  const release = () => {
+    if (!appPolling) return;
+    appPolling = false;
+    tick();
+  };
+
   return {
+    appClosed() {
+      release();
+    },
     start() {
       if (timer) clearTimeout(timer);
       stopped = false;
