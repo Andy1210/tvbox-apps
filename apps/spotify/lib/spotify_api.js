@@ -252,6 +252,12 @@ function tokenFor(acc) {
   }
   return p;
 }
+// Only the token that was refused: a concurrent refresh may already have put a
+// newer one in its place.
+function forgetToken(acc, token) {
+  const c = tokCache.get(acc.id);
+  if (c && c.token === token) tokCache.delete(acc.id);
+}
 async function refreshToken(acc) {
   const cr = creds();
   const body = new URLSearchParams({
@@ -266,10 +272,18 @@ async function refreshToken(acc) {
     body,
   );
   if (status !== 200) {
-    if (status === 400 || status === 401) {
-      removeAccount(acc.id);
-    } // revoked -> drop this account
-    throw new Error("refresh HTTP " + status);
+    // Only `invalid_grant` says the refresh token itself is dead (revoked, or
+    // rotated away). Any other refusal - a wrong client secret answers 401
+    // `invalid_client` - is about the app's credentials, and dropping the account
+    // for it would unlink every account on the box over a typo.
+    let code = "";
+    try {
+      code = String(JSON.parse(resp || "{}").error || "");
+    } catch (e) {
+      /* no JSON body: not a verdict on the token */
+    }
+    if (status === 400 && code === "invalid_grant") removeAccount(acc.id);
+    throw new Error("refresh HTTP " + status + (code ? " " + code : ""));
   }
   const j = JSON.parse(resp);
   if (j.refresh_token && j.refresh_token !== acc.token) {
@@ -301,6 +315,12 @@ async function apiGet(acc, p) {
       if (attempt < RETRY_MAX && /ECONNRESET|socket hang up|EPIPE/i.test(String(e.message || e))) continue;
       throw e;
     }
+    // A 401 means the cached access token is no longer accepted (revoked or
+    // expired early). Drop it and ask once more with a fresh one.
+    if (status === 401 && attempt < RETRY_MAX) {
+      forgetToken(acc, token);
+      continue;
+    }
     if (status === 429 && attempt < RETRY_MAX) {
       const after = Number((headers || {})["retry-after"]) || 1;
       if (after <= RETRY_MAX_WAIT_S) {
@@ -318,15 +338,22 @@ async function apiGet(acc, p) {
   }
 }
 async function apiWrite(acc, method, p, payload) {
-  const token = await tokenFor(acc);
-  const headers = { Authorization: "Bearer " + token };
-  let body = null;
-  if (payload !== undefined) {
-    body = JSON.stringify(payload);
-    headers["Content-Type"] = "application/json";
-  } else headers["Content-Length"] = "0";
-  const { status, body: resp } = await request(method, API + p, headers, body);
-  return { ok: status >= 200 && status < 300, status, body: resp };
+  for (let attempt = 0; ; attempt++) {
+    const token = await tokenFor(acc);
+    const headers = { Authorization: "Bearer " + token };
+    let body = null;
+    if (payload !== undefined) {
+      body = JSON.stringify(payload);
+      headers["Content-Type"] = "application/json";
+    } else headers["Content-Length"] = "0";
+    const { status, body: resp } = await request(method, API + p, headers, body);
+    // Refused before it was read, so asking again with a fresh token cannot act twice.
+    if (status === 401 && attempt < 1) {
+      forgetToken(acc, token);
+      continue;
+    }
+    return { ok: status >= 200 && status < 300, status, body: resp };
+  }
 }
 // Browsing, searching and the account's own identity are questions ABOUT the
 // active account, so they read as it. Anything that acts on the box says which
@@ -1398,6 +1425,8 @@ function queueRow(t) {
 }
 
 module.exports = {
+  // For the tests: one refresh for one account, by id.
+  _test: { refreshFor: (id) => refreshToken(accountById(id)) },
   setConfig,
   REDIRECT_URI,
   configured,

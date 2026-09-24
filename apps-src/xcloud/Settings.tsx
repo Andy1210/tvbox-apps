@@ -99,14 +99,15 @@ export function Settings({ status, onClose, onSignedOut, onRefreshed }: {
           setValues(r.settings);
           setError(null);
         } catch (e) {
-          // The plugin names the key it refused, which beats "could not save" - but
-          // it is our own message about our own field, so it is bounded before it
-          // goes on a television.
-          setError(String((e as api.ApiError).message || e).slice(0, 200));
+          // The plugin's message names the key it refused, in English: it goes to
+          // the log, and the screen gets the sentence for the code.
+          const err = e as api.ApiError;
+          console.warn("[xcloud] settings refused:", String(err.message || e).slice(0, 200));
+          setError(errorText(t, err.code || "bad_setting"));
         }
       })
       .finally(() => setBusy((n) => n - 1));
-  }, []);
+  }, [t]);
 
   // Both of these used to be a card with no focusable and no Back: the panel
   // stayed up and the remote did nothing at all. And the loading one said

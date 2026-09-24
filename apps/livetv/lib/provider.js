@@ -11,6 +11,7 @@ const http = require("http");
 const https = require("https");
 const dns = require("dns");
 const net = require("net");
+const epg = require("./epg");
 
 // Packaged Live TV provider (Kodi-model app code — ships in the app package, not
 // the core shell). `config` is the shell's config store, injected once by
@@ -205,7 +206,13 @@ async function vetHost(host) {
   return addrs;
 }
 
-function fetchText(url, timeoutMs, redirects) {
+// A provider's answer is held in memory whole, in the shell's own process, so it
+// is bounded twice: in size, and in total time. The socket timeout alone is an
+// idle timeout, and a server that trickles a byte at a time never trips it.
+const FETCH_MAX_CHARS = 64 * 1024 * 1024;
+
+function fetchText(url, timeoutMs, redirects, maxChars) {
+  const cap = maxChars || FETCH_MAX_CHARS;
   let parsed;
   try {
     parsed = new URL(url);
@@ -230,18 +237,33 @@ function fetchText(url, timeoutMs, redirects) {
             } catch (e) {
               return reject(new Error("bad redirect location"));
             }
-            return resolve(fetchText(next, timeoutMs, (redirects || 0) + 1));
+            clearTimeout(deadline);
+            return resolve(fetchText(next, timeoutMs, (redirects || 0) + 1, cap));
           }
           if (res.statusCode !== 200) {
             res.resume();
+            clearTimeout(deadline);
             return reject(new Error("HTTP " + res.statusCode));
           }
-          let data = "";
+          const parts = [];
+          let size = 0;
           res.setEncoding("utf8");
-          res.on("data", (c) => (data += c));
-          res.on("end", () => resolve(data));
+          res.on("data", (c) => {
+            size += c.length;
+            if (size > cap) return req.destroy(new Error("response too large"));
+            parts.push(c);
+          });
+          res.on("end", () => {
+            clearTimeout(deadline);
+            resolve(parts.join(""));
+          });
+          res.on("error", reject);
         });
-        req.on("error", reject);
+        const deadline = setTimeout(() => req.destroy(new Error("timeout")), timeoutMs * 2);
+        req.on("error", (e) => {
+          clearTimeout(deadline);
+          reject(e);
+        });
         req.setTimeout(timeoutMs, () => req.destroy(new Error("timeout")));
       }),
   );
@@ -294,6 +316,10 @@ function attr(line, key) {
 }
 function channelsFromM3U(text) {
   const channels = [];
+  // A channel's id is its focus key and its identity on screen, and playlists
+  // repeat a tvg-id (one channel in two qualities, or two channels sharing a guide
+  // entry). A repeat gets a suffix; its guide id is left as it was.
+  const seen = new Map();
   let cur = null;
   let order = 0;
   for (const raw of text.split("\n")) {
@@ -311,6 +337,9 @@ function channelsFromM3U(text) {
       cur.url = line;
       if (allowedStreamUrl(cur.url)) {
         cur.order = order++;
+        const n = seen.get(cur.id) || 0;
+        seen.set(cur.id, n + 1);
+        if (n) cur.id = cur.id + "~" + (n + 1);
         channels.push(cur);
       } else {
         console.warn("[livetv] dropped channel with disallowed URL scheme:", line.slice(0, 40));
@@ -323,20 +352,56 @@ function channelsFromM3U(text) {
 
 // ----------------------------------------------------------------------------
 let cache = { at: 0, channels: null, xtream: null };
+// Bumped by clearCache. A read that started before a source change answers for
+// the OLD source, so its result is only kept if the generation is still the one
+// it started under. `inflight` makes the two screens that ask together (now/next
+// and the guide) share one download instead of each making their own.
+let generation = 0;
+const inflight = { channels: null, epg: null };
+function shared(key, run) {
+  const gen = generation;
+  if (inflight[key] && inflight[key].gen === gen) return inflight[key].p;
+  // Either outcome of a read that outlived a source change is the old source's,
+  // a failure included, so both become source_changed and the caller asks again.
+  const stale = () => gen !== generation;
+  const p = run(gen)
+    .then(
+      (v) => {
+        if (stale()) throw new Error("source_changed");
+        return v;
+      },
+      (e) => {
+        throw stale() ? new Error("source_changed") : e;
+      },
+    )
+    .finally(() => {
+      if (inflight[key] && inflight[key].p === p) inflight[key] = null;
+    });
+  inflight[key] = { gen, p };
+  return p;
+}
 
-async function getChannels() {
+function getChannels() {
+  if (cache.channels && Date.now() - cache.at < TTL_MS) return Promise.resolve(cache.channels);
+  // A read that outlived a source change answers for the new source instead.
+  return shared("channels", readChannels).catch((e) =>
+    e && e.message === "source_changed" ? getChannels() : Promise.reject(e),
+  );
+}
+
+async function readChannels(gen) {
   const now = Date.now();
-  if (cache.channels && now - cache.at < TTL_MS) return cache.channels;
   const src = resolveSource();
   if (!src.x && !src.m3uUrl) throw new Error("not_configured"); // truly no source
   let channels = null;
+  let xtream = null;
   let failed = false; // a source IS configured but the fetch/auth failed
   if (src.x) {
     try {
       const info = await api(src.x, "");
       if (info && info.user_info && Number(info.user_info.auth) === 1) {
         channels = await channelsFromXtream(src.x);
-        cache.xtream = src.x;
+        xtream = src.x;
         console.log("[livetv] xtream (" + src.origin + "):", channels.length, "channels");
       } else {
         failed = true;
@@ -350,7 +415,6 @@ async function getChannels() {
   if (!channels && src.m3uUrl) {
     try {
       channels = channelsFromM3U(await fetchText(src.m3uUrl, 30000, 0));
-      cache.xtream = null;
       console.log("[livetv] m3u (" + src.origin + "):", channels.length, "channels");
     } catch (e) {
       failed = true;
@@ -359,37 +423,15 @@ async function getChannels() {
   }
   if (!channels) throw new Error(failed ? "unreachable" : "not_configured");
   if (!channels.length) throw new Error("empty_playlist");
-  cache = { ...cache, at: now, channels };
+  if (gen !== generation) throw new Error("source_changed");
+  cache = { ...cache, at: now, channels, xtream };
   return channels;
 }
 
 function clearCache() {
+  generation++;
   cache = { at: 0, channels: null, xtream: null };
   epgCache = { at: 0, progs: null };
-}
-
-function decodeEntities(s) {
-  return String(s)
-    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'");
-}
-
-// Standard XMLTV datetime -> epoch SECONDS. Format is "YYYYMMDDHHMMSS ±HHMM"
-// (the trailing timezone offset is optional; absent = UTC), e.g.
-// "20240101060000 +0100". Returns 0 if unparseable. The wall-clock is
-// interpreted in the stated offset: epoch = UTC(wall) - offset.
-function parseXmltvTime(s) {
-  const m = /^\s*(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:\s*([+-])(\d{2})(\d{2}))?/.exec(String(s || ""));
-  if (!m) return 0;
-  const wall = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) / 1000;
-  if (!m[7]) return Math.floor(wall); // no offset -> treat as UTC
-  const offset = (Number(m[8]) * 60 + Number(m[9])) * 60 * (m[7] === "-" ? -1 : 1);
-  return Math.floor(wall - offset);
 }
 
 // Full EPG, parsed once from the XMLTV guide (EPG_URL, or xmltv.php for an
@@ -400,38 +442,47 @@ function parseXmltvTime(s) {
 let epgCache = { at: 0, progs: null };
 const EPG_TTL_MS = 15 * 60 * 1000;
 
-async function getEpg() {
+function getEpg() {
+  if (epgCache.progs && Date.now() - epgCache.at < EPG_TTL_MS) return Promise.resolve(epgCache.progs);
+  return shared("epg", readEpg).catch((e) => (e && e.message === "source_changed" ? getEpg() : Promise.reject(e)));
+}
+
+async function readEpg(gen) {
   const now = Date.now();
-  if (epgCache.progs && now - epgCache.at < EPG_TTL_MS) return epgCache.progs;
   const { epgUrl } = resolveSource();
   if (!epgUrl) return {};
   const xml = await fetchText(epgUrl, 45000, 0);
   const nowSec = Math.floor(now / 1000);
-  const lo = nowSec - 2 * 3600;
-  const hi = nowSec + 24 * 3600;
-  const progs = {};
-  const re = /<programme\b([^>]*)>([\s\S]*?)<\/programme>/g;
-  let m;
-  while ((m = re.exec(xml))) {
-    const attrs = m[1];
-    const chm = /channel="([^"]*)"/.exec(attrs);
-    if (!chm || !chm[1]) continue;
-    // Two guide shapes: Xtream's xmltv.php extension (start_timestamp/stop_timestamp
-    // as epoch seconds) and standard XMLTV (start="YYYYMMDDHHMMSS ±HHMM"). Prefer
-    // the Xtream epoch when present, else parse the standard datetime form.
-    let start = Number((/start_timestamp="(\d+)"/.exec(attrs) || [])[1] || 0);
-    let stop = Number((/stop_timestamp="(\d+)"/.exec(attrs) || [])[1] || 0);
-    if (!start) start = parseXmltvTime((/\bstart="([^"]+)"/.exec(attrs) || [])[1] || "");
-    if (!stop) stop = parseXmltvTime((/\bstop="([^"]+)"/.exec(attrs) || [])[1] || "");
-    if (!start || !stop || stop < lo || start > hi) continue;
-    const tm = /<title[^>]*>([\s\S]*?)<\/title>/.exec(m[2]);
-    const title = tm ? decodeEntities(tm[1]).trim() : "";
-    (progs[chm[1]] || (progs[chm[1]] = [])).push({ title, start, stop });
-  }
-  for (const ch in progs) progs[ch].sort((a, b) => a.start - b.start);
+  const progs = await parseEpgOffThread(xml, nowSec - 2 * 3600, nowSec + 24 * 3600);
+  if (gen !== generation) throw new Error("source_changed");
   epgCache = { at: now, progs };
   console.log("[livetv] epg parsed for", Object.keys(progs).length, "channels");
   return progs;
+}
+
+// The guide is megabytes of XML and the parse is one long synchronous pass, so it
+// runs on a worker thread: in the shell's main process it would stall the UI and
+// every other route while it runs. Inline only if a worker cannot be started.
+function parseEpgOffThread(xml, lo, hi) {
+  let Worker;
+  try {
+    ({ Worker } = require("worker_threads"));
+  } catch (e) {
+    return Promise.resolve(epg.parse(xml, lo, hi));
+  }
+  return new Promise((resolve, reject) => {
+    let w;
+    try {
+      w = new Worker(path.join(__dirname, "epg-worker.js"), { workerData: { xml, lo, hi } });
+    } catch (e) {
+      return resolve(epg.parse(xml, lo, hi));
+    }
+    w.once("message", resolve);
+    w.once("error", reject);
+    w.once("exit", (code) => {
+      if (code !== 0) reject(new Error("epg worker exited with " + code));
+    });
+  });
 }
 
 // now/next per channel (Live TV list view).
@@ -478,4 +529,13 @@ async function getShortEpg(streamId, limit) {
   }));
 }
 
-module.exports = { setConfig, getChannels, getShortEpg, getNowNext, getGuide, clearCache, readConf };
+module.exports = {
+  setConfig,
+  getChannels,
+  getShortEpg,
+  getNowNext,
+  getGuide,
+  clearCache,
+  readConf,
+  _test: { parseEpgOffThread, channelsFromM3U },
+};

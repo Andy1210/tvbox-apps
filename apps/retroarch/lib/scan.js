@@ -32,6 +32,7 @@ const cores = require("./cores");
 const art = require("./art");
 const roms = require("./roms");
 const games = require("./games");
+const linked = require("./folders");
 
 const FLATPAK_REF = "org.libretro.RetroArch";
 const SCAN_TIMEOUT_MS = 45 * 60 * 1000; // a big folder over a network share, hashed file by file
@@ -218,27 +219,102 @@ function folders() {
   return out;
 }
 
+// The string half of resolveFolder: inside the library by spelling, with no
+// file system access, so it is safe to ask before anything touches the disk.
+function underLibrary(input) {
+  const want = path.resolve(String(input || ""));
+  const root = path.resolve(roms.ROMS_DIR);
+  return want === root || want.startsWith(root + path.sep);
+}
+
 // Is this path one of the folders a scan may be pointed at? The UI sends a path back,
 // so it is checked against the list rather than trusted - and a path outside the roms
 // folder must never reach a command line.
 function resolveFolder(input) {
   const want = path.resolve(String(input || ""));
   const root = path.resolve(roms.ROMS_DIR);
-  if (want !== root && !want.startsWith(root + path.sep)) return "";
+  const spelledInLibrary = want === root || want.startsWith(root + path.sep);
   try {
+    // The targets of the links this app made, each still passing the test `add`
+    // used. Read before anything else touches the path, so an input outside the
+    // library that is not inside one of them never reaches stat.
+    const targets = [];
+    for (const f of linked.read()) {
+      const link = linked.linkPath(f.name);
+      try {
+        if (!fs.lstatSync(link).isSymbolicLink()) continue;
+        const target = fs.realpathSync(link);
+        if (linked.targetOk(target)) targets.push({ link, target });
+      } catch (e) {
+        /* a dangling or unreadable link names nothing */
+      }
+    }
+    const inside = (p, base) => p === base || p.startsWith(base + path.sep);
+    // The answer is itself a real path, and callers pass it on (the scan hands it
+    // to its finish step), so an already resolved linked target is accepted as is.
+    if (!spelledInLibrary && !targets.some((t) => inside(want, t.target))) return "";
     if (!fs.statSync(want).isDirectory()) return "";
     // Compare what the paths REALLY are, not what they spell. A subdirectory of
     // the library that is a symlink elsewhere passes the string test above while
     // pointing anywhere on the box, and this value goes on RetroArch's command
     // line. The root is resolved too, so a library that is itself a link (an
     // external drive, say) keeps working - only escaping from inside it does not.
-    const realRoot = fs.realpathSync(root);
     const real = fs.realpathSync(want);
-    if (real !== realRoot && !real.startsWith(realRoot + path.sep)) return "";
-    return real;
+    if (inside(real, fs.realpathSync(root))) return real;
+    // A linked folder (folders.js) points outside the library on purpose. Its
+    // target is accepted when the path was spelled through that link, or is
+    // already inside where it points.
+    for (const t of targets) {
+      const named = spelledInLibrary ? inside(want, t.link) : inside(want, t.target);
+      if (named && inside(real, t.target)) return real;
+    }
+    return "";
   } catch (e) {
     return "";
   }
+}
+
+// One spelling for a ROM path, so the same file is recognised however it was
+// written down. A linked folder is scanned through its real target, while older
+// playlist entries (and RetroArch's own pass, pointed at the link) spell the same
+// file through the link: compared as strings they looked like two games, and a
+// rescan appended a second copy of each. Each registered link, and the library
+// root itself, is rewritten to its real target. String work only, one realpath
+// per link, so a playlist of thousands costs no file system access per entry.
+function canonicalizer() {
+  const pairs = [];
+  const add = (from, to) => {
+    const a = path.resolve(from);
+    if (a !== to) pairs.push([a, to]);
+  };
+  try {
+    for (const f of linked.read()) {
+      const link = linked.linkPath(f.name);
+      try {
+        if (!fs.lstatSync(link).isSymbolicLink()) continue;
+        add(link, fs.realpathSync(link));
+      } catch (e) {
+        /* a dangling link rewrites nothing */
+      }
+    }
+  } catch (e) {
+    /* no registered links */
+  }
+  try {
+    add(roms.ROMS_DIR, fs.realpathSync(roms.ROMS_DIR));
+  } catch (e) {
+    /* no library yet */
+  }
+  // Longest first, so a link inside the library wins over the library root.
+  pairs.sort((x, y) => y[0].length - x[0].length);
+  return (p) => {
+    const s = path.resolve(String(p || ""));
+    for (const [from, to] of pairs) {
+      if (s === from) return to;
+      if (s.startsWith(from + path.sep)) return to + s.slice(from.length);
+    }
+    return s;
+  };
 }
 
 // What a folder holds, and what a scan would do with it: how many games, which
@@ -252,12 +328,13 @@ function inspect(folder, opts) {
   if (!dir) return { folder: "", error: "bad_folder", games: 0, already: 0, ambiguous: 0, systems: [] };
   const map = extensionMap(opts);
   const found = walk(dir, new Set(map.keys()));
-  const known = knownPaths();
+  const canon = canonicalizer();
+  const known = knownPaths(canon);
   const systems = new Map(); // console -> count
   let ambiguous = 0;
   let already = 0;
   for (const f of found) {
-    if (known.has(f.path)) already++;
+    if (known.has(canon(f.path))) already++;
     const claim = map.get(f.ext);
     if (!claim || claim.size !== 1) {
       ambiguous++;
@@ -276,10 +353,13 @@ function inspect(folder, opts) {
 }
 
 // Every ROM path any playlist already lists. One read of each playlist, so a rescan
-// adds what is missing instead of duplicating what is there.
-function knownPaths() {
+// adds what is missing instead of duplicating what is there. `canon` (from
+// canonicalizer()) makes the set hold one spelling per file; without it the
+// paths are kept as written.
+function knownPaths(canon) {
   const out = new Set();
-  for (const system of games.systemNames()) for (const g of games.games(system)) out.add(g.rom);
+  const put = (p) => out.add(canon ? canon(p) : String(p));
+  for (const system of games.systemNames()) for (const g of games.games(system)) put(g.rom);
   // games() dedupes by label; the raw entries are what must not be added twice.
   let files = [];
   try {
@@ -290,7 +370,7 @@ function knownPaths() {
   for (const f of files) {
     try {
       const doc = JSON.parse(fs.readFileSync(path.join(art.PLAYLISTS_DIR, f), "utf8"));
-      for (const item of (doc && doc.items) || []) if (item && item.path) out.add(String(item.path));
+      for (const item of (doc && doc.items) || []) if (item && item.path) put(item.path);
     } catch (e) {
       /* unreadable playlist: its entries just look missing, and a rescan re-adds them */
     }
@@ -357,11 +437,15 @@ function addMissing(dir, opts) {
   const forced = (opts && opts.system) || "";
   if (forced && !art.nameOk(forced)) return { added: 0, skipped: 0, systems: [] };
   const found = walk(dir, forced ? null : new Set(map.keys()));
-  const known = knownPaths();
+  const canon = canonicalizer();
+  const known = knownPaths(canon);
   const bySystem = new Map();
   let skipped = 0;
   for (const f of found) {
-    if (known.has(f.path)) continue;
+    const key = canon(f.path);
+    if (known.has(key)) continue;
+    // Two spellings of one file inside the same walk count once too.
+    known.add(key);
     let system = forced;
     if (!system) {
       const claim = map.get(f.ext);
@@ -412,6 +496,7 @@ function addMissing(dir, opts) {
 // means the next one folds it again.
 function foldVariants(opts) {
   let folded = 0;
+  const canon = canonicalizer();
   for (const system of games.systemNames()) {
     const m = /^(.*\S)\s+\([^()]+\)$/.exec(system);
     if (!m) continue;
@@ -427,13 +512,13 @@ function foldVariants(opts) {
       // PlayStation Portable with no games in it, for ever.
       const from = readPlaylist(system);
       const into = readPlaylist(base);
-      const have = new Set(into.items.filter((i) => i && i.path).map((i) => i.path));
+      const have = new Set(into.items.filter((i) => i && i.path).map((i) => canon(i.path)));
       for (const item of from.items) {
         // A path is what identifies a game here, so an entry without one is
         // neither a duplicate nor something worth carrying over - copying it
         // would make every other pathless entry look like a duplicate of it.
-        if (!item || !item.path || have.has(item.path)) continue;
-        have.add(item.path);
+        if (!item || !item.path || have.has(canon(item.path))) continue;
+        have.add(canon(item.path));
         into.items.push({ ...item, db_name: base + ".lpl" });
       }
       writePlaylist(base, into);
@@ -460,13 +545,13 @@ async function scan(folder, opts) {
   const dir = resolveFolder(folder);
   if (!dir) return { ok: false, error: "bad_folder" };
   if (o.onProgress) o.onProgress({ stage: "retroarch", folder: dir });
-  const ra = await retroarchScan(dir, o.env, o.onChild);
+  // `retroarch` replaces the RetroArch pass, which needs the flatpak, in tests.
+  const ra = await (o.retroarch || retroarchScan)(dir, o.env, o.onChild);
   // A stop is a stop first: it is why the pass ended, and reporting it as a
   // failure would be a lie about something the user did on purpose. `missed`
   // counts every "??" in the output while `seen` counts progress lines, so a
   // SIGTERM landing mid-line can leave more of the first than the second.
-  if (o.stopped && o.stopped())
-    return { ok: true, stopped: true, matched: Math.max(0, ra.seen - ra.missed), added: 0 };
+  if (o.stopped && o.stopped()) return { ok: true, stopped: true, matched: Math.max(0, ra.seen - ra.missed), added: 0 };
   // Otherwise a pass that did not run is a failed scan, not an empty one. Without
   // this, a missing flatpak or a non-zero exit came back as "done, 0 recognised"
   // and the screen said the folder simply had nothing in it.
@@ -474,8 +559,14 @@ async function scan(folder, opts) {
   if (o.onProgress) o.onProgress({ stage: "adding", folder: dir, matched: ra.seen - ra.missed });
   let mine = { added: 0, skipped: 0, systems: [] };
   try {
-    mine = addMissing(dir, o);
-    foldVariants(o);
+    // `finish` lets the caller run this pass somewhere that may block (it walks
+    // the folder and rewrites playlists); by default it runs right here.
+    if (o.finish) mine = await o.finish(dir, o.system || "");
+    else {
+      mine = addMissing(dir, o);
+      foldVariants(o);
+    }
+    if (!mine || mine.error) throw new Error((mine && mine.error) || "finish_failed");
   } catch (e) {
     return { ok: false, error: "write_failed", detail: String((e && e.message) || e) };
   }
@@ -497,8 +588,10 @@ module.exports = {
   walk,
   folders,
   resolveFolder,
+  underLibrary,
   inspect,
   knownPaths,
+  canonicalizer,
   readPlaylist,
   writePlaylist,
   addMissing,

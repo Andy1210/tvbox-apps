@@ -2,6 +2,7 @@
 <html lang="{{lang}}">
   <head>
     <meta charset="utf-8" />
+    <meta name="referrer" content="no-referrer" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>{{title}}</title>
     <style>
@@ -89,8 +90,24 @@
     <label>{{secret}}</label><input id="secret" autocapitalize="off" autocorrect="off" spellcheck="false" />
     <button id="save" onclick="save()">{{save}}</button>
     <div id="msg"></div>
+    <script src="/tvbox-seal.js" data-v="2"></script>
     <script>
-      document.getElementById("code").value = new URLSearchParams(location.search).get("c") || "";
+      // With data-v="2" the box's /tvbox-seal.js takes the code and a key from the
+      // QR code's URL fragment and seals every write with that key, so neither
+      // crosses the network in clear. A box that does not serve it put the code
+      // in the query and takes a plain body.
+      var seal = window.tvboxSeal;
+      function sealBody(b, route) {
+        return seal ? seal.body(b, route) : JSON.stringify(b);
+      }
+      function pairCode() {
+        return seal ? seal.code : new URLSearchParams(location.search).get("c") || "";
+      }
+      // What a write's URL carries: nothing once the code travels sealed.
+      function writeQuery() {
+        return seal ? "" : location.search;
+      }
+      document.getElementById("code").value = pairCode();
       function val(id) {
         return document.getElementById(id).value.trim();
       }
@@ -112,10 +129,10 @@
         } catch (e) {}
       }
       function save() {
-        fetch("/save" + location.search, {
+        fetch("/save" + writeQuery(), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ code: val("code"), clientId: val("cid"), clientSecret: val("secret") }),
+          body: sealBody({ code: val("code"), clientId: val("cid"), clientSecret: val("secret") }, "/save"),
         })
           .then(function (r) {
             return r.json();

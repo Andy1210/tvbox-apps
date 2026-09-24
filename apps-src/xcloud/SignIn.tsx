@@ -80,7 +80,12 @@ export function SignIn({
     }, POLL_MS);
   }, [message, onSignedIn, stopPolling]);
 
+  // A ref as well as the state: a second Enter can land before the render that
+  // would have shown `busy`, and each press would otherwise ask for its own code.
+  const starting = useRef(false);
   const start = useCallback(async () => {
+    if (starting.current) return;
+    starting.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -93,6 +98,7 @@ export function SignIn({
     } catch (e) {
       setError(message((e as api.ApiError).code));
     } finally {
+      starting.current = false;
       setBusy(false);
     }
   }, [message, poll]);

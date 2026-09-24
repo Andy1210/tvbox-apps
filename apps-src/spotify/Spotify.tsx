@@ -3,7 +3,7 @@ import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spat
 import { useI18n, useBackspace, useConfigStore, FocusButton, tvbox } from "@sdk";
 import { NowPlaying } from "./NowPlaying";
 import { SpotifySettings } from "./SpotifySettings";
-import { Browser, playErrorText, startedAsText } from "./Browser";
+import { Browser, apiErrorText, playErrorText, startedAsText } from "./Browser";
 import { useSpotifyStore } from "./stores/spotify";
 import { authStatus, play, search, setSpotifyEnabled, URIS_MAX, type AuthStatus } from "./api";
 
@@ -222,6 +222,7 @@ export function Spotify({ onExit }: { onExit: () => void }) {
     return off;
   }, []);
 
+  const voiceSeq = useRef(0);
   useEffect(() => {
     // Not until the account is known - see `wanted`.
     if (wanted === null || auth === null) return;
@@ -234,7 +235,15 @@ export function Spotify({ onExit }: { onExit: () => void }) {
       return;
     }
     say(t("spotify.voiceSearching", { query }));
+    // A newer spoken request replaces this one: a slow search must not start its
+    // music after the next request has already been answered.
+    const mine = ++voiceSeq.current;
     void search(query).then(async (r) => {
+      if (voiceSeq.current !== mine) return;
+      if (r.error) {
+        say(apiErrorText(t, r.error), true);
+        return;
+      }
       if (!r.tracks.length) {
         say(t("spotify.voiceNoMatch", { query }), true);
         return;
@@ -242,6 +251,7 @@ export function Spotify({ onExit }: { onExit: () => void }) {
       // The result list is the running order, so what was asked for is followed
       // by more of the same rather than by silence.
       const out = await play({ uris: r.tracks.slice(0, URIS_MAX).map((x) => x.uri) });
+      if (voiceSeq.current !== mine) return;
       // A spoken request lands on this screen too, so it is owed the same sentence
       // about whose session started as a press from the library is.
       if (out.ok) say(startedAsText(t, out.startedAs || "", auth?.user || ""));

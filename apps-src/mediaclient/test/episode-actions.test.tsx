@@ -220,6 +220,25 @@ describe("the marking button", () => {
     expect(hint()).toContain("Mark as watched");
   });
 
+  it("acts on the episode shown after the cursor went away and came back", async () => {
+    // A -> B -> A along the row, with B's read still out: B's late answer must
+    // not replace A, which the cursor is on and the header describes.
+    const h = await open();
+    const { useApp } = await import("../state");
+    const be = useApp.getState().backend as unknown as { item: (id: string) => Promise<unknown> };
+    const orig = be.item;
+    let releaseB = (): void => {};
+    be.item = (id: string) =>
+      id === h.episodes[1]!.id ? new Promise((r) => (releaseB = () => r(orig(id)))) : orig(id);
+    await focusOn(`children-${h.season.id}-${h.episodes[0]!.id}`);
+    await focusOn(`children-${h.season.id}-${h.episodes[1]!.id}`);
+    await focusOn(`children-${h.season.id}-${h.episodes[0]!.id}`);
+    releaseB();
+    await settleFocus();
+    await focusOn("detail-watched");
+    expect(hint()).toContain("S1E1");
+  });
+
   it("takes that name back when the cursor leaves the row", async () => {
     // The SDK's button reports focus and has no blur, so a name put up by one
     // and never taken down stays up behind whatever the cursor moved on to.

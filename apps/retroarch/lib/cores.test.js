@@ -25,6 +25,41 @@ function putCore(name, data) {
 }
 const reset = () => fs.rmSync(cores.CORES_DIR, { recursive: true, force: true });
 
+test("a system pack carrying a symlink entry is refused before anything is unpacked", async () => {
+  const { execFileSync } = require("child_process");
+  const work = fs.mkdtempSync(path.join(HOME, "zip-"));
+  fs.mkdirSync(path.join(work, "pack"));
+  fs.writeFileSync(path.join(work, "pack", "bios.bin"), "x");
+  fs.symlinkSync("/etc/passwd", path.join(work, "pack", "link"));
+  const bad = path.join(work, "bad.zip");
+  execFileSync("zip", ["-qry", bad, "pack"], { cwd: work });
+  assert.deepStrictEqual(await cores._test.unpackAssets(bad), { ok: false, error: "unsafe_archive" });
+  assert.ok(!fs.existsSync(path.join(cores.SYSTEM_DIR, "pack")), "nothing was unpacked");
+  fs.unlinkSync(path.join(work, "pack", "link"));
+  const good = path.join(work, "good.zip");
+  execFileSync("zip", ["-qr", good, "pack"], { cwd: work });
+  assert.strictEqual((await cores._test.unpackAssets(good)).ok, true);
+  assert.ok(fs.existsSync(path.join(cores.SYSTEM_DIR, "pack", "bios.bin")));
+});
+
+test("a symlink entry with setuid or sticky bits is refused as well", async () => {
+  const { execFileSync } = require("child_process");
+  const work = fs.mkdtempSync(path.join(HOME, "zip-"));
+  const bad = path.join(work, "bits.zip");
+  // zip cannot store those bits for a link, so the entry is written by hand.
+  execFileSync("python3", [
+    "-c",
+    [
+      "import sys, zipfile",
+      "zi = zipfile.ZipInfo('pack/l'); zi.create_system = 3",
+      "zi.external_attr = 0o127777 << 16",
+      "z = zipfile.ZipFile(sys.argv[1], 'w'); z.writestr(zi, '/etc/passwd'); z.close()",
+    ].join("\n"),
+    bad,
+  ]);
+  assert.deepStrictEqual(await cores._test.unpackAssets(bad), { ok: false, error: "unsafe_archive" });
+});
+
 test("the cores directory is under the redirected HOME", () => {
   assert.ok(cores.CORES_DIR.startsWith(HOME), cores.CORES_DIR);
 });

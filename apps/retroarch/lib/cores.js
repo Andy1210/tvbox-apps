@@ -421,10 +421,23 @@ function unpackAssets(zip, env) {
       for (const e of entries) {
         if (e.startsWith("/") || e.split("/").includes("..")) return resolve({ ok: false, error: "unsafe_archive" });
       }
-      fs.mkdirSync(SYSTEM_DIR, { recursive: true });
-      execFile("unzip", ["-o", "-q", zip, "-d", SYSTEM_DIR], { env, timeout: 120000 }, (uerr) =>
-        resolve(uerr ? { ok: false, error: "unpack_failed" } : { ok: true, entries: entries.length }),
-      );
+      // A symlink entry is refused too: it could point anywhere, and a later entry
+      // or a later pack would then be written through it. The long listing is
+      // the one that carries each entry's mode, where a link reads "l". Only the
+      // type letter is matched: setuid, setgid and sticky bits change the rest.
+      execFile("unzip", ["-Z", zip], { env, timeout: 30000, maxBuffer: 4 * 1024 * 1024 }, (lerr, long) => {
+        if (lerr) return resolve({ ok: false, error: "bad_archive" });
+        if (
+          String(long)
+            .split("\n")
+            .some((line) => /^l\S{9}\s/.test(line))
+        )
+          return resolve({ ok: false, error: "unsafe_archive" });
+        fs.mkdirSync(SYSTEM_DIR, { recursive: true });
+        execFile("unzip", ["-o", "-q", zip, "-d", SYSTEM_DIR], { env, timeout: 120000 }, (uerr) =>
+          resolve(uerr ? { ok: false, error: "unpack_failed" } : { ok: true, entries: entries.length }),
+        );
+      });
     });
   });
 }
@@ -556,7 +569,7 @@ module.exports = {
   CORES_DIR,
   SYSTEM_DIR,
   installSystemAssets,
-  _test: { assetForCore },
+  _test: { assetForCore, unpackAssets },
   OVERRIDES_DIR,
   videoDriversFor,
   setOverrideDriver,

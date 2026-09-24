@@ -155,6 +155,67 @@ describe("the companion poll", () => {
     ).toBe(true);
   });
 
+  it("polls again when a held poll never answers", async () => {
+    // A connection that died without closing leaves the poll pending for ever,
+    // and the box is uncastable until the app restarts. The poll has a deadline.
+    vi.useFakeTimers();
+    try {
+      let polls = 0;
+      vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+        if (String(url).includes("/player/proxy/poll")) polls += 1;
+        return held(init);
+      });
+      const stop = startCompanion({
+        baseUrl: "http://s:32400",
+        token: "t",
+        id: ID,
+        onCommand: () => ({ ok: true as const }),
+      });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(polls).toBe(1);
+      await vi.advanceTimersByTimeAsync(10 * 60_000 + 1000);
+      expect(polls, "a second poll after the deadline").toBeGreaterThanOrEqual(2);
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("polls again when the headers arrive and the body stalls", async () => {
+    vi.useFakeTimers();
+    try {
+      let polls = 0;
+      vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+        if (!String(url).includes("/player/proxy/poll")) return held(init);
+        polls += 1;
+        // Headers now, body never: the stream only ends when the request is aborted.
+        const body = new ReadableStream<Uint8Array>({
+          start(c) {
+            init?.signal?.addEventListener("abort", () => {
+              const e = new Error("aborted");
+              e.name = "AbortError";
+              c.error(e);
+            });
+          },
+        });
+        return new Response(body, { status: 200, headers: { "Content-Type": "application/xml" } });
+      });
+      const stop = startCompanion({
+        baseUrl: "http://s:32400",
+        token: "t",
+        id: ID,
+        onCommand: () => ({ ok: true as const }),
+      });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(polls).toBe(1);
+      await vi.advanceTimersByTimeAsync(10 * 60_000 + 60_000);
+      expect(polls, "a second poll after the deadline").toBeGreaterThanOrEqual(2);
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("stops polling when it is told to", async () => {
     // It is started from an effect and torn down with the session. A loop that
     // outlived sign-out would keep answering for an account that has left.

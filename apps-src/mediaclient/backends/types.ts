@@ -106,6 +106,8 @@ export interface MediaItem {
    * asked for reports a number that is not on the other device.
    */
   childCount?: number;
+  /** On a playlist: whether it holds music, films or photos, where the server says. */
+  playlistType?: "audio" | "video" | "photo";
 }
 
 export interface PageQuery {

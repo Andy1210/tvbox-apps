@@ -412,3 +412,38 @@ test("an abandoned pass cannot take down the session that replaced it", async ()
     instance.stop();
   }
 });
+
+test("only the page that started a session can end it", async (t) => {
+  // The stop is reachable by a caller the shell cannot name (the page's beacon as
+  // it goes away), so it takes the key the start handed that page.
+  const real = { start: sessions.start, waitReady: sessions.waitReady, configuration: sessions.configuration, keepalive: sessions.keepalive, alive: sessions.alive, stop: sessions.stop };
+  let stopped = 0;
+  sessions.start = async () => ({ id: "S-key", type: "cloud", target: "GAME" });
+  sessions.waitReady = async () => ({ state: "Provisioned" });
+  sessions.configuration = async () => ({ keepAliveMs: 60000, noConnectionTimeoutMs: 300000, overrides: {} });
+  sessions.keepalive = async () => ({ reason: "None" });
+  sessions.alive = async () => ({ alive: true, state: "Provisioned" });
+  sessions.stop = async () => {
+    stopped++;
+  };
+  t.mock.timers.enable({ apis: ["setInterval", "setTimeout"] });
+  const { table, instance } = mount();
+  try {
+    const started = await callRoute(table.t, "POST /session/start", { body: { titleId: "GAME" } });
+    assert.match(started.stopKey, /^[0-9a-f]{32}$/);
+    for (const body of [{}, { key: "" }, { key: "0".repeat(32) }, { key: started.stopKey.slice(1) }]) {
+      const r = await callRoute(table.t, "POST /session/stop", { body });
+      assert.equal(r.code, "bad_key", JSON.stringify(body));
+    }
+    assert.equal(stopped, 0, "a stop without the key ended the session");
+    assert.equal((await callRoute(table.t, "GET /session/state")).active, true);
+    assert.equal((await callRoute(table.t, "POST /session/stop", { body: { key: started.stopKey } })).ok, true);
+    assert.equal(stopped, 1);
+    // With nothing running there is nothing to protect, and the answer stays ok.
+    assert.equal((await callRoute(table.t, "POST /session/stop")).ok, true);
+  } finally {
+    t.mock.timers.reset();
+    Object.assign(sessions, real);
+    instance.stop();
+  }
+});

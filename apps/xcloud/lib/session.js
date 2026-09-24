@@ -133,24 +133,52 @@ async function start(target, opts) {
 // flickers.
 async function waitReady(session, opts) {
   const o = opts || {};
-  const deadlineAt = Date.now() + (o.timeoutMs || 300000);
+  // The deadline is for the server getting a session ready, so time spent in the
+  // queue does not count against it: a queue is the server saying it is on the
+  // way, and it can be long. The queue has a bound of its own.
+  const timeoutMs = o.timeoutMs || 300000;
+  const queueMaxMs = o.queueMaxMs || 30 * 60 * 1000;
   const intervalMs = o.intervalMs || 1000;
   let connectSent = false;
   let last = "";
   let waitSeconds = null;
   let waitAskedAt = 0;
   const startedAt = Date.now();
+  let queuedMs = 0;
+  let queuedSince = 0;
+  let blips = 0;
 
   for (;;) {
     cancelled(o.signal);
-    if (Date.now() > deadlineAt) throw new SessionError("provision_timeout", "The session never became ready.", { last });
+    const now = Date.now();
+    const inQueue = queuedMs + (queuedSince ? now - queuedSince : 0);
+    if (now - startedAt - inQueue > timeoutMs || inQueue > queueMaxMs)
+      throw new SessionError("provision_timeout", "The session never became ready.", { last });
 
-    const res = await api.gssv("GET", path(session.type, session.id, "state"), null, { timeout: 20000 });
+    let res;
+    try {
+      res = await api.gssv("GET", path(session.type, session.id, "state"), null, { timeout: 20000 });
+      blips = 0;
+    } catch (e) {
+      // A refused token or a session the server no longer knows is an answer. A
+      // failed request is not: one bad poll on the way to Microsoft must not end a
+      // session the server is still preparing.
+      const status = e && e.detail && e.detail.status;
+      if (!transientPoll(e, status) || ++blips > POLL_BLIPS_MAX) throw e;
+      await sleep(Math.min(10000, intervalMs * 2 ** blips), o.signal);
+      continue;
+    }
     const body = res.json() || {};
     const state = String(body.state || "");
     if (state !== last) {
       last = state;
       if (o.onState) o.onState(state, body);
+    }
+    if (state === "WaitingForResources") {
+      if (!queuedSince) queuedSince = Date.now();
+    } else if (queuedSince) {
+      queuedMs += Date.now() - queuedSince;
+      queuedSince = 0;
     }
 
     switch (state) {
@@ -197,6 +225,16 @@ async function waitReady(session, opts) {
     }
     await sleep(intervalMs, o.signal);
   }
+}
+
+const POLL_BLIPS_MAX = 5;
+
+// A poll that failed for a reason another poll could fix: no answer at all, a
+// server error, or a rate limit. A 4xx is the server's verdict and is not retried.
+function transientPoll(e, status) {
+  if (e && e.code === "token_rejected") return false;
+  if (!status) return true;
+  return status >= 500 || status === 429 || status === 408;
 }
 
 function failureMessage(body) {

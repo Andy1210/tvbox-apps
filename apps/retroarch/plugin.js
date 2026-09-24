@@ -69,6 +69,7 @@ const STR = {
     delAll: "Összes törlése",
     delAllConfirm: "Töröljön a box {n} játékot a(z) {sys} mappából? Ez nem visszavonható.",
     deleted: "{n} játék törölve.",
+    exists: "Már fent van a boxon: {name}. Ha cserélnéd, előbb töröld.",
   },
   en: {
     title: "tvbox - Upload games",
@@ -87,6 +88,7 @@ const STR = {
     delAll: "Delete all",
     delAllConfirm: "Delete {n} games from {sys}? This cannot be undone.",
     deleted: "{n} games deleted.",
+    exists: "Already on the box: {name}. Delete it first to replace it.",
   },
 };
 
@@ -351,18 +353,21 @@ module.exports = (host) => {
     return true;
   }
 
-  // The inspection walks a folder and reads every playlist, synchronously, and
-  // this code runs in the shell's Electron MAIN process - so doing it here would
-  // freeze the UI for as long as the walk takes, on every folder the cursor lands
-  // on. Electron's own binary as Node (ELECTRON_RUN_AS_NODE), the way the shell
-  // runs its CLI out of process for the same reason.
+  // Walking a folder and rewriting playlists are synchronous, and this code runs in
+  // the shell's Electron MAIN process - so doing them here would freeze the UI for
+  // as long as the walk takes, and for ever on a share that stops answering.
+  // Electron's own binary as Node (ELECTRON_RUN_AS_NODE), the way the shell runs
+  // its CLI out of process for the same reason.
   const INSPECT_TIMEOUT_MS = 60000;
-  function inspectOutOfProcess(folder) {
+  const ROM_STAT_TIMEOUT_MS = 5000;
+  const FINISH_TIMEOUT_MS = 10 * 60 * 1000;
+  function runOutOfProcess(args, timeoutMs, onChild) {
     return new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, [path.join(__dirname, "lib", "inspect-cli.js"), String(folder || "")], {
+      const child = spawn(process.execPath, [path.join(__dirname, "lib", "scan-cli.js"), ...args.map(String)], {
         env: { ...host.childEnv(), ELECTRON_RUN_AS_NODE: "1" },
         stdio: ["ignore", "pipe", "ignore"],
       });
+      if (onChild) onChild(child);
       let out = "";
       let done = false;
       const finish = (fn, arg) => {
@@ -371,8 +376,6 @@ module.exports = (host) => {
         clearTimeout(timer);
         fn(arg);
       };
-      // A share that has gone away can block the walk indefinitely; a folder the
-      // user has already moved off must not hold a process for ever.
       const timer = setTimeout(() => {
         try {
           child.kill("SIGKILL");
@@ -380,7 +383,7 @@ module.exports = (host) => {
           /* already gone */
         }
         finish(reject, new Error("timeout"));
-      }, INSPECT_TIMEOUT_MS);
+      }, timeoutMs);
       child.stdout.on("data", (d) => (out += d));
       child.on("error", (e) => finish(reject, e));
       child.on("close", () => {
@@ -390,6 +393,28 @@ module.exports = (host) => {
           finish(reject, e);
         }
       });
+    });
+  }
+
+  // One inspection at a time. The screen asks for one on every folder the cursor
+  // lands on, so a newer request makes the older one moot: it is ended rather
+  // than left walking beside it.
+  let inspectChild = null;
+  function inspectOutOfProcess(folder) {
+    if (inspectChild) {
+      try {
+        inspectChild.kill("SIGKILL");
+      } catch (e) {
+        /* already gone */
+      }
+      inspectChild = null;
+    }
+    let mine = null;
+    return runOutOfProcess(["inspect", folder], INSPECT_TIMEOUT_MS, (c) => {
+      mine = c;
+      inspectChild = c;
+    }).finally(() => {
+      if (inspectChild === mine) inspectChild = null;
     });
   }
 
@@ -413,6 +438,7 @@ module.exports = (host) => {
         onProgress: (p) => {
           scanning = { ...scanning, ...p };
         },
+        finish: (d, sys) => runOutOfProcess(["finish", d, sys], FINISH_TIMEOUT_MS),
       })
       .then((r) => {
         scanResult = r;
@@ -463,6 +489,35 @@ module.exports = (host) => {
   // and an INDEX, and the ROM and core are resolved here from RetroArch's own
   // playlist (lib/games.js), so nothing the renderer says ever reaches a command
   // line.
+  // Starting a game. Async because the ROM is checked off the main thread: on a
+  // network share a synchronous stat blocks for as long as the share does not answer.
+  async function playGame(res, ctx) {
+    const body = ctx.body || {};
+    const spec = games.launchSpec(String(body.system || ""), body.i, { statRom: false });
+    if (spec.error) return ctx.json(res, { ok: false, error: spec.error, rom: spec.rom || null });
+    // A network share that is not mounted right now is the common case, and it is
+    // worth saying so rather than starting an emulator that shows a black screen.
+    if (!(await games.romReachable(spec.rom, ROM_STAT_TIMEOUT_MS)))
+      return ctx.json(res, { ok: false, error: "rom_missing", rom: spec.rom });
+    if (!host.launchNative) return ctx.json(res, { ok: false, error: "shell_too_old" });
+    // A scan runs RetroArch too, and two of them on one box fight over the config and
+    // the controllers - so the game wins and the scan is ended. A scan is re-runnable
+    // and writes as it goes, so nothing is lost by stopping it here.
+    if (scanning) {
+      stopScan();
+      host.log("retroarch: scan stopped - a game is starting");
+    }
+    // A pad that connected since boot needs its profile corrected before RetroArch
+    // reads it, and this is the last moment we own: a launch is the one point where
+    // the set of connected pads is known and RetroArch is not running yet.
+    applyPadProfiles();
+    // --fullscreen comes from the manifest; the core and the ROM are this launch.
+    const ok = host.launchNative("retroarch", ["-L", spec.corePath, spec.rom]);
+    if (ok) host.log("retroarch: play", spec.core, "-", spec.label);
+    else host.log("retroarch: launch refused for", spec.label);
+    ctx.json(res, { ok, core: spec.core, label: spec.label });
+  }
+
   const gameRoutes = {
     "GET /systems": (req, res, ctx) =>
       ctx.json(res, {
@@ -493,28 +548,11 @@ module.exports = (host) => {
       png.on("error", () => res.end());
       png.pipe(res);
     },
-    "POST /play": (req, res, ctx) => {
-      const body = ctx.body || {};
-      const spec = games.launchSpec(String(body.system || ""), body.i);
-      if (spec.error) return ctx.json(res, { ok: false, error: spec.error, rom: spec.rom || null });
-      if (!host.launchNative) return ctx.json(res, { ok: false, error: "shell_too_old" });
-      // A scan runs RetroArch too, and two of them on one box fight over the config and
-      // the controllers - so the game wins and the scan is ended. A scan is re-runnable
-      // and writes as it goes, so nothing is lost by stopping it here.
-      if (scanning) {
-        stopScan();
-        host.log("retroarch: scan stopped - a game is starting");
-      }
-      // A pad that connected since boot needs its profile corrected before RetroArch
-      // reads it, and this is the last moment we own: a launch is the one point where
-      // the set of connected pads is known and RetroArch is not running yet.
-      applyPadProfiles();
-      // --fullscreen comes from the manifest; the core and the ROM are this launch.
-      const ok = host.launchNative("retroarch", ["-L", spec.corePath, spec.rom]);
-      if (ok) host.log("retroarch: play", spec.core, "-", spec.label);
-      else host.log("retroarch: launch refused for", spec.label);
-      ctx.json(res, { ok, core: spec.core, label: spec.label });
-    },
+    "POST /play": (req, res, ctx) =>
+      playGame(res, ctx).catch((e) => {
+        host.log("retroarch: play failed:", String((e && e.message) || e));
+        if (!res.headersSent) ctx.json(res, { ok: false, error: "failed" });
+      }),
     // The folders a scan can be pointed at, and what one would find in the one being
     // looked at. The inspection walks the folder, so it is per request rather than part
     // of the list - over a network share that walk is the expensive part.
@@ -522,6 +560,10 @@ module.exports = (host) => {
       ctx.json(res, { romsDir: roms.ROMS_DIR, folders: scan.folders(), consoles: scan.consoles() }),
     "GET /scan-inspect": (req, res, ctx) => {
       const folder = new URL(req.url, "http://x").searchParams.get("folder") || "";
+      // Checked by spelling before a process is spent on it; the child resolves
+      // it properly, links included.
+      if (!scan.underLibrary(folder))
+        return ctx.json(res, { folder: "", error: "bad_folder", games: 0, already: 0, ambiguous: 0, systems: [] });
       inspectOutOfProcess(folder)
         .then((r) => ctx.json(res, r))
         .catch(() =>
@@ -670,21 +712,33 @@ module.exports = (host) => {
 
   return {
     start() {
-      host.registerRoutes("/tvbox/api/retroarch", {
-        ...routes,
-        ...onScreen(gameRoutes),
-        // Consoles and covers are things a remote can drive, so the app has screens
-        // for them too - the same routes the phone pages call.
-        ...onScreen(coresRoutes),
-        ...onScreen(artRoutes),
-        ...onScreen(folderRoutes),
-      });
+      host.registerRoutes(
+        "/tvbox/api/retroarch",
+        {
+          ...routes,
+          ...onScreen(gameRoutes),
+          // Consoles and covers are things a remote can drive, so the app has screens
+          // for them too - the same routes the phone pages call.
+          ...onScreen(coresRoutes),
+          ...onScreen(artRoutes),
+          ...onScreen(folderRoutes),
+        },
+        // Reads that SPEND something get the same-origin gate every non-GET has: an
+        // inspection is a process walking a folder, and the core list is a request
+        // to the buildbot. Either can be fired by an <img src> on any page.
+        // Nothing here is for a caller the shell cannot name. An older shell
+        // ignores `public`.
+        { guard: ["GET /scan-inspect", "GET /cores"], public: [] },
+      );
       // Phone upload. The pairing server is only up while the TV shows the code,
       // and every route below it is code-gated by the shell.
       host.pairing.register("roms", {
+        v2: true,
         page: (ctx) => renderTemplate(romsPage, { lang: ctx.locale, ...(STR[ctx.locale] || STR.en) }),
         routes: {
+          // Bulk: authenticated by the query, not a sealed body (see roms.html).
           "POST /rom-chunk": {
+            bulk: true,
             maxBody: CHUNK_MAX_BODY,
             handler: (req, res, ctx) => ctx.json(res, roms.writeChunk(ctx.body || {})),
           },

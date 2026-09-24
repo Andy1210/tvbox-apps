@@ -114,6 +114,36 @@ describe("a command from a controller", () => {
     expect(played.length, "something actually started").toBe(1);
   });
 
+  it("plays a film cast with a play queue from the queue's own entry, with the rest after it", async () => {
+    const detail = (id: string) => ({
+      id,
+      kind: "episode",
+      title: `Item ${id}`,
+      versions: [{ mediaIndex: 0, label: "1080p", partId: "1", audio: [], subtitles: [] }],
+      roles: [],
+      extras: [],
+    });
+    useApp.setState({
+      backend: backend({
+        item: async (id: string) => (id === "900" ? { ...detail(id), kind: "playlist", playlistType: "video" } : detail(id)),
+        queueItems: async () => ({
+          items: [
+            { id: "11", kind: "episode", title: "one" },
+            { id: "12", kind: "episode", title: "two" },
+          ],
+          startIndex: 1,
+        }),
+      }) as never,
+    });
+    const res = await runCompanionCommand({
+      path: "/player/playback/playMedia",
+      params: { queryKey: "/playlists/900", queryContainerKey: "/playQueues/5", commandID: "1" },
+    });
+    expect(res).toEqual({ ok: true });
+    expect(usePlayer.getState().current?.item.id, "a video playlist goes to the film player").toBe("12");
+    expect(usePlayer.getState().queue?.map((i) => i.id)).toEqual(["11", "12"]);
+  });
+
   it("starts where the controller said, not where the server left off", async () => {
     // `resume` used the item's own view offset and only then seeked, which
     // begins a transcode in the wrong place and leaves the bar pointing

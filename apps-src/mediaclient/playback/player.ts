@@ -241,7 +241,6 @@ function sayItFailed(set: Setter, item: MediaItem): void {
   stepFailedTimer = setTimeout(() => set({ stepFailed: null, stepFailedId: null }), STEP_FAILED_MS);
 }
 
-
 /** What the store says when the box is showing nothing. */
 const STOPPED = {
   current: null,
@@ -912,6 +911,15 @@ export const usePlayer = create<PlayerState>((set, get) => ({
  * `useTheme` asks the same question for consistency rather than for a hole of
  * its own - what keeps a theme out of a gap is that playback already silenced it.
  */
+/**
+ * Say that a press on this item could not be answered, from outside the store:
+ * a screen that has to fetch something before it can call `play` fails before
+ * the player ever hears of it.
+ */
+export function reportPlayFailed(item: MediaItem): void {
+  sayItFailed((partial) => usePlayer.setState(partial), item);
+}
+
 export function useShowingPlayer(): boolean {
   return usePlayer((s) => s.current !== null);
 }
@@ -1164,6 +1172,9 @@ function wireLifecycle(): void {
     // somebody pressed Home would start a film over the launcher five seconds
     // later, with nothing able to cancel it.
     usePlayer.getState().cancelUpNext();
+    // A play still resolving is given up whether or not a film is on screen:
+    // with nothing current it would otherwise start behind the launcher.
+    playToken += 1;
     const s = usePlayer.getState();
     if (!s.current) return;
     // Synchronous-ish and best effort: the page may be frozen immediately after,
@@ -1179,6 +1190,16 @@ function wireLifecycle(): void {
     postNowPlaying({ state: "idle" });
     const session = s.current.decision.session;
     if (session && currentBackend) void currentBackend.endSession(session).catch(() => {});
+    // And forget it here too. The shell has stopped the film, so a store still
+    // saying "playing" would come back to a frozen overlay over nothing, the
+    // browsing screens hidden, the screensaver held off and phones told a film is
+    // on.
+    scheduler = null;
+    releasePlayer("video");
+    unsubscribePlayer?.();
+    unsubscribePlayer = null;
+    startedAt = 0;
+    usePlayer.setState(STOPPED);
   });
 
   onResume(() => {

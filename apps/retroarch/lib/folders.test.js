@@ -70,6 +70,57 @@ test("only ground the box offers as a source may be linked", () => {
   assert.strictEqual(folders.add({ name: "usb", path: STICK }).ok, true, "the home directory is fine");
 });
 
+test("HOME itself and its hidden directories cannot be linked", () => {
+  reset();
+  const hidden = path.join(HOME, ".config", "games");
+  fs.mkdirSync(hidden, { recursive: true });
+  fs.mkdirSync(path.join(HOME, ".tvbox", "apps", "x"), { recursive: true });
+  assert.strictEqual(folders.add({ name: "home", path: HOME }).error, "bad_path");
+  assert.strictEqual(folders.add({ name: "cfg", path: hidden }).error, "bad_path");
+  assert.strictEqual(folders.add({ name: "apps", path: path.join(HOME, ".tvbox", "apps", "x") }).error, "bad_path");
+  assert.strictEqual(folders.add({ name: "tvbox", path: path.join(HOME, ".tvbox") }).error, "bad_path");
+  // A name that merely starts with two dots is inside HOME, not above it.
+  const dots = path.join(HOME, "..cache", "games");
+  fs.mkdirSync(dots, { recursive: true });
+  assert.strictEqual(folders.add({ name: "dots", path: dots }).error, "bad_path");
+});
+
+test("a network share the shell mounted may be linked", () => {
+  reset();
+  const share = path.join(HOME, ".tvbox", "shares", "nas", "roms");
+  fs.mkdirSync(share, { recursive: true });
+  assert.strictEqual(folders.add({ name: "nas", path: share }).ok, true);
+});
+
+test("a user folder the shell offers under ~/.tvbox may be linked, its machinery may not", () => {
+  const user = path.join(HOME, ".tvbox", "games-drop", "gba");
+  fs.mkdirSync(user, { recursive: true });
+  assert.strictEqual(folders.add({ name: "drop", path: user }).ok, true);
+  const snaps = path.join(HOME, ".tvbox", "config-snapshots");
+  fs.mkdirSync(snaps, { recursive: true });
+  assert.strictEqual(folders.add({ name: "snaps", path: snaps }).error, "bad_path");
+  const hiddenInside = path.join(HOME, ".tvbox", "games-drop", ".secret");
+  fs.mkdirSync(hiddenInside, { recursive: true });
+  assert.strictEqual(folders.add({ name: "sec", path: hiddenInside }).error, "bad_path");
+  folders.remove("drop");
+});
+
+test("the shell's key and capture folders, and any private folder under ~/.tvbox, may not be linked", () => {
+  for (const name of ["update-keys", "screenframe"]) {
+    const dir = path.join(HOME, ".tvbox", name);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o755 });
+    assert.strictEqual(folders.add({ name: "m" + name.length, path: dir }).error, "bad_path", name);
+  }
+  // A folder a newer shell adds and keeps to itself is refused without a list entry.
+  const fresh = path.join(HOME, ".tvbox", "new-secrets");
+  fs.mkdirSync(fresh, { recursive: true });
+  fs.chmodSync(fresh, 0o700);
+  assert.strictEqual(folders.add({ name: "fresh", path: fresh }).error, "bad_path");
+  fs.chmodSync(fresh, 0o755);
+  assert.strictEqual(folders.add({ name: "fresh", path: fresh }).ok, true);
+  folders.remove("fresh");
+});
+
 test("a path that is not a directory on this box is refused", () => {
   reset();
   assert.strictEqual(folders.add({ name: "gone", path: path.join(HOME, "nope") }).error, "bad_path");

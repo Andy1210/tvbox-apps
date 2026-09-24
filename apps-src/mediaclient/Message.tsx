@@ -32,7 +32,15 @@ export interface MessageProps {
  * that immediately fails the same way, and the only recourse left is
  * reinstalling the app.
  */
-export function Message({ loading, text, failure, actions, onRetry }: MessageProps): React.JSX.Element {
+export function Message(props: MessageProps): React.JSX.Element {
+  // Keyed on what the screen says, so a second failure of another kind (the
+  // server unreachable, then Retry, then signed out) is a new screen whose first
+  // button takes focus. The initial focus fires once per mounted instance, and
+  // the button it went to the first time is gone.
+  return <MessageBody key={`${props.failure?.kind ?? ""}|${props.loading ? 1 : 0}`} {...props} />;
+}
+
+function MessageBody({ loading, text, failure, actions, onRetry }: MessageProps): React.JSX.Element {
   const { t } = useI18n();
   const signOut = useApp((s) => s.signOut);
   const clearFailure = useApp((s) => s.fail);

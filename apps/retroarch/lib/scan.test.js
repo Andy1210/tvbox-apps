@@ -57,6 +57,124 @@ test("a scan can only be pointed inside the roms folder", () => {
   assert.strictEqual(scan.resolveFolder(""), "");
 });
 
+test("a linked folder can be scanned through its link, and only through one the app made", () => {
+  const folders = require("./folders");
+  const outside = path.join(HOME, "Games", "gba");
+  fs.mkdirSync(outside, { recursive: true });
+  fs.writeFileSync(path.join(outside, "A.gba"), "x");
+  assert.strictEqual(folders.add({ name: "stick", path: outside }).ok, true);
+  const viaLink = path.join(roms.ROMS_DIR, "stick");
+  assert.strictEqual(scan.resolveFolder(viaLink), fs.realpathSync(outside));
+  // A link nobody registered, planted in the library, still escapes nowhere.
+  fs.symlinkSync("/etc", path.join(roms.ROMS_DIR, "planted"));
+  assert.strictEqual(scan.resolveFolder(path.join(roms.ROMS_DIR, "planted")), "");
+  fs.unlinkSync(path.join(roms.ROMS_DIR, "planted"));
+  folders.remove("stick");
+  assert.strictEqual(scan.resolveFolder(viaLink), "");
+});
+
+test("a resolved linked folder resolves to itself, and a sibling of its target does not", () => {
+  const folders = require("./folders");
+  const outside = path.join(HOME, "Games2", "gba");
+  fs.mkdirSync(outside, { recursive: true });
+  fs.mkdirSync(path.join(HOME, "Games2", "other"), { recursive: true });
+  assert.strictEqual(folders.add({ name: "stick2", path: outside }).ok, true);
+  const once = scan.resolveFolder(path.join(roms.ROMS_DIR, "stick2"));
+  assert.strictEqual(once, fs.realpathSync(outside));
+  // The scan resolves the folder, then hands the answer to its finish step,
+  // which resolves it again.
+  assert.strictEqual(scan.resolveFolder(once), once);
+  assert.strictEqual(scan.resolveFolder(path.join(once, "..", "other")), "");
+  assert.strictEqual(scan.resolveFolder(path.join(HOME, "Games2")), "");
+  // A link inside the target that points elsewhere is not the target.
+  fs.symlinkSync("/etc", path.join(outside, "escape"));
+  assert.strictEqual(scan.resolveFolder(path.join(once, "escape")), "");
+  fs.unlinkSync(path.join(outside, "escape"));
+  folders.remove("stick2");
+  assert.strictEqual(scan.resolveFolder(once), "");
+});
+
+test("a linked folder goes through the whole scan, finish pass included", async () => {
+  reset();
+  installCore("mgba", 'database = "' + GBA + '"\nsupported_extensions = "gba"\n');
+  const folders = require("./folders");
+  const outside = path.join(HOME, "Games3", "gba");
+  fs.mkdirSync(outside, { recursive: true });
+  fs.writeFileSync(path.join(outside, "Metroid (USA).gba"), "x");
+  assert.strictEqual(folders.add({ name: "stick3", path: outside }).ok, true);
+  const { execFileSync } = require("child_process");
+  const cli = path.join(__dirname, "scan-cli.js");
+  const dir = scan.resolveFolder(path.join(roms.ROMS_DIR, "stick3"));
+  // This is what the plugin's finish step is called with: the resolved folder.
+  const out = JSON.parse(execFileSync(process.execPath, [cli, "finish", dir], { env: { ...process.env, HOME } }));
+  assert.strictEqual(out.error, undefined);
+  assert.strictEqual(out.added, 1);
+  // And the in-process scan, with RetroArch's own pass stubbed out, reaches the
+  // same finish step with the same folder.
+  let finishedWith = "";
+  const res = await scan.scan(path.join(roms.ROMS_DIR, "stick3"), {
+    retroarch: async () => ({ ok: true, seen: 1, missed: 0 }),
+    finish: async (d) => {
+      finishedWith = d;
+      return JSON.parse(execFileSync(process.execPath, [cli, "finish", d], { env: { ...process.env, HOME } }));
+    },
+  });
+  assert.notStrictEqual(res.error, "bad_folder");
+  assert.strictEqual(finishedWith, dir);
+  folders.remove("stick3");
+});
+
+test("a rescan of a linked folder recognises what is already listed, however it was spelled", () => {
+  reset();
+  installCore("mgba", 'database = "' + GBA + '"\nsupported_extensions = "gba"\n');
+  const folders = require("./folders");
+  const outside = path.join(HOME, "Games4", "gba");
+  fs.mkdirSync(outside, { recursive: true });
+  fs.writeFileSync(path.join(outside, "Zelda (USA).gba"), "x");
+  fs.writeFileSync(path.join(outside, "Kirby (USA).gba"), "x");
+  assert.strictEqual(folders.add({ name: "stick4", path: outside }).ok, true);
+  const viaLink = path.join(roms.ROMS_DIR, "stick4");
+  const real = fs.realpathSync(outside);
+  // One entry written through the link (an older scan, or RetroArch's own pass
+  // pointed at the link), one through the real target (this app's own scan).
+  const doc = scan.readPlaylist(GBA);
+  doc.items.push({ path: path.join(viaLink, "Zelda (USA).gba"), label: "Zelda" });
+  doc.items.push({ path: path.join(real, "Kirby (USA).gba"), label: "Kirby" });
+  scan.writePlaylist(GBA, doc);
+
+  const dir = scan.resolveFolder(viaLink);
+  assert.strictEqual(scan.inspect(dir).already, 2, "both spellings count as listed");
+  assert.strictEqual(scan.addMissing(dir).added, 0, "nothing is appended a second time");
+  assert.strictEqual(scan.readPlaylist(GBA).items.length, 2);
+  // The canonical form of both spellings is the same path.
+  const canon = scan.canonicalizer();
+  assert.strictEqual(canon(path.join(viaLink, "Zelda (USA).gba")), path.join(real, "Zelda (USA).gba"));
+  // The entry written through the link is left as it was, so it still plays.
+  assert.strictEqual(scan.readPlaylist(GBA).items[0].path, path.join(viaLink, "Zelda (USA).gba"));
+  folders.remove("stick4");
+});
+
+test("folding a variant does not duplicate a game the base lists through the other spelling", () => {
+  reset();
+  installCore("ppsspp", 'database = "Sony - PlayStation Portable"\nsupported_extensions = "iso"\n');
+  const folders = require("./folders");
+  const outside = path.join(HOME, "Games5", "psp");
+  fs.mkdirSync(outside, { recursive: true });
+  fs.writeFileSync(path.join(outside, "Game.iso"), "x");
+  assert.strictEqual(folders.add({ name: "stick5", path: outside }).ok, true);
+  const viaLink = path.join(roms.ROMS_DIR, "stick5", "Game.iso");
+  const real = path.join(fs.realpathSync(outside), "Game.iso");
+  const base = scan.readPlaylist("Sony - PlayStation Portable");
+  base.items.push({ path: viaLink, label: "Game" });
+  scan.writePlaylist("Sony - PlayStation Portable", base);
+  const variant = scan.readPlaylist("Sony - PlayStation Portable (PSN)");
+  variant.items.push({ path: real, label: "Game" });
+  scan.writePlaylist("Sony - PlayStation Portable (PSN)", variant);
+  assert.strictEqual(scan.foldVariants(), 1);
+  assert.strictEqual(scan.readPlaylist("Sony - PlayStation Portable").items.length, 1);
+  folders.remove("stick5");
+});
+
 test("the walk keeps games, drops what sits next to them, and skips a disc's raw tracks", () => {
   const dir = folder("psx", {
     "Game.cue": "",
@@ -262,4 +380,27 @@ test("a playlist entry with no path is not carried over", () => {
     ["Real"],
     "only the entry that names a game came across",
   );
+});
+
+test("the out-of-process finish pass does what the in-process one does", () => {
+  // scan-cli.js is what the plugin runs so a walk over a share cannot block the
+  // shell; it has to add the same entries addMissing would.
+  reset();
+  installCore("mgba", 'database = "' + GBA + '"\nsupported_extensions = "gba"\n');
+  const dir = folder("gba3", { "Zelda (USA).gba": "" });
+  const { execFileSync } = require("child_process");
+  const cli = path.join(__dirname, "scan-cli.js");
+  const run = (...args) =>
+    JSON.parse(execFileSync(process.execPath, [cli, ...args], { env: { ...process.env, HOME } }));
+  assert.deepStrictEqual(run("finish", dir).added, 1);
+  assert.strictEqual(scan.readPlaylist(GBA).items.length, 1);
+  assert.strictEqual(run("inspect", dir).already, 1);
+  assert.strictEqual(run("finish", "/etc").error, "bad_folder");
+  assert.strictEqual(run("nope").error, "bad_command");
+});
+
+test("underLibrary answers by spelling alone", () => {
+  assert.strictEqual(scan.underLibrary(path.join(roms.ROMS_DIR, "gba")), true);
+  assert.strictEqual(scan.underLibrary(path.join(roms.ROMS_DIR, "..", "x")), false);
+  assert.strictEqual(scan.underLibrary("/etc"), false);
 });

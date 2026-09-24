@@ -449,3 +449,20 @@ test("it starts, answers on the port it advertises, and stops", async () => {
   }
   assert.equal(r.running(), false);
 });
+
+test("an SSDP socket that fails while running is opened again", async () => {
+  const { r } = receiver({ ssdpRestartMs: 20 });
+  await new Promise((res, rej) => r.start((e) => (e ? rej(e) : res())));
+  try {
+    const first = r._ssdp();
+    assert.ok(first);
+    first.emit("error", new Error("interface went away"));
+    assert.strictEqual(r._ssdp(), null);
+    assert.strictEqual(r.findable(), false);
+    await new Promise((res) => setTimeout(res, 150));
+    assert.ok(r._ssdp(), "a new socket is listening");
+    assert.notStrictEqual(r._ssdp(), first);
+  } finally {
+    await new Promise((res) => r.stop(res));
+  }
+});

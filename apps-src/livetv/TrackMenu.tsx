@@ -73,9 +73,24 @@ export function TrackMenu({ tracks, onClose }: { tracks: TvboxTrack[]; onClose: 
 
   useBackspace(onClose);
   useEffect(() => () => clearTimeout(confirmTimer.current), []);
+  // The caller re-reads the track list as it opens this, so the fresh one lands
+  // after mount - a snapshot taken at mount would be the stale one it was meant
+  // to replace.
+  useEffect(() => setList(tracks), [tracks]);
 
-  // initial focus: the selected audio track, else the selected/Off subtitle row
+  // Initial focus: the selected audio track, else the selected/Off subtitle row.
+  // It follows the list the caller re-reads as the menu opens, until the first
+  // key press: after that the cursor is the user's.
+  const touched = useRef(false);
   useEffect(() => {
+    const mark = (): void => {
+      touched.current = true;
+    };
+    window.addEventListener("keydown", mark, true);
+    return () => window.removeEventListener("keydown", mark, true);
+  }, []);
+  useEffect(() => {
+    if (touched.current) return;
     const audio = tracks.filter((x) => x.type === "audio");
     const subs = tracks.filter((x) => x.type === "sub");
     const a = audio.find((x) => x.selected) || audio[0];
@@ -83,8 +98,7 @@ export function TrackMenu({ tracks, onClose }: { tracks: TvboxTrack[]; onClose: 
     const key = a ? `track-audio-${a.id}` : s ? `track-sub-${s.id}` : "track-sub-off";
     const id = setTimeout(() => setFocus(key), 0);
     return () => clearTimeout(id);
-    // mount-only on purpose: the opening snapshot decides where focus lands
-  }, []);
+  }, [tracks]);
 
   const apply = useCallback((type: "audio" | "sub", id: number | "no") => {
     window.tvbox?.setTrack?.(type, id);
@@ -127,7 +141,12 @@ export function TrackMenu({ tracks, onClose }: { tracks: TvboxTrack[]; onClose: 
           {subs.length > 0 && (
             <>
               <div className="text-[1.7vh] text-fg-dim font-semibold mt-[1vh]">{t("livetv.tracksSubtitles")}</div>
-              <TrackRow fk="track-sub-off" label={t("livetv.tracksOff")} selected={subsOff} onEnter={() => apply("sub", "no")} />
+              <TrackRow
+                fk="track-sub-off"
+                label={t("livetv.tracksOff")}
+                selected={subsOff}
+                onEnter={() => apply("sub", "no")}
+              />
               {subs.map((x) => (
                 <TrackRow
                   key={x.id}

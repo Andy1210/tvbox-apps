@@ -91,6 +91,34 @@ function Starting({ label }: { label: string }) {
   );
 }
 
+/** How long a refused launch stays on screen. */
+const PLAY_NOTICE_MS = 6000;
+
+/**
+ * Why a game did not start, over the grid rather than instead of it. Not
+ * focusable: the cursor stays on the cover that was pressed, so the next press
+ * can try another game straight away.
+ */
+function PlayNotice({ text, onDone }: { text: string; onDone: () => void }) {
+  // The timer follows the TEXT only. The parent passes a new callback on every
+  // render, and restarting on that would keep the notice up for as long as the
+  // screen keeps re-rendering.
+  const done = useRef(onDone);
+  done.current = onDone;
+  useEffect(() => {
+    const timer = setTimeout(() => done.current(), PLAY_NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [text]);
+  return (
+    <div
+      role="alert"
+      className="absolute left-1/2 top-[3vh] -translate-x-1/2 max-w-[70vw] z-20 rounded-[1vh] bg-bg-1 border border-white/15 px-[2.5vh] py-[1.5vh] text-[2vh] text-center shadow-lg"
+    >
+      {text}
+    </div>
+  );
+}
+
 export function RetroArchApp({ onExit }: { onExit: () => void }) {
   const { t } = useI18n();
   const { ref, focusKey } = useFocusable({ focusKey: "retroarch-app" });
@@ -122,7 +150,14 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
    * it is followed by a `setGames` that re-renders anyway.
    */
   const gamesFor = useRef("");
-  const [error, setError] = useState("");
+  // Three kinds of trouble, kept apart because they end differently: the console
+  // list failing, one console's games failing, and one game refusing to start.
+  // Only the first two replace the covers; a game that will not start is a notice
+  // over the grid, so the rest of the library stays one press away.
+  const [systemsError, setSystemsError] = useState("");
+  const [gamesError, setGamesError] = useState("");
+  const [playError, setPlayError] = useState("");
+  const error = systemsError || gamesError;
   const [starting, setStarting] = useState("");
   /**
    * Marking favourites rather than starting games.
@@ -139,6 +174,7 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
     return fetchSystems()
       .then((d) => {
         listCache.current.clear();
+        setSystemsError("");
         setSystems(d.systems);
         // Whatever console was last looked at, if it is still there.
         setSystem((cur) => {
@@ -155,7 +191,7 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
           return first ? first.system : "";
         });
       })
-      .catch(() => setError(t("retroarch.stateError")));
+      .catch(() => setSystemsError(t("retroarch.stateError")));
   }, [t, favourites.length, recent.length]);
 
   useEffect(() => {
@@ -214,10 +250,10 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
               .filter((g): g is Entry => Boolean(g)),
           );
         }
-        if (alive) setError("");
+        if (alive) setGamesError("");
       } catch {
         if (!alive) return;
-        setError(t("retroarch.gamesError"));
+        setGamesError(t("retroarch.gamesError"));
         // And drop what is on screen with it. The error panel replaces the covers,
         // but the LIST stayed as it was - the previous console's - so everything
         // downstream still believed in tiles nobody could see: focus was handed to
@@ -255,6 +291,7 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
   });
 
   const onPlay = (game: Entry) => {
+    setPlayError("");
     setStarting(game.label);
     play(game.system, game.i)
       .then((r) => {
@@ -267,7 +304,7 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
           return; // the shell is taking the screen; this window is about to be hidden
         }
         setStarting("");
-        setError(
+        setPlayError(
           r.error === "no_core"
             ? t("retroarch.noCoreFor", { system: game.system })
             : r.error === "rom_missing"
@@ -279,7 +316,7 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
       })
       .catch(() => {
         setStarting("");
-        setError(t("retroarch.playFailed"));
+        setPlayError(t("retroarch.playFailed"));
       });
   };
 
@@ -456,6 +493,7 @@ export function RetroArchApp({ onExit }: { onExit: () => void }) {
           )}
         </div>
         {starting && <Starting label={starting} />}
+        {playError && !starting && <PlayNotice text={playError} onDone={() => setPlayError("")} />}
       </div>
     </FocusContext.Provider>
   );

@@ -187,7 +187,11 @@
     "searchLanguage": "Keresés nyelve",
     "searchResults": "Találatok",
     "back": "Vissza",
-    "searchAdded": "Hozzáadva ehhez a filmhez"
+    "searchAdded": "Hozzáadva ehhez a filmhez",
+    "mbps": "{n} Mbps",
+    "kbps": "{n} kbps",
+    "gb": "{n} GB",
+    "seconds": "{n} mp"
   },
   "profiles": {
     "title": "Ki néz?",
@@ -229,6 +233,8 @@
     "nowPlaying": "Most szól",
     "off": "ki",
     "on": "be",
+    "jumpFailed": "Nem sikerült arra a betűre ugrani.",
+    "pageFailed": "Nem sikerült betölteni. Nyomd meg az OK-t az újrapróbáláshoz.",
     "pause": "Szünet",
     "play": "Lejátszás",
     "playAll": "Mind lejátszása",

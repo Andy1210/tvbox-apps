@@ -102,3 +102,18 @@ describe("the search screen when the server cannot be reached", () => {
     }
   });
 });
+
+describe("a failure screen that changes kind", () => {
+  it("puts the cursor on the new screen's button", async () => {
+    // Unreachable, then Retry, then signed out: the second screen's only button
+    // is Sign in again, and the first screen's Retry is gone with it.
+    const { Message } = await import("../Message");
+    await act(async () => setFocus(""));
+    const { rerender } = render(<Message failure={{ kind: "unreachable" } as never} onRetry={() => {}} />);
+    await focusLands();
+    expect(getCurrentFocusKey()).toBe("msg-retry");
+    rerender(<Message failure={{ kind: "signed-out" } as never} onRetry={() => {}} />);
+    await focusLands();
+    expect(getCurrentFocusKey()).toBe("msg-signin");
+  });
+});

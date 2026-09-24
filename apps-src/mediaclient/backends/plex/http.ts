@@ -78,6 +78,30 @@ export class PlexHttpError extends Error {
   }
 }
 
+/**
+ * How long one request may take, end to end. A server that accepts the
+ * connection and never answers would otherwise leave the caller waiting for
+ * ever - and the callers include the progress reports and the stop that the
+ * next episode waits on.
+ */
+export const REQUEST_TIMEOUT_MS = 30_000;
+
+/** The caller's signal, plus a deadline. */
+export function bounded(signal?: AbortSignal, ms = REQUEST_TIMEOUT_MS): AbortSignal | undefined {
+  const A = AbortSignal as unknown as {
+    any?: (s: AbortSignal[]) => AbortSignal;
+    timeout?: (ms: number) => AbortSignal;
+  };
+  if (typeof A.timeout !== "function") return signal;
+  try {
+    const clock = A.timeout(ms);
+    if (!signal) return clock;
+    return typeof A.any === "function" ? A.any([signal, clock]) : signal;
+  } catch {
+    return signal;
+  }
+}
+
 export interface RequestOpts {
   method?: "GET" | "POST" | "PUT" | "DELETE";
   headers?: Record<string, string>;
@@ -114,7 +138,7 @@ export async function request<T>(
 
   let res: Response;
   try {
-    res = await fetch(url, { method: opts.method || "GET", headers, signal: opts.signal });
+    res = await fetch(url, { method: opts.method || "GET", headers, signal: bounded(opts.signal) });
   } catch (e) {
     // A network failure and a refusal look the same to the caller, but only one
     // of them is worth retrying, so keep the distinction in the message.

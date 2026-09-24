@@ -44,10 +44,36 @@ function romPath(system, name, part) {
   return p.startsWith(dir + path.sep) ? p : "";
 }
 
+// A system folder that is a LINK is a folder linked in from elsewhere on the box
+// (folders.js), not an uploaded library. Uploads and deletes must never reach
+// through one: the link can point at any directory the user may link, and the
+// upload and delete routes answer a phone, not the person who made the link.
+function isLink(p) {
+  try {
+    return fs.lstatSync(p).isSymbolicLink();
+  } catch (e) {
+    return false; // absent
+  }
+}
+
+function linkedSystem(system) {
+  return isLink(path.join(ROMS_DIR, system));
+}
+
 function ensureDir(system) {
   const dir = path.join(ROMS_DIR, system);
   fs.mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+// Whether anything is at `p`, a dangling link included.
+function exists(p) {
+  try {
+    fs.lstatSync(p);
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 function sizeOf(p) {
@@ -64,6 +90,8 @@ function writeChunk({ system, name, offset, data, last }) {
   const part = romPath(system, name, true);
   const final = romPath(system, name, false);
   if (!part || !final) return { ok: false, error: "bad_name" };
+  if (linkedSystem(system)) return { ok: false, error: "is_link" };
+  if (isLink(part) || isLink(final)) return { ok: false, error: "bad_name" };
   const off = Number(offset);
   if (!Number.isInteger(off) || off < 0) return { ok: false, error: "bad_offset" };
   let buf;
@@ -73,6 +101,16 @@ function writeChunk({ system, name, offset, data, last }) {
     return { ok: false, error: "bad_data" };
   }
   if (off + buf.length > MAX_FILE_BYTES) return { ok: false, error: "too_big" };
+  // An upload adds a game, it never replaces one: the chunk route is reachable
+  // with nothing more than the pairing session, so replacing a file would hand
+  // that session the bytes an emulator core later parses. Deleting first is the
+  // way to swap a game. Checked on every chunk, so an upload of the same name
+  // that finished in between is not replaced by the last chunk of this one. Its
+  // partial can never become a game after that, so it goes too.
+  if (exists(final)) {
+    removePart(part);
+    return { ok: false, error: "exists" };
+  }
   ensureDir(system);
   const have = sizeOf(part);
   if (off === 0) {
@@ -83,10 +121,36 @@ function writeChunk({ system, name, offset, data, last }) {
   }
   const size = sizeOf(part);
   if (last) {
-    fs.renameSync(part, final);
+    // A hard link to the final name fails if that name exists, where a rename
+    // would replace it, so a file that appeared since the check above is kept.
+    // A file system with no hard links (FAT, exFAT) gets the rename, behind one
+    // more existence check. A refused upload drops its finished partial, which
+    // nothing else would ever remove.
+    const refuse = () => {
+      removePart(part);
+      return { ok: false, error: "exists" };
+    };
+    try {
+      fs.linkSync(part, final);
+    } catch (e) {
+      if (e && e.code === "EEXIST") return refuse();
+      if (!e || !["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EXDEV"].includes(e.code)) throw e;
+      if (exists(final)) return refuse();
+      fs.renameSync(part, final);
+      return { ok: true, size, done: true, name };
+    }
+    removePart(part);
     return { ok: true, size, done: true, name };
   }
   return { ok: true, size };
+}
+
+function removePart(part) {
+  try {
+    fs.unlinkSync(part);
+  } catch (e) {
+    /* already gone; the final file, if any, is what matters */
+  }
 }
 
 // Directories under the library that are actually MOUNTS, e.g. a network share.
@@ -155,6 +219,7 @@ function list() {
 
 // Delete a game (or an abandoned partial upload of it).
 function remove(system, name) {
+  if (!systemOk(system) || linkedSystem(system)) return false;
   let gone = false;
   for (const part of [false, true]) {
     const p = romPath(system, name, part);
@@ -186,6 +251,7 @@ function remove(system, name) {
 function removeSystem(system) {
   if (!systemOk(system)) return { ok: false, error: "bad_system" };
   const dir = path.join(ROMS_DIR, system);
+  if (linkedSystem(system)) return { ok: false, error: "is_link" };
   if (mountedDirs().has(dir)) return { ok: false, error: "is_mount" };
   let entries;
   try {

@@ -57,6 +57,8 @@ module.exports = (host) => {
    * playing the song on the phone itself.
    */
   let appPolling = false;
+  /** Set by stop(): a release that arrives afterwards must not bring the loop back. */
+  let stopped = true;
 
   function str() {
     let locale = "";
@@ -145,7 +147,12 @@ module.exports = (host) => {
     return true;
   };
 
+  // One chain at most: a tick that is run early (a release) replaces the pending
+  // one instead of starting a second chain beside it.
   const tick = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    if (stopped) return;
     timer = setTimeout(tick, WATCH_MS);
     // The app's own poll is live: it is the player, and this must not be.
     if (appPolling) {
@@ -185,28 +192,56 @@ module.exports = (host) => {
   // closes the handover gap: the app says "mine" BEFORE it starts its loop and
   // "yours" when it tears one down, so the two never both poll and never both
   // stay silent.
-  host.registerRoutes("/tvbox/api/mediaclient", {
-    "POST /poll-taken": (req, res) => {
-      appPolling = true;
-      stopListening(false);
-      host.json(res, { ok: true });
+  host.registerRoutes(
+    "/tvbox/api/mediaclient",
+    {
+      "POST /poll-taken": (req, res) => {
+        appPolling = true;
+        stopListening(false);
+        host.json(res, { ok: true });
+      },
+      "POST /poll-released": (req, res) => {
+        // Only a poll this receiver handed over can be handed back. A release
+        // with nothing taken changes nothing, and must not run a tick of its own.
+        // Straight away rather than at the next tick: the app has just stopped
+        // answering, and until this receiver does the box is not a player.
+        release();
+        host.json(res, { ok: true });
+      },
     },
-    "POST /poll-released": (req, res) => {
-      appPolling = false;
-      // Straight away rather than at the next tick: the app has just stopped
-      // answering, and until this receiver does the box is not a player.
-      tick();
-      host.json(res, { ok: true });
+    {
+      // What a caller the shell cannot name may reach: only the release the page
+      // sends with keepalive as it goes away, which can arrive after its window
+      // is gone. An older shell ignores `public`.
+      public: ["POST /poll-released"],
     },
-  });
+  );
+
+  // The page's own release runs in its unmount, and a quit destroys the window
+  // without running it, so the poll would stay "taken" and the box off the cast
+  // list until the shell restarted. The shell calls appClosed on a deliberate
+  // quit and, on newer shells, windowGone on every teardown of the window.
+  const release = () => {
+    if (!appPolling) return;
+    appPolling = false;
+    tick();
+  };
 
   return {
+    appClosed() {
+      release();
+    },
+    windowGone() {
+      release();
+    },
     start() {
       if (timer) clearTimeout(timer);
+      stopped = false;
       handedOver = false;
       timer = setTimeout(tick, START_DELAY_MS);
     },
     stop() {
+      stopped = true;
       if (timer) clearTimeout(timer);
       timer = null;
       stopListening(true);

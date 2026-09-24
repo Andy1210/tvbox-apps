@@ -2,6 +2,7 @@
 <html lang="{{lang}}">
   <head>
     <meta charset="utf-8" />
+    <meta name="referrer" content="no-referrer" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>{{title}}</title>
     <style>
@@ -115,8 +116,24 @@
       </div>
     </details>
     <div id="st"></div>
+    <script src="/tvbox-seal.js" data-v="2"></script>
     <script>
-      document.getElementById("code").value = new URLSearchParams(location.search).get("c") || "";
+      // With data-v="2" the box's /tvbox-seal.js takes the code and a key from the
+      // QR code's URL fragment and seals every write with that key, so neither
+      // crosses the network in clear. A box that does not serve it put the code
+      // in the query and takes a plain body.
+      var seal = window.tvboxSeal;
+      function sealBody(b, route) {
+        return seal ? seal.body(b, route) : JSON.stringify(b);
+      }
+      function pairCode() {
+        return seal ? seal.code : new URLSearchParams(location.search).get("c") || "";
+      }
+      // What a write's URL carries: nothing once the code travels sealed.
+      function writeQuery() {
+        return seal ? "" : location.search;
+      }
+      document.getElementById("code").value = pairCode();
       function code() {
         return document.getElementById("code").value;
       }
@@ -126,10 +143,10 @@
       function fill(id, field) {
         var v = document.getElementById(id).value;
         if (!v) return;
-        fetch("/fill" + location.search, {
+        fetch("/fill" + writeQuery(), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ code: code(), field: field, value: v }),
+          body: sealBody({ code: code(), field: field, value: v }, "/fill"),
         })
           .then(function (r) {
             st(r.ok ? "{{sent}}" : "✗");
@@ -140,10 +157,10 @@
       }
       function key(b) {
         b.code = code();
-        return fetch("/key" + location.search, {
+        return fetch("/key" + writeQuery(), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(b),
+          body: sealBody(b, "/key"),
         })
           .then(function (r) {
             if (!r.ok) st("✗");

@@ -187,7 +187,11 @@
     "searchLanguage": "Search in",
     "searchResults": "Results",
     "back": "Back",
-    "searchAdded": "Added to this title"
+    "searchAdded": "Added to this title",
+    "mbps": "{n} Mbps",
+    "kbps": "{n} kbps",
+    "gb": "{n} GB",
+    "seconds": "{n} s"
   },
   "profiles": {
     "title": "Who is watching?",
@@ -229,6 +233,8 @@
     "nowPlaying": "Now playing",
     "off": "off",
     "on": "on",
+    "jumpFailed": "Could not jump to that letter.",
+    "pageFailed": "Could not load. Press OK to try again.",
     "pause": "Pause",
     "play": "Play",
     "playAll": "Play all",

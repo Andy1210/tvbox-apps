@@ -44,6 +44,66 @@ function allowedRoots() {
   return [HOME, path.join("/media", user), path.join("/run/media", user)];
 }
 
+// The box's own machinery under ~/.tvbox, as opposed to the user content that
+// also lives there. Kept in step with the shell's contentdirs.js, which offers
+// every other folder under ~/.tvbox as a source, plus the shell's private
+// working folders it never offers. A folder that is not on this list is still
+// refused when it is private to the box user (see privateDir), which is how the
+// shell marks what holds credentials, so a folder a newer shell adds is not
+// linkable just because this list has not caught up.
+const MACHINERY = new Set([
+  "appdata",
+  "apps",
+  "apps-data",
+  "bin",
+  "cache",
+  "config-snapshots",
+  "current",
+  "fileserver",
+  "librespot-cache",
+  "photoshare",
+  "pyenv",
+  "__pycache__",
+  "screenframe",
+  "shell",
+  "shell-userdata",
+  "update",
+  "update-keys",
+  "versions",
+]);
+
+// No group or other permission bits: the shell writes what it keeps private
+// (keys, tokens, captures of the screen) that way.
+function privateDir(p) {
+  try {
+    return (fs.statSync(p).mode & 0o077) === 0;
+  } catch (e) {
+    return true;
+  }
+}
+
+// HOME as a whole is not a game library, and a hidden directory under it holds
+// configuration and app data (~/.config, ~/.local, ~/.var, the box's own files
+// under ~/.tvbox): linking one in would expose it through the library's file
+// share and its routes. Under ~/.tvbox, the folders the shell offers as user
+// content are allowed (network shares included); anywhere else, a path with a
+// hidden segment is refused.
+function userContent(home, real) {
+  const rel = path.relative(home, real);
+  // Outside HOME is removable media. A leading ".." SEGMENT, not a prefix: a
+  // folder named "..cache" is still inside HOME, and hidden.
+  if (rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel)) return true;
+  const segs = rel.split(path.sep);
+  let rest = segs;
+  if (segs[0] === ".tvbox") {
+    const top = segs[1];
+    if (!top || top.startsWith(".") || MACHINERY.has(top)) return false;
+    if (privateDir(path.join(home, ".tvbox", top))) return false;
+    rest = segs.slice(2);
+  }
+  return !rest.some((seg) => seg.startsWith("."));
+}
+
 // Absolute, real (so a link cannot be aimed through another link at something
 // else later), a directory, inside one of those roots, and NOT inside the library
 // itself - linking roms/ into roms/ is a loop the scanner would have to defend
@@ -59,6 +119,9 @@ function targetOk(p) {
   }
   const inside = (root) => real === root || real.startsWith(root + path.sep);
   if (!allowedRoots().some(inside)) return false;
+  const home = fs.realpathSync(HOME);
+  if (real === home) return false;
+  if (!userContent(home, real)) return false;
   const roms = fs.existsSync(ROMS_DIR) ? fs.realpathSync(ROMS_DIR) : ROMS_DIR;
   return real !== roms && !real.startsWith(roms + path.sep);
 }
@@ -195,6 +258,7 @@ module.exports = {
   MAX_FOLDERS,
   nameOk,
   targetOk,
+  userContent,
   nameFree,
   read,
   write,

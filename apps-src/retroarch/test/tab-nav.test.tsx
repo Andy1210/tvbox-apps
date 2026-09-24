@@ -177,11 +177,9 @@ describe("the tab row is reachable from the games view", () => {
     expect(getCurrentFocusKey()).toBe("g-Nintendo - NES-0");
   });
 
-  it("an error over a list that is still there does not eat the arrow", async () => {
-    // A game that will not start leaves the covers in place and puts a panel over
-    // them, so the list is non-empty while nothing on it is on screen. Committing
-    // to it hands the cursor a key with no element behind it, and the recovery net
-    // does not re-arm for a press - measured, every arrow after it did nothing.
+  it("a game that will not start leaves the covers and the cursor where they were", async () => {
+    // The refusal is a notice over the grid, not a panel instead of it: the rest of
+    // the library stays one press away, and the cursor stays on the cover pressed.
     playFails = true;
     await open();
     await setFocus("g-Nintendo - NES-0");
@@ -189,14 +187,16 @@ describe("the tab row is reachable from the games view", () => {
 
     await remote.ok();
     await flushFocus();
-    expect(screen.getByText(en.retroarch.noCoreFor.replace("{system}", "Nintendo - NES"))).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toBe(en.retroarch.noCoreFor.replace("{system}", "Nintendo - NES"));
+    expect(getCurrentFocusKey()).toBe("g-Nintendo - NES-0");
+    expect(screen.getAllByText("Contra").length).toBeGreaterThan(0);
 
     await setFocus("sys-Nintendo - NES");
     await flushFocus();
     layout();
     await remote.right();
 
-    expect(getCurrentFocusKey()).toBe("search");
+    expect(getCurrentFocusKey()).toBe("g-Nintendo - NES-0");
   });
 
   it("an error on screen does not answer for the console still being read", async () => {
@@ -208,7 +208,7 @@ describe("the tab row is reachable from the games view", () => {
     await open();
     await setFocus("g-Nintendo - NES-0");
     await flushFocus();
-    await remote.ok(); // a game that will not start: the error panel goes up
+    await remote.ok(); // a game that will not start: a notice goes up
     await flushFocus();
 
     hold("Nintendo - GBA");

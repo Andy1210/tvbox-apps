@@ -2,8 +2,12 @@
   "id": "spotify",
   "manifestVersion": 1,
   "name": "Spotify",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "changelog": [
+    {
+      "version": "1.7.2",
+      "notes": "A bejelentkező ablak a távirányító Vissza vagy Home gombjával bezárható (egy szövegmezőben a Vissza előbb törli a beírt szöveget, üres mezőben zár be), és ha tíz percig senki nem nyúl hozzá, magától is bezárul, így egy félbehagyott bejelentkezés nem foglalja a tévét. Ha a könyvtár vagy egy lejátszási lista nem töltődik be, egy Próbáld újra gombbal újra lekérhető, és fiókváltás után a lista mindig az új fiókhoz tartozik. Egy hálózati hiba miatt a dalszöveg már nem tűnik el az egész munkamenetre, és egy hibás kliens-titok nem választja le a fiókokat. A telefonon beírt Spotify-jelszó és kliens-titok titkosítva jut el a boxhoz, ha a telefon a QR-kódot olvasta be. A párosító kód sem utazik már titkosítatlanul a hálózaton, ha a telefon a QR-kódot olvasta be. Egy nem a bejelentkezésből érkező kérés már nem zárhatja be a félkész bejelentkezést. / The sign-in window closes with the remote's Back or Home button (in a text field Back first deletes what was typed and closes once the field is empty), and on its own after ten minutes with no key pressed, so an abandoned sign-in no longer holds the TV. A library or playlist that fails to load has a Try again button, and after an account switch the list always belongs to the new account. A network hiccup no longer hides a song's lyrics for the rest of the session, and a wrong client secret no longer unlinks the accounts. A Spotify password and client secret typed on the phone reach the box encrypted when the phone scanned the QR code. The pairing code no longer crosses the network in the clear either when the phone scanned the QR code. A request that did not come from the sign-in itself can no longer close a sign-in halfway."
+    },
     {
       "version": "1.7.1",
       "notes": "Stepping onto the progress bar no longer nudges the rest of the screen. The bar thickens when it takes focus, and the cover, the song title and the buttons used to shift with it."

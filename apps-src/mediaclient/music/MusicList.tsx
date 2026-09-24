@@ -77,6 +77,9 @@ export function MusicList({
   const [cursor, setCursor] = useState(0);
   const [reload, setReload] = useState(0);
   const inflight = useRef<Set<number>>(new Set());
+  // Pages whose last read failed. Their rows stop looking like they are loading
+  // and say what OK does instead.
+  const [failedPages, setFailedPages] = useState<ReadonlySet<number>>(new Set());
   /**
    * Where Up from the top of the list goes.
    *
@@ -96,6 +99,7 @@ export function MusicList({
     setPages(new Map());
     setLetters([]);
     setCursor(0);
+    setFailedPages(new Set());
     inflight.current = new Set();
   }, [lens, libraryId]);
 
@@ -106,6 +110,12 @@ export function MusicList({
       try {
         const p = await backend.libraryPage(libraryId, { offset: index * PAGE, limit: PAGE, of });
         setPages((m) => new Map(m).set(index, p.items));
+        setFailedPages((f) => {
+          if (!f.has(index)) return f;
+          const next = new Set(f);
+          next.delete(index);
+          return next;
+        });
         if (p.total !== undefined) setTotal(p.total);
         else if (p.items.length < PAGE) setTotal(index * PAGE + p.items.length);
       } catch (e) {
@@ -113,6 +123,7 @@ export function MusicList({
         // that failed once on a flaky network must not become a permanent hole.
         inflight.current.delete(index);
         log.warn("music page failed", e);
+        setFailedPages((f) => (f.has(index) ? f : new Set(f).add(index)));
         if (index === 0) fail(classify(e));
         return;
       }
@@ -150,6 +161,11 @@ export function MusicList({
   }, [start, end, pages, loadPage]);
 
   const at = (index: number): MediaItem | undefined => pages.get(Math.floor(index / PAGE))?.[index % PAGE];
+
+  /** The one row of a failed page that says so: the cursor's, when it is on that
+   * page, otherwise the first of the page's rows the window shows. */
+  const failedTextRow = (page: number): number =>
+    Math.floor(cursor / PAGE) === page ? cursor : Math.max(start, page * PAGE);
 
   // No scrolling from here. Every row is a FocusButton, and the SDK already
   // brings the focused one into view with `block: "nearest"` - scrolling it a
@@ -195,10 +211,13 @@ export function MusicList({
         await loadPage(Math.floor(offset / PAGE));
         setFocus(`mrow-${offset}`);
       } catch (e) {
+        // Where the letter starts could not be asked, so the list stays where it
+        // is and the cursor on the letter; the header says why nothing moved.
         log.warn("letter jump failed", e);
+        setNote(t("music.jumpFailed"));
       }
     },
-    [backend, libraryId, of, loadPage],
+    [backend, libraryId, of, loadPage, t],
   );
 
   const openOrPlay = async (index: number): Promise<void> => {
@@ -313,8 +332,35 @@ export function MusicList({
                     // A row that has not arrived is still a row: without a box of
                     // the same height the ones below it move as pages land, and a
                     // list that shifts under the cursor is a list you cannot aim
-                    // at.
-                    <div className="h-full animate-pulse rounded-[1vh] bg-white/5" aria-hidden="true" />
+                    // at. It takes focus too, so Down at the edge of a page that
+                    // failed still moves, and landing on it asks for the page
+                    // again.
+                    <FocusButton
+                      focusKey={`mrow-${i}`}
+                      onEnter={() => void loadPage(Math.floor(i / PAGE))}
+                      onFocused={() => {
+                        setCursor(i);
+                        void loadPage(Math.floor(i / PAGE));
+                      }}
+                      onArrowPress={(dir) => {
+                        if (dir === "up" && i === 0 && topKey) {
+                          setFocus(topKey);
+                          return false;
+                        }
+                        return true;
+                      }}
+                      className={
+                        failedPages.has(Math.floor(i / PAGE))
+                          ? "flex h-full w-full items-center rounded-[1vh] bg-white/5 px-[1.5vw] text-left text-[2vh] text-white/60"
+                          : "block h-full w-full animate-pulse rounded-[1vh] bg-white/5"
+                      }
+                    >
+                      {failedPages.has(Math.floor(i / PAGE)) && i === failedTextRow(Math.floor(i / PAGE)) ? (
+                        t("music.pageFailed")
+                      ) : (
+                        <span className="sr-only">…</span>
+                      )}
+                    </FocusButton>
                   )}
                 </li>
               );

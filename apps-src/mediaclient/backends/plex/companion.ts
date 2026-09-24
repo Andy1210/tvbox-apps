@@ -68,6 +68,8 @@ const MIN_POLL_MS = 250;
 const COMMAND_TIMEOUT_MS = 12_000;
 /** An acknowledgement is a local round trip; it has no business taking longer. */
 const RESPOND_TIMEOUT_MS = 10_000;
+/** Longer than any hold the server does on purpose; see the poll in `loop`. */
+const POLL_TIMEOUT_MS = 10 * 60_000;
 /**
  * How often the box says where it is while something plays.
  *
@@ -242,11 +244,17 @@ export function startCompanion(opts: {
     publishing = true;
     const url = new URL("player/proxy/timeline", base(opts.baseUrl));
     url.searchParams.set("commandID", String(commandId));
+    // Bounded: `publishing` stays set until this settles, and a request that
+    // never did would silence every report after it.
+    const timer = setTimeout(() => reportController.abort(), RESPOND_TIMEOUT_MS);
+    const reportController = new AbortController();
+    responders.add(reportController);
     try {
       const res = await fetch(url.toString(), {
         method: "POST",
         headers: { ...headers(), "Content-Type": "application/xml" },
         body,
+        signal: reportController.signal,
       });
       // Said ONCE, not once a second - but said. A refused report is invisible
       // from every other angle: the box goes on playing, the controller goes on
@@ -267,6 +275,8 @@ export function startCompanion(opts: {
         log.warn("this player's status report did not reach the server", e);
       }
     } finally {
+      clearTimeout(timer);
+      responders.delete(reportController);
       publishing = false;
     }
   };
@@ -305,23 +315,33 @@ export function startCompanion(opts: {
         for (const [k, v] of Object.entries({ ...POLL_ARGS, commandID: String(commandId) })) {
           url.searchParams.set(k, v);
         }
-        // No timeout: this request is MEANT to hang. The server holds it open
-        // until it has something to say, which is what makes a command arrive
-        // in the moment it is sent rather than on the next tick of a poll.
-        const res = await fetch(url.toString(), { headers: headers(), signal: controller.signal });
-        // A dead credential is not a transient failure, and this is the one
-        // place in the app that would otherwise swallow it: everywhere else a
-        // 401 becomes "signed out" on screen. Here it would be a warning line
-        // every sixty seconds, forever, with the box looking fine.
-        if (res.status === 401 || res.status === 403) {
-          log.warn("companion poll rejected the credential; stopping");
-          opts.onUnauthorized?.();
-          return;
+        // A long timeout, not a short one: this request is MEANT to hang. The
+        // server holds it open until it has something to say, which is what makes
+        // a command arrive in the moment it is sent rather than on the next tick of
+        // a poll. But a connection that died without closing never answers at all,
+        // and then the box is uncastable until the app restarts.
+        const pollController = controller;
+        const pollTimer = setTimeout(() => pollController.abort(), POLL_TIMEOUT_MS);
+        // The deadline covers the body too: a server can send its headers and then
+        // stall, and a stalled body read stops the poll just as surely.
+        let answer: { text: string; over: boolean };
+        try {
+          const res = await fetch(url.toString(), { headers: headers(), signal: controller.signal });
+          // A dead credential is not a transient failure, and this is the one
+          // place in the app that would otherwise swallow it: everywhere else a
+          // 401 becomes "signed out" on screen. Here it would be a warning line
+          // every sixty seconds, forever, with the box looking fine.
+          if (res.status === 401 || res.status === 403) {
+            log.warn("companion poll rejected the credential; stopping");
+            opts.onUnauthorized?.();
+            return;
+          }
+          if (!res.ok) throw new Error(`poll answered ${res.status}`);
+          backoff = RETRY_MS;
+          answer = await boundedText(res, MAX_ANSWER_BYTES);
+        } finally {
+          clearTimeout(pollTimer);
         }
-        if (!res.ok) throw new Error(`poll answered ${res.status}`);
-        backoff = RETRY_MS;
-
-        const answer = await boundedText(res, MAX_ANSWER_BYTES);
         // Nothing to answer with: the commandID the controller is waiting on is
         // inside the body that was refused, so all this can do is say why and
         // let the poll come round again.
@@ -383,8 +403,9 @@ export function startCompanion(opts: {
         if (took < MIN_POLL_MS) await sleep(MIN_POLL_MS - took);
       } catch (e) {
         if (stopped) return;
-        // An aborted poll is this loop being torn down, not a failure.
-        if (e instanceof Error && e.name === "AbortError") return;
+        // Not torn down, so an abort is the poll's own deadline: a connection
+        // that went quiet. Poll again straight away.
+        if (e instanceof Error && e.name === "AbortError") continue;
         log.warn("companion poll failed", e);
         await sleep(backoff);
         backoff = Math.min(RETRY_MAX_MS, backoff * 2);

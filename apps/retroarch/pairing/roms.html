@@ -2,6 +2,7 @@
 <html lang="{{lang}}">
   <head>
     <meta charset="utf-8" />
+    <meta name="referrer" content="no-referrer" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>{{title}}</title>
     <style>
@@ -149,7 +150,16 @@
     <div id="list"></div>
     <div id="empty" hidden>{{empty}}</div>
 
+    <script src="/tvbox-seal.js" data-v="2"></script>
     <script>
+      // With data-v="2" the box's /tvbox-seal.js takes the code and a key from the
+      // QR code's URL fragment and seals every write with that key, so neither
+      // crosses the network in clear. A box that does not serve it put the code
+      // in the query and takes a plain body.
+      const seal = window.tvboxSeal;
+      function sealBody(b, route) {
+        return seal ? seal.body(b, route) : JSON.stringify(b);
+      }
       const T = {
         uploading: "{{uploading}}",
         done: "{{done}}",
@@ -160,6 +170,7 @@
         delAll: "{{delAll}}",
         delAllConfirm: "{{delAllConfirm}}",
         deleted: "{{deleted}}",
+        exists: "{{exists}}",
       };
       // Folder names are slugs on the box; the labels are only for this page.
       const SYSTEMS = [
@@ -216,15 +227,32 @@
 
       const fmt = (n) =>
         n >= 1e9 ? (n / 1e9).toFixed(1) + " GB" : n >= 1e6 ? Math.round(n / 1e6) + " MB" : Math.round(n / 1e3) + " kB";
-      // The pairing server gates every route on the session code: "c" in the query
-      // for reads, "code" in the body for writes.
-      const code = new URLSearchParams(location.search).get("c") || "";
-      const api = (p, body) =>
-        fetch(p, {
+      // The pairing server gates every route on the session code. A write carries
+      // it inside its (sealed) body. A read and a ROM chunk are signed instead:
+      // tvboxSeal.url() adds a MAC over the method, the URL and the exact body
+      // when the page has the key, and the code itself when it does not. A box
+      // without /tvbox-seal.js takes the code from the query.
+      const code = seal ? seal.code : new URLSearchParams(location.search).get("c") || "";
+      const signed = (method, p, body) =>
+        seal ? seal.url(method, p, body) : p + (p.includes("?") ? "&" : "?") + "c=" + encodeURIComponent(code);
+      // A ROM chunk goes plain: it is not a secret, and sealing 4 MB means
+      // base64-encoding it twice on the phone for every chunk. With a key the MAC
+      // authenticates it, so the code stays out of it.
+      const api = (p, body, { plain = false } = {}) => {
+        if (!plain) {
+          return fetch(p, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: sealBody({ ...body, code }, p),
+          }).then((r) => r.json());
+        }
+        const text = JSON.stringify(seal && seal.sealed ? body : { ...body, code });
+        return fetch(signed("POST", p, text), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...body, code }),
+          body: text,
         }).then((r) => r.json());
+      };
 
       go.onclick = () => pick.click();
 
@@ -239,13 +267,19 @@
         go.disabled = true;
         const system = sysSel.value;
         let failed = 0;
+        const already = [];
         for (let i = 0; i < files.length; i++) {
           const f = files[i];
           st.textContent = T.uploading + " " + (i + 1) + "/" + files.length + ": " + f.name;
-          if (!(await upload(f, system))) failed++;
+          const r = await upload(f, system);
+          if (r === "exists") already.push(f.name);
+          else if (!r) failed++;
         }
         pb.style.width = "0";
-        st.textContent = failed ? T.failed + " (" + failed + ")" : T.done;
+        const parts = [];
+        if (already.length) parts.push(T.exists.replace("{name}", already.join(", ")));
+        if (failed) parts.push(T.failed + " (" + failed + ")");
+        st.textContent = parts.length ? parts.join(" ") : T.done;
         go.disabled = false;
         load();
       };
@@ -257,10 +291,11 @@
           const last = offset + CHUNK >= file.size;
           let r;
           try {
-            r = await api("/rom-chunk", { system, name: file.name, offset, data, last });
+            r = await api("/rom-chunk", { system, name: file.name, offset, data, last }, { plain: true });
           } catch (e) {
             return false;
           }
+          if (r && r.error === "exists") return "exists";
           if (!r || !r.ok) return false;
           pb.style.width = Math.round((Math.min(offset + CHUNK, file.size) / Math.max(file.size, 1)) * 100) + "%";
           if (last) return true;
@@ -282,7 +317,7 @@
       async function load() {
         let groups = [];
         try {
-          groups = await fetch("/roms?c=" + encodeURIComponent(code)).then((r) => r.json());
+          groups = await fetch(signed("GET", "/roms")).then((r) => r.json());
         } catch (e) {
           /* box went away; the list just stays as it was */
         }
