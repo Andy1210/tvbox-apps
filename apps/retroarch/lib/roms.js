@@ -117,7 +117,24 @@ function writeChunk({ system, name, offset, data, last }) {
   }
   const size = sizeOf(part);
   if (last) {
-    fs.renameSync(part, final);
+    // A hard link to the final name fails if that name exists, where a rename
+    // would replace it, so a file that appeared since the check above is kept.
+    // A file system with no hard links (FAT, exFAT) gets the rename, behind one
+    // more existence check.
+    try {
+      fs.linkSync(part, final);
+    } catch (e) {
+      if (e && e.code === "EEXIST") return { ok: false, error: "exists" };
+      if (!e || !["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EXDEV"].includes(e.code)) throw e;
+      if (exists(final)) return { ok: false, error: "exists" };
+      fs.renameSync(part, final);
+      return { ok: true, size, done: true, name };
+    }
+    try {
+      fs.unlinkSync(part);
+    } catch (e) {
+      /* the final file is in place; a leftover partial is swept like any other */
+    }
     return { ok: true, size, done: true, name };
   }
   return { ok: true, size };

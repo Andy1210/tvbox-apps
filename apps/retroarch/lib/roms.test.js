@@ -171,3 +171,24 @@ test("an upload that another one finished first does not replace it on its last 
   assert.deepStrictEqual(last, { ok: false, error: "exists" });
   assert.strictEqual(fs.readFileSync(path.join(roms.ROMS_DIR, "gba", "r.gba"), "utf8"), "FIRST");
 });
+
+test("a game that lands between the check and the final move is kept", () => {
+  reset();
+  assert.ok(roms.writeChunk({ system: "gba", name: "g.gba", offset: 0, data: b64("aa") }).ok);
+  const final = path.join(roms.ROMS_DIR, "gba", "g.gba");
+  // The other upload finishes while this one appends its last chunk, i.e. after
+  // the existence check has already passed.
+  const append = fs.appendFileSync;
+  fs.appendFileSync = (...args) => {
+    append(...args);
+    fs.writeFileSync(final, "FIRST");
+  };
+  let last;
+  try {
+    last = roms.writeChunk({ system: "gba", name: "g.gba", offset: 2, data: b64("cc"), last: true });
+  } finally {
+    fs.appendFileSync = append;
+  }
+  assert.deepStrictEqual(last, { ok: false, error: "exists" });
+  assert.strictEqual(fs.readFileSync(final, "utf8"), "FIRST");
+});

@@ -15,6 +15,7 @@
 // behind a same-origin check, and this API listens unauthenticated on loopback -
 // so a `signout` reachable by GET would be a page on the internet signing the
 // television out.
+const crypto = require("crypto");
 const auth = require("./lib/xboxauth");
 const library = require("./lib/library");
 const api = require("./lib/xcloudapi");
@@ -140,6 +141,12 @@ let passSeq = 0;
 // Long enough for the 3 s poll to collect it several times over, short enough
 // that it cannot explain away some later, unrelated absence of a session.
 const FAILURE_TTL_MS = 120000;
+
+function stopKeyOk(want, got) {
+  const a = Buffer.from(String(want || ""));
+  const b = Buffer.from(String(got || ""));
+  return a.length > 0 && a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 
 async function endSession() {
   const l = live;
@@ -429,8 +436,12 @@ module.exports = (host) => {
           if (live) live.controller.abort();
           lastFailure = null;
           const pass = ++passSeq;
-          live = { session, controller, pass, state: "Provisioning", queueSeconds: null, queuedFor: 0, error: null, config: null, ended: null, lastAsked: Date.now() };
-          host.json(res, { ok: true, id: session.id, type: session.type, titleId });
+          // The stop route is reachable by a caller the shell cannot name (the
+          // page's own beacon as it goes away), so ending the session takes this
+          // key, which only the page that started it was given.
+          const stopKey = crypto.randomBytes(16).toString("hex");
+          live = { session, controller, pass, stopKey, state: "Provisioning", queueSeconds: null, queuedFor: 0, error: null, config: null, ended: null, lastAsked: Date.now() };
+          host.json(res, { ok: true, id: session.id, type: session.type, titleId, stopKey });
 
           // Every callback below asks whether it is still THIS session's. A
           // ladder that was abandoned answers late - its state GET is already in
@@ -554,7 +565,10 @@ module.exports = (host) => {
         .catch((e) => host.json(res, errorPayload(e)));
     },
 
-    "POST /session/stop": (req, res) => {
+    "POST /session/stop": (req, res, ctx) => {
+      if (live && !stopKeyOk(live.stopKey, ctx && ctx.body && ctx.body.key)) {
+        return host.json(res, { ok: false, code: "bad_key", error: "not this session's key" });
+      }
       endSession()
         .then(() => host.json(res, { ok: true }))
         .catch((e) => host.json(res, errorPayload(e)));

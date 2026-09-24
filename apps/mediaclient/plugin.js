@@ -57,6 +57,8 @@ module.exports = (host) => {
    * playing the song on the phone itself.
    */
   let appPolling = false;
+  /** Set by stop(): a release that arrives afterwards must not bring the loop back. */
+  let stopped = true;
 
   function str() {
     let locale = "";
@@ -145,7 +147,12 @@ module.exports = (host) => {
     return true;
   };
 
+  // One chain at most: a tick that is run early (a release) replaces the pending
+  // one instead of starting a second chain beside it.
   const tick = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    if (stopped) return;
     timer = setTimeout(tick, WATCH_MS);
     // The app's own poll is live: it is the player, and this must not be.
     if (appPolling) {
@@ -194,6 +201,9 @@ module.exports = (host) => {
         host.json(res, { ok: true });
       },
       "POST /poll-released": (req, res) => {
+        // Only a poll this receiver handed over can be handed back. A release
+        // with nothing taken changes nothing, and must not run a tick of its own.
+        if (!appPolling) return host.json(res, { ok: true });
         appPolling = false;
         // Straight away rather than at the next tick: the app has just stopped
         // answering, and until this receiver does the box is not a player.
@@ -212,10 +222,12 @@ module.exports = (host) => {
   return {
     start() {
       if (timer) clearTimeout(timer);
+      stopped = false;
       handedOver = false;
       timer = setTimeout(tick, START_DELAY_MS);
     },
     stop() {
+      stopped = true;
       if (timer) clearTimeout(timer);
       timer = null;
       stopListening(true);

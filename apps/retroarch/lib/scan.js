@@ -274,6 +274,49 @@ function resolveFolder(input) {
   }
 }
 
+// One spelling for a ROM path, so the same file is recognised however it was
+// written down. A linked folder is scanned through its real target, while older
+// playlist entries (and RetroArch's own pass, pointed at the link) spell the same
+// file through the link: compared as strings they looked like two games, and a
+// rescan appended a second copy of each. Each registered link, and the library
+// root itself, is rewritten to its real target. String work only, one realpath
+// per link, so a playlist of thousands costs no file system access per entry.
+function canonicalizer() {
+  const pairs = [];
+  const add = (from, to) => {
+    const a = path.resolve(from);
+    if (a !== to) pairs.push([a, to]);
+  };
+  try {
+    for (const f of linked.read()) {
+      const link = linked.linkPath(f.name);
+      try {
+        if (!fs.lstatSync(link).isSymbolicLink()) continue;
+        add(link, fs.realpathSync(link));
+      } catch (e) {
+        /* a dangling link rewrites nothing */
+      }
+    }
+  } catch (e) {
+    /* no registered links */
+  }
+  try {
+    add(roms.ROMS_DIR, fs.realpathSync(roms.ROMS_DIR));
+  } catch (e) {
+    /* no library yet */
+  }
+  // Longest first, so a link inside the library wins over the library root.
+  pairs.sort((x, y) => y[0].length - x[0].length);
+  return (p) => {
+    const s = path.resolve(String(p || ""));
+    for (const [from, to] of pairs) {
+      if (s === from) return to;
+      if (s.startsWith(from + path.sep)) return to + s.slice(from.length);
+    }
+    return s;
+  };
+}
+
 // What a folder holds, and what a scan would do with it: how many games, which
 // consoles they resolve to, and how many are already in a playlist. This is what the
 // screen shows before anyone presses anything.
@@ -285,12 +328,13 @@ function inspect(folder, opts) {
   if (!dir) return { folder: "", error: "bad_folder", games: 0, already: 0, ambiguous: 0, systems: [] };
   const map = extensionMap(opts);
   const found = walk(dir, new Set(map.keys()));
-  const known = knownPaths();
+  const canon = canonicalizer();
+  const known = knownPaths(canon);
   const systems = new Map(); // console -> count
   let ambiguous = 0;
   let already = 0;
   for (const f of found) {
-    if (known.has(f.path)) already++;
+    if (known.has(canon(f.path))) already++;
     const claim = map.get(f.ext);
     if (!claim || claim.size !== 1) {
       ambiguous++;
@@ -309,10 +353,13 @@ function inspect(folder, opts) {
 }
 
 // Every ROM path any playlist already lists. One read of each playlist, so a rescan
-// adds what is missing instead of duplicating what is there.
-function knownPaths() {
+// adds what is missing instead of duplicating what is there. `canon` (from
+// canonicalizer()) makes the set hold one spelling per file; without it the
+// paths are kept as written.
+function knownPaths(canon) {
   const out = new Set();
-  for (const system of games.systemNames()) for (const g of games.games(system)) out.add(g.rom);
+  const put = (p) => out.add(canon ? canon(p) : String(p));
+  for (const system of games.systemNames()) for (const g of games.games(system)) put(g.rom);
   // games() dedupes by label; the raw entries are what must not be added twice.
   let files = [];
   try {
@@ -323,7 +370,7 @@ function knownPaths() {
   for (const f of files) {
     try {
       const doc = JSON.parse(fs.readFileSync(path.join(art.PLAYLISTS_DIR, f), "utf8"));
-      for (const item of (doc && doc.items) || []) if (item && item.path) out.add(String(item.path));
+      for (const item of (doc && doc.items) || []) if (item && item.path) put(item.path);
     } catch (e) {
       /* unreadable playlist: its entries just look missing, and a rescan re-adds them */
     }
@@ -390,11 +437,15 @@ function addMissing(dir, opts) {
   const forced = (opts && opts.system) || "";
   if (forced && !art.nameOk(forced)) return { added: 0, skipped: 0, systems: [] };
   const found = walk(dir, forced ? null : new Set(map.keys()));
-  const known = knownPaths();
+  const canon = canonicalizer();
+  const known = knownPaths(canon);
   const bySystem = new Map();
   let skipped = 0;
   for (const f of found) {
-    if (known.has(f.path)) continue;
+    const key = canon(f.path);
+    if (known.has(key)) continue;
+    // Two spellings of one file inside the same walk count once too.
+    known.add(key);
     let system = forced;
     if (!system) {
       const claim = map.get(f.ext);
@@ -445,6 +496,7 @@ function addMissing(dir, opts) {
 // means the next one folds it again.
 function foldVariants(opts) {
   let folded = 0;
+  const canon = canonicalizer();
   for (const system of games.systemNames()) {
     const m = /^(.*\S)\s+\([^()]+\)$/.exec(system);
     if (!m) continue;
@@ -460,13 +512,13 @@ function foldVariants(opts) {
       // PlayStation Portable with no games in it, for ever.
       const from = readPlaylist(system);
       const into = readPlaylist(base);
-      const have = new Set(into.items.filter((i) => i && i.path).map((i) => i.path));
+      const have = new Set(into.items.filter((i) => i && i.path).map((i) => canon(i.path)));
       for (const item of from.items) {
         // A path is what identifies a game here, so an entry without one is
         // neither a duplicate nor something worth carrying over - copying it
         // would make every other pathless entry look like a duplicate of it.
-        if (!item || !item.path || have.has(item.path)) continue;
-        have.add(item.path);
+        if (!item || !item.path || have.has(canon(item.path))) continue;
+        have.add(canon(item.path));
         into.items.push({ ...item, db_name: base + ".lpl" });
       }
       writePlaylist(base, into);
@@ -539,6 +591,7 @@ module.exports = {
   underLibrary,
   inspect,
   knownPaths,
+  canonicalizer,
   readPlaylist,
   writePlaylist,
   addMissing,

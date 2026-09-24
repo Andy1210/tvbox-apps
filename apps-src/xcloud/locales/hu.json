@@ -46,6 +46,7 @@
     "catalog_unavailable": "A Game Pass katalógus most nem olvasható.",
     "sigl_unavailable": "Ez a lista most nem érhető el.",
     "no_session": "Nem fut játék.",
+    "bad_key": "Ezt a játékot egy másik képernyő indította.",
     "session_failed": "A játék indítása nem sikerült.",
     "provision_timeout": "A szerver nem készült el időben.",
     "exchange_timeout": "A szerver nem válaszolt a kapcsolódásra.",

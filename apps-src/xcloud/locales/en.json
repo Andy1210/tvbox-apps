@@ -46,6 +46,7 @@
     "catalog_unavailable": "The Game Pass catalogue cannot be read right now.",
     "sigl_unavailable": "That list is not available right now.",
     "no_session": "No game is running.",
+    "bad_key": "This game was started from another screen.",
     "session_failed": "The game could not be started.",
     "provision_timeout": "The server did not become ready in time.",
     "exchange_timeout": "The server did not answer the connection.",

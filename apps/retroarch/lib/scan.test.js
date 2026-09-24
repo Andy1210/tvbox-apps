@@ -124,6 +124,57 @@ test("a linked folder goes through the whole scan, finish pass included", async 
   folders.remove("stick3");
 });
 
+test("a rescan of a linked folder recognises what is already listed, however it was spelled", () => {
+  reset();
+  installCore("mgba", 'database = "' + GBA + '"\nsupported_extensions = "gba"\n');
+  const folders = require("./folders");
+  const outside = path.join(HOME, "Games4", "gba");
+  fs.mkdirSync(outside, { recursive: true });
+  fs.writeFileSync(path.join(outside, "Zelda (USA).gba"), "x");
+  fs.writeFileSync(path.join(outside, "Kirby (USA).gba"), "x");
+  assert.strictEqual(folders.add({ name: "stick4", path: outside }).ok, true);
+  const viaLink = path.join(roms.ROMS_DIR, "stick4");
+  const real = fs.realpathSync(outside);
+  // One entry written through the link (an older scan, or RetroArch's own pass
+  // pointed at the link), one through the real target (this app's own scan).
+  const doc = scan.readPlaylist(GBA);
+  doc.items.push({ path: path.join(viaLink, "Zelda (USA).gba"), label: "Zelda" });
+  doc.items.push({ path: path.join(real, "Kirby (USA).gba"), label: "Kirby" });
+  scan.writePlaylist(GBA, doc);
+
+  const dir = scan.resolveFolder(viaLink);
+  assert.strictEqual(scan.inspect(dir).already, 2, "both spellings count as listed");
+  assert.strictEqual(scan.addMissing(dir).added, 0, "nothing is appended a second time");
+  assert.strictEqual(scan.readPlaylist(GBA).items.length, 2);
+  // The canonical form of both spellings is the same path.
+  const canon = scan.canonicalizer();
+  assert.strictEqual(canon(path.join(viaLink, "Zelda (USA).gba")), path.join(real, "Zelda (USA).gba"));
+  // The entry written through the link is left as it was, so it still plays.
+  assert.strictEqual(scan.readPlaylist(GBA).items[0].path, path.join(viaLink, "Zelda (USA).gba"));
+  folders.remove("stick4");
+});
+
+test("folding a variant does not duplicate a game the base lists through the other spelling", () => {
+  reset();
+  installCore("ppsspp", 'database = "Sony - PlayStation Portable"\nsupported_extensions = "iso"\n');
+  const folders = require("./folders");
+  const outside = path.join(HOME, "Games5", "psp");
+  fs.mkdirSync(outside, { recursive: true });
+  fs.writeFileSync(path.join(outside, "Game.iso"), "x");
+  assert.strictEqual(folders.add({ name: "stick5", path: outside }).ok, true);
+  const viaLink = path.join(roms.ROMS_DIR, "stick5", "Game.iso");
+  const real = path.join(fs.realpathSync(outside), "Game.iso");
+  const base = scan.readPlaylist("Sony - PlayStation Portable");
+  base.items.push({ path: viaLink, label: "Game" });
+  scan.writePlaylist("Sony - PlayStation Portable", base);
+  const variant = scan.readPlaylist("Sony - PlayStation Portable (PSN)");
+  variant.items.push({ path: real, label: "Game" });
+  scan.writePlaylist("Sony - PlayStation Portable (PSN)", variant);
+  assert.strictEqual(scan.foldVariants(), 1);
+  assert.strictEqual(scan.readPlaylist("Sony - PlayStation Portable").items.length, 1);
+  folders.remove("stick5");
+});
+
 test("the walk keeps games, drops what sits next to them, and skips a disc's raw tracks", () => {
   const dir = folder("psx", {
     "Game.cue": "",

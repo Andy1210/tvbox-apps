@@ -271,7 +271,7 @@ export function Stream({
   // `sendBeacon` for the page going away, because a `fetch` started in `pagehide`
   // is cancelled with the page.
   useEffect(() => {
-    const beacon = () => navigator.sendBeacon?.("/tvbox/api/xcloud/session/stop");
+    const beacon = () => api.beaconStop();
     window.addEventListener("pagehide", beacon);
     return () => {
       window.removeEventListener("pagehide", beacon);

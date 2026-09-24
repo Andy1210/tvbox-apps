@@ -127,10 +127,23 @@ export const search = (q: string) => call<{ results: Title[] }>("/search?q=" + e
 // UI is in lives in a localStorage key the launcher and every local app share -
 // which a host-side plugin cannot read. Without it the session, the game and the
 // server's own dialogs all came back in English on a Hungarian box.
-export const startSession = (titleId: string, width: number, height: number, locale: string) =>
-  post<{ id: string; type: string }>("/session/start", { titleId, width, height, locale });
+// Ending a session takes the key its start handed back: the stop route has to be
+// reachable by the page's beacon after its window is gone, where the shell can no
+// longer say who is calling, so the key is what shows the request is ours.
+let stopKey = "";
+export const startSession = async (titleId: string, width: number, height: number, locale: string) => {
+  const r = await post<{ id: string; type: string; stopKey?: string }>("/session/start", { titleId, width, height, locale });
+  stopKey = String(r.stopKey || "");
+  return r;
+};
 export const sessionState = () => call<SessionState>("/session/state");
-export const stopSession = () => post("/session/stop");
+export const stopSession = () => post("/session/stop", { key: stopKey });
+// The same stop, for `pagehide`, where a fetch is cancelled with the page.
+export const beaconStop = () =>
+  navigator.sendBeacon?.(
+    BASE + "/session/stop",
+    new Blob([JSON.stringify({ key: stopKey })], { type: "text/plain" }),
+  );
 
 // The offer and the candidates pass THROUGH the plugin: the streaming token that
 // authenticates them is not something this page ever holds.
