@@ -185,20 +185,29 @@ module.exports = (host) => {
   // closes the handover gap: the app says "mine" BEFORE it starts its loop and
   // "yours" when it tears one down, so the two never both poll and never both
   // stay silent.
-  host.registerRoutes("/tvbox/api/mediaclient", {
-    "POST /poll-taken": (req, res) => {
-      appPolling = true;
-      stopListening(false);
-      host.json(res, { ok: true });
+  host.registerRoutes(
+    "/tvbox/api/mediaclient",
+    {
+      "POST /poll-taken": (req, res) => {
+        appPolling = true;
+        stopListening(false);
+        host.json(res, { ok: true });
+      },
+      "POST /poll-released": (req, res) => {
+        appPolling = false;
+        // Straight away rather than at the next tick: the app has just stopped
+        // answering, and until this receiver does the box is not a player.
+        tick();
+        host.json(res, { ok: true });
+      },
     },
-    "POST /poll-released": (req, res) => {
-      appPolling = false;
-      // Straight away rather than at the next tick: the app has just stopped
-      // answering, and until this receiver does the box is not a player.
-      tick();
-      host.json(res, { ok: true });
+    {
+      // What a caller the shell cannot name may reach: only the release the page
+      // sends with keepalive as it goes away, which can arrive after its window
+      // is gone. An older shell ignores `public`.
+      public: ["POST /poll-released"],
     },
-  });
+  );
 
   return {
     start() {

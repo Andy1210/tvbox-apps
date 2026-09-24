@@ -69,6 +69,7 @@ const STR = {
     delAll: "Összes törlése",
     delAllConfirm: "Töröljön a box {n} játékot a(z) {sys} mappából? Ez nem visszavonható.",
     deleted: "{n} játék törölve.",
+    exists: "Már fent van a boxon: {name}. Ha cserélnéd, előbb töröld.",
   },
   en: {
     title: "tvbox - Upload games",
@@ -87,6 +88,7 @@ const STR = {
     delAll: "Delete all",
     delAllConfirm: "Delete {n} games from {sys}? This cannot be undone.",
     deleted: "{n} games deleted.",
+    exists: "Already on the box: {name}. Delete it first to replace it.",
   },
 };
 
@@ -724,11 +726,14 @@ module.exports = (host) => {
         // Reads that SPEND something get the same-origin gate every non-GET has: an
         // inspection is a process walking a folder, and the core list is a request
         // to the buildbot. Either can be fired by an <img src> on any page.
-        { guard: ["GET /scan-inspect", "GET /cores"] },
+        // Nothing here is for a caller the shell cannot name. An older shell
+        // ignores `public`.
+        { guard: ["GET /scan-inspect", "GET /cores"], public: [] },
       );
       // Phone upload. The pairing server is only up while the TV shows the code,
       // and every route below it is code-gated by the shell.
       host.pairing.register("roms", {
+        v2: true,
         page: (ctx) => renderTemplate(romsPage, { lang: ctx.locale, ...(STR[ctx.locale] || STR.en) }),
         routes: {
           // Bulk: authenticated by the query, not a sealed body (see roms.html).

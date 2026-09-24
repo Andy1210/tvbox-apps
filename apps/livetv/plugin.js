@@ -120,7 +120,9 @@ module.exports = (host) => {
         .catch((err) => host.json(res, { error: String(err.message || err), epg: [] }));
     },
   };
-  host.registerRoutes("/tvbox/api/livetv", routes);
+  // Nothing here is for a caller the shell cannot name. An older shell ignores
+  // `public`.
+  host.registerRoutes("/tvbox/api/livetv", routes, { public: [] });
 
   // Drop the channel/EPG cache when the IPTV source changes. The app's settings
   // save through the generic POST /tvbox/api/config (not our routes), so the
@@ -135,6 +137,7 @@ module.exports = (host) => {
   // package; the shell gives us the code-gate, lifecycle, and config store.
   const pageHtml = fs.readFileSync(path.join(__dirname, "pairing", "iptv.html"), "utf8");
   host.pairing.register("iptv", {
+    v2: true,
     page: (ctx) => renderTemplate(pageHtml, { lang: ctx.locale, ...(PAIRING_STR[ctx.locale] || PAIRING_STR.en) }),
     routes: {
       "POST /save": (req, res, ctx) => {

@@ -112,7 +112,7 @@ test("list groups by system and flags unfinished uploads", () => {
 test("remove deletes the game, its partial, and an emptied system folder", () => {
   reset();
   roms.writeChunk({ system: "n64", name: "g.z64", offset: 0, data: b64("aa"), last: true });
-  roms.writeChunk({ system: "n64", name: "g.z64", offset: 0, data: b64("a") }); // leaves a .part too
+  fs.writeFileSync(path.join(roms.ROMS_DIR, "n64", "g.z64.part"), "a"); // an abandoned partial beside it
   assert.strictEqual(roms.remove("n64", "g.z64"), true);
   assert.strictEqual(fs.existsSync(path.join(roms.ROMS_DIR, "n64")), false);
   assert.strictEqual(roms.remove("n64", "g.z64"), false, "already gone");
@@ -153,4 +153,21 @@ test("an upload does not write through a link planted in a real system folder", 
   const w = roms.writeChunk({ system: "nes", name: "game.nes", offset: 0, data: b64("x"), last: true });
   assert.strictEqual(w.ok, false);
   assert.strictEqual(fs.readFileSync(target, "utf8"), "mine");
+});
+
+test("an upload never replaces a game that is already there", () => {
+  reset();
+  assert.ok(roms.writeChunk({ system: "gba", name: "z.gba", offset: 0, data: b64("GOOD"), last: true }).ok);
+  const again = roms.writeChunk({ system: "gba", name: "z.gba", offset: 0, data: b64("EVIL"), last: true });
+  assert.deepStrictEqual(again, { ok: false, error: "exists" });
+  assert.strictEqual(fs.readFileSync(path.join(roms.ROMS_DIR, "gba", "z.gba"), "utf8"), "GOOD");
+});
+
+test("an upload that another one finished first does not replace it on its last chunk", () => {
+  reset();
+  assert.ok(roms.writeChunk({ system: "gba", name: "r.gba", offset: 0, data: b64("aa") }).ok);
+  fs.writeFileSync(path.join(roms.ROMS_DIR, "gba", "r.gba"), "FIRST");
+  const last = roms.writeChunk({ system: "gba", name: "r.gba", offset: 2, data: b64("cc"), last: true });
+  assert.deepStrictEqual(last, { ok: false, error: "exists" });
+  assert.strictEqual(fs.readFileSync(path.join(roms.ROMS_DIR, "gba", "r.gba"), "utf8"), "FIRST");
 });

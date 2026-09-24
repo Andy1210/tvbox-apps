@@ -1414,6 +1414,10 @@ module.exports = (host) => {
       "GET /search",
       "GET /lyrics",
     ],
+    // What a caller the shell cannot name may reach: only the OAuth sign-in
+    // window landing on the callback. The event hook proves itself with the
+    // box's local token instead. An older shell ignores `public`.
+    public: ["GET /auth/callback"],
   });
 
   // Spotify's phone-pairing pages: the API-keys form and the phone-as-keyboard
@@ -1423,6 +1427,7 @@ module.exports = (host) => {
   // that login window's state.
   const spotifyPageHtml = fs.readFileSync(path.join(__dirname, "pairing", "spotify.html"), "utf8");
   host.pairing.register("spotify", {
+    v2: true,
     page: (ctx) =>
       renderTemplate(spotifyPageHtml, {
         lang: ctx.locale,
@@ -1442,6 +1447,7 @@ module.exports = (host) => {
   });
   const keyboardPageHtml = fs.readFileSync(path.join(__dirname, "pairing", "keyboard.html"), "utf8");
   host.pairing.register("keyboard", {
+    v2: true,
     page: (ctx) =>
       renderTemplate(keyboardPageHtml, { lang: ctx.locale, ...(KEYBOARD_STR[ctx.locale] || KEYBOARD_STR.en) }),
     routes: {

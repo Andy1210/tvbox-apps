@@ -66,6 +66,16 @@ function ensureDir(system) {
   return dir;
 }
 
+// Whether anything is at `p`, a dangling link included.
+function exists(p) {
+  try {
+    fs.lstatSync(p);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 function sizeOf(p) {
   try {
     return fs.statSync(p).size;
@@ -91,6 +101,12 @@ function writeChunk({ system, name, offset, data, last }) {
     return { ok: false, error: "bad_data" };
   }
   if (off + buf.length > MAX_FILE_BYTES) return { ok: false, error: "too_big" };
+  // An upload adds a game, it never replaces one: the chunk route is reachable
+  // with nothing more than the pairing session, so replacing a file would hand
+  // that session the bytes an emulator core later parses. Deleting first is the
+  // way to swap a game. Checked on every chunk, so an upload of the same name
+  // that finished in between is not replaced by the last chunk of this one.
+  if (exists(final)) return { ok: false, error: "exists" };
   ensureDir(system);
   const have = sizeOf(part);
   if (off === 0) {

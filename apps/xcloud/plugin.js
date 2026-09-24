@@ -576,7 +576,13 @@ module.exports = (host) => {
   // `/library` is ~101 authenticated requests to Microsoft on a cold cache and it
   // rewrites the cached language; `/waittime` is one authenticated request per
   // distinct id, and an <img src> can fire either from any page the box loads.
-  host.registerRoutes("/tvbox/api/xcloud", routes, { guard: ["GET /library", "GET /waittime"] });
+  // `public` is what a caller the shell cannot name may reach: only the stop the
+  // page sends with sendBeacon as it goes away, which can arrive after its window
+  // is gone. An older shell ignores it.
+  host.registerRoutes("/tvbox/api/xcloud", routes, {
+    guard: ["GET /library", "GET /waittime"],
+    public: ["POST /session/stop"],
+  });
 
   // The catalogue language follows the PAGE, the market does not: the market comes
   // from the streaming token because it is the account's, not the box's.
