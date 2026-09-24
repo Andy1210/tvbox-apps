@@ -611,11 +611,19 @@ module.exports = (host) => {
       res.end(authResultHtml(ok, locale));
       setTimeout(closeAuthWin, 1800);
     };
-    if (err || !code || !authState || st !== authState) {
-      finish(false);
+    // Only the redirect of the sign-in this box started may end it: a request
+    // without that state is answered and otherwise ignored, so it cannot close a
+    // login window somebody is still typing into.
+    if (!authState || st !== authState) {
+      res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("bad state");
       return;
     }
     authState = "";
+    if (err || !code) {
+      finish(false);
+      return;
+    }
     spotifyApi
       .exchangeCode(code)
       .then((r) => finish(!!r.ok))

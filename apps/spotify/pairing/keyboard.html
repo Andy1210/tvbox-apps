@@ -2,6 +2,7 @@
 <html lang="{{lang}}">
   <head>
     <meta charset="utf-8" />
+    <meta name="referrer" content="no-referrer" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>{{title}}</title>
     <style>
@@ -115,14 +116,24 @@
       </div>
     </details>
     <div id="st"></div>
-    <script src="/tvbox-seal.js"></script>
+    <script src="/tvbox-seal.js" data-v="2"></script>
     <script>
-      // Sealed with the key the QR carries in its fragment when the box serves
-      // /tvbox-seal.js; a box without it takes the plain body.
+      // With data-v="2" the box's /tvbox-seal.js takes the code and a key from the
+      // QR code's URL fragment and seals every write with that key, so neither
+      // crosses the network in clear. A box that does not serve it put the code
+      // in the query and takes a plain body.
+      var seal = window.tvboxSeal;
       function sealBody(b) {
-        return window.tvboxSeal ? window.tvboxSeal.body(b) : JSON.stringify(b);
+        return seal ? seal.body(b) : JSON.stringify(b);
       }
-      document.getElementById("code").value = new URLSearchParams(location.search).get("c") || "";
+      function pairCode() {
+        return seal ? seal.code : new URLSearchParams(location.search).get("c") || "";
+      }
+      // What a write's URL carries: nothing once the code travels sealed.
+      function writeQuery() {
+        return seal ? "" : location.search;
+      }
+      document.getElementById("code").value = pairCode();
       function code() {
         return document.getElementById("code").value;
       }
@@ -132,7 +143,7 @@
       function fill(id, field) {
         var v = document.getElementById(id).value;
         if (!v) return;
-        fetch("/fill" + location.search, {
+        fetch("/fill" + writeQuery(), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: sealBody({ code: code(), field: field, value: v }),
@@ -146,7 +157,7 @@
       }
       function key(b) {
         b.code = code();
-        return fetch("/key" + location.search, {
+        return fetch("/key" + writeQuery(), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: sealBody(b),

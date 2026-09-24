@@ -50,6 +50,22 @@ PY
 # The payload goes in on stdin, not in argv: it carries the key that tells the
 # shell this event is the daemon's, and an argument is readable in /proc by
 # anything running as this user.
+#
+# The shell writes a per-start token to ~/.tvbox/local-token, and a request that
+# carries it counts as one of the box's own processes. It goes to curl as a
+# header FILE (a process substitution, filled by builtins), for the same reason
+# the payload goes on stdin. A shell that writes no token simply gets no header.
+TOKEN_FILE="${HOME}/.tvbox/local-token"
+local_header=""
+if [ -r "$TOKEN_FILE" ]; then
+  token=$(<"$TOKEN_FILE")
+  token=${token//[$'\r\n ']/}
+  [ -z "$token" ] || local_header="X-Tvbox-Local: $token"
+fi
+# The substitution sits on curl's own command line: one created earlier (kept in
+# a variable) is closed again before curl gets to read it.
 printf '%s' "$payload" | curl --silent --max-time 2 --request POST \
-  --header "Content-Type: application/json" --data-binary @- "$URL" \
+  --header "Content-Type: application/json" \
+  --header @<([ -z "$local_header" ] || printf '%s\n' "$local_header") \
+  --data-binary @- "$URL" \
   >/dev/null 2>&1 || true

@@ -731,7 +731,9 @@ module.exports = (host) => {
       host.pairing.register("roms", {
         page: (ctx) => renderTemplate(romsPage, { lang: ctx.locale, ...(STR[ctx.locale] || STR.en) }),
         routes: {
+          // Bulk: authenticated by the query, not a sealed body (see roms.html).
           "POST /rom-chunk": {
+            bulk: true,
             maxBody: CHUNK_MAX_BODY,
             handler: (req, res, ctx) => ctx.json(res, roms.writeChunk(ctx.body || {})),
           },

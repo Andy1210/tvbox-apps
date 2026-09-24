@@ -2,6 +2,7 @@
 <html lang="{{lang}}">
   <head>
     <meta charset="utf-8" />
+    <meta name="referrer" content="no-referrer" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>{{title}}</title>
     <style>
@@ -149,12 +150,15 @@
     <div id="list"></div>
     <div id="empty" hidden>{{empty}}</div>
 
-    <script src="/tvbox-seal.js"></script>
+    <script src="/tvbox-seal.js" data-v="2"></script>
     <script>
-      // Sealed with the key the QR carries in its fragment when the box serves
-      // /tvbox-seal.js; a box without it takes the plain body.
+      // With data-v="2" the box's /tvbox-seal.js takes the code and a key from the
+      // QR code's URL fragment and seals every write with that key, so neither
+      // crosses the network in clear. A box that does not serve it put the code
+      // in the query and takes a plain body.
+      const seal = window.tvboxSeal;
       function sealBody(b) {
-        return window.tvboxSeal ? window.tvboxSeal.body(b) : JSON.stringify(b);
+        return seal ? seal.body(b) : JSON.stringify(b);
       }
       const T = {
         uploading: "{{uploading}}",
@@ -222,16 +226,20 @@
 
       const fmt = (n) =>
         n >= 1e9 ? (n / 1e9).toFixed(1) + " GB" : n >= 1e6 ? Math.round(n / 1e6) + " MB" : Math.round(n / 1e3) + " kB";
-      // The pairing server gates every route on the session code: "c" in the query
-      // for reads, "code" in the body for writes.
-      const code = new URLSearchParams(location.search).get("c") || "";
+      // The pairing server gates every route on the session code. A write carries
+      // it inside its (sealed) body; a read and a ROM chunk carry the query
+      // credential instead, which is a token derived from the key when the page
+      // has one and the code itself when it does not.
+      const code = seal ? seal.code : new URLSearchParams(location.search).get("c") || "";
+      const auth = () => (seal ? seal.query() : "c=" + encodeURIComponent(code));
       // A ROM chunk goes plain: it is not a secret, and sealing 4 MB means
-      // base64-encoding it twice on the phone for every chunk.
+      // base64-encoding it twice on the phone for every chunk. With a key it is
+      // authenticated by the query token, so the code stays out of it.
       const api = (p, body, { plain = false } = {}) =>
-        fetch(p, {
+        fetch(plain ? p + "?" + auth() : p, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: plain ? JSON.stringify({ ...body, code }) : sealBody({ ...body, code }),
+          body: plain ? JSON.stringify(seal && seal.sealed ? body : { ...body, code }) : sealBody({ ...body, code }),
         }).then((r) => r.json());
 
       go.onclick = () => pick.click();
@@ -290,7 +298,7 @@
       async function load() {
         let groups = [];
         try {
-          groups = await fetch("/roms?c=" + encodeURIComponent(code)).then((r) => r.json());
+          groups = await fetch("/roms?" + auth()).then((r) => r.json());
         } catch (e) {
           /* box went away; the list just stays as it was */
         }
