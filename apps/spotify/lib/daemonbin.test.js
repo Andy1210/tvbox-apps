@@ -73,6 +73,17 @@ test("overlapping updates do not share a temp file", async () => {
   assert.equal(fs.readFileSync(file, "utf8"), "new");
 });
 
+test("a binary that changed during the download is left alone", async () => {
+  const { dir, file } = setup("old");
+  const download = async (u, dest) => {
+    fs.writeFileSync(file, "own");
+    fs.writeFileSync(dest, "new");
+  };
+  assert.equal(await refreshBinary({ file, spec: { url, sha256: sha("new") }, replaces, download }), false);
+  assert.equal(fs.readFileSync(file, "utf8"), "own");
+  assert.deepEqual(fs.readdirSync(dir), ["librespot"]);
+});
+
 test("a failed download keeps the old build", async () => {
   const { dir, file } = setup("old");
   const download = async (u, dest) => {

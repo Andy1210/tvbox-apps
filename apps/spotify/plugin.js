@@ -765,6 +765,7 @@ module.exports = (host) => {
   // exactly when somebody presses again. `starting` in the browser cannot cover
   // it either: it is per-component, and the voice path is a second call site.
   let recovering = false;
+  let lastPlayAt = 0;
   // Whether there is anything to sign back in WITH. Only a real ENOENT counts as
   // "no": `existsSync` answers false for a cache directory it cannot READ too,
   // and taking that as an absent login makes the one claim this file is careful
@@ -947,6 +948,7 @@ module.exports = (host) => {
   // their own library is owed that sentence rather than left wondering whose
   // songs these are. Only on a play that started - a refusal has its own message.
   async function playOnBox(body) {
+    lastPlayAt = Date.now();
     const want = spotifyApi.activeAccountInfo();
     const r = await startOnBox(want, body);
     if (!r || !r.ok || !want || !r.account || r.account === want.id) return r;
@@ -1497,7 +1499,9 @@ module.exports = (host) => {
   // would end the music, or a sign-in or recovery waiting for this daemon to come up.
   // Otherwise its next start picks the new build up.
   let stopped = false;
-  const daemonInUse = () => recovering || spotify.sessionActive() || !!spotify.getState().track_id;
+  // A play has no state of its own until the daemon reports it, hence the time window.
+  const daemonInUse = () =>
+    recovering || spotify.sessionActive() || !!spotify.getState().track_id || Date.now() - lastPlayAt < 30000;
   function updateDaemon() {
     const entry = ((manifest.requires || {}).download || [])[0];
     if (!entry || !entry.bin) return;

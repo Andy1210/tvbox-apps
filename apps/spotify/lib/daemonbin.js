@@ -58,6 +58,7 @@ async function refreshBinary({ file, spec, replaces = [], download = curl, log =
     await download(spec.url, tmp);
     const got = await sha256(tmp);
     if (got !== wanted) throw new Error("sha256 mismatch (got " + got + ")");
+    if ((await sha256(file)) !== current) throw new Error("it changed during the download");
     await fs.promises.chmod(tmp, 0o755);
     await fs.promises.rename(tmp, file);
     return true;
