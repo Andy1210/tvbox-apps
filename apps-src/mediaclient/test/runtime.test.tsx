@@ -68,12 +68,16 @@ describe("a tile", () => {
 });
 
 describe("the home screen's description", () => {
-  it("names the length beside an episode's title, on one line", () => {
+  it("keeps the separator with the title and the length in one piece", () => {
     const { container } = render(
       <Hero item={{ id: "e", kind: "episode", title: "Pilot", grandparentTitle: "Series", durationMs: 23 * 60_000 }} />,
     );
     const line = [...container.querySelectorAll("p")].find((p) => p.textContent?.includes("Pilot"));
-    expect(line?.textContent).toMatch(/Pilot · .*23/);
+    expect(line?.textContent).toMatch(/^Pilot · .*23/);
+    const length = line?.querySelector(".whitespace-nowrap")?.textContent;
+    expect(length).toMatch(/23/);
+    // Only the length: a title inside this span could no longer wrap.
+    expect(length).not.toMatch(/Pilot/);
   });
 
   it("names a film's length, and no line at all for a series", () => {

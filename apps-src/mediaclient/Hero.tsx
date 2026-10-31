@@ -124,8 +124,7 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
   const title = item.grandparentTitle ?? item.title;
   // The same rule as the tile: a series' own duration is a typical episode's.
   const length = item.kind === "movie" || item.kind === "episode" ? runtime(item.durationMs, t) : "";
-  // One line, so an episode's name and its length cost the synopsis no room.
-  const sub = [item.grandparentTitle ? item.title : "", length].filter(Boolean).join(" · ");
+  const sub = item.grandparentTitle ? item.title : "";
 
   return (
     <>
@@ -216,7 +215,16 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
 
       <section className="relative z-10 flex h-[42vh] w-[46vw] shrink-0 flex-col justify-center gap-[1.2vh] px-[4vw]">
         <TitleArt title={title} logo={detail?.logo} />
-        {sub && <p className="text-[2.1vh] text-white/85 [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.8)]">{sub}</p>}
+        {/* A long title may wrap, and is never cut: this is the one place on the
+            screen that names the episode in full. The only break the length
+            allows is right before it, with the separator left on the title's
+            line, so "18 p" cannot split into two lines. */}
+        {(sub || length) && (
+          <p className="text-[2.1vh] text-white/85 [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.8)]">
+            {sub && length ? `${sub} · ` : sub}
+            {length && <span className="whitespace-nowrap">{length}</span>}
+          </p>
+        )}
         {detail?.summary && (
           <p className="line-clamp-3 max-w-[42vw] text-[2vh] leading-relaxed [text-shadow:0_0.2vh_0.6vh_rgba(0,0,0,0.8)]">
             {detail.summary}
