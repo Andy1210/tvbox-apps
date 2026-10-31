@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { useFocusableItem } from "@sdk";
+import { useFocusableItem, useI18n } from "@sdk";
 import type { MediaItem } from "./backends/types";
 import { loadImage } from "./posters";
 import { useApp } from "./state";
+import { runtime } from "./time";
 
 export interface TileProps {
   item: MediaItem;
@@ -89,6 +90,7 @@ export function Tile({
   countdown,
   describing = false,
 }: TileProps): React.JSX.Element {
+  const { t } = useI18n();
   // scrollIntoView scrolls BOTH axes - `inline` defaults to "nearest" - so a
   // row gets its vertical scrolling from here and then supersedes the horizontal
   // half with its own scrollTo, which gives the focused tile some run-up. That
@@ -118,9 +120,11 @@ export function Tile({
   // "16 unwatched" badge, which unscrobbling the episodes never took back off.
   // `unwatchedCount` is set for a series and a season and for nothing else, so
   // it is also the test for which kind of item this is.
-  const watched =
-    !pct && (item.unwatchedCount !== undefined ? item.unwatchedCount === 0 : (item.viewCount ?? 0) > 0);
+  const watched = !pct && (item.unwatchedCount !== undefined ? item.unwatchedCount === 0 : (item.viewCount ?? 0) > 0);
   const showsTitleInPlace = (!src || broken) && item.title !== "";
+  // Only what is itself played. A series' duration is the length of a typical
+  // episode, which on its poster would read as the length of the series.
+  const length = item.kind === "movie" || item.kind === "episode" ? runtime(item.durationMs, t) : "";
 
   // The callback is held in a ref and the effect depends on `focused` alone.
   // Depending on the callback re-ran this on EVERY render - and a caller that
@@ -230,6 +234,13 @@ export function Tile({
         {pct !== null && (
           <div className="absolute inset-x-0 bottom-0 h-[0.5vh] bg-black/60">
             <div className="h-full bg-white" style={{ width: `${pct * 100}%` }} />
+          </div>
+        )}
+
+        {/* Clear of the progress bar along the bottom edge. */}
+        {length && (
+          <div className="absolute right-[0.6vh] bottom-[1vh] rounded-[0.4vh] bg-black/70 px-[0.6vh] text-[1.7vh] tabular-nums">
+            {length}
           </div>
         )}
 
