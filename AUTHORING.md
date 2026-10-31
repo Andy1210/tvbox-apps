@@ -375,13 +375,17 @@ the sha256. Two patterns:
    a release on your repo, attach the static binary as an asset, and point
    `arch.<arch>.url` at the asset URL with its `sha256`. You own and update it.
 2. **Registry-hosted** (first-party, like `librespot`): the binary is a **release
-   asset on this repo** (e.g. tag `librespot-v0.8.0`, asset `librespot-aarch64`).
+   asset on this repo** (e.g. tag `librespot-v0.8.0-tvbox.1`, asset `librespot-tvbox-aarch64`).
    Open a PR with the manifest referencing it; a maintainer uploads the asset.
 
 Why release assets and not the git tree: they stay out of git history (no repo
 bloat, no LFS metering), and the **sha256 pins them** — it's checked at install
 and reviewable in the PR, so a swapped asset can't slip through. Compute it with
 `sha256sum <file>`. The box's arch is `arm64` (Raspberry Pi 5); provide that key.
+
+A box skips a download when the binary is already on its PATH, so a new url and
+sha256 do not reach a box that has the old build. To replace a binary, the app's
+plugin has to do it, as Spotify's `lib/daemonbin.js` does.
 
 Example (`apps/spotify/manifest.json`):
 
@@ -391,8 +395,8 @@ Example (`apps/spotify/manifest.json`):
   "download": [{
     "bin": "librespot",
     "arch": { "arm64": {
-      "url": "https://github.com/Andy1210/tvbox-apps/releases/download/librespot-v0.8.0/librespot-aarch64",
-      "sha256": "3adf05fd4d203072437da90fa9f977b99ff78bc98cc37173debc40c5f4a47c51"
+      "url": "https://github.com/Andy1210/tvbox-apps/releases/download/librespot-v0.8.0-tvbox.1/librespot-tvbox-aarch64",
+      "sha256": "585b3ce01559a54ae5ff94fadd535df0d9f91b144f15bf6884164b9101a75c00"
     }}
   }]
 }
