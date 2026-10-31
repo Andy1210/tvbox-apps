@@ -15,3 +15,18 @@ export function clock(ms: number): string {
   const mm = h ? String(m).padStart(2, "0") : String(m);
   return `${h ? `${h}:` : ""}${mm}:${String(s).padStart(2, "0")}`;
 }
+
+/**
+ * How long something runs, in hours and minutes, with the units from the locale:
+ * "2h 14m" is not how a Hungarian television says it. Empty when the length is
+ * not known.
+ *
+ * Never under a minute, because a 20 second trailer is not "0 m".
+ */
+export function runtime(ms: number | undefined, t: (key: string, vars?: Record<string, string>) => string): string {
+  if (!ms) return "";
+  const total = Math.max(1, Math.round(ms / 60000));
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return h ? t("detail.runtimeHm", { h: String(h), m: String(m) }) : t("detail.runtimeM", { m: String(m) });
+}

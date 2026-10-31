@@ -31,16 +31,7 @@ import { classify, useApp } from "./state";
 import { rememberTrack, resolveTrack, type ChosenTrack } from "./tracks";
 import type { ItemDetail, MediaItem, MediaVersion } from "./backends/types";
 import { log } from "./redact";
-
-/** Hours and minutes, with the unit letters coming from the locale - "2h 14m"
- *  is not how a Hungarian television says it. */
-function runtime(ms: number | undefined, t: (key: string, vars?: Record<string, string>) => string): string {
-  if (!ms) return "";
-  const total = Math.round(ms / 60000);
-  const h = Math.floor(total / 60);
-  const m = total % 60;
-  return h ? t("detail.runtimeHm", { h: String(h), m: String(m) }) : t("detail.runtimeM", { m: String(m) });
-}
+import { runtime } from "./time";
 
 /** The part of an item this screen ever patches by hand. */
 type ViewState = Pick<MediaItem, "viewCount" | "viewOffsetMs">;
@@ -1272,9 +1263,18 @@ export function Detail({
           {shown !== detail || shown.grandparentTitle ? <p className="text-[2vh] text-fg-dim">{shown.title}</p> : null}
           {shown.tagline && <p className="text-[1.9vh] text-fg-dim italic">{shown.tagline}</p>}
 
-          <div className="flex flex-wrap items-center gap-[1.4vw] text-[1.7vh] text-fg-dim">
+          {/* The length follows the page's subject: on a season that is the
+              highlighted episode, because a season has no length of its own.
+              A season usually has nothing else on this line either, so its
+              height is reserved there, or the first highlight would push the
+              episode row out from under the cursor. */}
+          <div
+            className={`flex flex-wrap items-center gap-[1.4vw] text-[1.7vh] text-fg-dim ${
+              detail.kind === "season" ? "min-h-[2.6vh]" : ""
+            }`}
+          >
             {detail.year ? <span className="tabular-nums">{detail.year}</span> : null}
-            {detail.durationMs ? <span className="tabular-nums">{runtime(detail.durationMs, t)}</span> : null}
+            {shown.durationMs ? <span className="tabular-nums">{runtime(shown.durationMs, t)}</span> : null}
             {detail.contentRating ? (
               <span className="rounded-[0.4vh] border border-white/40 px-[0.6vw] py-[0.1vh]">
                 {detail.contentRating}

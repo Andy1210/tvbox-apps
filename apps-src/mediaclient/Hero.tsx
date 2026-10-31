@@ -8,6 +8,7 @@ import { useApp } from "./state";
 import { useShowingPlayer } from "./playback/player";
 import type { ItemDetail, MediaItem } from "./backends/types";
 import { log } from "./redact";
+import { runtime } from "./time";
 
 /**
  * What the cursor is on, in full, above the rows.
@@ -121,7 +122,10 @@ export function Hero({ item }: { item: MediaItem | null }): React.JSX.Element | 
 
   const cast = (detail?.roles ?? []).slice(0, 4).map((r) => r.name);
   const title = item.grandparentTitle ?? item.title;
-  const sub = item.grandparentTitle ? item.title : null;
+  // The same rule as the tile: a series' own duration is a typical episode's.
+  const length = item.kind === "movie" || item.kind === "episode" ? runtime(item.durationMs, t) : "";
+  // One line, so an episode's name and its length cost the synopsis no room.
+  const sub = [item.grandparentTitle ? item.title : "", length].filter(Boolean).join(" · ");
 
   return (
     <>
