@@ -1,8 +1,8 @@
 diff --git a/core/src/audio_key.rs b/core/src/audio_key.rs
-index 42cad43..faf0303 100644
+index 42cad43..5d95166 100644
 --- a/core/src/audio_key.rs
 +++ b/core/src/audio_key.rs
-@@ -3,9 +3,23 @@ use std::{collections::HashMap, io::Write, time::Duration};
+@@ -3,9 +3,26 @@ use std::{collections::HashMap, io::Write, time::Duration};
  use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
  use bytes::Bytes;
  use thiserror::Error;
@@ -18,17 +18,20 @@ index 42cad43..faf0303 100644
 +// Spotify rate limits key requests, far below what skipping through a list asks for,
 +// and answers with code 2 for as long as requests keep arriving. Requests are spaced
 +// so that a burst of skips costs one key, and a refusal is waited out and retried.
++// The limit can take half a minute to clear. Retrying for about a minute costs nothing
++// when the listener moves on, because a skip cancels the load that is waiting here.
 +const KEY_REQUEST_SPACING: Duration = Duration::from_secs(1);
 +const THROTTLED_BACKOFF: [Duration; 3] = [
 +    Duration::from_secs(3),
 +    Duration::from_secs(5),
 +    Duration::from_secs(10),
 +];
++const THROTTLED_RETRIES: usize = 7;
 +const AES_KEY_ERROR_THROTTLED: u8 = 2;
  
  #[derive(Debug, Hash, PartialEq, Eq, Copy, Clone)]
  pub struct AudioKey(pub [u8; 16]);
-@@ -14,6 +28,8 @@ pub struct AudioKey(pub [u8; 16]);
+@@ -14,6 +31,8 @@ pub struct AudioKey(pub [u8; 16]);
  pub enum AudioKeyError {
      #[error("audio key error")]
      AesKey,
@@ -37,7 +40,7 @@ index 42cad43..faf0303 100644
      #[error("other end of channel disconnected")]
      Channel,
      #[error("unexpected packet type {0}")]
-@@ -28,6 +44,7 @@ impl From<AudioKeyError> for Error {
+@@ -28,6 +47,7 @@ impl From<AudioKeyError> for Error {
      fn from(err: AudioKeyError) -> Self {
          match err {
              AudioKeyError::AesKey => Error::unavailable(err),
@@ -45,7 +48,7 @@ index 42cad43..faf0303 100644
              AudioKeyError::Channel => Error::aborted(err),
              AudioKeyError::Sequence(_) => Error::aborted(err),
              AudioKeyError::Packet(_) => Error::unimplemented(err),
-@@ -40,6 +57,8 @@ component! {
+@@ -40,6 +60,8 @@ component! {
      AudioKeyManager : AudioKeyManagerInner {
          sequence: SeqGenerator<u32> = SeqGenerator::new(0),
          pending: HashMap<u32, oneshot::Sender<Result<AudioKey, Error>>> = HashMap::new(),
@@ -54,11 +57,14 @@ index 42cad43..faf0303 100644
      }
  }
  
-@@ -65,8 +84,13 @@ impl AudioKeyManager {
+@@ -65,8 +87,16 @@ impl AudioKeyManager {
                      data.as_ref()[0],
                      data.as_ref()[1]
                  );
 +                let err = if data.as_ref()[1] == AES_KEY_ERROR_THROTTLED {
++                    // Here rather than in request(): the refusal counts even if the load
++                    // that asked has been cancelled by now.
++                    self.note_throttled();
 +                    AudioKeyError::Throttled
 +                } else {
 +                    AudioKeyError::AesKey
@@ -69,7 +75,7 @@ index 42cad43..faf0303 100644
                      .map_err(|_| AudioKeyError::Channel)?
              }
              _ => {
-@@ -79,6 +103,54 @@ impl AudioKeyManager {
+@@ -79,6 +109,55 @@ impl AudioKeyManager {
      }
  
      pub async fn request(&self, track: SpotifyId, file: FileId) -> Result<AudioKey, Error> {
@@ -77,26 +83,27 @@ index 42cad43..faf0303 100644
 +        loop {
 +            self.wait_for_turn().await;
 +            let result = self.request_once(track, file).await;
-+            let throttled = matches!(&result, Err(e) if e.kind == ErrorKind::ResourceExhausted);
-+            if !throttled {
-+                if result.is_ok() {
++            match &result {
++                Ok(_) => {
 +                    self.lock(|inner| inner.throttled_count = 0);
++                    return result;
 +                }
-+                return result;
++                Err(e) if e.kind == ErrorKind::ResourceExhausted && retries < THROTTLED_RETRIES => {
++                    retries += 1;
++                }
++                Err(_) => return result,
 +            }
-+            let delay = self.lock(|inner| {
-+                let delay =
-+                    THROTTLED_BACKOFF[inner.throttled_count.min(THROTTLED_BACKOFF.len() - 1)];
-+                inner.throttled_count += 1;
-+                inner.not_before = Some(Instant::now() + delay);
-+                delay
-+            });
-+            if retries == THROTTLED_BACKOFF.len() {
-+                return result;
-+            }
-+            retries += 1;
-+            warn!("Audio key requests are rate limited, trying again in {delay:?}");
 +        }
++    }
++
++    fn note_throttled(&self) {
++        let delay = self.lock(|inner| {
++            let delay = THROTTLED_BACKOFF[inner.throttled_count.min(THROTTLED_BACKOFF.len() - 1)];
++            inner.throttled_count += 1;
++            inner.not_before = Some(Instant::now() + delay);
++            delay
++        });
++        warn!("Audio key requests are rate limited, trying again in {delay:?}");
 +    }
 +
 +    // Takes the next slot, or waits for it. Dropping the future while it waits costs

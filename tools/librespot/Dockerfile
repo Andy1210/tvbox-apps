@@ -1,6 +1,6 @@
 # Builds the librespot binary the Spotify app downloads:
 #   docker build --output out tools/librespot
-FROM rust:1.99-bookworm AS build
+FROM rust:1.99-bookworm@sha256:9181b56c2a21ab1d5e73cffe04fc762426d30aa7fac3c91141dd033f49a7fc8b AS build
 RUN dpkg --add-architecture arm64 && apt-get update && apt-get install -y --no-install-recommends \
     crossbuild-essential-arm64 libasound2-dev:arm64 libpulse-dev:arm64 cmake clang pkg-config \
     && rustup target add aarch64-unknown-linux-gnu

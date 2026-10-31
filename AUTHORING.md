@@ -384,19 +384,19 @@ and reviewable in the PR, so a swapped asset can't slip through. Compute it with
 `sha256sum <file>`. The box's arch is `arm64` (Raspberry Pi 5); provide that key.
 
 A box skips a download when the binary is already on its PATH, so a new url and
-sha256 do not reach a box that has the old build. To replace a binary, give it a
-new `bin` name as well.
+sha256 do not reach a box that has the old build. To replace a binary, the app's
+plugin has to do it, as Spotify's `lib/daemonbin.js` does.
 
 Example (`apps/spotify/manifest.json`):
 
 ```jsonc
 "requires": {
-  "bin": ["librespot-tvbox"],
+  "bin": ["librespot"],
   "download": [{
-    "bin": "librespot-tvbox",
+    "bin": "librespot",
     "arch": { "arm64": {
       "url": "https://github.com/Andy1210/tvbox-apps/releases/download/librespot-v0.8.0-tvbox.1/librespot-tvbox-aarch64",
-      "sha256": "3cb0ef823e6c87672805ab296e9e352af3965c201442abd72e3c8c0b79dd180f"
+      "sha256": "585b3ce01559a54ae5ff94fadd535df0d9f91b144f15bf6884164b9101a75c00"
     }}
   }]
 }

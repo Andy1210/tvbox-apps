@@ -6,7 +6,7 @@
   "changelog": [
     {
       "version": "1.7.3",
-      "notes": "Ha a telefonon kiválasztasz egy számot a listából, most már az szólal meg, nem a lista első száma. Gyors léptetés után a lejátszó nem pörög tovább magától a listán, megáll azon a számon, ahová léptél, és legfeljebb pár másodperc múlva elindítja. / Picking a track in a list on the phone now plays that track instead of the first one. After skipping quickly the player no longer keeps running through the list by itself: it stays on the track you landed on and starts it within a few seconds."
+      "notes": "Ha a telefonon kiválasztasz egy számot a listából, most már az szólal meg, nem a lista első száma. Gyors léptetés után a lejátszó nem pörög tovább magától a listán, megáll azon a számon, ahová léptél, és amint a Spotify újra enged, elindítja. Ez általában pár másodperc, de ritkán akár egy percig is tarthat. / Picking a track in a list on the phone now plays that track instead of the first one. After skipping quickly the player no longer keeps running through the list by itself: it stays on the track you landed on and starts it as soon as Spotify allows. That is usually a few seconds, rarely up to a minute."
     },
     {
       "version": "1.7.2",
@@ -94,14 +94,14 @@
     "hu": "A box Spotify Connect hangszóróvá válik: nyisd meg a Spotify-t a telefonodon vagy gépeden, és válaszd ki a boxot lejátszási eszköznek. Opcionális fiók-funkciók (ingyenes API-kulcsok) képernyős keresést, lejátszási listákat és kedvelt számokat adnak."
   },
   "requires": {
-    "bin": ["librespot-tvbox"],
+    "bin": ["librespot"],
     "download": [
       {
-        "bin": "librespot-tvbox",
+        "bin": "librespot",
         "arch": {
           "arm64": {
             "url": "https://github.com/Andy1210/tvbox-apps/releases/download/librespot-v0.8.0-tvbox.1/librespot-tvbox-aarch64",
-            "sha256": "3cb0ef823e6c87672805ab296e9e352af3965c201442abd72e3c8c0b79dd180f"
+            "sha256": "585b3ce01559a54ae5ff94fadd535df0d9f91b144f15bf6884164b9101a75c00"
           }
         }
       }

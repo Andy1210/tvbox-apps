@@ -28,6 +28,8 @@ const spotifyApi = require("./lib/spotify_api"); // OPTIONAL Spotify Web API (ac
 const { createAutoplay } = require("./lib/autoplay"); // what plays when a playlist runs out
 const { createCredGuard, isSupervisorExit, isCredentialRejection, authenticatedAs } = require("./lib/credguard"); // what the daemon's own output says
 const { createCredVault } = require("./lib/credvault"); // one saved login per linked account
+const { refreshBinary } = require("./lib/daemonbin"); // the librespot build this version ships
+const manifest = require("./manifest.json");
 
 const SPOTIFY_HOOK = path.join(__dirname, "spotify_event_hook.sh"); // librespot --onevent target
 // Where librespot keeps the saved session credentials (and the Connect volume).
@@ -223,12 +225,6 @@ function searchLrclib(title, artist, durSec) {
   });
 }
 
-// Our patched build, see tools/librespot. Its name differs from upstream's because a
-// box never replaces a binary it already has. It has to match requires.bin in the
-// manifest. "librespot" is still reaped at start, a box updating from an older
-// version can have one running.
-const LIBRESPOT_BIN = "librespot-tvbox";
-
 module.exports = (host) => {
   spotify.setConfig(host.config); // read the Connect device name from the shell config store
   spotifyApi.setConfig(host.config); // read the Spotify Web API credentials from the shell config store
@@ -315,7 +311,7 @@ module.exports = (host) => {
   }
   function librespotArgv() {
     const args = [
-      LIBRESPOT_BIN,
+      "librespot",
       "--name",
       spotifyDeviceName(),
       "--device-type",
@@ -1495,13 +1491,33 @@ module.exports = (host) => {
     },
   });
 
+  // A new build takes over right away only when nobody is listening. Otherwise the
+  // daemon's next start picks it up, a restart here would end the music.
+  let stopped = false;
+  function updateDaemon() {
+    const entry = ((manifest.requires || {}).download || [])[0];
+    if (!entry || !entry.bin) return;
+    refreshBinary({
+      file: path.join(os.homedir(), ".tvbox", "bin", entry.bin),
+      spec: (entry.arch || {})[process.arch],
+      log: (m) => host.log("spotify: " + m),
+    })
+      .then((replaced) => {
+        if (!replaced) return;
+        host.log("spotify: librespot updated");
+        if (!stopped && !spotify.getState().track_id) restartLibrespot();
+      })
+      .catch((e) => host.log("spotify: librespot update failed: " + (e.message || e)));
+  }
+
   return {
     // Called by the shell after the audio sink is detected and the window exists.
     start() {
+      updateDaemon();
       // Reap a stray/previous librespot before we spawn ours (a crashed prior
       // shell can leave one holding the Connect name + zeroconf port).
       try {
-        for (const name of [LIBRESPOT_BIN, "librespot"]) execFile("pkill", ["-9", "-x", name], () => {});
+        execFile("pkill", ["-9", "-x", "librespot"], () => {});
       } catch (e) {}
       // A cast started on the box (Connect): open the Spotify app (its own
       // webclient window now) and stop other playback. Fires once per cast
@@ -1594,6 +1610,7 @@ module.exports = (host) => {
         .catch((e) => host.log("spotify: could not pause on close:", String(e.message || e)));
     },
     stop() {
+      stopped = true;
       if (host.widget) host.widget.clear();
       autoplay.stop();
       stopLibrespot();
