@@ -38,7 +38,10 @@ test("a binary that is not there is not this app's to replace", async () => {
 
 test("an older build is replaced and stays executable", async () => {
   const { dir, file } = setup("old");
-  assert.equal(await refreshBinary({ file, spec: { url, sha256: sha("new") }, replaces, download: writes("new") }), true);
+  assert.equal(
+    await refreshBinary({ file, spec: { url, sha256: sha("new") }, replaces, download: writes("new") }),
+    true,
+  );
   assert.equal(fs.readFileSync(file, "utf8"), "new");
   assert.ok(fs.statSync(file).mode & 0o100);
   assert.deepEqual(fs.readdirSync(dir), ["librespot"]);
@@ -46,7 +49,10 @@ test("an older build is replaced and stays executable", async () => {
 
 test("a download with the wrong hash keeps the old build", async () => {
   const { dir, file } = setup("old");
-  assert.equal(await refreshBinary({ file, spec: { url, sha256: sha("new") }, replaces, download: writes("evil") }), false);
+  assert.equal(
+    await refreshBinary({ file, spec: { url, sha256: sha("new") }, replaces, download: writes("evil") }),
+    false,
+  );
   assert.equal(fs.readFileSync(file, "utf8"), "old");
   assert.deepEqual(fs.readdirSync(dir), ["librespot"]);
 });
