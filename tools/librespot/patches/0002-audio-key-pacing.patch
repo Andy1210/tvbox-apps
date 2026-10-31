@@ -1,0 +1,166 @@
+diff --git a/core/src/audio_key.rs b/core/src/audio_key.rs
+index 42cad43..faf0303 100644
+--- a/core/src/audio_key.rs
++++ b/core/src/audio_key.rs
+@@ -3,9 +3,23 @@ use std::{collections::HashMap, io::Write, time::Duration};
+ use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
+ use bytes::Bytes;
+ use thiserror::Error;
+-use tokio::sync::oneshot;
++use tokio::{
++    sync::oneshot,
++    time::{Instant, sleep_until},
++};
+ 
+-use crate::{Error, FileId, SpotifyId, packet::PacketType, util::SeqGenerator};
++use crate::{Error, FileId, SpotifyId, error::ErrorKind, packet::PacketType, util::SeqGenerator};
++
++// Spotify rate limits key requests, far below what skipping through a list asks for,
++// and answers with code 2 for as long as requests keep arriving. Requests are spaced
++// so that a burst of skips costs one key, and a refusal is waited out and retried.
++const KEY_REQUEST_SPACING: Duration = Duration::from_secs(1);
++const THROTTLED_BACKOFF: [Duration; 3] = [
++    Duration::from_secs(3),
++    Duration::from_secs(5),
++    Duration::from_secs(10),
++];
++const AES_KEY_ERROR_THROTTLED: u8 = 2;
+ 
+ #[derive(Debug, Hash, PartialEq, Eq, Copy, Clone)]
+ pub struct AudioKey(pub [u8; 16]);
+@@ -14,6 +28,8 @@ pub struct AudioKey(pub [u8; 16]);
+ pub enum AudioKeyError {
+     #[error("audio key error")]
+     AesKey,
++    #[error("audio key requests are being rate limited")]
++    Throttled,
+     #[error("other end of channel disconnected")]
+     Channel,
+     #[error("unexpected packet type {0}")]
+@@ -28,6 +44,7 @@ impl From<AudioKeyError> for Error {
+     fn from(err: AudioKeyError) -> Self {
+         match err {
+             AudioKeyError::AesKey => Error::unavailable(err),
++            AudioKeyError::Throttled => Error::resource_exhausted(err),
+             AudioKeyError::Channel => Error::aborted(err),
+             AudioKeyError::Sequence(_) => Error::aborted(err),
+             AudioKeyError::Packet(_) => Error::unimplemented(err),
+@@ -40,6 +57,8 @@ component! {
+     AudioKeyManager : AudioKeyManagerInner {
+         sequence: SeqGenerator<u32> = SeqGenerator::new(0),
+         pending: HashMap<u32, oneshot::Sender<Result<AudioKey, Error>>> = HashMap::new(),
++        not_before: Option<Instant> = None,
++        throttled_count: usize = 0,
+     }
+ }
+ 
+@@ -65,8 +84,13 @@ impl AudioKeyManager {
+                     data.as_ref()[0],
+                     data.as_ref()[1]
+                 );
++                let err = if data.as_ref()[1] == AES_KEY_ERROR_THROTTLED {
++                    AudioKeyError::Throttled
++                } else {
++                    AudioKeyError::AesKey
++                };
+                 sender
+-                    .send(Err(AudioKeyError::AesKey.into()))
++                    .send(Err(err.into()))
+                     .map_err(|_| AudioKeyError::Channel)?
+             }
+             _ => {
+@@ -79,6 +103,54 @@ impl AudioKeyManager {
+     }
+ 
+     pub async fn request(&self, track: SpotifyId, file: FileId) -> Result<AudioKey, Error> {
++        let mut retries = 0;
++        loop {
++            self.wait_for_turn().await;
++            let result = self.request_once(track, file).await;
++            let throttled = matches!(&result, Err(e) if e.kind == ErrorKind::ResourceExhausted);
++            if !throttled {
++                if result.is_ok() {
++                    self.lock(|inner| inner.throttled_count = 0);
++                }
++                return result;
++            }
++            let delay = self.lock(|inner| {
++                let delay =
++                    THROTTLED_BACKOFF[inner.throttled_count.min(THROTTLED_BACKOFF.len() - 1)];
++                inner.throttled_count += 1;
++                inner.not_before = Some(Instant::now() + delay);
++                delay
++            });
++            if retries == THROTTLED_BACKOFF.len() {
++                return result;
++            }
++            retries += 1;
++            warn!("Audio key requests are rate limited, trying again in {delay:?}");
++        }
++    }
++
++    // Takes the next slot, or waits for it. Dropping the future while it waits costs
++    // no request, which is what makes a superseded track free.
++    async fn wait_for_turn(&self) {
++        loop {
++            let not_before = self.lock(|inner| {
++                let now = Instant::now();
++                match inner.not_before {
++                    Some(at) if at > now => Some(at),
++                    _ => {
++                        inner.not_before = Some(now + KEY_REQUEST_SPACING);
++                        None
++                    }
++                }
++            });
++            match not_before {
++                Some(at) => sleep_until(at).await,
++                None => return,
++            }
++        }
++    }
++
++    async fn request_once(&self, track: SpotifyId, file: FileId) -> Result<AudioKey, Error> {
+         let (tx, rx) = oneshot::channel();
+ 
+         let seq = self.lock(move |inner| {
+diff --git a/playback/Cargo.toml b/playback/Cargo.toml
+index e5656ad..24f5a8f 100644
+--- a/playback/Cargo.toml
++++ b/playback/Cargo.toml
+@@ -56,7 +56,7 @@ log = "0.4"
+ portable-atomic = "1"
+ shell-words = "1.1"
+ thiserror = "2"
+-tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
++tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
+ zerocopy = { version = "0.8", features = ["derive"] }
+ 
+ # Backends
+diff --git a/playback/src/player.rs b/playback/src/player.rs
+index 3f3bbc9..8c9f859 100644
+--- a/playback/src/player.rs
++++ b/playback/src/player.rs
+@@ -2393,13 +2393,20 @@ impl PlayerInternal {
+             local_file_lookup: self.local_file_lookup.clone(),
+         };
+ 
+-        let (result_tx, result_rx) = oneshot::channel();
++        let (mut result_tx, result_rx) = oneshot::channel();
+ 
+         let load_handles_clone = self.load_handles.clone();
+         let handle = tokio::runtime::Handle::current();
+ 
+         let load_handle = thread::spawn(move || {
+-            let data = handle.block_on(loader.load_track(spotify_uri, position_ms));
++            // The receiver is dropped when this load is superseded, so a skip ends the
++            // load instead of leaving it to spend an audio key on a track nobody wants.
++            let data = handle.block_on(async {
++                tokio::select! {
++                    data = loader.load_track(spotify_uri, position_ms) => data,
++                    _ = result_tx.closed() => None,
++                }
++            });
+             if let Some(data) = data {
+                 let _ = result_tx.send(data);
+             }

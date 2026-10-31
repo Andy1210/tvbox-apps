@@ -223,6 +223,12 @@ function searchLrclib(title, artist, durSec) {
   });
 }
 
+// Our patched build, see tools/librespot. Its name differs from upstream's because a
+// box never replaces a binary it already has. It has to match requires.bin in the
+// manifest. "librespot" is still reaped at start, a box updating from an older
+// version can have one running.
+const LIBRESPOT_BIN = "librespot-tvbox";
+
 module.exports = (host) => {
   spotify.setConfig(host.config); // read the Connect device name from the shell config store
   spotifyApi.setConfig(host.config); // read the Spotify Web API credentials from the shell config store
@@ -309,7 +315,7 @@ module.exports = (host) => {
   }
   function librespotArgv() {
     const args = [
-      "librespot",
+      LIBRESPOT_BIN,
       "--name",
       spotifyDeviceName(),
       "--device-type",
@@ -1495,7 +1501,7 @@ module.exports = (host) => {
       // Reap a stray/previous librespot before we spawn ours (a crashed prior
       // shell can leave one holding the Connect name + zeroconf port).
       try {
-        execFile("pkill", ["-9", "-x", "librespot"], () => {});
+        for (const name of [LIBRESPOT_BIN, "librespot"]) execFile("pkill", ["-9", "-x", name], () => {});
       } catch (e) {}
       // A cast started on the box (Connect): open the Spotify app (its own
       // webclient window now) and stop other playback. Fires once per cast
