@@ -30,6 +30,8 @@ const { createCredGuard, isSupervisorExit, isCredentialRejection, authenticatedA
 const { createCredVault } = require("./lib/credvault"); // one saved login per linked account
 const { refreshBinary } = require("./lib/daemonbin"); // the librespot build this version ships
 const manifest = require("./manifest.json");
+// sha256 of the builds earlier versions of this app downloaded.
+const EARLIER_LIBRESPOT_BUILDS = ["3adf05fd4d203072437da90fa9f977b99ff78bc98cc37173debc40c5f4a47c51"];
 
 const SPOTIFY_HOOK = path.join(__dirname, "spotify_event_hook.sh"); // librespot --onevent target
 // Where librespot keeps the saved session credentials (and the Connect volume).
@@ -1491,21 +1493,24 @@ module.exports = (host) => {
     },
   });
 
-  // A new build takes over right away only when nobody is listening. Otherwise the
-  // daemon's next start picks it up, a restart here would end the music.
+  // A new build takes over right away only when the daemon is not in use: a restart
+  // would end the music, or a sign-in or recovery waiting for this daemon to come up.
+  // Otherwise its next start picks the new build up.
   let stopped = false;
+  const daemonInUse = () => recovering || spotify.sessionActive() || !!spotify.getState().track_id;
   function updateDaemon() {
     const entry = ((manifest.requires || {}).download || [])[0];
     if (!entry || !entry.bin) return;
     refreshBinary({
       file: path.join(os.homedir(), ".tvbox", "bin", entry.bin),
       spec: (entry.arch || {})[process.arch],
+      replaces: EARLIER_LIBRESPOT_BUILDS,
       log: (m) => host.log("spotify: " + m),
     })
       .then((replaced) => {
         if (!replaced) return;
         host.log("spotify: librespot updated");
-        if (!stopped && !spotify.getState().track_id) restartLibrespot();
+        if (!stopped && !daemonInUse()) restartLibrespot();
       })
       .catch((e) => host.log("spotify: librespot update failed: " + (e.message || e)));
   }

@@ -16,22 +16,29 @@ function setup(content) {
   return { dir, file };
 }
 const writes = (content) => async (u, dest) => fs.writeFileSync(dest, content);
+const replaces = [sha("old")];
 const forbidden = async () => assert.fail("nothing should be downloaded");
 
 test("the wanted build is left alone", async () => {
   const { file } = setup("new");
-  assert.equal(await refreshBinary({ file, spec: { url, sha256: sha("new") }, download: forbidden }), false);
+  assert.equal(await refreshBinary({ file, spec: { url, sha256: sha("new") }, replaces, download: forbidden }), false);
+});
+
+test("somebody's own build is left alone", async () => {
+  const { file } = setup("own");
+  assert.equal(await refreshBinary({ file, spec: { url, sha256: sha("new") }, replaces, download: forbidden }), false);
+  assert.equal(fs.readFileSync(file, "utf8"), "own");
 });
 
 test("a binary that is not there is not this app's to replace", async () => {
   const { file } = setup();
-  assert.equal(await refreshBinary({ file, spec: { url, sha256: sha("new") }, download: forbidden }), false);
+  assert.equal(await refreshBinary({ file, spec: { url, sha256: sha("new") }, replaces, download: forbidden }), false);
   assert.equal(fs.existsSync(file), false);
 });
 
 test("an older build is replaced and stays executable", async () => {
   const { dir, file } = setup("old");
-  assert.equal(await refreshBinary({ file, spec: { url, sha256: sha("new") }, download: writes("new") }), true);
+  assert.equal(await refreshBinary({ file, spec: { url, sha256: sha("new") }, replaces, download: writes("new") }), true);
   assert.equal(fs.readFileSync(file, "utf8"), "new");
   assert.ok(fs.statSync(file).mode & 0o100);
   assert.deepEqual(fs.readdirSync(dir), ["librespot"]);
@@ -39,9 +46,25 @@ test("an older build is replaced and stays executable", async () => {
 
 test("a download with the wrong hash keeps the old build", async () => {
   const { dir, file } = setup("old");
-  assert.equal(await refreshBinary({ file, spec: { url, sha256: sha("new") }, download: writes("evil") }), false);
+  assert.equal(await refreshBinary({ file, spec: { url, sha256: sha("new") }, replaces, download: writes("evil") }), false);
   assert.equal(fs.readFileSync(file, "utf8"), "old");
   assert.deepEqual(fs.readdirSync(dir), ["librespot"]);
+});
+
+test("overlapping updates do not share a temp file", async () => {
+  const { file } = setup("old");
+  const seen = [];
+  const download = async (u, dest) => {
+    seen.push(dest);
+    fs.writeFileSync(dest, "new");
+  };
+  const spec = { url, sha256: sha("new") };
+  await Promise.all([
+    refreshBinary({ file, spec, replaces, download }),
+    refreshBinary({ file, spec, replaces, download }),
+  ]);
+  assert.equal(new Set(seen).size, 2);
+  assert.equal(fs.readFileSync(file, "utf8"), "new");
 });
 
 test("a failed download keeps the old build", async () => {
@@ -52,7 +75,7 @@ test("a failed download keeps the old build", async () => {
   };
   const logged = [];
   const log = (m) => logged.push(m);
-  assert.equal(await refreshBinary({ file, spec: { url, sha256: sha("new") }, download, log }), false);
+  assert.equal(await refreshBinary({ file, spec: { url, sha256: sha("new") }, replaces, download, log }), false);
   assert.equal(fs.readFileSync(file, "utf8"), "old");
   assert.deepEqual(fs.readdirSync(dir), ["librespot"]);
   assert.match(logged[0], /network/);
@@ -61,5 +84,5 @@ test("a failed download keeps the old build", async () => {
 test("a malformed spec never downloads", async () => {
   const { file } = setup("old");
   for (const spec of [undefined, { url, sha256: "x" }, { url: "http://example.invalid/a", sha256: sha("new") }])
-    assert.equal(await refreshBinary({ file, spec, download: forbidden }), false);
+    assert.equal(await refreshBinary({ file, spec, replaces, download: forbidden }), false);
 });
